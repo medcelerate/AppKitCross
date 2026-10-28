@@ -18,6 +18,7 @@ are concrete and testable.
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised) |
 | M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 98/98 tests pass in the `swift:6.2-noble` container |
 | M9 CoreText and the text system | done on all three platforms: CoreText module (ADR-0007) with Pango/HarfBuzz and DirectWrite engines (PR #7, DrawGlyphRun parity in PR #8); NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them; 98/98 tests on macOS, Linux and Windows |
+| M10 Combine | done: `Sources/Combine` ports OpenCombine 0.14.0 under Apple's module name (ADR-0008), plus Merge/CombineLatest which upstream lacks; 17 Combine tests pass on macOS (Apple's Combine) and Linux (the port); Windows by reading only |
 
 The macOS host build and the Linux container run the full test suite (98 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
@@ -298,6 +299,23 @@ IME (text-input-v3), `wp_viewporter`, and a GPU path.
 
 Open on Linux: X11 selections and Wayland data devices for the pasteboard, JPEG via
 gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
+
+## M10: SwiftUI stack modules
+
+The modules a SwiftUI implementation needs beside AppKit, each declared only on Windows
+and Linux so the macOS build and tests run against Apple's.
+
+Combine (2026-10-28, ADR-0008): `Sources/Combine` is OpenCombine 0.14.0 (MIT) renamed to
+`Combine`, with `OpenCombineFoundation` and `OpenCombineDispatch` merged in and their
+`OCombine` namespaces flattened to Apple's shape (`NotificationCenter.publisher(for:)`,
+`Timer.publish(...)`, `RunLoop`/`DispatchQueue`/`OperationQueue: Scheduler`,
+`URLSession.dataTaskPublisher`, `JSONEncoder: TopLevelEncoder`), the C++ helper target
+replaced by `NSLock`-based Swift, and `Publishers.Merge`/`MergeMany`/`CombineLatest`
+added since upstream has not implemented them. `Tests/AppKitTests/CombineTests.swift`
+is the specification: it passes against Apple's Combine on macOS and against the port in
+the Linux container. Not implemented: `Publishers.CollectByTime` (`collect(.byTime)`).
+Windows is unverified until the next Windows session (nothing platform-specific beyond
+`DebugBreak()` and corelibs Foundation).
 
 ## Reference projects
 
