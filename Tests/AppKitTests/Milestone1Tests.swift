@@ -644,3 +644,67 @@ final class ScrollViewTests: XCTestCase {
     }
     #endif
 }
+
+#if canImport(CoreGraphics)
+@MainActor
+final class ImageTests: XCTestCase {
+    /// A 4x4 PNG: left half red, right half blue.
+    private func samplePNG() -> Data {
+        let img = NSImage(size: NSSize(width: 4, height: 4))
+        img.lockFocus()
+        NSColor.red.setFill(); NSBezierPath.fill(NSRect(x: 0, y: 0, width: 2, height: 4))
+        NSColor.blue.setFill(); NSBezierPath.fill(NSRect(x: 2, y: 0, width: 2, height: 4))
+        img.unlockFocus()
+        let rep = img.representations.first as! NSBitmapImageRep
+        return rep.representation(using: .png, properties: [:])!
+    }
+
+    func testDecodeAndPixels() {
+        let data = samplePNG()
+        XCTAssertGreaterThan(data.count, 20)
+        guard let image = NSImage(data: data) else { return XCTFail("decode failed") }
+        XCTAssertEqual(image.size, NSSize(width: 8, height: 8), "lockFocus renders at 2x")
+        let rep = image.representations.first as! NSBitmapImageRep
+        XCTAssertEqual(rep.pixelsWide, 8)
+        XCTAssertEqual(rep.colorAt(x: 1, y: 1)?.redComponent ?? 0, 1, accuracy: 0.05)
+        XCTAssertEqual(rep.colorAt(x: 6, y: 6)?.blueComponent ?? 0, 1, accuracy: 0.05)
+        XCTAssertTrue(image.isValid)
+    }
+
+    func testImageViewDrawsUprightAndScaled() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        w.backgroundColor = .white
+        // Top half green, bottom half black, via a drawing handler (y-up).
+        let image = NSImage(size: NSSize(width: 10, height: 10), flipped: false) { rect in
+            NSColor.black.setFill(); NSBezierPath.fill(NSRect(x: 0, y: 0, width: 10, height: 5))
+            NSColor.green.setFill(); NSBezierPath.fill(NSRect(x: 0, y: 5, width: 10, height: 5))
+            return true
+        }
+        let plain = NSImageView(frame: NSRect(x: 0, y: 0, width: 50, height: 50))
+        plain.imageScaling = .scaleAxesIndependently
+        plain.image = image
+        final class FlippedHost: NSView { override var isFlipped: Bool { true } }
+        let host = FlippedHost(frame: NSRect(x: 50, y: 0, width: 50, height: 100))
+        let flippedView = NSImageView(frame: NSRect(x: 0, y: 0, width: 50, height: 50))   // top of the flipped host
+        flippedView.imageScaling = .scaleAxesIndependently
+        flippedView.image = image
+        host.addSubview(flippedView)
+        w.contentView!.addSubview(plain)
+        w.contentView!.addSubview(host)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        guard let bitmap = platform?.lastImage else { return XCTFail("no image") }
+        let data = bitmap.dataProvider!.data! as Data
+        func px(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+            let row = bitmap.height - 1 - y * 2, i = row * bitmap.bytesPerRow + x * 2 * 4
+            return (data[i + 2], data[i + 1], data[i])
+        }
+        // Non-flipped: green on top (y 25..50), black below.
+        XCTAssertGreaterThan(px(25, 40).g, 200); XCTAssertLessThan(px(25, 10).g, 50)
+        // Flipped host: the image view is in the top half of the window; still green on top.
+        XCTAssertGreaterThan(px(75, 90).g, 200); XCTAssertLessThan(px(75, 60).g, 50)
+        w.close()
+    }
+}
+#endif

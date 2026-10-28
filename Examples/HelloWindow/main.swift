@@ -198,6 +198,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         scroll.autoresizingMask = [.minXMargin, .height]
         scroll.documentView = RowsView(frame: NSRect(x: 0, y: 0, width: 140, height: 40 * 24))
         canvas.addSubview(scroll)
+
+        // An image drawn offscreen with lockFocus, shown by an NSImageView.
+        let badge = NSImage(size: NSSize(width: 64, height: 64))
+        badge.lockFocus()
+        NSColor.systemPurple.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 2, y: 2, width: 60, height: 60)).fill()
+        NSColor.white.setFill()
+        let star = NSBezierPath()
+        for i in 0..<10 {
+            let angle = CGFloat(i) * .pi / 5 - .pi / 2
+            let r: CGFloat = i % 2 == 0 ? 24 : 10
+            let p = NSPoint(x: 32 + r * cos(angle), y: 32 - r * sin(angle))
+            if i == 0 { star.move(to: p) } else { star.line(to: p) }
+        }
+        star.close()
+        star.fill()
+        badge.unlockFocus()
+        let imageView = NSImageView(frame: NSRect(x: scroll.frame.minX - 80, y: 60, width: 64, height: 64))
+        imageView.image = badge
+        imageView.imageFrameStyle = .grayBezel
+        imageView.autoresizingMask = [.minXMargin, .maxYMargin]
+        canvas.addSubview(imageView)
         self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)

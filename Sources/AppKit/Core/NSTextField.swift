@@ -35,6 +35,9 @@ import CoreText
 
     internal var _fieldCell: NSTextFieldCell? { _cell as? NSTextFieldCell }
 
+    /// True while editing: Return commits the field before key equivalents run.
+    internal var _consumesReturnKey: Bool { _isEditing && isEditable }
+
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSTextFieldCell(textCell: "") }
 
 

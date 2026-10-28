@@ -45,6 +45,13 @@ public final class CGImage: @unchecked Sendable {
     }
 
     public func copy() -> CGImage? { self }
+
+    /// BGRA premultiplied, top row first: the native layout of the Direct2D/WIC pipeline.
+    public static func fromBGRA(width: Int, height: Int, stride: Int, data: Data) -> CGImage? {
+        CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: stride,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue), data: data)
+    }
 }
 
 /// Display identifier; Windows has no CoreGraphics display IDs, so monitors are numbered.

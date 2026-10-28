@@ -49,6 +49,14 @@ monitors.
 `NSCursor`, `NSPasteboard` over OLE clipboard, `NSAlert`, `NSOpenPanel`/`NSSavePanel`
 over `IFileDialog`. Target/action and `NSControl` validation.
 
+Status (2026-10-28): done and verified on Windows: `NSCell`/`NSControl`/`NSButton`
+(push, checkbox, radio), `NSTextField` labels and inline single-line editing (no field
+editor or IME yet), `NSMenu`/`NSMenuItem` on a Win32 menu bar with key equivalents and
+validation, selector-free target/action (`NSSelectorHandling`, `setActionHandler`).
+Done, awaiting Windows verification: `NSScrollView`/`NSClipView`/`NSScroller`. Decision:
+Ctrl maps to `.command` and the Windows key to `.control`. Remaining: `NSImage`/
+`NSImageView`, `NSSlider`, `NSCursor`, `NSPasteboard`, `NSAlert`, open/save panels.
+
 ## M3: DirectX 12 presentation
 
 Replace the Direct2D HWND render target with a DXGI flip-model swap chain on a D3D12

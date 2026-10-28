@@ -168,12 +168,12 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/isenabled
     open var isEnabled: Bool {
         get { _isEnabled }
-        set { _isEnabled = newValue; _notifyChanged() }
+        set { guard _isEnabled != newValue else { return }; _isEnabled = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/ishidden
     open var isHidden: Bool {
         get { _isHidden }
-        set { _isHidden = newValue; _notifyChanged() }
+        set { guard _isHidden != newValue else { return }; _isHidden = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/ishiddenorhashiddenancestor
     open var isHiddenOrHasHiddenAncestor: Bool { _isHidden || (parent?.isHiddenOrHasHiddenAncestor ?? false) }
@@ -187,12 +187,12 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/keyequivalent
     open var keyEquivalent: String {
         get { _keyEquivalent }
-        set { _keyEquivalent = newValue; _notifyChanged() }
+        set { guard _keyEquivalent != newValue else { return }; _keyEquivalent = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/keyequivalentmodifiermask
     open var keyEquivalentModifierMask: NSEvent.ModifierFlags {
         get { _keyEquivalentModifierMask }
-        set { _keyEquivalentModifierMask = newValue; _notifyChanged() }
+        set { guard _keyEquivalentModifierMask != newValue else { return }; _keyEquivalentModifierMask = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/menu
     open var menu: NSMenu? {
@@ -245,7 +245,7 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/state
     open var state: NSControl.StateValue {
         get { _state }
-        set { _state = newValue; _notifyChanged() }
+        set { guard _state != newValue else { return }; _state = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/submenu
     open var submenu: NSMenu? {
@@ -276,7 +276,7 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/title
     open var title: String {
         get { _title }
-        set { _title = newValue; _notifyChanged() }
+        set { guard _title != newValue else { return }; _title = newValue; _notifyChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/tooltip
     open var toolTip: String? {

@@ -61,6 +61,7 @@ public final class CGContext {
     deinit {
         while !stack.isEmpty { restoreGState() }
         popClips(state.clipPushes)
+        for (_, (_, bm)) in bitmapCache { cd2d_bitmap_release(bm) }
         cd2d_brush_release(fillBrush)
         cd2d_brush_release(strokeBrush)
     }
@@ -240,6 +241,37 @@ public final class CGContext {
             case .path: cd2d_target_pop_clip_path(target)
             }
         }
+    }
+
+    // MARK: Images
+
+    private var bitmapCache: [ObjectIdentifier: (CGImage, OpaquePointer)] = [:]
+
+    private func bitmap(for image: CGImage) -> OpaquePointer? {
+        let key = ObjectIdentifier(image)
+        if let (cached, bm) = bitmapCache[key], cached === image { return bm }
+        let bm = image.data.withUnsafeBytes { buf -> OpaquePointer? in
+            cd2d_bitmap_create(target, UInt32(image.width), UInt32(image.height), UInt32(image.bytesPerRow), buf.baseAddress?.assumingMemoryBound(to: UInt8.self))
+        }
+        if let bm { bitmapCache[key] = (image, bm) }
+        return bm
+    }
+
+    /// Draws `image` scaled into `rect`, first pixel row at the rect's maximum y, as CoreGraphics does.
+    public func draw(_ image: CGImage, in rect: CGRect, byTiling: Bool = false) {
+        guard let bm = bitmap(for: image) else { return }
+        let r = rect.standardized
+        saveGState()
+        translateBy(x: r.minX, y: r.maxY)
+        scaleBy(x: 1, y: -1)
+        cd2d_target_draw_bitmap(target, bm, 0, 0, Float(r.width), Float(r.height), Float(state.alpha),
+                                state.interpolation != .none, 0, 0, Float(image.width), Float(image.height))
+        restoreGState()
+    }
+
+    public func releaseImageCache() {
+        for (_, (_, bm)) in bitmapCache { cd2d_bitmap_release(bm) }
+        bitmapCache.removeAll()
     }
 
     // MARK: Text (DirectWrite layouts created by the AppKit text backend)

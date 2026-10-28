@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 22 |
-| Types generated | 516 |
+| Types handwritten | 27 |
+| Types generated | 511 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10204 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 748 |
+| Members unimplemented-calls | 971 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -93,7 +93,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBindingName | struct | generated | 79 | 0 | 0 |  |
 | NSBindingOption | struct | generated | 26 | 0 | 0 |  |
 | NSBindingSelectionMarker | class | generated | 5 | 0 | 0 |  |
-| NSBitmapImageRep | class | generated | 81 | 1 | 5 |  |
+| NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 28 |
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
 | NSBox | class | generated | 29 | 0 | 2 |  |
 | NSBrowser | class | generated | 95 | 1 | 3 |  |
@@ -256,14 +256,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSHelpManager | class | generated | 14 | 0 | 3 |  |
 | NSHorizontalDirection | enum | generated | 17 | 0 | 6 |  |
 | NSIgnoreMisspelledWords | protocol | generated | 1 | 0 | 0 |  |
-| NSImage | class | generated | 244 | 4 | 11 |  |
+| NSImage | class | handwritten | 244 | 4 | 11 | 170 |
 | NSImageAlignment | enum | generated | 9 | 0 | 0 |  |
-| NSImageCell | class | generated | 3 | 0 | 0 |  |
+| NSImageCell | class | handwritten | 3 | 0 | 0 | 2 |
 | NSImageDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSImageInterpolation | enum | generated | 5 | 0 | 0 |  |
-| NSImageRep | class | generated | 40 | 0 | 1 |  |
+| NSImageRep | class | handwritten | 40 | 0 | 1 | 20 |
 | NSImageScaling | enum | generated | 7 | 0 | 0 |  |
-| NSImageView | class | generated | 18 | 8 | 1 |  |
+| NSImageView | class | handwritten | 18 | 8 | 1 | 3 |
 | NSInputServerMouseTracker | protocol | generated | 0 | 0 | 0 |  |
 | NSInputServiceProvider | protocol | generated | 0 | 0 | 0 |  |
 | NSItemBadge | struct | generated | 5 | 0 | 0 |  |

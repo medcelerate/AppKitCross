@@ -23,6 +23,11 @@ final class HostBackend: PlatformBackend {
     #else
     let text: any PlatformTextBackend = NoTextBackend()
     #endif
+    #if canImport(ImageIO) && canImport(CoreGraphics)
+    let image: any PlatformImageBackend = HostImageBackend()
+    #else
+    let image: any PlatformImageBackend = NoImageBackend()
+    #endif
 
     func makeWindow(owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) -> PlatformWindow {
         HostWindow(owner: owner, contentRect: contentRect, styleMask: styleMask, backend: self)
@@ -198,4 +203,11 @@ final class NoTextBackend: PlatformTextBackend {
     func makeFont(family: String?, size: CGFloat, weight: CGFloat, italic: Bool, monospaced: Bool) -> PlatformFontHandle? { nil }
     func measure(_ text: String, font: PlatformFontHandle, maxWidth: CGFloat?) -> CGSize { .zero }
     func draw(_ text: String, font: PlatformFontHandle, color: CGColor, topLeft: CGPoint, maxWidth: CGFloat?, flipped: Bool, in context: CGContext) {}
+}
+
+@MainActor
+final class NoImageBackend: PlatformImageBackend {
+    func decode(_ data: Data) -> CGImage? { nil }
+    func encode(_ image: CGImage, format: String, quality: Double) -> Data? { nil }
+    func makeOffscreen(size: CGSize, scale: CGFloat) -> PlatformOffscreenSurface? { nil }
 }

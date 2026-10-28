@@ -66,6 +66,31 @@ void cd2d_target_pop_clip_rect(CD2DTarget *target);
 void cd2d_target_push_clip_path(CD2DTarget *target, CD2DPath *path);
 void cd2d_target_pop_clip_path(CD2DTarget *target);
 
+// Bitmaps (BGRA, premultiplied, 8 bits per channel, top row first)
+typedef struct CD2DBitmap CD2DBitmap;
+typedef struct CD2DOffscreen CD2DOffscreen;
+
+/// Decodes an image file in memory with WIC into a BGRA premultiplied buffer the caller
+/// frees with cd2d_image_free. Returns false on failure.
+bool cd2d_image_decode(const uint8_t *bytes, uint32_t length, uint32_t *width, uint32_t *height, uint32_t *stride, uint8_t **pixels);
+void cd2d_image_free(uint8_t *pixels);
+/// Encodes BGRA premultiplied pixels; `format` is "png" or "jpeg". Caller frees with cd2d_image_free.
+bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, uint32_t stride, const char *format, float quality, uint8_t **bytes, uint32_t *length);
+
+CD2DBitmap *cd2d_bitmap_create(CD2DTarget *target, uint32_t width, uint32_t height, uint32_t stride, const uint8_t *pixels);
+void cd2d_bitmap_release(CD2DBitmap *bitmap);
+/// Draws `bitmap` into dst (DIPs, current transform) from src (pixels), with opacity 0-1.
+void cd2d_target_draw_bitmap(CD2DTarget *target, CD2DBitmap *bitmap, float dl, float dt, float dr, float db, float opacity, bool linear,
+                             float sl, float st, float sr, float sb);
+
+/// Offscreen render target of pixelWidth x pixelHeight at `dpi`. Its CD2DTarget can be used
+/// with every cd2d_target_* call; begin_draw/end_draw apply.
+CD2DOffscreen *cd2d_offscreen_create(CD2DFactory *factory, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+CD2DTarget *cd2d_offscreen_target(CD2DOffscreen *offscreen);
+/// Copies the pixels out (BGRA premultiplied); buffer must hold stride*height bytes. Returns stride.
+uint32_t cd2d_offscreen_read(CD2DOffscreen *offscreen, uint8_t *buffer, uint32_t bufferSize);
+void cd2d_offscreen_release(CD2DOffscreen *offscreen);
+
 // DirectWrite
 typedef struct CD2DTextFormat CD2DTextFormat;
 typedef struct CD2DTextLayout CD2DTextLayout;

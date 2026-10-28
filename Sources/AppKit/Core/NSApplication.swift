@@ -256,9 +256,21 @@ import CoreText
         }
     }
 
+    private var _menuRebuildSuppressed = false
+
     /// Rebuilds the platform menu bar from the main menu tree.
     @MainActor internal func _mainMenuDidChange() {
+        guard !_menuRebuildSuppressed else { return }
         Platform.backend.setMainMenu(_mainMenu?._platformMenu(), host: self)
+    }
+
+    /// Runs `body` without rebuilding the native menu bar for item changes it makes
+    /// (the native side refreshes states in place while a menu is open).
+    @MainActor private func _withoutMenuRebuild<T>(_ body: () -> T) -> T {
+        let saved = _menuRebuildSuppressed
+        _menuRebuildSuppressed = true
+        defer { _menuRebuildSuppressed = saved }
+        return body()
     }
 
     /// The object that would receive `action` for a nil target (responder chain from the
@@ -278,13 +290,13 @@ import CoreText
 
     public func platformMenuWillOpen(_ menuID: Int) -> PlatformMenu? {
         guard let menu = _mainMenu?._menu(withID: menuID) else { return nil }
-        menu.update()
+        _withoutMenuRebuild { menu.update() }
         return menu._platformMenu()
     }
 
     public func platformMenuItemSelected(_ itemID: Int) {
         guard let item = _mainMenu?._item(withCommandID: itemID), let menu = item.menu else { return }
-        menu.update()
+        _withoutMenuRebuild { menu.update() }
         menu.performActionForItem(at: menu.index(of: item))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/mainwindow

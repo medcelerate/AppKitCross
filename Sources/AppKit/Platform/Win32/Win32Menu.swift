@@ -21,14 +21,14 @@ final class Win32MenuBar {
     /// Builds (or rebuilds) the menu bar for one window.
     func apply(to hwnd: HWND) {
         let key = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(hwnd)))
+        var before = RECT()
+        GetClientRect(hwnd, &before)
         if let old = builtBars[key] {
             SetMenu(hwnd, nil)
             forget(old)
             DestroyMenu(old)
             builtBars[key] = nil
         }
-        var before = RECT()
-        GetClientRect(hwnd, &before)
         guard let spec else { DrawMenuBar(hwnd); restoreClientSize(hwnd, before); return }
         let bar = CreateMenu()
         for item in spec.items where !item.isHidden {

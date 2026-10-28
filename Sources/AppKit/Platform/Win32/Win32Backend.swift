@@ -19,6 +19,7 @@ final class Win32Backend: PlatformBackend {
     private var running = false
     private var classesRegistered = false
     let text: any PlatformTextBackend = Win32TextBackend()
+    let image: any PlatformImageBackend = Win32ImageBackend()
     let menuBar = Win32MenuBar()
     private(set) var windows: [Win32Window] = []
 

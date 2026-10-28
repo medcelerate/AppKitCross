@@ -965,6 +965,13 @@ import CoreText
         case .scrollWheel, .mouseEntered, .mouseExited:
             _dispatchMouse(event, to: _contentView?.hitTest(event.locationInWindow) ?? self)
         case .keyDown:
+            // An editing text field commits on Return before the default button sees it.
+            if let field = firstResponder as? NSTextField, field._consumesReturnKey, event.charactersIgnoringModifiers == "\r",
+               event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+                field.keyDown(with: event)
+                _ = _contentView?.performKeyEquivalent(with: event)
+                return
+            }
             if !(_contentView?.performKeyEquivalent(with: event) ?? false) {
                 firstResponder?.keyDown(with: event)
             }
