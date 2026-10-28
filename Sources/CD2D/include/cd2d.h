@@ -38,8 +38,25 @@ CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t p
 /// Returns NULL when the device or swap chain cannot be created (the caller may fall
 /// back to cd2d_target_create_hwnd).
 CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
-/// True when the target presents through a swap chain (created with cd2d_target_create_swapchain).
+/// Creates a window target for a translucent window (Milestone 3b). Like
+/// cd2d_target_create_swapchain, but the swap chain comes from
+/// CreateSwapChainForComposition with DXGI_ALPHA_MODE_PREMULTIPLIED (an HWND swap chain
+/// cannot carry alpha) and is presented through DirectComposition: an IDCompositionDevice
+/// on the DXGI device, a target for `hwnd` (topmost) whose root visual shows the swap
+/// chain, committed after every Present. The back-buffer bitmap is premultiplied, so
+/// pixels left at (0,0,0,0) show whatever DWM draws behind the window (the system
+/// backdrop set with DWMWA_SYSTEMBACKDROP_TYPE). The window should carry
+/// WS_EX_NOREDIRECTIONBITMAP so no opaque redirection surface sits under the visual.
+/// begin_draw/end_draw/resize/set_dpi and all drawing calls work unchanged. Returns
+/// NULL when D3D11, DXGI 1.2 or DirectComposition is unavailable.
+CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+/// True when the target presents through a swap chain (created with
+/// cd2d_target_create_swapchain or cd2d_target_create_composition_swapchain).
 bool cd2d_target_is_swapchain(CD2DTarget *target);
+/// True when the target is a premultiplied composition swap chain
+/// (cd2d_target_create_composition_swapchain): the caller clears it to transparent
+/// before drawing a frame.
+bool cd2d_target_is_composition(CD2DTarget *target);
 void cd2d_target_release(CD2DTarget *target);
 void cd2d_target_resize(CD2DTarget *target, uint32_t pixelWidth, uint32_t pixelHeight);
 void cd2d_target_set_dpi(CD2DTarget *target, float dpi);

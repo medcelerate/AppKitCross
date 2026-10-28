@@ -37,25 +37,113 @@ final class Win32Window: PlatformWindow {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
         dpi = GetDpiForWindow(hwnd)
         backend.register(self)
+        if usesCustomFrame {
+            // CreateWindowExW sent WM_NCCALCSIZE before the window procedure knew this
+            // object; recalculate so the client area covers the window from the start.
+            SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
+        }
+        applyChrome()
     }
 
     /// Titled windows carry the application menu bar (AppKit's main menu is global).
-    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) && ownerWantsMenuBar }
+    /// Windows whose content covers the frame have no non-client area to show it in.
+    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) && ownerWantsMenuBar && !usesCustomFrame }
     private let ownerWantsMenuBar: Bool
     private var _chrome = PlatformWindowChrome()
     var chrome: PlatformWindowChrome {
         get { _chrome }
         set {
             guard newValue != _chrome else { return }
+            let old = _chrome
             _chrome = newValue
-            applyChrome()
+            applyChrome(previous: old)
         }
     }
 
-    /// Milestone 3b (branch m3b-frameless-glass): DWM backdrop and corner attributes,
-    /// WM_NCCALCSIZE for content that extends into the title bar, a composition swap
-    /// chain for transparent windows. Until then the chrome is recorded only.
-    private func applyChrome() {}
+    // MARK: Chrome (Milestone 3b)
+
+    /// The content covers the whole window: no system caption, our WM_NCCALCSIZE and
+    /// WM_NCHITTEST. Decided by the style mask (`fullSizeContentView` or borderless) so
+    /// the frame is right from creation, before the chrome arrives; the chrome agrees.
+    private var usesCustomFrame: Bool { Win32Backend.usesCustomFrame(_styleMask) || _chrome.extendsContentIntoTitleBar }
+
+    private var isResizable: Bool { _styleMask.contains(.resizable) }
+
+    // dwmapi.h values (the enums import awkwardly); Windows 11 22H2+ for the backdrop.
+    private static let dwmwaNCRenderingPolicy: DWORD = 2
+    private static let dwmwaUseImmersiveDarkMode: DWORD = 20
+    private static let dwmwaWindowCornerPreference: DWORD = 33
+    private static let dwmwaSystemBackdropType: DWORD = 38
+    private static let dwmncrpUseWindowStyle: Int32 = 0, dwmncrpDisabled: Int32 = 2
+    private static let dwmwcpDoNotRound: Int32 = 1, dwmwcpRound: Int32 = 2
+    private static let dwmsbtNone: Int32 = 1, dwmsbtMainWindow: Int32 = 2, dwmsbtTransientWindow: Int32 = 3, dwmsbtTabbedWindow: Int32 = 4
+
+    private func setDwmAttribute(_ attribute: DWORD, _ value: Int32) {
+        guard let hwnd else { return }
+        var v = value
+        // Fails silently on builds that do not know the attribute (e.g. the backdrop
+        // before Windows 11 22H2), which leaves the default look.
+        _ = DwmSetWindowAttribute(hwnd, attribute, &v, DWORD(MemoryLayout<Int32>.size))
+    }
+
+    /// Whether the system app theme is dark (HKCU ...\Themes\Personalize\AppsUseLightTheme == 0).
+    private static func systemAppThemeIsDark() -> Bool {
+        var value: DWORD = 1
+        var size = DWORD(MemoryLayout<DWORD>.size)
+        // HKEY_CURRENT_USER is ((HKEY)(ULONG_PTR)((LONG)0x80000001)), sign-extended on x64.
+        let hkcu = HKEY(bitPattern: Int(Int32(bitPattern: 0x8000_0001)))
+        let status = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize".withCString(encodedAs: UTF16.self) { key in
+            "AppsUseLightTheme".withCString(encodedAs: UTF16.self) { name in
+                RegGetValueW(hkcu, key, name, DWORD(RRF_RT_REG_DWORD), nil, &value, &size)
+            }
+        }
+        return status == ERROR_SUCCESS && value == 0
+    }
+
+    /// Applies the chrome to the live HWND without recreating it: DWM attributes
+    /// (backdrop, corners, shadow policy, dark mode), the frame extension that keeps the
+    /// DWM shadow and rounded corners on a custom frame, and the swap-chain kind
+    /// (composition, premultiplied) for transparent windows.
+    private func applyChrome(previous: PlatformWindowChrome? = nil) {
+        guard let hwnd else { return }
+
+        // Transparent windows draw into a premultiplied composition swap chain, so
+        // unpainted pixels show the backdrop (see ensureRenderTarget); the next paint
+        // builds the right kind of target. WS_EX_NOREDIRECTIONBITMAP would also drop
+        // the window's redirection surface, but Windows honours that bit only at
+        // CreateWindowExW (SetWindowLongPtr + SWP_FRAMECHANGED leaves it clear; verified
+        // on build 26200) and the chrome arrives after creation. The composition visual
+        // is composed over the never-painted surface and the backdrop shows through, so
+        // the window is not recreated for it.
+        let transparencyChanged = previous.map { $0.isTransparent != _chrome.isTransparent } ?? _chrome.isTransparent
+        if transparencyChanged, renderTarget != nil {
+            discardRenderTarget()
+            setNeedsDisplay(nil)
+        }
+
+        // Frame: keep the DWM shadow, border and rounded corners while the client area
+        // covers the frame by extending the frame one pixel into the client area.
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: usesCustomFrame ? 1 : 0, cyBottomHeight: 0)
+        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
+            SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
+        }
+
+        let backdrop: Int32
+        switch _chrome.backdrop {
+        case .none: backdrop = Win32Window.dwmsbtNone
+        case .mica: backdrop = Win32Window.dwmsbtMainWindow
+        case .micaAlt: backdrop = Win32Window.dwmsbtTabbedWindow
+        case .acrylic: backdrop = Win32Window.dwmsbtTransientWindow
+        }
+        setDwmAttribute(Win32Window.dwmwaSystemBackdropType, backdrop)
+        setDwmAttribute(Win32Window.dwmwaUseImmersiveDarkMode, Win32Window.systemAppThemeIsDark() ? 1 : 0)
+        setDwmAttribute(Win32Window.dwmwaWindowCornerPreference, _chrome.roundedCorners ? Win32Window.dwmwcpRound : Win32Window.dwmwcpDoNotRound)
+        // No shadow: disabling non-client rendering is the closest DWM offers.
+        setDwmAttribute(Win32Window.dwmwaNCRenderingPolicy, _chrome.hasShadow ? Win32Window.dwmncrpUseWindowStyle : Win32Window.dwmncrpDisabled)
+        // hidesTitle / transparentTitleBar only have a visible effect together with
+        // extendsContentIntoTitleBar, where the caption is not drawn at all.
+    }
 
     private var scale: CGFloat { CGFloat(dpi) / 96 }
 
@@ -78,7 +166,9 @@ final class Win32Window: PlatformWindow {
             let (style, ex) = Win32Backend.styles(for: newValue)
             SetWindowLongPtrW(hwnd, GWL_STYLE, LONG_PTR(style))
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, LONG_PTR(ex))
+            // WM_NCCALCSIZE re-runs for the new mask (custom frame or system caption).
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED))
+            applyChrome(previous: _chrome)
         }
     }
 
@@ -86,9 +176,14 @@ final class Win32Window: PlatformWindow {
 
     var isVisible: Bool { hwnd.map { IsWindowVisible($0) } ?? false }
 
+    /// The frame before the window was minimised: a minimised HWND sits at
+    /// (-32000, -32000) with a tiny rect, while AppKit keeps a miniaturised window's frame.
+    private var frameBeforeMinimize: NSRect?
+
     var frame: NSRect {
         get {
             guard let hwnd else { return .zero }
+            if IsIconic(hwnd), let f = frameBeforeMinimize { return f }
             var r = RECT()
             GetWindowRect(hwnd, &r)
             return Win32Backend.appKitRect(r, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
@@ -105,22 +200,36 @@ final class Win32Window: PlatformWindow {
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
 
-    func frameRect(forContentRect contentRect: NSRect) -> NSRect {
-        let (style, ex) = Win32Backend.styles(for: _styleMask)
-        var r = RECT(left: 0, top: 0, right: Int32((contentRect.width * scale).rounded()), bottom: Int32((contentRect.height * scale).rounded()))
-        _ = AdjustWindowRectExForDpi(&r, style, hasMenuBar, ex, dpi)
-        let leftInset = CGFloat(-r.left) / scale
-        let bottomInset = CGFloat(r.bottom) / scale - contentRect.height
-        return NSRect(x: contentRect.minX - leftInset, y: contentRect.minY - bottomInset,
-                      width: CGFloat(r.right - r.left) / scale, height: CGFloat(r.bottom - r.top) / scale)
-    }
-
-    func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
+    /// Pixels between the window rect and the client rect on each side, at `dpi`
+    /// (`left`/`top` positive inward). A custom frame has none, except that a
+    /// maximised thick-framed window hangs over the monitor edge by its frame width,
+    /// which WM_NCCALCSIZE trims off the client area.
+    private func nonClientInsets(dpi: UINT) -> (left: Int32, top: Int32, right: Int32, bottom: Int32) {
+        if usesCustomFrame {
+            guard let hwnd, IsZoomed(hwnd), isResizable else { return (0, 0, 0, 0) }
+            let padded = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+            let x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + padded
+            let y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + padded
+            return (x, y, x, y)
+        }
         let (style, ex) = Win32Backend.styles(for: _styleMask)
         var r = RECT(left: 0, top: 0, right: 100, bottom: 100)
         _ = AdjustWindowRectExForDpi(&r, style, hasMenuBar, ex, dpi)
-        let leftInset = CGFloat(-r.left) / scale, rightInset = CGFloat(r.right - 100) / scale
-        let topInset = CGFloat(-r.top) / scale, bottomInset = CGFloat(r.bottom - 100) / scale
+        return (-r.left, -r.top, r.right - 100, r.bottom - 100)
+    }
+
+    func frameRect(forContentRect contentRect: NSRect) -> NSRect {
+        let i = nonClientInsets(dpi: dpi)
+        let leftInset = CGFloat(i.left) / scale, rightInset = CGFloat(i.right) / scale
+        let topInset = CGFloat(i.top) / scale, bottomInset = CGFloat(i.bottom) / scale
+        return NSRect(x: contentRect.minX - leftInset, y: contentRect.minY - bottomInset,
+                      width: contentRect.width + leftInset + rightInset, height: contentRect.height + topInset + bottomInset)
+    }
+
+    func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
+        let i = nonClientInsets(dpi: dpi)
+        let leftInset = CGFloat(i.left) / scale, rightInset = CGFloat(i.right) / scale
+        let topInset = CGFloat(i.top) / scale, bottomInset = CGFloat(i.bottom) / scale
         return NSRect(x: frameRect.minX + leftInset, y: frameRect.minY + bottomInset,
                       width: max(0, frameRect.width - leftInset - rightInset), height: max(0, frameRect.height - topInset - bottomInset))
     }
@@ -146,8 +255,7 @@ final class Win32Window: PlatformWindow {
 
     func setNeedsDisplay(_ rect: NSRect?) {
         guard let hwnd else { return }
-        if let rect {
-            var r = clientRect(rect)
+        if let rect, var r = clientRect(rect) {
             InvalidateRect(hwnd, &r, false)
         } else {
             InvalidateRect(hwnd, nil, false)
@@ -167,13 +275,16 @@ final class Win32Window: PlatformWindow {
 
     // MARK: Coordinates
 
-    /// AppKit content coordinates (points, bottom-left) -> client pixels RECT.
-    private func clientRect(_ rect: NSRect) -> RECT {
+    /// AppKit content coordinates (points, bottom-left) -> client pixels RECT, or nil
+    /// for a rect that is not finite (layout fallout the caller treats as "everything").
+    private func clientRect(_ rect: NSRect) -> RECT? {
+        guard rect.minX.isFinite, rect.minY.isFinite, rect.width.isFinite, rect.height.isFinite else { return nil }
         let h = contentSize.height
-        return RECT(left: Int32((rect.minX * scale).rounded(.down)),
-                    top: Int32(((h - rect.maxY) * scale).rounded(.down)),
-                    right: Int32((rect.maxX * scale).rounded(.up)),
-                    bottom: Int32(((h - rect.minY) * scale).rounded(.up)))
+        func px(_ v: CGFloat, _ rule: FloatingPointRoundingRule) -> Int32 {
+            Int32(min(max(v * scale, -1_000_000), 1_000_000).rounded(rule))
+        }
+        return RECT(left: px(rect.minX, .down), top: px(h - rect.maxY, .down),
+                    right: px(rect.maxX, .up), bottom: px(h - rect.minY, .up))
     }
 
     /// Client pixel coordinates -> AppKit content points.
@@ -202,7 +313,14 @@ final class Win32Window: PlatformWindow {
         let height = UInt32(max(1, client.bottom - client.top))
         var rt: OpaquePointer? = nil
         if !Win32Window.useLegacyHwndTarget {
-            rt = cd2d_target_create_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            // Transparent windows (Milestone 3b): a premultiplied composition swap chain
+            // under DirectComposition, so the DWM backdrop shows through unpainted pixels.
+            if _chrome.isTransparent {
+                rt = cd2d_target_create_composition_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            }
+            if rt == nil {
+                rt = cd2d_target_create_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            }
         }
         if rt == nil {
             // Legacy path, or no usable D3D11/DXGI device: the HWND render target still works.
@@ -210,7 +328,8 @@ final class Win32Window: PlatformWindow {
         }
         renderTarget = rt
         if Win32Window.reportsLiveObjects, let rt {
-            reportLiveObjects("after creating the \(cd2d_target_is_swapchain(rt) ? "swap-chain" : "HWND") window target")
+            let kind = cd2d_target_is_composition(rt) ? "composition swap-chain" : cd2d_target_is_swapchain(rt) ? "swap-chain" : "HWND"
+            reportLiveObjects("after creating the \(kind) window target")
         }
         return rt
     }
@@ -243,6 +362,9 @@ final class Win32Window: PlatformWindow {
                      width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
                      height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
         cd2d_target_begin_draw(rt)
+        // A transparent window starts every frame fully transparent so unpainted areas
+        // show the backdrop; an opaque window fills its background in NSWindow.
+        if cd2d_target_is_composition(rt) { cd2d_target_clear(rt, 0, 0, 0, 0) }
         // Flip: CoreGraphics is bottom-left in points; Direct2D is top-left in DIPs.
         let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
         do {
@@ -337,12 +459,19 @@ final class Win32Window: PlatformWindow {
         case WM_ERASEBKGND:
             return 1
         case WM_SIZE:
+            // Minimised (SIZE_MINIMIZED): the client area is 0x0 and the HWND moves off
+            // screen; AppKit keeps the frame and content of a miniaturised window, so the
+            // owner is not told (and the content view does not collapse to zero).
+            if wParam == 1 { return 0 }
             if let rt = renderTarget {
                 cd2d_target_resize(rt, UInt32(lParam & 0xFFFF), UInt32((lParam >> 16) & 0xFFFF))
             }
+            frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
             return 0
         case WM_MOVE:
+            if let hwnd, IsIconic(hwnd) { return 0 }
+            frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
             return 0
         case WM_DPICHANGED:
@@ -353,10 +482,10 @@ final class Win32Window: PlatformWindow {
             if let rt = renderTarget { cd2d_target_set_dpi(rt, Float(dpi)) }
             if let suggested = UnsafePointer<RECT>(bitPattern: Int(lParam)), let hwnd {
                 let r = suggested.pointee
-                let (style, ex) = Win32Backend.styles(for: _styleMask)
-                var client = RECT(left: 0, top: 0, right: Int32((pointSize.width * scale).rounded()), bottom: Int32((pointSize.height * scale).rounded()))
-                _ = AdjustWindowRectExForDpi(&client, style, hasMenuBar, ex, dpi)
-                SetWindowPos(hwnd, nil, r.left, r.top, client.right - client.left, client.bottom - client.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
+                let i = nonClientInsets(dpi: dpi)
+                let width = Int32((pointSize.width * scale).rounded()) + i.left + i.right
+                let height = Int32((pointSize.height * scale).rounded()) + i.top + i.bottom
+                SetWindowPos(hwnd, nil, r.left, r.top, width, height, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
             }
             owner?.platformWindowDidChangeBackingScaleFactor(scale)
             return 0
@@ -370,6 +499,51 @@ final class Win32Window: PlatformWindow {
                 }
             }
             return 0
+        case WM_NCCALCSIZE:
+            // Custom frame: the client area is the whole window, so no caption or border
+            // is drawn (the DWM shadow and corners survive through the extended frame).
+            // Maximised, the window overhangs the monitor by its frame; keep content on screen.
+            guard usesCustomFrame else { return nil }
+            let i = nonClientInsets(dpi: dpi)
+            func inset(_ r: inout RECT) { r.left += i.left; r.top += i.top; r.right -= i.right; r.bottom -= i.bottom }
+            if wParam != 0, let params = UnsafeMutablePointer<NCCALCSIZE_PARAMS>(bitPattern: Int(lParam)) {
+                inset(&params.pointee.rgrc.0)
+            } else if wParam == 0, let rect = UnsafeMutablePointer<RECT>(bitPattern: Int(lParam)) {
+                inset(&rect.pointee)
+            }
+            return 0
+        case WM_NCHITTEST:
+            guard let hwnd, usesCustomFrame || _chrome.movableByBackground else { return nil }
+            var pt = POINT(x: Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF)), y: Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF)))
+            if usesCustomFrame {
+                // Resize bands (8 px at 96 dpi) along the edges of resizable, non-maximised windows.
+                var client = RECT()
+                GetClientRect(hwnd, &client)
+                ScreenToClient(hwnd, &pt)
+                if isResizable, !IsZoomed(hwnd) {
+                    let band = Int32((8 * scale).rounded())
+                    let left = pt.x < client.left + band, right = pt.x >= client.right - band
+                    let top = pt.y < client.top + band, bottom = pt.y >= client.bottom - band
+                    if top && left { return LRESULT(HTTOPLEFT) }
+                    if top && right { return LRESULT(HTTOPRIGHT) }
+                    if bottom && left { return LRESULT(HTBOTTOMLEFT) }
+                    if bottom && right { return LRESULT(HTBOTTOMRIGHT) }
+                    if left { return LRESULT(HTLEFT) }
+                    if right { return LRESULT(HTRIGHT) }
+                    if top { return LRESULT(HTTOP) }
+                    if bottom { return LRESULT(HTBOTTOM) }
+                }
+                if pt.x < client.left || pt.x >= client.right || pt.y < client.top || pt.y >= client.bottom { return LRESULT(HTNOWHERE) }
+            } else {
+                // System frame: only client points are ours to reclassify as caption.
+                let def = DefWindowProcW(hwnd, msg, wParam, lParam)
+                if def != LRESULT(HTCLIENT) { return def }
+                ScreenToClient(hwnd, &pt)
+            }
+            // NSWindow decides: caption when movable by background or in the title bar
+            // band of content that extends into it, unless a control is under the mouse.
+            let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
+            return LRESULT(region == .caption ? HTCAPTION : HTCLIENT)
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
             // last-window-closed check run; NSWindow then calls close() here.

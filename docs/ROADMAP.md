@@ -162,9 +162,19 @@ bar, hidden title, transparent title bar, backdrop, transparency, shadow, movabl
 background, rounded corners) derived from `NSWindow` properties and pushed to the
 platform window; `platformWindowHitTest` decides caption vs client for dragging;
 `NSVisualEffectView` (materials map to Mica/Acrylic behind the window, translucent tint
-otherwise). HelloWindow: Help > Glass Window. Win32 side (WM_NCCALCSIZE, DWM attributes,
-DirectComposition swap chain for transparency) is being built by the Windows session on
-branch `m3b-frameless-glass`.
+otherwise). HelloWindow: Help > Glass Window. Win32 side done and verified on Windows 11 Pro 25H2
+(build 26200.9711): windows whose content covers the frame (`fullSizeContentView` or
+borderless) keep their Win32 styles but answer `WM_NCCALCSIZE` so the client area is the
+whole window (maximised windows are inset by the frame), extend the DWM frame by one pixel
+so the shadow and rounded corners stay, and answer `WM_NCHITTEST` with 8-px resize bands
+and `NSWindow`'s caption/client decision; DWM attributes map the chrome (system backdrop
+Mica/Mica Alt/Acrylic, corner preference, non-client rendering off for `hasShadow == false`,
+immersive dark mode from the app theme); transparent windows present through a
+premultiplied composition swap chain under a DirectComposition visual
+(`cd2d_target_create_composition_swapchain`), cleared to transparent each frame. Not done:
+`WS_EX_NOREDIRECTIONBITMAP` (Windows only honours it at creation and the chrome arrives
+later; the backdrop shows through without it), window caption buttons, a shadow for
+non-resizable borderless windows (no DWM frame to extend).
 
 ## M7: Metal translation layer (separate track)
 

@@ -9,6 +9,7 @@
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
 #include <dxgidebug.h>
+#include <dcomp.h>
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
@@ -30,6 +31,12 @@ struct CD2DTarget {
     ID2D1Device *d2dDevice = nullptr;
     ID2D1DeviceContext *dc = nullptr;
     ID2D1Bitmap1 *backBuffer = nullptr;
+    // DirectComposition presentation (Milestone 3b). Non-null only for composition
+    // swap-chain targets; the back buffer is then premultiplied.
+    IDCompositionDevice *dcompDevice = nullptr;
+    IDCompositionTarget *dcompTarget = nullptr;
+    IDCompositionVisual *dcompVisual = nullptr;
+    D2D1_ALPHA_MODE alphaMode = D2D1_ALPHA_MODE_IGNORE;   // of the swap-chain back buffer
     float dpi = 96;
     bool lost = false;                            // device removed/reset: end_draw reports it
 };
@@ -88,7 +95,7 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
     if (FAILED(hr)) { t->lost = true; return false; }
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), t->dpi, t->dpi);
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, t->alphaMode), t->dpi, t->dpi);
     hr = t->dc->CreateBitmapFromDxgiSurface(surface, &props, &t->backBuffer);
     surface->Release();
     if (FAILED(hr)) { t->lost = true; return false; }
@@ -134,13 +141,17 @@ static HRESULT createD3DDevice(ID3D11Device **device, ID3D11DeviceContext **cont
     return hr;
 }
 
-CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
+/// Shared body of cd2d_target_create_swapchain (HWND swap chain, opaque) and
+/// cd2d_target_create_composition_swapchain (composition swap chain, premultiplied,
+/// presented through a DirectComposition visual).
+static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi, bool composition) {
     if (!factory || !factory->factory || !hwnd) return nullptr;
     ID2D1Factory1 *factory1 = nullptr;
     if (FAILED(factory->factory->QueryInterface(__uuidof(ID2D1Factory1), reinterpret_cast<void **>(&factory1)))) return nullptr;
 
     CD2DTarget *t = new CD2DTarget();
     t->dpi = dpi;
+    t->alphaMode = composition ? D2D1_ALPHA_MODE_PREMULTIPLIED : D2D1_ALPHA_MODE_IGNORE;
     IDXGIDevice *dxgiDevice = nullptr;
     IDXGIAdapter *adapter = nullptr;
     IDXGIFactory2 *dxgiFactory = nullptr;
@@ -162,11 +173,23 @@ CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint3
         desc.SampleDesc.Quality = 0;
         desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         desc.BufferCount = 2;
-        desc.Scaling = DXGI_SCALING_NONE;
+        // Composition swap chains require DXGI_SCALING_STRETCH; the visual shows the
+        // buffer 1:1 anyway because the chain is resized with the window.
+        desc.Scaling = composition ? DXGI_SCALING_STRETCH : DXGI_SCALING_NONE;
         desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-        desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+        desc.AlphaMode = composition ? DXGI_ALPHA_MODE_PREMULTIPLIED : DXGI_ALPHA_MODE_IGNORE;
         desc.Flags = 0;
-        if (FAILED(dxgiFactory->CreateSwapChainForHwnd(t->d3dDevice, (HWND)hwnd, &desc, nullptr, nullptr, &t->swapChain))) break;
+        if (composition) {
+            if (FAILED(dxgiFactory->CreateSwapChainForComposition(t->d3dDevice, &desc, nullptr, &t->swapChain))) break;
+            if (FAILED(DCompositionCreateDevice(dxgiDevice, __uuidof(IDCompositionDevice), reinterpret_cast<void **>(&t->dcompDevice)))) break;
+            if (FAILED(t->dcompDevice->CreateTargetForHwnd((HWND)hwnd, TRUE, &t->dcompTarget))) break;
+            if (FAILED(t->dcompDevice->CreateVisual(&t->dcompVisual))) break;
+            if (FAILED(t->dcompVisual->SetContent(t->swapChain))) break;
+            if (FAILED(t->dcompTarget->SetRoot(t->dcompVisual))) break;
+            if (FAILED(t->dcompDevice->Commit())) break;
+        } else {
+            if (FAILED(dxgiFactory->CreateSwapChainForHwnd(t->d3dDevice, (HWND)hwnd, &desc, nullptr, nullptr, &t->swapChain))) break;
+        }
         // Alt+Enter full-screen switching is not an AppKit behaviour.
         dxgiFactory->MakeWindowAssociation((HWND)hwnd, DXGI_MWA_NO_ALT_ENTER);
         if (!createBackBufferBitmap(t)) break;
@@ -187,8 +210,20 @@ CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint3
     return t;
 }
 
+CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
+    return createSwapChainTarget(factory, hwnd, w, h, dpi, false);
+}
+
+CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
+    return createSwapChainTarget(factory, hwnd, w, h, dpi, true);
+}
+
 bool cd2d_target_is_swapchain(CD2DTarget *target) {
     return target && target->swapChain;
+}
+
+bool cd2d_target_is_composition(CD2DTarget *target) {
+    return target && target->dcompDevice;
 }
 
 void cd2d_target_release(CD2DTarget *target) {
@@ -197,6 +232,14 @@ void cd2d_target_release(CD2DTarget *target) {
     safeRelease(target->target);
     safeRelease(target->dc);
     safeRelease(target->d2dDevice);
+    // The visual tree holds the swap chain; drop it (and the HWND target) before the
+    // chain and the DXGI device the composition device was created on.
+    if (target->dcompTarget) target->dcompTarget->SetRoot(nullptr);
+    if (target->dcompVisual) target->dcompVisual->SetContent(nullptr);
+    if (target->dcompDevice) target->dcompDevice->Commit();
+    safeRelease(target->dcompVisual);
+    safeRelease(target->dcompTarget);
+    safeRelease(target->dcompDevice);
     safeRelease(target->swapChain);
     safeRelease(target->d3dContext);
     safeRelease(target->d3dDevice);
@@ -231,6 +274,8 @@ bool cd2d_target_end_draw(CD2DTarget *target) {
     if (target->lost || isDeviceLost(hr)) return false;
     HRESULT present = target->swapChain->Present(1, 0);
     if (isDeviceLost(present)) { target->lost = true; return false; }
+    // A composition swap chain reaches the screen only when the visual tree commits.
+    if (target->dcompDevice) target->dcompDevice->Commit();
     return true;
 }
 
