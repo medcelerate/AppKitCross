@@ -29,7 +29,10 @@ import CoreText
     private var _isAutomaticQuoteSubstitutionEnabled = false
     private var _isGrammarCheckingEnabled = false
     private var _isAutomaticSpellingCorrectionEnabled = false
-    private var _textContainer: NSTextContainer? = nil
+    // The text system (ADR-0007): storage → layout manager → container, created with the view.
+    private var _storage: NSTextStorage
+    private var _layoutManager: NSLayoutManager
+    private var _container: NSTextContainer
 
     private var _viewDelegate: (any NSTextViewDelegate)? { _textDelegate as? NSTextViewDelegate }
 
@@ -346,13 +349,182 @@ import CoreText
         _viewDelegate?.textViewDidChangeSelection(n)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(coder:)
-    public required init?(coder: NSCoder) { super.init(coder: coder) }
+    public required init?(coder: NSCoder) {
+        _storage = NSTextStorage()
+        _layoutManager = NSLayoutManager()
+        _container = NSTextContainer(size: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+        super.init(coder: coder)
+        MainActor.assumeIsolated { _wireTextSystem() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(frame:)
-    @MainActor public override init(frame frameRect: NSRect) { super.init(frame: frameRect) }
+    @MainActor public override convenience init(frame frameRect: NSRect) { self.init(frame: frameRect, textContainer: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(frame:textcontainer:)
     @MainActor public init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+        // A container that already belongs to a layout manager brings its text system along.
+        if let c = container, let lm = c.layoutManager {
+            _container = c
+            _layoutManager = lm
+            _storage = lm.textStorage ?? NSTextStorage()
+        } else {
+            _container = container ?? NSTextContainer(size: NSSize(width: max(1, frameRect.width), height: CGFloat.greatestFiniteMagnitude))
+            _layoutManager = NSLayoutManager()
+            _storage = NSTextStorage()
+        }
         super.init(frame: frameRect)
-        _textContainer = container
+        _wireTextSystem()
+    }
+
+    private func _wireTextSystem() {
+        if _layoutManager.textStorage !== _storage { _storage.addLayoutManager(_layoutManager) }
+        if !_layoutManager.textContainers.contains(where: { $0 === _container }) { _layoutManager.addTextContainer(_container) }
+        _container.textView = self
+        _container.widthTracksTextView = true
+        _container.heightTracksTextView = false
+        if _storage.length == 0 { _storage.setAttributedString(NSAttributedString(string: "", attributes: typingAttributes)) }
+        _syncContainerSize()
+    }
+
+    /// Container width follows the view unless the text runs on one line (field editors,
+    /// horizontally resizable views).
+    private func _syncContainerSize() {
+        let unbounded = isFieldEditor || isHorizontallyResizable
+        let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
+        let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        if _container.size != size { _container.size = size }
+        let padding: CGFloat = isFieldEditor ? 0 : 5
+        if _container.lineFragmentPadding != padding { _container.lineFragmentPadding = padding }
+    }
+
+    private var _drawOrigin: NSPoint { NSPoint(x: textContainerOrigin.x - _scrollX, y: textContainerOrigin.y) }
+
+    // MARK: NSText model hooks, backed by the text storage
+
+    internal override func _getString() -> String { _storage.string }
+    internal override func _setString(_ s: String) {
+        _storage.setAttributedString(NSAttributedString(string: s, attributes: typingAttributes))
+    }
+    internal override func _storageReplace(_ r: NSRange, with text: String) {
+        var attrs = typingAttributes
+        if r.location > 0, r.location <= _storage.length {
+            let before = _storage.attributes(at: r.location - 1, effectiveRange: nil)
+            if before[.font] != nil { attrs = before }
+        }
+        _storage.replaceCharacters(in: r, with: NSAttributedString(string: text, attributes: attrs))
+    }
+
+    internal override func _invalidateLayout() {
+        _syncContainerSize()
+        _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
+    }
+
+    /// The layout manager laid the text out again (an edit, a geometry change).
+    internal func _layoutManagerDidChange() { needsDisplay = true }
+
+    internal override func _layoutLines() -> [_Line] {
+        let origin = _drawOrigin
+        var lines = _layoutManager._lineFragments.map { f in
+            _Line(range: NSRange(location: f.charRange.location, length: f.charRange.length - f.newlineLength),
+                  y: f.rect.minY + origin.y, width: f.usedRect.width, endsWithNewline: f.newlineLength > 0)
+        }
+        if _layoutManager.extraLineFragmentTextContainer != nil || lines.isEmpty {
+            let extra = _layoutManager.extraLineFragmentRect
+            lines.append(_Line(range: NSRange(location: _storage.length, length: 0), y: (lines.isEmpty ? 0 : extra.minY) + origin.y, width: 0, endsWithNewline: false))
+        }
+        return lines
+    }
+
+    internal override func _caretRect(for offset: Int) -> NSRect {
+        let origin = _drawOrigin
+        guard let c = _layoutManager._caret(forCharacter: offset) else {
+            return NSRect(x: origin.x + _container.lineFragmentPadding, y: origin.y, width: 1, height: _lineHeight)
+        }
+        return NSRect(x: c.rect.minX + origin.x, y: c.rect.minY + origin.y, width: 1, height: c.rect.height)
+    }
+
+    internal override func _offset(at point: NSPoint) -> Int {
+        let origin = _drawOrigin
+        var fraction: CGFloat = 0
+        let p = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let i = _layoutManager.characterIndex(for: p, in: _container, fractionOfDistanceBetweenInsertionPoints: &fraction)
+        guard fraction > 0.5 else { return i }
+        let line = _lineRange(at: i)
+        return min(i + 1, line.location + line.length)
+    }
+
+    internal override var _contentSize: NSSize {
+        let used = _layoutManager.usedRect(for: _container)
+        let padding = isFieldEditor ? 0 : _container.lineFragmentPadding
+        return NSSize(width: (used.width + padding + 2 * _textContainerInset.width).rounded(.up),
+                      height: max(used.height, _lineHeight) + 2 * _textContainerInset.height)
+    }
+
+    /// The colour the layout manager highlights this view's selection with.
+    internal var _selectionHighlightColor: NSColor {
+        let focused = window?.firstResponder === self && (window?.isKeyWindow ?? true)
+        return focused ? (_selectedTextAttributes[.backgroundColor] as? NSColor) ?? .selectedTextBackgroundColor : .unemphasizedSelectedContentBackgroundColor
+    }
+
+    open override func draw(_ dirtyRect: NSRect) {
+        if drawsBackground, let bg = backgroundColor {
+            bg.setFill()
+            NSBezierPath.fill(bounds)
+        }
+        let origin = _drawOrigin
+        let all = NSRange(location: 0, length: _storage.length)
+        _layoutManager.drawBackground(forGlyphRange: all, at: origin)
+        _layoutManager.drawGlyphs(forGlyphRange: all, at: origin)
+        if let m = _markedRange, m.length > 0 {
+            (textColor ?? .textColor).setFill()
+            _layoutManager.enumerateEnclosingRects(forGlyphRange: m, withinSelectedGlyphRange: m, in: _container) { r, _ in
+                NSBezierPath.fill(NSRect(x: r.minX + origin.x, y: r.maxY + origin.y - 2, width: r.width, height: 1))
+            }
+        }
+        let sel = selectedRange
+        if window?.firstResponder === self && isEditable && sel.length == 0 {
+            let caret = _caretRect(for: sel.location)
+            insertionPointColor.setFill()
+            NSBezierPath.fill(NSRect(x: caret.minX.rounded(), y: caret.minY, width: 1, height: caret.height))
+        }
+    }
+
+    open override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        _syncContainerSize()
+    }
+
+    open override var isFieldEditor: Bool {
+        get { super.isFieldEditor }
+        set { super.isFieldEditor = newValue; _syncContainerSize() }
+    }
+    open override var isHorizontallyResizable: Bool {
+        get { super.isHorizontallyResizable }
+        set { super.isHorizontallyResizable = newValue; _syncContainerSize() }
+    }
+    open override var font: NSFont? {
+        get { super.font }
+        set {
+            super.font = newValue
+            let r = NSRange(location: 0, length: _storage.length)
+            if let f = newValue { _storage.addAttribute(.font, value: f, range: r) } else { _storage.removeAttribute(.font, range: r) }
+        }
+    }
+    open override var textColor: NSColor? {
+        get { super.textColor }
+        set {
+            super.textColor = newValue
+            let r = NSRange(location: 0, length: _storage.length)
+            if let c = newValue { _storage.addAttribute(.foregroundColor, value: c, range: r) } else { _storage.removeAttribute(.foregroundColor, range: r) }
+        }
+    }
+    open override var alignment: NSTextAlignment {
+        get { super.alignment }
+        set {
+            super.alignment = newValue
+            let ps = NSMutableParagraphStyle()
+            ps.alignment = newValue
+            _typingAttributes[.paragraphStyle] = ps
+            _storage.addAttribute(.paragraphStyle, value: ps, range: NSRange(location: 0, length: _storage.length))
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(usingtextlayoutmanager:)
     @MainActor public convenience init(usingTextLayoutManager: Bool) { unimplemented() }
@@ -539,7 +711,7 @@ import CoreText
     @available(macOS 15.0, *)
     @MainActor open var isWritingToolsActive: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/layoutmanager
-    @MainActor open var layoutManager: NSLayoutManager? { nil }   // TextKit is not part of this port yet
+    @MainActor open var layoutManager: NSLayoutManager? { _layoutManager }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/linktextattributes
     @MainActor open var linkTextAttributes: [NSAttributedString.Key : Any]? {
         get { unimplemented() }
@@ -696,16 +868,27 @@ import CoreText
     @MainActor class public var stronglyReferencesTextStorage: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontainer
     @MainActor open var textContainer: NSTextContainer? {
-        get { _textContainer }
-        set { _textContainer = newValue }
+        get { _container }
+        set {
+            guard let c = newValue, c !== _container else { return }
+            if let i = _layoutManager.textContainers.firstIndex(where: { $0 === _container }) { _layoutManager.removeTextContainer(at: i) }
+            _container.textView = nil
+            _container = c
+            if let lm = c.layoutManager, lm !== _layoutManager {
+                _layoutManager = lm
+                if let s = lm.textStorage { _storage = s }
+            }
+            _wireTextSystem()
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontainerinset
     @MainActor open var textContainerInset: NSSize {
         get { _textContainerInset }
-        set { _textContainerInset = newValue; _invalidateLayout(); needsDisplay = true }
+        set { _textContainerInset = newValue; _syncContainerSize(); _invalidateLayout(); needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontainerorigin
-    @MainActor open var textContainerOrigin: NSPoint { unimplemented() }
+    @MainActor open var textContainerOrigin: NSPoint { NSPoint(x: _textContainerInset.width, y: _textContainerInset.height) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontentstorage
     @available(macOS 12.0, *)
     @MainActor open var textContentStorage: NSTextContentStorage? { unimplemented() }
@@ -719,7 +902,7 @@ import CoreText
     @available(macOS 12.0, *)
     @MainActor open var textLayoutManager: NSTextLayoutManager? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textstorage
-    @MainActor open var textStorage: NSTextStorage? { nil }   // TextKit is not part of this port yet
+    @MainActor open var textStorage: NSTextStorage? { _storage }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/tightenkerning(_:)
     @MainActor open func tightenKerning(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticdashsubstitution(_:)

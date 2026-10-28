@@ -72,6 +72,13 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/antialiasthresholdchangednotification
     static public var antialiasThresholdChangedNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSAntialiasThresholdChangedNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/ascender
+    /// The CoreText font behind this font (the text system lays out and draws with it).
+    #if canImport(CoreText)
+    internal var _coreTextFont: CTFont {
+        if let h = handle as? HostFont { return h.ct }
+        return CTFontCreateWithName(fontName as CFString, pointSize, nil)
+    }
+    #endif
     open var ascender: CGFloat { handle.ascent }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/boldsystemfont(ofsize:)
     public class func boldSystemFont(ofSize fontSize: CGFloat) -> NSFont { system(fontSize, weight: NSFont.Weight.bold.rawValue) }

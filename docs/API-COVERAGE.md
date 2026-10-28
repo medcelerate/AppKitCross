@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 56 |
-| Types generated | 482 |
+| Types handwritten | 61 |
+| Types generated | 477 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10212 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 955 |
+| Members unimplemented-calls | 1409 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -271,7 +271,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |
 | NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |
 | NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |
-| NSLayoutManager | class | generated | 144 | 8 | 4 |  |
+| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 146 |
 | NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |
 | NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
 | NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
@@ -291,7 +291,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMenuToolbarItem | class | generated | 2 | 0 | 0 |  |
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
 | NSMutableFontCollection | class | generated | 8 | 1 | 0 |  |
-| NSMutableParagraphStyle | class | generated | 24 | 1 | 0 |  |
+| NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 46 |
 | NSNib | class | generated | 4 | 0 | 1 |  |
 | NSObjectController | class | generated | 21 | 3 | 0 |  |
 | NSOpenGLContext | class | generated | 24 | 6 | 1 |  |
@@ -314,7 +314,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPageLayout | class | generated | 10 | 0 | 1 |  |
 | NSPanGestureRecognizer | class | generated | 5 | 0 | 0 |  |
 | NSPanel | class | handwritten | 3 | 0 | 0 | 2 |
-| NSParagraphStyle | class | generated | 31 | 0 | 2 |  |
+| NSParagraphStyle | class | handwritten | 31 | 0 | 2 | 30 |
 | NSPasteboard | class | handwritten | 91 | 11 | 11 | 5 |
 | NSPasteboardItem | class | handwritten | 14 | 0 | 2 | 6 |
 | NSPasteboardItemDataProvider | protocol | generated | 2 | 0 | 0 |  |
@@ -450,7 +450,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceSectionHeaderViewProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewRowAction | class | generated | 7 | 0 | 1 |  |
-| NSText | class | handwritten | 57 | 0 | 0 | 0 |
+| NSText | class | handwritten | 57 | 0 | 0 | 9 |
 | NSTextAlignment | enum | generated | 5 | 0 | 0 |  |
 | NSTextAlternatives | class | generated | 5 | 0 | 0 |  |
 | NSTextAttachment | class | generated | 12 | 2 | 0 |  |
@@ -462,7 +462,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextBlock | class | generated | 34 | 0 | 4 |  |
 | NSTextCheckingClient | protocol | generated | 8 | 0 | 0 |  |
 | NSTextCheckingController | class | generated | 18 | 1 | 0 |  |
-| NSTextContainer | class | generated | 18 | 1 | 0 |  |
+| NSTextContainer | class | handwritten | 18 | 1 | 0 | 32 |
 | NSTextContent | protocol | generated | 1 | 0 | 0 |  |
 | NSTextContentManager | class | generated | 15 | 0 | 1 |  |
 | NSTextContentManagerDelegate | protocol | generated | 2 | 0 | 0 |  |
@@ -502,7 +502,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextSelection | class | generated | 20 | 0 | 2 |  |
 | NSTextSelectionDataSource | protocol | generated | 10 | 0 | 0 |  |
 | NSTextSelectionNavigation | class | generated | 31 | 0 | 5 |  |
-| NSTextStorage | class | generated | 21 | 0 | 0 |  |
+| NSTextStorage | class | handwritten | 21 | 0 | 0 | 28 |
 | NSTextStorageDelegate | protocol | generated | 2 | 0 | 0 |  |
 | NSTextStorageEditActions | struct | generated | 2 | 0 | 0 |  |
 | NSTextStorageObserving | protocol | generated | 3 | 0 | 0 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | generated | 8 | 0 | 1 |  |
 | NSTextTable | class | generated | 9 | 0 | 1 |  |
 | NSTextTableBlock | class | generated | 6 | 0 | 0 |  |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 0 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 170 |
 | NSTextViewDelegate | protocol | generated | 27 | 3 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 151 |
+| NSView | class | handwritten | 361 | 3 | 19 | 150 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 180 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 174 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

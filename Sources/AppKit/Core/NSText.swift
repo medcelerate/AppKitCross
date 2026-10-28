@@ -17,7 +17,20 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext
 @MainActor open class NSText: NSView, NSChangeSpelling, NSIgnoreMisspelledWords {
     // MARK: Storage
-    internal var _string = ""
+    private var _plainString = ""
+    /// The text, routed through overridable hooks so NSTextView can keep it in its text storage.
+    internal var _string: String {
+        get { _getString() }
+        set { _setString(newValue) }
+    }
+    internal func _getString() -> String { _plainString }
+    internal func _setString(_ s: String) { _plainString = s }
+    /// Replaces `r` (already clamped) in the model; NSTextView edits its storage instead.
+    internal func _storageReplace(_ r: NSRange, with text: String) {
+        var units = _units
+        units.replaceSubrange(r.location..<(r.location + r.length), with: Array(text.utf16))
+        _plainString = String(decoding: units, as: UTF16.self)
+    }
     private var _selectedRange = NSRange(location: 0, length: 0)      // UTF-16 offsets
     private var _font: NSFont? = NSFont.systemFont(ofSize: NSFont.systemFontSize)
     private var _textColor: NSColor? = .textColor
@@ -69,9 +82,7 @@ import CoreText
     /// Replaces `range` and moves the selection after the inserted text.
     internal func _replace(_ range: NSRange, with text: String, notify: Bool = true) {
         let r = _clamped(range)
-        var units = _units
-        units.replaceSubrange(r.location..<(r.location + r.length), with: Array(text.utf16))
-        _string = String(decoding: units, as: UTF16.self)
+        _storageReplace(r, with: text)
         _selectedRange = NSRange(location: r.location + text.utf16.count, length: 0)
         _markedRange = nil
         _invalidateLayout()
