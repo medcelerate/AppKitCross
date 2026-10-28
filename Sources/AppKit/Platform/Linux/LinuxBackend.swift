@@ -50,7 +50,7 @@ final class LinuxBackend: PlatformBackend {
         utf8String = XInternAtom(d, "UTF8_STRING", 0)
         var fds: [Int32] = [-1, -1]
         if pipe(&fds) == 0 { wakePipe = fds }
-        text = LinuxTextBackend()
+        text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
     }
 

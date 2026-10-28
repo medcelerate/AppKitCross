@@ -2,3 +2,6 @@
 #include <cairo.h>
 #include <cairo-xlib.h>
 #include <pango/pangocairo.h>
+#include <pango/pangofc-font.h>
+#include <hb.h>
+#include <hb-ot.h>

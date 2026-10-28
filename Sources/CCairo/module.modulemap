@@ -3,6 +3,8 @@ module CCairo [system] {
     link "cairo"
     link "pangocairo-1.0"
     link "pango-1.0"
+    link "harfbuzz"
+    link "pangoft2-1.0"
     link "gobject-2.0"
     link "glib-2.0"
     export *

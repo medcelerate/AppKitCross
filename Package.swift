@@ -32,8 +32,18 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
-appKitDependencies += ["CoreGraphics", "CD2D"]
-appKitExclude += ["Platform/Host", "Platform/Linux"]
+targets += [
+    // extern "C" shim over DirectWrite (fonts, shaping, glyph runs) for the CoreText module.
+    .target(name: "CDirectWrite", dependencies: ["CD2D"], path: "Sources/CDirectWrite", linkerSettings: [.linkedLibrary("dwrite")]),
+    .target(
+        name: "CoreText",
+        dependencies: ["CoreGraphics", "CD2D", "CDirectWrite"],
+        path: "Sources/CoreText",
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
+appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 #elseif os(Linux)
 // Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib for windows (Milestone 8).
@@ -48,7 +58,15 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
-appKitDependencies += ["CoreGraphics", "CCairo", "CX11"]
+targets += [
+    .target(
+        name: "CoreText",
+        dependencies: ["CoreGraphics", "CCairo"],
+        path: "Sources/CoreText",
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CoreText"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 #else

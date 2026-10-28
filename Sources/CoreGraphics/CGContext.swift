@@ -94,6 +94,11 @@ public final class CGContext {
     }
 
     public func setFillColor(_ color: CGColor) { state.fill = color }
+    /// The current fill colour (CoreText draws glyphs with it when a run carries no colour).
+    public var _fillColor: CGColor { state.fill }
+    /// Text drawing state (CoreText's CTLineDraw/CTRunDraw read and advance these).
+    public var textPosition: CGPoint = .zero
+    public var textMatrix: CGAffineTransform = .identity
     public func setFillColor(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) { state.fill = CGColor(srgbRed: red, green: green, blue: blue, alpha: alpha) }
     public func setFillColor(gray: CGFloat, alpha: CGFloat) { state.fill = CGColor(gray: gray, alpha: alpha) }
     public func setStrokeColor(_ color: CGColor) { state.stroke = color }
