@@ -24,7 +24,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 | `Sources/CoreGraphics` | Windows implementation of the CoreGraphics drawing API over Direct2D (Windows only). |
 | `Sources/CoreGraphics` (Windows only) | `CGContext`, `CGPath`, `CGColor` over Direct2D. |
 | `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004), used on Windows unless `APPKITWIN_METAL_REFERENCE=1`. |
-| `Sources/AppKit/Platform/Linux`, `Sources/CCairo`, `Sources/CX11` | Linux backend: X11 windows, Cairo drawing, PangoCairo text (`tools/linux/Dockerfile` builds and screenshots it). |
+| `Sources/AppKit/Platform/Linux`, `Sources/CCairo`, `Sources/CX11`, `Sources/CWayland` | Linux backend: Wayland (xdg-shell) or X11 windows, Cairo drawing, PangoCairo text (`tools/linux/Dockerfile` builds and screenshots both). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
 | `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
 | `Stubs/Pending` | Generated stubs that do not compile yet. Not part of any target. |
@@ -58,6 +58,10 @@ python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API
 
 ## Linux
 
-`tools/linux/Dockerfile` builds the package on `swift:6.2-noble` with X11, Cairo and Pango, runs the test suite on the headless host backend and HelloWindow under Xvfb. The sample as rendered there (no window manager, so no decorations):
+`tools/linux/Dockerfile` builds the package on `swift:6.2-noble` with X11, Wayland, Cairo and Pango, runs the test suite on the headless host backend and HelloWindow under Xvfb. The sample as rendered there (no window manager, so no decorations):
 
 ![HelloWindow on Linux under Xvfb](docs/images/hellowindow-linux-xvfb.png)
+
+Two window backends share the Cairo drawing, PangoCairo text and the rest of the Linux platform code: Wayland (`WaylandBackend`, xdg-shell toplevels with wl_shm buffers, xkbcommon keyboards, wl_cursor themes, server-side decorations through xdg-decoration) is preferred when `WAYLAND_DISPLAY` is set and the connection succeeds, X11 is the fallback; `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one. `bash tools/linux/run.sh --wayland` in the container additionally runs HelloWindow under a headless sway and screenshots it with grim (sway draws the title bar):
+
+![HelloWindow on Linux under a headless sway](docs/images/hellowindow-linux-wayland.png)
