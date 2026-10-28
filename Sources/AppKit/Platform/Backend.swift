@@ -42,6 +42,11 @@ public protocol PlatformBackend: AnyObject {
     var text: any PlatformTextBackend { get }
     /// Image decoding and offscreen surfaces.
     var image: any PlatformImageBackend { get }
+    /// The system clipboard.
+    var systemPasteboard: any PlatformPasteboard { get }
+    /// Runs a nested event loop for a modal window until `stop` reports true.
+    /// Other windows of the application do not receive input meanwhile.
+    func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
     /// Sets the mouse cursor shown over this application's windows.
     func setCursor(_ cursor: PlatformCursor)
     func setCursorHidden(_ hidden: Bool)

@@ -196,6 +196,25 @@ final class Win32Backend: PlatformBackend {
 
     func beep() { MessageBeep(UINT(MB_OK)) }
 
+    // MARK: Pasteboard and modal loops
+
+    let systemPasteboard: any PlatformPasteboard = Win32Pasteboard()
+
+    func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
+        let modal = (window as? Win32Window)?.hwnd
+        let others = windows.compactMap { $0.hwnd }.filter { $0 != modal }
+        for h in others { EnableWindow(h, false) }
+        var msg = MSG()
+        while !stop() {
+            if !GetMessageW(&msg, nil, 0, 0) { PostQuitMessage(Int32(msg.wParam)); break }
+            TranslateMessage(&msg)
+            DispatchMessageW(&msg)
+            drainPosted()
+        }
+        for h in others { EnableWindow(h, true) }
+        if let modal { SetActiveWindow(modal) }
+    }
+
     // MARK: Cursor
 
     private(set) var currentCursor: HCURSOR? = LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32512))

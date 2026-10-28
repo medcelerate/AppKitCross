@@ -102,6 +102,8 @@ import CoreText
         _platform?.setNeedsDisplay(nil)
     }
 
+    internal var _platformWindow: (any PlatformWindow)? { _platform }
+
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
         let r = view.convert(rect, to: nil)

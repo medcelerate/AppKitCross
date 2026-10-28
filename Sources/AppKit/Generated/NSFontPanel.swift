@@ -37,7 +37,11 @@ import CoreText
     @MainActor class public var shared: NSFontPanel { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanel/sharedfontpanelexists
     @MainActor class public var sharedFontPanelExists: Bool { unimplemented() }
-    // INHERITED (identical redeclaration): @MainActor var worksWhenModal: Bool { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanel/workswhenmodal
+    @MainActor open override var worksWhenModal: Bool {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
 }
 
 extension NSFontPanel {

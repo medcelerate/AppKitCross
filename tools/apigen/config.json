@@ -1,6 +1,7 @@
 {
   "handwritten": [
     "NSActionCell",
+    "NSAlert",
     "NSApplication",
     "NSBezierPath",
     "NSBitmapImageRep",
@@ -20,6 +21,9 @@
     "NSImageView",
     "NSMenu",
     "NSMenuItem",
+    "NSPanel",
+    "NSPasteboard",
+    "NSPasteboardItem",
     "NSResponder",
     "NSScreen",
     "NSScrollView",

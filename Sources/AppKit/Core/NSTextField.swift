@@ -178,10 +178,29 @@ import CoreText
         default:
             break
         }
-        if (flags.contains(.command) || flags.contains(.control)) && chars.lowercased() == "a" {
-            _selection = NSRange(location: 0, length: n)
-            needsDisplay = true
-            return
+        if flags.contains(.command) || flags.contains(.control) {
+            switch chars.lowercased() {
+            case "a":
+                _selection = NSRange(location: 0, length: n)
+                needsDisplay = true
+                return
+            case "c", "x":
+                if sel.length > 0 {
+                    let text = String(decoding: _utf16[sel.location..<(sel.location + sel.length)], as: UTF16.self)
+                    _ = NSPasteboard.general.clearContents()
+                    _ = NSPasteboard.general.setString(text, forType: .string)
+                    if chars.lowercased() == "x" { _replaceSelection(with: "") }
+                }
+                needsDisplay = true
+                return
+            case "v":
+                if let text = NSPasteboard.general.string(forType: .string) {
+                    _replaceSelection(with: text.replacingOccurrences(of: "\r\n", with: " ").replacingOccurrences(of: "\n", with: " "))
+                }
+                needsDisplay = true
+                return
+            default: break
+            }
         }
         if flags.contains(.command) || flags.contains(.control) { super.keyDown(with: event); return }
         guard let text = event.characters, !text.isEmpty, text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && ($0.value < 0xF700 || $0.value > 0xF8FF) }) else {

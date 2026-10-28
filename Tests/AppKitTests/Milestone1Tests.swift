@@ -761,3 +761,53 @@ final class SliderAndCursorTests: XCTestCase {
         w.close()
     }
 }
+
+@MainActor
+final class PasteboardAndAlertTests: XCTestCase {
+    func testPasteboardRoundTripAndTextFieldClipboard() {
+        let pb = NSPasteboard.general
+        let before = pb.changeCount
+        XCTAssertGreaterThan(pb.clearContents(), before)
+        XCTAssertTrue(pb.setString("hello", forType: .string))
+        XCTAssertEqual(pb.string(forType: .string), "hello")
+        XCTAssertEqual(pb.types, [.string])
+        XCTAssertEqual(pb.availableType(from: [.png, .string]), .string)
+        // Copy and paste through a text field.
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(string: "abc")
+        field.frame = NSRect(x: 10, y: 10, width: 200, height: 24)
+        w.contentView!.addSubview(field)
+        w.makeKeyAndOrderFront(nil)
+        _ = w.makeFirstResponder(field)
+        func key(_ c: String, _ flags: NSEvent.ModifierFlags = []) {
+            NSApp.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: w.windowNumber, context: nil, characters: c, charactersIgnoringModifiers: c, isARepeat: false, keyCode: 0)!)
+        }
+        key("a", [.command]); key("x", [.command])
+        XCTAssertEqual(field.stringValue, "")
+        XCTAssertEqual(pb.string(forType: .string), "abc")
+        key("v", [.command]); key("v", [.command])
+        XCTAssertEqual(field.stringValue, "abcabc")
+        w.close()
+    }
+
+    func testAlertRunsModalAndReturnsButton() {
+        let host = Platform.backend as! HostBackend
+        let alert = NSAlert()
+        alert.messageText = "Delete the file?"
+        alert.informativeText = "This cannot be undone."
+        _ = alert.addButton(withTitle: "Delete")
+        _ = alert.addButton(withTitle: "Cancel")
+        XCTAssertEqual(alert.buttons.count, 2)
+        alert.layout()
+        XCTAssertEqual(alert.buttons[0].keyEquivalent, "\r", "the first button is the default button")
+        // Press "Cancel" once the modal loop is running.
+        host.post {
+            XCTAssertTrue(NSApp.modalWindow === alert.window)
+            alert.buttons[1].performClick(nil)
+        }
+        let response = alert.runModal()
+        XCTAssertEqual(response, .alertSecondButtonReturn)
+        XCTAssertNil(NSApp.modalWindow)
+        XCTAssertFalse(alert.window.isVisible)
+    }
+}

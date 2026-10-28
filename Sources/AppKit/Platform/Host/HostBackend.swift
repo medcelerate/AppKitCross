@@ -58,6 +58,18 @@ final class HostBackend: PlatformBackend {
 
     func beep() { beepCount += 1 }
 
+    let systemPasteboard: any PlatformPasteboard = HostPasteboard()
+
+    func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
+        // Tests end modal sessions from inside the loop via posted blocks.
+        var guardCount = 0
+        while !stop() && guardCount < 10_000 {
+            drain()
+            _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.001))
+            guardCount += 1
+        }
+    }
+
     private(set) var cursor: PlatformCursor = .arrow
     private(set) var cursorHidden = false
     func setCursor(_ cursor: PlatformCursor) { self.cursor = cursor }
@@ -215,4 +227,12 @@ final class NoImageBackend: PlatformImageBackend {
     func decode(_ data: Data) -> CGImage? { nil }
     func encode(_ image: CGImage, format: String, quality: Double) -> Data? { nil }
     func makeOffscreen(size: CGSize, scale: CGFloat) -> PlatformOffscreenSurface? { nil }
+}
+
+@MainActor
+final class HostPasteboard: PlatformPasteboard {
+    private var entries: [PlatformPasteboardEntry] = []
+    private(set) var changeCount = 0
+    func write(_ entries: [PlatformPasteboardEntry]) { self.entries = entries; changeCount += 1 }
+    func read() -> [PlatformPasteboardEntry] { entries }
 }

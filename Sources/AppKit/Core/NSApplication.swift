@@ -42,6 +42,13 @@ import CoreText
     private var _servicesProvider: Any? = nil
     private var _applicationIconImage: NSImage? = nil
     private var _appearance: NSAppearance? = nil
+    internal final class _ModalSession {
+        let window: NSWindow
+        var response: NSApplication.ModalResponse? = nil
+        init(window: NSWindow) { self.window = window }
+    }
+    private var _modalStack: [_ModalSession] = []
+
     internal weak var _keyWindow: NSWindow?
     internal weak var _mainWindow: NSWindow?
 
@@ -83,7 +90,7 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/abortmodal()
-    @MainActor open func abortModal() { unimplemented() }
+    @MainActor open func abortModal() { stopModal(withCode: .abort) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/activate()
     @available(macOS 14.0, *)
     @MainActor open func activate() { activate(ignoringOtherApps: false) }
@@ -117,7 +124,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/arrangeinfront(_:)
     @MainActor open func arrangeInFront(_ sender: Any?) { for w in _windows where w.isVisible { w.orderFront(nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/beginmodalsession(for:)
-    @MainActor open func beginModalSession(for window: NSWindow) -> NSApplication.ModalSession { unimplemented() }
+    @MainActor open func beginModalSession(for window: NSWindow) -> NSApplication.ModalSession {
+        let session = _ModalSession(window: window)
+        _modalStack.append(session)
+        window.makeKeyAndOrderFront(nil)
+        return OpaquePointer(Unmanaged.passUnretained(session).toOpaque())
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/beginsheet(_:modalfor:modaldelegate:didend:contextinfo:)
     @MainActor open func beginSheet(_ sheet: NSWindow, modalFor docWindow: NSWindow, modalDelegate: Any?, didEnd didEndSelector: Selector?, contextInfo: UnsafeMutableRawPointer!) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/canceluserattentionrequest(_:)
@@ -180,7 +192,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enabledremotenotificationtypes
     @MainActor open var enabledRemoteNotificationTypes: NSApplication.RemoteNotificationType { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endmodalsession(_:)
-    @MainActor open func endModalSession(_ session: NSApplication.ModalSession) { unimplemented() }
+    @MainActor open func endModalSession(_ session: NSApplication.ModalSession) {
+        if !_modalStack.isEmpty { _modalStack.removeLast() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:)
     @MainActor open func endSheet(_ sheet: NSWindow) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:returncode:)
@@ -306,7 +320,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/miniaturizeall(_:)
     @MainActor open func miniaturizeAll(_ sender: Any?) { for w in _windows where w.isVisible { w.miniaturize(nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/modalwindow
-    @MainActor open var modalWindow: NSWindow? { nil }
+    @MainActor open var modalWindow: NSWindow? { _modalStack.last?.window }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/nextevent(matching:until:inmode:dequeue:)
     @MainActor open func nextEvent(matching mask: NSEvent.EventTypeMask, until expiration: Date?, inMode mode: RunLoop.Mode, dequeue deqFlag: Bool) -> NSEvent? {
         // Only the posted-event queue is consulted; the native queue is pumped by run().
@@ -371,9 +385,20 @@ import CoreText
         _isRunning = false
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/runmodal(for:)
-    @MainActor open func runModal(for window: NSWindow) -> NSApplication.ModalResponse { unimplemented() }
+    @MainActor open func runModal(for window: NSWindow) -> NSApplication.ModalResponse {
+        let session = beginModalSession(for: window)
+        defer { endModalSession(session) }
+        Platform.backend.runModal(for: window._platformWindow) { [weak self] in
+            guard let self else { return true }
+            return self._modalStack.last?.response != nil || !window.isVisible
+        }
+        return _modalStack.last?.response ?? .abort
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/runmodalsession(_:)
-    @MainActor open func runModalSession(_ session: NSApplication.ModalSession) -> NSApplication.ModalResponse { unimplemented() }
+    @MainActor open func runModalSession(_ session: NSApplication.ModalSession) -> NSApplication.ModalResponse {
+        guard let s = _modalStack.last else { return .abort }
+        return s.response ?? .continue
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/runpagelayout(_:)
     @MainActor open func runPageLayout(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/searchstring(_:inuserinterfaceitemstring:range:found:)
@@ -427,9 +452,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stop(_:)
     @MainActor open func stop(_ sender: Any?) { Platform.backend.stop() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stopmodal()
-    @MainActor open func stopModal() { unimplemented() }
+    @MainActor open func stopModal() { stopModal(withCode: .stop) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stopmodal(withcode:)
-    @MainActor open func stopModal(withCode returnCode: NSApplication.ModalResponse) { unimplemented() }
+    @MainActor open func stopModal(withCode returnCode: NSApplication.ModalResponse) { _modalStack.last?.response = returnCode }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/target(foraction:)
     @MainActor open func target(forAction action: Selector) -> Any? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/target(foraction:to:from:)

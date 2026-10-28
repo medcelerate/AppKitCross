@@ -126,6 +126,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             gridCheckbox.state = gridMenuItem.state
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("showAbout:")):
+            let alert = NSAlert()
+            alert.messageText = "HelloWindow"
+            alert.informativeText = "AppKit on Windows, milestone 2. Choose a button; the greeting label reports which."
+            alert.addButton(withTitle: "Great")
+            alert.addButton(withTitle: "Later")
+            let response = alert.runModal()
+            greeting.stringValue = response == .alertFirstButtonReturn ? "You chose Great" : "You chose Later"
+            return true
+        case Selector(("copyGreeting:")):
+            _ = NSPasteboard.general.clearContents()
+            _ = NSPasteboard.general.setString(greeting.stringValue.isEmpty ? "Hello from AppKit on Windows" : greeting.stringValue, forType: .string)
+            return true
         case Selector(("sizeChanged:")):
             canvas.circleSize = CGFloat((sender as? NSSlider)?.doubleValue ?? 120)
             return true
@@ -153,6 +166,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         gridMenuItem.state = .on
         viewItem.submenu = view
         main.addItem(viewItem)
+        let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        let help = NSMenu(title: "Help")
+        help.addItem(withTitle: "About HelloWindow", action: Selector(("showAbout:")), keyEquivalent: "")
+        help.addItem(withTitle: "Copy Greeting", action: Selector(("copyGreeting:")), keyEquivalent: "c")
+        helpItem.submenu = help
+        main.addItem(helpItem)
         NSApp.mainMenu = main
 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),

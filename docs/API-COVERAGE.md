@@ -9,11 +9,11 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 30 |
-| Types generated | 508 |
+| Types handwritten | 34 |
+| Types generated | 504 |
 | Types pending | 3 |
 | Types skipped | 0 |
-| Members emitted | 10204 |
+| Members emitted | 10205 |
 | Members blocked | 187 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 972 |
+| Members unimplemented-calls | 981 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -71,7 +71,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAccessibilityUnits | enum | generated | 5 | 0 | 0 |  |
 | NSActionCell | class | handwritten | 3 | 0 | 0 | 2 |
 | NSAdaptiveImageGlyph | class | generated | 5 | 2 | 0 |  |
-| NSAlert | class | generated | 21 | 0 | 1 |  |
+| NSAlert | class | handwritten | 21 | 0 | 1 | 3 |
 | NSAlertDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSAlignmentFeedbackFilter | class | generated | 7 | 0 | 0 |  |
 | NSAlignmentFeedbackToken | protocol | generated | 0 | 0 | 0 |  |
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | generated | 18 | 0 | 1 |  |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 56 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 49 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -230,7 +230,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFontDescriptor | class | generated | 67 | 0 | 6 |  |
 | NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |
 | NSFontManager | class | generated | 47 | 0 | 0 |  |
-| NSFontPanel | class | generated | 18 | 0 | 1 |  |
+| NSFontPanel | class | generated | 19 | 0 | 1 |  |
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
@@ -313,10 +313,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |
 | NSPageLayout | class | generated | 10 | 0 | 1 |  |
 | NSPanGestureRecognizer | class | generated | 5 | 0 | 0 |  |
-| NSPanel | class | generated | 3 | 0 | 0 |  |
+| NSPanel | class | handwritten | 3 | 0 | 0 | 2 |
 | NSParagraphStyle | class | generated | 31 | 0 | 2 |  |
-| NSPasteboard | class | generated | 91 | 11 | 11 |  |
-| NSPasteboardItem | class | generated | 14 | 0 | 2 |  |
+| NSPasteboard | class | handwritten | 91 | 11 | 11 | 5 |
+| NSPasteboardItem | class | handwritten | 14 | 0 | 2 | 6 |
 | NSPasteboardItemDataProvider | protocol | generated | 2 | 0 | 0 |  |
 | NSPasteboardReading | protocol | generated | 3 | 0 | 0 |  |
 | NSPasteboardTypeOwner | protocol | generated | 2 | 0 | 0 |  |
