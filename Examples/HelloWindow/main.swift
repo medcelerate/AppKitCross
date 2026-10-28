@@ -326,6 +326,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         window.center()
         window.makeKeyAndOrderFront(nil)
         _ = window.makeFirstResponder(canvas)
+
+        // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs).
+        if CommandLine.arguments.contains("--metal") {
+            showLayoutDemo()
+            (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 2
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -403,10 +409,200 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     }
 }
 
+// `HelloWindow --metal-selftest` checks the Metal device offscreen and exits with the
+// number of failed checks (the test target needs the host backend, so this is how the
+// Direct3D 12 device is verified on Windows).
+if CommandLine.arguments.contains("--metal-selftest") { exit(MetalSelfTest.run()) }
+
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
 app.run()
+
+/// Offscreen checks of the system Metal device: buffers and blits, texture upload and
+/// readback, a cleared render pass with a triangle (where the device rasterizes), a
+/// texture copy and shader diagnostics. The device is released at the end so the
+/// Direct3D 12 shim can report leaked objects (APPKITWIN_D3D12_DEBUG=1).
+enum MetalSelfTest {
+    static let shaders = """
+    cbuffer Frame { float4 tint; };
+    struct VSIn { float2 position : ATTRIBUTE0; float4 color : ATTRIBUTE1; };
+    struct VSOut { float4 position : SV_Position; float4 color : COLOR0; };
+    VSOut triangleVertex(VSIn v) { VSOut o; o.position = float4(v.position, 0, 1); o.color = v.color * tint; return o; }
+    float4 triangleFragment(VSOut i) : SV_Target { return i.color; }
+    Texture2D image;
+    SamplerState imageSampler;
+    float4 sampledFragment(VSOut i) : SV_Target { return image.Sample(imageSampler, i.color.xy); }
+    """
+    struct Vertex { var x: Float, y: Float, r: Float, g: Float, b: Float, a: Float }
+
+    static func render(_ queue: any MTLCommandQueue, _ pass: MTLRenderPassDescriptor, _ pipeline: any MTLRenderPipelineState, _ vertices: any MTLBuffer, tint: inout [Float], texture: (any MTLTexture)? = nil, sampler: (any MTLSamplerState)? = nil) -> Bool {
+        guard let cb = queue.makeCommandBuffer(), let encoder = cb.makeRenderCommandEncoder(descriptor: pass) else { return false }
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setVertexBytes(&tint, length: 16, index: 0)
+        encoder.setVertexBuffer(vertices, offset: 0, index: 1)
+        if let texture { encoder.setFragmentTexture(texture, index: 0) }
+        if let sampler { encoder.setFragmentSamplerState(sampler, index: 0) }
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        return cb.status == .completed
+    }
+
+    nonisolated(unsafe) static var failures: Int32 = 0
+    static func check(_ condition: Bool, _ what: String) {
+        print("\(condition ? "PASS" : "FAIL"): \(what)")
+        if !condition { failures += 1 }
+    }
+    static func pixel(_ texture: any MTLTexture, _ x: Int, _ y: Int) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: 4)
+        texture.getBytes(&out, bytesPerRow: 4, from: MTLRegionMake2D(x, y, 1, 1), mipmapLevel: 0)
+        return out
+    }
+
+    static func run() -> Int32 {
+        exercise()
+        print("device released")
+        fflush(stdout)
+        return failures
+    }
+
+    static func exercise() {
+        #if os(Windows)
+        let made: (any MTLDevice)? = ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] == "1" ? MTLCreateSystemDefaultDevice() : MTLD3D12Device()
+        #else
+        let made = MTLCreateSystemDefaultDevice()
+        #endif
+        guard let device = made, let queue = device.makeCommandQueue() else { check(false, "device and queue"); return }
+        print("device: \(device.name) rasterizes=\(device.supportsRasterization)")
+
+        // Buffers and a blit copy.
+        var floats: [Float] = [1, 2, 3, 4]
+        if let a = device.makeBuffer(bytes: &floats, length: 16, options: .storageModeShared), let b = device.makeBuffer(length: 16, options: []), let cb = queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+            blit.copy(from: a, sourceOffset: 4, to: b, destinationOffset: 0, size: 12)
+            blit.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+            check(cb.status == .completed, "blit command buffer completes")
+            check(b.contents().load(as: Float.self) == 2 && b.contents().load(fromByteOffset: 8, as: Float.self) == 4, "buffer copy lands (\(b.contents().load(as: Float.self)), \(b.contents().load(fromByteOffset: 8, as: Float.self)))")
+        } else { check(false, "buffers and blit encoder") }
+
+        // Texture upload and readback round trip.
+        if let tex = device.makeTexture(descriptor: MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 8, height: 4, mipmapped: false)) {
+            var pixels = [UInt8](repeating: 0, count: 8 * 4 * 4)
+            for i in 0..<(8 * 4) { pixels[i * 4] = UInt8(i); pixels[i * 4 + 1] = 100; pixels[i * 4 + 2] = 200; pixels[i * 4 + 3] = 255 }
+            tex.replace(region: MTLRegionMake2D(0, 0, 8, 4), mipmapLevel: 0, withBytes: pixels, bytesPerRow: 32)
+            var back = [UInt8](repeating: 0, count: pixels.count)
+            tex.getBytes(&back, bytesPerRow: 32, from: MTLRegionMake2D(0, 0, 8, 4), mipmapLevel: 0)
+            check(back == pixels, "texture upload reads back identically")
+            check(pixel(tex, 3, 1) == [11, 100, 200, 255], "partial readback of pixel (3,1): \(pixel(tex, 3, 1))")
+        } else { check(false, "texture creation") }
+
+        // Clear + triangle, two clear colours, then a texture copy.
+        do {
+            let options = MTLCompileOptions()
+            options.shaderLanguage = .hlsl
+            let library = try device.makeLibrary(source: shaders, options: options)
+            let pd = MTLRenderPipelineDescriptor()
+            pd.vertexFunction = library.makeFunction(name: "triangleVertex")
+            pd.fragmentFunction = library.makeFunction(name: "triangleFragment")
+            pd.colorAttachments[0].pixelFormat = .bgra8Unorm
+            let vd = MTLVertexDescriptor()
+            vd.attributes[0].format = .float2
+            vd.attributes[0].bufferIndex = 1
+            vd.attributes[1].format = .float4
+            vd.attributes[1].offset = 8
+            vd.attributes[1].bufferIndex = 1
+            vd.layouts[1].stride = MemoryLayout<Vertex>.stride
+            pd.vertexDescriptor = vd
+            let pipeline = try device.makeRenderPipelineState(descriptor: pd)
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 64, height: 64, mipmapped: false)
+            td.usage = [.renderTarget, .shaderRead]
+            guard let target = device.makeTexture(descriptor: td), let copy = device.makeTexture(descriptor: td) else { check(false, "render target creation"); return }
+            let triangle = [Vertex(x: 0, y: 0.9, r: 0, g: 1, b: 0, a: 1), Vertex(x: 0.9, y: -0.9, r: 0, g: 1, b: 0, a: 1), Vertex(x: -0.9, y: -0.9, r: 0, g: 1, b: 0, a: 1)]
+            guard let vertices = triangle.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }) else { check(false, "vertex buffer"); return }
+            var tint: [Float] = [1, 1, 1, 1]
+            for clear in [MTLClearColorMake(1, 0, 0, 1), MTLClearColorMake(0, 0, 1, 1)] {
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = target
+                pass.colorAttachments[0].loadAction = .clear
+                pass.colorAttachments[0].clearColor = clear
+                check(render(queue, pass, pipeline, vertices, tint: &tint), "render command buffer completes")
+                let expectedCorner: [UInt8] = [UInt8(clear.blue * 255), UInt8(clear.green * 255), UInt8(clear.red * 255), 255]
+                check(pixel(target, 1, 1) == expectedCorner && pixel(target, 62, 1) == expectedCorner, "corners are the clear colour \(expectedCorner): \(pixel(target, 1, 1)) \(pixel(target, 62, 1))")
+                if device.supportsRasterization { check(pixel(target, 32, 32) == [0, 255, 0, 255], "centre is the green triangle: \(pixel(target, 32, 32))") }
+            }
+            if let cb = queue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+                blit.copy(from: target, to: copy)
+                blit.endEncoding()
+                cb.commit()
+                cb.waitUntilCompleted()
+                check(pixel(copy, 1, 1) == [255, 0, 0, 255] && (!device.supportsRasterization || pixel(copy, 32, 40) == [0, 255, 0, 255]), "texture copy carries the frame: \(pixel(copy, 1, 1)) \(pixel(copy, 32, 40))")
+            }
+
+            if device.supportsRasterization {
+                // Sampling: every vertex carries uv (0.75, 0.75) in its colour, so the whole
+                // triangle shows texel (1, 1) of a 2x2 image with point sampling.
+                let sd = MTLRenderPipelineDescriptor()
+                sd.vertexFunction = library.makeFunction(name: "triangleVertex")
+                sd.fragmentFunction = library.makeFunction(name: "sampledFragment")
+                sd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                sd.vertexDescriptor = vd
+                let sampled = try device.makeRenderPipelineState(descriptor: sd)
+                let id = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 2, height: 2, mipmapped: false)
+                id.usage = .shaderRead
+                guard let image = device.makeTexture(descriptor: id) else { check(false, "sampled texture"); return }
+                let texels: [UInt8] = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 40, 80, 120, 255]   // BGRA: blue, green, red, (40,80,120)
+                image.replace(region: MTLRegionMake2D(0, 0, 2, 2), mipmapLevel: 0, withBytes: texels, bytesPerRow: 8)
+                let uvTriangle = triangle.map { Vertex(x: $0.x, y: $0.y, r: 0.75, g: 0.75, b: 0, a: 1) }
+                guard let uvVertices = uvTriangle.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }) else { check(false, "uv vertex buffer"); return }
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = target
+                pass.colorAttachments[0].loadAction = .clear
+                pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+                let sampler = device.makeSamplerState(descriptor: MTLSamplerDescriptor())
+                check(render(queue, pass, sampled, uvVertices, tint: &tint, texture: image, sampler: sampler), "sampled render completes")
+                check(pixel(target, 32, 32) == [40, 80, 120, 255] && pixel(target, 1, 1) == [0, 0, 0, 255], "fragment samples texel (1,1) through t0/s0: \(pixel(target, 32, 32)) corner \(pixel(target, 1, 1))")
+
+                // A depth attachment: the pass clears and binds it; the colour result is unchanged.
+                let dd = MTLRenderPipelineDescriptor()
+                dd.vertexFunction = library.makeFunction(name: "triangleVertex")
+                dd.fragmentFunction = library.makeFunction(name: "triangleFragment")
+                dd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                dd.depthAttachmentPixelFormat = .depth32Float
+                dd.vertexDescriptor = vd
+                let depthPipeline = try device.makeRenderPipelineState(descriptor: dd)
+                let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: 64, height: 64, mipmapped: false)
+                depthDesc.usage = .renderTarget
+                guard let depth = device.makeTexture(descriptor: depthDesc) else { check(false, "depth texture"); return }
+                let depthPass = MTLRenderPassDescriptor()
+                depthPass.colorAttachments[0].texture = target
+                depthPass.colorAttachments[0].loadAction = .clear
+                depthPass.colorAttachments[0].clearColor = MTLClearColorMake(1, 1, 1, 1)
+                depthPass.depthAttachment.texture = depth
+                depthPass.depthAttachment.loadAction = .clear
+                depthPass.depthAttachment.clearDepth = 1
+                check(render(queue, depthPass, depthPipeline, vertices, tint: &tint), "render with a depth attachment completes")
+                check(pixel(target, 32, 32) == [0, 255, 0, 255] && pixel(target, 1, 1) == [255, 255, 255, 255], "triangle over a cleared depth attachment: \(pixel(target, 32, 32)) corner \(pixel(target, 1, 1))")
+            }
+        } catch { check(false, "triangle pipeline: \(error)") }
+
+        // Compiler diagnostics reach the caller.
+        if device.supportsRasterization {
+            do {
+                let options = MTLCompileOptions()
+                options.shaderLanguage = .hlsl
+                let library = try device.makeLibrary(source: "float4 brokenVertex(uint id : SV_VertexID) : SV_Position { return undefined_symbol; }", options: options)
+                let pd = MTLRenderPipelineDescriptor()
+                pd.vertexFunction = library.makeFunction(name: "brokenVertex")
+                pd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                _ = try device.makeRenderPipelineState(descriptor: pd)
+                check(false, "broken shader is rejected")
+            } catch { check("\(error)".contains("undefined_symbol"), "broken shader diagnostics: \(error)") }
+        }
+    }
+}
 
 
 /// A form laid out entirely with Auto Layout: labels and fields in a vertical stack.
@@ -504,11 +700,59 @@ final class ColorViewController: NSViewController {
 }
 
 
-/// An MTKView on the reference device: the clear colour cycles every frame through the
-/// display link, which exercises MTLCommandBuffer, drawables and presentation.
+/// An MTKView whose drawable is a plain texture (the Direct3D 12 device): the presented
+/// texture is read back and blitted through CoreGraphics, the way MTKView itself does it
+/// for the reference device.
+final class ReadbackMTKView: MTKView {
+    override func draw(_ dirtyRect: NSRect) {
+        #if os(Windows) || os(Linux)
+        guard let tex = presentedTexture, !(tex is MTLReferenceTexture), let gc = NSGraphicsContext.current else { super.draw(dirtyRect); return }
+        let stride = tex.width * 4
+        var bytes = [UInt8](repeating: 0, count: stride * tex.height)
+        bytes.withUnsafeMutableBytes { tex.getBytes($0.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0) }
+        guard let image = CGImage.fromBGRA(width: tex.width, height: tex.height, stride: stride, data: Data(bytes)) else { return }
+        let ctx = gc.cgContext
+        ctx.saveGState()
+        ctx.translateBy(x: 0, y: bounds.height)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(image, in: NSRect(origin: .zero, size: bounds.size))
+        ctx.restoreGState()
+        #else
+        super.draw(dirtyRect)
+        #endif
+    }
+}
+
+/// An MTKView on the system device: the clear colour cycles every frame through the
+/// display link and an HLSL pipeline draws a spinning triangle over it (the reference
+/// device does not rasterize, so there only the clear shows). With `--metal-log` the
+/// centre and corner pixels of every 30th frame are read back and printed.
 final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     private var frame = 0
     private let label = NSTextField(labelWithString: "")
+    private var queue: (any MTLCommandQueue)?
+    private var pipeline: (any MTLRenderPipelineState)?
+    private var vertices: (any MTLBuffer)?
+    private let logsPixels = CommandLine.arguments.contains("--metal-log")
+
+    /// Constants at buffer 0 (`b0`), vertices at buffer 1 with attributes 0 and 1.
+    static let shaderSource = """
+    cbuffer Frame { float2 scale; float angle; float padding; };
+    struct VSIn { float2 position : ATTRIBUTE0; float4 color : ATTRIBUTE1; };
+    struct VSOut { float4 position : SV_Position; float4 color : COLOR0; };
+    VSOut triangleVertex(VSIn v) {
+        float s = sin(angle), c = cos(angle);
+        float2 p = float2(v.position.x * c - v.position.y * s, v.position.x * s + v.position.y * c) * scale;
+        VSOut o;
+        o.position = float4(p, 0, 1);
+        o.color = v.color;
+        return o;
+    }
+    float4 triangleFragment(VSOut i) : SV_Target { return i.color; }
+    """
+
+    struct Vertex { var x: Float, y: Float, r: Float, g: Float, b: Float, a: Float }
+    struct Frame { var scaleX: Float, scaleY: Float, angle: Float, padding: Float }
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -518,7 +762,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
 
     override func loadView() {
         let device = MTLCreateSystemDefaultDevice()
-        let mtk = MTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
+        let mtk = ReadbackMTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
         mtk.delegate = self
         mtk.preferredFramesPerSecond = 30
         mtk.colorPixelFormat = .bgra8Unorm
@@ -531,6 +775,35 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             label.topAnchor.constraint(equalTo: mtk.topAnchor, constant: 12),
         ])
         view = mtk
+        if let device { setUpTriangle(on: device, format: mtk.colorPixelFormat) }
+    }
+
+    private func setUpTriangle(on device: any MTLDevice, format: MTLPixelFormat) {
+        queue = device.makeCommandQueue()
+        let triangle = [Vertex(x: 0, y: 0.7, r: 1, g: 0.2, b: 0.2, a: 1), Vertex(x: 0.7, y: -0.5, r: 0.2, g: 1, b: 0.2, a: 1), Vertex(x: -0.7, y: -0.5, r: 0.2, g: 0.3, b: 1, a: 1)]
+        vertices = triangle.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }
+        do {
+            let options = MTLCompileOptions()
+            options.shaderLanguage = .hlsl
+            let library = try device.makeLibrary(source: MetalDemoViewController.shaderSource, options: options)
+            let desc = MTLRenderPipelineDescriptor()
+            desc.label = "triangle"
+            desc.vertexFunction = library.makeFunction(name: "triangleVertex")
+            desc.fragmentFunction = library.makeFunction(name: "triangleFragment")
+            desc.colorAttachments[0].pixelFormat = format
+            let vd = MTLVertexDescriptor()
+            vd.attributes[0].format = .float2
+            vd.attributes[0].offset = 0
+            vd.attributes[0].bufferIndex = 1
+            vd.attributes[1].format = .float4
+            vd.attributes[1].offset = 8
+            vd.attributes[1].bufferIndex = 1
+            vd.layouts[1].stride = MemoryLayout<Vertex>.stride
+            desc.vertexDescriptor = vd
+            pipeline = try device.makeRenderPipelineState(descriptor: desc)
+        } catch {
+            label.stringValue += " (triangle pipeline failed: \(error))"
+        }
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -540,9 +813,27 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
         let t = Double(frame) / 60
         view.clearColor = MTLClearColorMake(0.5 + 0.5 * sin(t), 0.5 + 0.5 * sin(t * 1.3 + 2), 0.5 + 0.5 * sin(t * 0.7 + 4), 1)
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
-              let queue = view.device?.makeCommandQueue(), let cb = queue.makeCommandBuffer() else { return }
-        cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+              let queue, let cb = queue.makeCommandBuffer(), let encoder = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
+        if let pipeline, let vertices {
+            let size = view.drawableSize
+            var constants = Frame(scaleX: Float(min(size.width, size.height) / max(size.width, 1)), scaleY: Float(min(size.width, size.height) / max(size.height, 1)), angle: Float(t), padding: 0)
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setVertexBytes(&constants, length: MemoryLayout<Frame>.stride, index: 0)
+            encoder.setVertexBuffer(vertices, offset: 0, index: 1)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+        encoder.endEncoding()
         cb.present(drawable)
+        let texture = view.currentTexture
         cb.commit()
+        if logsPixels, frame % 30 == 1, let tex = texture {
+            var centre = [UInt8](repeating: 0, count: 4), corner = [UInt8](repeating: 0, count: 4)
+            tex.getBytes(&centre, bytesPerRow: 4, from: MTLRegionMake2D(tex.width / 2, tex.height / 2, 1, 1), mipmapLevel: 0)
+            tex.getBytes(&corner, bytesPerRow: 4, from: MTLRegionMake2D(2, 2, 1, 1), mipmapLevel: 0)
+            let c = view.clearColor
+            let expected = [Int(c.blue * 255 + 0.5), Int(c.green * 255 + 0.5), Int(c.red * 255 + 0.5), 255]
+            print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre)")
+            fflush(stdout)
+        }
     }
 }

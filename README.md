@@ -23,7 +23,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 | `Sources/AppKit/Platform` | Backend protocols plus the Win32/DirectX backend and a headless host backend used for tests on macOS/Linux. |
 | `Sources/CoreGraphics` | Windows implementation of the CoreGraphics drawing API over Direct2D (Windows only). |
 | `Sources/CoreGraphics` (Windows only) | `CGContext`, `CGPath`, `CGColor` over Direct2D. |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; D3D12 backend interface in `Sources/CMetalD3D12` (ADR-0004). |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004), used on Windows unless `APPKITWIN_METAL_REFERENCE=1`. |
 | `Sources/AppKit/Platform/Linux`, `Sources/CCairo`, `Sources/CX11` | Linux backend: X11 windows, Cairo drawing, PangoCairo text (`tools/linux/Dockerfile` builds and screenshots it). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
 | `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
