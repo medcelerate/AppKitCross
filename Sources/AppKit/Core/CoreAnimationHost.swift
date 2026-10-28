@@ -14,8 +14,12 @@ enum _CoreAnimationHost {
         guard !installed else { return }
         installed = true
         CARuntime.frameRequester = {
-            Platform.backend.scheduleFrame { CARuntime.tick() }
+            Platform.backend.scheduleFrame {
+                CARuntime.tick()
+                for w in NSApplication.shared.windows { w._commitLayerSceneIfNeeded() }
+            }
         }
+        CALayer._sceneExtraChildren = { layer in (layer.delegate as? NSView)?._hostedChildLayers ?? [] }
         CARuntime.textRenderer = { layer, ctx, flipped in
             drawText(of: layer, in: ctx, flipped: flipped)
         }

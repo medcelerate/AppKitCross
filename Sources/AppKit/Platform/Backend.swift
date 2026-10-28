@@ -6,6 +6,9 @@
 // of the primary display, y increasing upwards. Backends convert at this boundary.
 
 import Foundation
+#if canImport(QuartzCore)
+import QuartzCore
+#endif
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
@@ -90,6 +93,17 @@ public protocol PlatformWindow: AnyObject {
     func displayIfNeeded()
     /// Repaints synchronously.
     func display()
+    /// Hosts the window's layer tree natively (DirectComposition visuals on Windows), or
+    /// tears the hosting down when `scene` is nil. Returns false when the platform cannot;
+    /// the window then composites layers in software inside `platformWindowDraw`.
+    func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool
+}
+
+/// A layer tree flattened for the platform compositor; see `_CALayerScene` in QuartzCore.
+public typealias PlatformLayerScene = _CALayerScene
+
+extension PlatformWindow {
+    public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
 }
 
 /// Implemented by `NSWindow`. Callbacks arrive on the main actor.

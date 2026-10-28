@@ -18,6 +18,57 @@ import CoreText
 @MainActor open class NSWindow: NSResponder, NSAnimatablePropertyContainer, NSMenuItemValidation, NSUserInterfaceValidations, NSUserInterfaceItemIdentification, NSAppearanceCustomization, NSAccessibilityElementProtocol, NSAccessibilityProtocol {
     // MARK: Storage
     private var _platform: (any PlatformWindow)?
+
+    // MARK: Native layer hosting
+
+    /// True while the platform composites the content view's layer tree itself.
+    internal private(set) var _hostsLayersNatively = false
+    private var _layerSceneDirty = false
+    private var _layerSceneFrame = 0
+
+    /// Called when the content view becomes layer-backed, is replaced, or the window shows:
+    /// offers the tree to the platform. Only a fully layer-backed window qualifies, so every
+    /// view is a visual and stacking stays correct.
+    internal func _updateLayerHosting() {
+        let wantsHosting = _contentView?.layer != nil && _platform != nil
+        if wantsHosting && !_hostsLayersNatively {
+            _layerSceneFrame += 1
+            if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) == true {
+                _hostsLayersNatively = true
+                _layerSceneDirty = false
+                _platform?.setNeedsDisplay(nil)      // the backing store must stop showing the software composite
+            }
+        } else if !wantsHosting && _hostsLayersNatively {
+            _hostsLayersNatively = false
+            _ = _platform?.hostLayerScene(nil)
+            _platform?.setNeedsDisplay(nil)
+        }
+    }
+
+    private func _makeLayerScene() -> PlatformLayerScene? {
+        guard let cv = _contentView, let root = cv.layer else { return nil }
+        cv.layoutSubtreeIfNeeded()
+        let content = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
+        return root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
+    }
+
+    /// The hosted tree changed: a commit is coalesced into the next frame (or the next display).
+    internal func _setLayerSceneNeedsCommit() {
+        guard _hostsLayersNatively, !_layerSceneDirty else { return }
+        _layerSceneDirty = true
+        CARuntime.requestFrame()
+    }
+
+    /// Sends the current tree to the platform if anything changed since the last commit.
+    internal func _commitLayerSceneIfNeeded() {
+        guard _hostsLayersNatively, _layerSceneDirty else { return }
+        _layerSceneDirty = false
+        _layerSceneFrame += 1
+        if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) != true {
+            _hostsLayersNatively = false            // the platform gave hosting up: back to software
+            _platform?.setNeedsDisplay(nil)
+        }
+    }
     private var _contentView: NSView?
     private var _styleMask: NSWindow.StyleMask
     private var _title = ""
@@ -106,6 +157,7 @@ import CoreText
         if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(self)
         _platform?.setNeedsDisplay(nil)
+        _updateLayerHosting()
     }
 
     internal var _platformWindow: (any PlatformWindow)? { _platform }
@@ -246,6 +298,7 @@ import CoreText
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
+        _commitLayerSceneIfNeeded()
         context.saveGState()
         if _isOpaque {
             context.setFillColor(_backgroundColor.cgColor)
@@ -648,9 +701,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardevents(matching:before:)
     @MainActor open func discardEvents(matching mask: NSEvent.EventTypeMask, before lastEvent: NSEvent?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/display()
-    @MainActor open func display() { _platform?.display() }
+    @MainActor open func display() { _commitLayerSceneIfNeeded(); _platform?.display() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/displayifneeded()
-    @MainActor open func displayIfNeeded() { _platform?.displayIfNeeded() }
+    @MainActor open func displayIfNeeded() { _commitLayerSceneIfNeeded(); _platform?.displayIfNeeded() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/displaylink(target:selector:)
     @available(macOS 14.0, *)
     @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink {

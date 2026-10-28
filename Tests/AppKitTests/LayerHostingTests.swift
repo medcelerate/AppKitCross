@@ -1,0 +1,213 @@
+// Native layer hosting: the window hands its layer tree to the platform as a scene of
+// visuals. The host backend's reference compositor must match the software compositor.
+
+import XCTest
+@testable import AppKit
+#if canImport(QuartzCore)
+import QuartzCore
+#endif
+
+@MainActor
+private final class BoxView: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1).setFill()
+        NSBezierPath(rect: NSRect(x: 4, y: 4, width: 30, height: 12)).fill()   // near the top in flipped space
+    }
+}
+
+final class LayerHostingTests: XCTestCase, @unchecked Sendable {
+    /// Rasterising a node into its own surface and compositing it anti-aliases edges once
+    /// more than drawing straight into the window, so edge pixels may differ slightly.
+    private func _assertSimilar(_ a: Data, _ b: Data, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(a.count, b.count, message, file: file, line: line)
+        guard a.count == b.count else { return }
+        var off = 0, far = 0, maxDiff = 0
+        for i in stride(from: 0, to: a.count, by: 4) {
+            var d = 0
+            for c in 0..<4 { d = max(d, abs(Int(a[i + c]) - Int(b[i + c]))) }
+            if d > 0 { off += 1 }
+            if d > 48 { far += 1 }
+            maxDiff = max(maxDiff, d)
+        }
+        let pixels = a.count / 4
+        XCTAssertLessThan(far, pixels / 200, "\(message): \(far) of \(pixels) pixels differ strongly, \(off) at all, max \(maxDiff)", file: file, line: line)
+    }
+
+    @MainActor private func hostWindow(_ w: NSWindow) -> HostWindow {
+        Mirror(reflecting: w).descendant("_platform") as! HostWindow
+    }
+
+    /// A window whose content view is layer-backed, with views and bare layers.
+    @MainActor private func makeWindow() -> (NSWindow, CALayer, CALayer) {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+        w.backgroundColor = .white
+        let box = BoxView(frame: NSRect(x: 20, y: 100, width: 60, height: 40))
+        w.contentView!.addSubview(box)
+        w.contentView!.wantsLayer = true
+        let panel = CALayer()
+        panel.frame = CGRect(x: 100, y: 20, width: 80, height: 60)
+        panel.backgroundColor = CGColor(red: 1, green: 0.5, blue: 0, alpha: 1)
+        panel.cornerRadius = 8
+        panel.borderWidth = 2
+        panel.borderColor = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        panel.masksToBounds = true
+        let child = CALayer()
+        child.frame = CGRect(x: 50, y: 30, width: 60, height: 60)   // overhangs: clipped by the panel
+        child.backgroundColor = CGColor(red: 0, green: 0.6, blue: 0.2, alpha: 1)
+        child.opacity = 0.5
+        panel.addSublayer(child)
+        w.contentView!.layer!.addSublayer(panel)
+        w.makeKeyAndOrderFront(nil)
+        return (w, panel, child)
+    }
+
+    func testHostedCompositeMatchesSoftware() {
+        MainActor.assumeIsolated {
+            let (w, panel, child) = makeWindow()
+            let host = hostWindow(w)
+            w.display()
+            XCTAssertFalse(w._hostsLayersNatively)
+            let software = _pixels(host.lastImage!)
+
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            XCTAssertTrue(w._hostsLayersNatively)
+            w.display()
+            let hosted = _pixels(host.lastImage!)
+            XCTAssertEqual(hosted.count, software.count)
+            _assertSimilar(hosted, software, "the reference compositor reproduces the software composite")
+
+            // The scene: content view, box view, panel, child, panel border (pre-order, parents first).
+            let scene = host.hostedScene!
+            XCTAssertEqual(scene.nodes.count, 5)
+            XCTAssertNil(scene.nodes[0].parent)
+            XCTAssertEqual(scene.nodes[0].size, CGSize(width: 200, height: 150))
+            let panelNode = scene.nodes.first { $0.size == CGSize(width: 80, height: 60) }!
+            // y-down placement: the panel's top edge is 150 - (20 + 60) = 70 points from the top.
+            XCTAssertEqual(panelNode.transform.tx, 100, accuracy: 0.001)
+            XCTAssertEqual(panelNode.transform.ty, 70, accuracy: 0.001)
+            XCTAssertTrue(panelNode.clipsToBounds)
+            XCTAssertEqual(panelNode.cornerRadius, 8)
+            let childNode = scene.nodes.first { $0.size == CGSize(width: 60, height: 60) && $0.parent != nil }!
+            XCTAssertEqual(childNode.opacity, 0.5)
+            XCTAssertEqual(childNode.transform.tx, 50, accuracy: 0.001)
+            XCTAssertEqual(childNode.transform.ty, 60 - 30 - 60, accuracy: 0.001)
+            XCTAssertEqual(scene.nodes.last!.name, nil)
+            XCTAssertEqual(scene.nodes.last!.parent, scene.nodes.firstIndex { $0.size == panelNode.size })
+            _ = panel; _ = child
+            w.close()
+        }
+    }
+
+    func testCommitsAndRastersOnlyWhenNeeded() {
+        MainActor.assumeIsolated {
+            let (w, panel, child) = makeWindow()
+            let host = hostWindow(w)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            let commits = host.sceneCommitCount, rasters = host.rasterCount
+            XCTAssertGreaterThan(rasters, 0)
+
+            // Nothing changed: no commit, no raster.
+            w.displayIfNeeded()
+            XCTAssertEqual(host.sceneCommitCount, commits)
+            XCTAssertEqual(host.rasterCount, rasters)
+
+            // Moving a layer commits a new scene but keeps every raster.
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            child.position = CGPoint(x: 10, y: 10)
+            CATransaction.commit()
+            w.displayIfNeeded()
+            XCTAssertEqual(host.sceneCommitCount, commits + 1)
+            XCTAssertEqual(host.rasterCount, rasters)
+            let moved = host.hostedScene!.nodes.first { $0.size == CGSize(width: 60, height: 60) && $0.parent != nil }!
+            XCTAssertEqual(moved.transform.tx, 10 - 30, accuracy: 0.001)
+
+            // Changing content re-rasterises that one node.
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            panel.backgroundColor = CGColor(red: 0, green: 0, blue: 1, alpha: 1)
+            CATransaction.commit()
+            w.displayIfNeeded()
+            XCTAssertEqual(host.rasterCount, rasters + 1)
+
+            // A view invalidation re-rasterises the view's node only.
+            w.contentView!.subviews[0].needsDisplay = true
+            w.displayIfNeeded()
+            XCTAssertEqual(host.rasterCount, rasters + 2)
+            w.close()
+        }
+    }
+
+    func testAnimationsCommitPresentationValues() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 100
+            let savedNow = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = savedNow }
+            let (w, _, child) = makeWindow()
+            let host = hostWindow(w)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            let rasters = host.rasterCount
+
+            let a = CABasicAnimation(keyPath: "position")
+            a.fromValue = CGPoint(x: 30, y: 30)
+            a.toValue = CGPoint(x: 70, y: 30)
+            a.duration = 1
+            child.add(a, forKey: "slide")
+            clock = 100.5
+            CARuntime.tick()
+            w.displayIfNeeded()
+            let node = host.hostedScene!.nodes.first { $0.size == CGSize(width: 60, height: 60) && $0.parent != nil }!
+            XCTAssertEqual(node.transform.tx, 50 - 30, accuracy: 0.5, "halfway through the slide")
+            XCTAssertEqual(host.rasterCount, rasters, "a position animation never re-rasterises")
+
+            // A colour animation does redraw each frame.
+            let c = CABasicAnimation(keyPath: "backgroundColor")
+            c.fromValue = CGColor(red: 1, green: 0, blue: 0, alpha: 1)
+            c.toValue = CGColor(red: 0, green: 0, blue: 1, alpha: 1)
+            c.duration = 1
+            child.add(c, forKey: "tint")
+            clock = 100.6
+            CARuntime.tick(); w.displayIfNeeded()
+            let afterOne = host.rasterCount
+            XCTAssertGreaterThan(afterOne, rasters)
+            clock = 100.7
+            CARuntime.tick(); w.displayIfNeeded()
+            XCTAssertGreaterThan(host.rasterCount, afterOne)
+            w.close()
+        }
+    }
+
+    func testUnsupportedFeaturesFlattenTheirSubtree() {
+        MainActor.assumeIsolated {
+            let (w, panel, _) = makeWindow()
+            let host = hostWindow(w)
+            w.display()
+            let software = _pixels(host.lastImage!)
+            let mask = CALayer()
+            mask.frame = CGRect(x: 0, y: 0, width: 40, height: 60)
+            panel.mask = mask
+            w.display()
+            let softwareMasked = _pixels(host.lastImage!)
+            XCTAssertNotEqual(software, softwareMasked)
+
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            let scene = host.hostedScene!
+            // content view, box, panel (flattened: no child or border node).
+            XCTAssertEqual(scene.nodes.count, 3)
+            _assertSimilar(_pixels(host.lastImage!), softwareMasked)
+
+            // Hosting ends when the content view loses its layer tree (new content view).
+            w.contentView = NSView(frame: .zero)
+            XCTAssertFalse(w._hostsLayersNatively)
+            XCTAssertNil(host.hostedScene)
+            w.close()
+        }
+    }
+}

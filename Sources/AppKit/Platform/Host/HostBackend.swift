@@ -141,6 +141,17 @@ final class HostWindow: PlatformWindow {
     #endif
     private(set) var paintCount = 0
 
+    /// Test hook: when set, the window hosts layer scenes and composites them itself
+    /// (a reference for the DirectComposition implementation).
+    var layerHostingEnabled = false
+    private(set) var hostedScene: PlatformLayerScene?
+    private(set) var sceneCommitCount = 0
+    /// Rasterised node content, keyed by node id: re-drawn only when the version changes.
+    #if canImport(CoreGraphics)
+    private var rasters: [Int: (version: Int, scale: CGFloat, size: CGSize, image: CGImage)] = [:]
+    #endif
+    private(set) var rasterCount = 0
+
     init(owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask, backend: HostBackend) {
         self.owner = owner
         self.styleMask = styleMask
@@ -218,11 +229,85 @@ final class HostWindow: PlatformWindow {
         ctx.saveGState()
         owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
         ctx.restoreGState()
+        if let scene = hostedScene { composite(scene, into: ctx, height: content.height) }
         lastImage = ctx.makeImage()
         #else
         _ = rect
         #endif
     }
+
+    func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
+        guard layerHostingEnabled else { return false }
+        hostedScene = scene
+        sceneCommitCount += 1
+        #if canImport(CoreGraphics)
+        if let scene {
+            let live = Set(scene.nodes.map(\.id))
+            rasters = rasters.filter { live.contains($0.key) }
+        } else {
+            rasters.removeAll()
+        }
+        #endif
+        setNeedsDisplay(nil)
+        return true
+    }
+
+    #if canImport(CoreGraphics)
+    /// Draws the scene over the window content: each node's content is rasterised once per
+    /// version, then placed by its transform, exactly as a visual tree would be.
+    private func composite(_ scene: PlatformLayerScene, into ctx: CGContext, height: CGFloat) {
+        var children: [Int: [Int]] = [:]
+        var roots: [Int] = []
+        for (i, n) in scene.nodes.enumerated() {
+            if let p = n.parent { children[p, default: []].append(i) } else { roots.append(i) }
+        }
+        func raster(_ node: _CALayerSceneNode) -> CGImage? {
+            guard let content = node.content else { return nil }
+            if let r = rasters[node.id], r.version == content.version, r.scale == scene.scale, r.size == node.size { return r.image }
+            let w = max(1, Int((node.size.width * scene.scale).rounded(.up))), h = max(1, Int((node.size.height * scene.scale).rounded(.up)))
+            guard let bc = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                     space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                     bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+            bc.scaleBy(x: scene.scale, y: scene.scale)
+            content.draw(bc)
+            guard let image = bc.makeImage() else { return nil }
+            rasters[node.id] = (content.version, scene.scale, node.size, image)
+            rasterCount += 1
+            return image
+        }
+        func draw(_ i: Int, alpha: CGFloat) {
+            let n = scene.nodes[i]
+            ctx.saveGState()
+            ctx.concatenate(n.transform)                       // now in the node's local y-down space
+            let a = alpha * CGFloat(n.opacity)
+            let rect = CGRect(origin: .zero, size: n.size)
+            if n.clipsToBounds {
+                if n.cornerRadius > 0 {
+                    ctx.addPath(CGPath(roundedRect: rect, cornerWidth: min(n.cornerRadius, rect.width / 2), cornerHeight: min(n.cornerRadius, rect.height / 2), transform: nil))
+                } else {
+                    ctx.addRect(rect)
+                }
+                ctx.clip()
+            }
+            if let image = raster(n) {
+                ctx.saveGState()
+                ctx.setAlpha(a)
+                ctx.translateBy(x: 0, y: n.size.height)
+                ctx.scaleBy(x: 1, y: -1)
+                ctx.draw(image, in: rect)
+                ctx.restoreGState()
+            }
+            for c in children[i] ?? [] { draw(c, alpha: a) }
+            ctx.restoreGState()
+        }
+        ctx.saveGState()
+        // Window content y-up → the scene's y-down space.
+        ctx.translateBy(x: 0, y: height)
+        ctx.scaleBy(x: 1, y: -1)
+        for r in roots { draw(r, alpha: 1) }
+        ctx.restoreGState()
+    }
+    #endif
 
     /// Test hook: deliver an event as the OS would.
     func inject(_ event: NSEvent) {

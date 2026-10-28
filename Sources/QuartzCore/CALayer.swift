@@ -129,32 +129,32 @@ open class CALayer: NSObject, CAMediaTiming {
 
     // MARK: Geometry
 
-    private var _bounds = CGRect.zero
-    private var _position = CGPoint.zero
-    private var _zPosition: CGFloat = 0
-    private var _anchorPoint = CGPoint(x: 0.5, y: 0.5)
-    private var _anchorPointZ: CGFloat = 0
-    private var _transform = CATransform3DIdentity
-    private var _sublayerTransform = CATransform3DIdentity
-    private var _isHidden = false
-    private var _isDoubleSided = true
-    private var _isGeometryFlipped = false
-    private var _masksToBounds = false
-    private var _opacity: Float = 1
-    private var _backgroundColor: CGColor?
-    private var _cornerRadius: CGFloat = 0
-    private var _borderWidth: CGFloat = 0
-    private var _borderColor: CGColor? = CGColor.black
-    private var _contents: Any?
-    private var _contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-    private var _contentsCenter = CGRect(x: 0, y: 0, width: 1, height: 1)
-    private var _contentsScale: CGFloat = 1
-    private var _shadowColor: CGColor? = CGColor.black
-    private var _shadowOpacity: Float = 0
-    private var _shadowOffset = CGSize(width: 0, height: -3)
-    private var _shadowRadius: CGFloat = 3
-    private var _shadowPath: CGPath?
-    private var _mask: CALayer?
+    var _bounds = CGRect.zero
+    var _position = CGPoint.zero
+    var _zPosition: CGFloat = 0
+    var _anchorPoint = CGPoint(x: 0.5, y: 0.5)
+    var _anchorPointZ: CGFloat = 0
+    var _transform = CATransform3DIdentity
+    var _sublayerTransform = CATransform3DIdentity
+    var _isHidden = false
+    var _isDoubleSided = true
+    var _isGeometryFlipped = false
+    var _masksToBounds = false
+    var _opacity: Float = 1
+    var _backgroundColor: CGColor?
+    var _cornerRadius: CGFloat = 0
+    var _borderWidth: CGFloat = 0
+    var _borderColor: CGColor? = CGColor.black
+    var _contents: Any?
+    var _contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    var _contentsCenter = CGRect(x: 0, y: 0, width: 1, height: 1)
+    var _contentsScale: CGFloat = 1
+    var _shadowColor: CGColor? = CGColor.black
+    var _shadowOpacity: Float = 0
+    var _shadowOffset = CGSize(width: 0, height: -3)
+    var _shadowRadius: CGFloat = 3
+    var _shadowPath: CGPath?
+    var _mask: CALayer?
 
     public var beginTime: CFTimeInterval = 0
     public var duration: CFTimeInterval = 0
@@ -165,7 +165,7 @@ open class CALayer: NSObject, CAMediaTiming {
     public var autoreverses = false
     public var fillMode: CAMediaTimingFillMode = .removed
 
-    open var contentsGravity: CALayerContentsGravity = .resize { didSet { _setNeedsRedraw() } }
+    open var contentsGravity: CALayerContentsGravity = .resize { didSet { _rasterVersion += 1; _setNeedsRedraw() } }
     open var contentsFormat: CALayerContentsFormat = .RGBA8Uint
     open var minificationFilter: CALayerContentsFilter = .linear
     open var magnificationFilter: CALayerContentsFilter = .linear
@@ -176,7 +176,7 @@ open class CALayer: NSObject, CAMediaTiming {
     open var edgeAntialiasingMask: CAEdgeAntialiasingMask = []
     open var allowsEdgeAntialiasing = false
     open var allowsGroupOpacity = true
-    open var maskedCorners: CACornerMask = .all { didSet { _setNeedsRedraw() } }
+    open var maskedCorners: CACornerMask = .all { didSet { _rasterVersion += 1; _borderVersion += 1; _setNeedsRedraw() } }
     open var cornerCurve: CALayerCornerCurve = .circular
     open var shouldRasterize = false
     open var rasterizationScale: CGFloat = 1
@@ -197,7 +197,7 @@ open class CALayer: NSObject, CAMediaTiming {
     // MARK: Hierarchy
 
     public private(set) weak var superlayer: CALayer?
-    private var _sublayers: [CALayer] = []
+    var _sublayers: [CALayer] = []
     open var sublayers: [CALayer]? {
         get { _sublayers.isEmpty ? nil : _sublayers }
         set {
@@ -209,8 +209,8 @@ open class CALayer: NSObject, CAMediaTiming {
 
     // MARK: Display state
 
-    private var _needsDisplay = true
-    private var _needsLayout = true
+    var _needsDisplay = true
+    var _needsLayout = true
     private var userValues: [String: Any] = [:]
     var animations: [(key: String, animation: CAAnimation)] = []
     private var animationCounter = 0
@@ -221,6 +221,16 @@ open class CALayer: NSObject, CAMediaTiming {
     var hasPresentation = false
     /// Presentation copies carry this so their setters never trigger actions.
     var isPresentationCopy = false
+    /// Bumped whenever this layer's own rasterised content changes (not its placement).
+    /// Native layer hosts re-rasterise a layer only when this moves.
+    public private(set) var _rasterVersion = 0
+    /// Bumped when the border's appearance changes (it is composited as its own node).
+    public private(set) var _borderVersion = 0
+    static let borderKeys: Set<String> = ["borderWidth", "borderColor", "cornerRadius", "bounds"]
+    /// Bumped whenever anything in this layer's subtree changes (placement included).
+    public private(set) var _treeVersion = 0
+    /// Properties that only affect compositing: a change leaves the rasterised content valid.
+    static let compositingOnlyKeys: Set<String> = ["position", "transform", "opacity", "hidden", "anchorPoint", "anchorPointZ", "zPosition", "sublayerTransform"]
 
     public required override init() {
         super.init()
@@ -251,6 +261,8 @@ open class CALayer: NSObject, CAMediaTiming {
     /// Records a change to an animatable property: redraws and runs the implicit action.
     func _changed(_ key: String, old: Any?) {
         guard !isPresentationCopy else { return }
+        if !CALayer.compositingOnlyKeys.contains(key) { _rasterVersion += 1 }
+        if CALayer.borderKeys.contains(key) { _borderVersion += 1 }
         _setNeedsRedraw()
         guard hasPresentation, !CATransaction.disableActions() else { return }
         if let old { pendingOldValues[key] = old }
@@ -263,6 +275,8 @@ open class CALayer: NSObject, CAMediaTiming {
     /// Marks the hosting tree dirty.
     func _setNeedsRedraw() {
         guard !isPresentationCopy else { return }
+        var l: CALayer? = self
+        while let layer = l { layer._treeVersion += 1; l = layer.superlayer }
         _invalidateHost(nil)
     }
 
@@ -524,6 +538,7 @@ open class CALayer: NSObject, CAMediaTiming {
 
     open func setNeedsDisplay() {
         _needsDisplay = true
+        _rasterVersion += 1
         _setNeedsRedraw()
     }
 
@@ -1022,18 +1037,7 @@ open class CALayer: NSObject, CAMediaTiming {
             ctx.restoreGState()
         }
 
-        if let bg = p._backgroundColor {
-            ctx.setFillColor(bg)
-            p._addBoundsPath(ctx, b)
-            ctx.fillPath()
-        }
-
-        p._drawContents(in: ctx, flipped: p._isGeometryFlipped)
-        // Delegate/subclass content, in bounds coordinates.
-        delegate?.layerWillDraw(self)
-        ctx.saveGState()
-        p._drawContent(in: ctx, model: self)
-        ctx.restoreGState()
+        _drawOwnContent(into: ctx, presentation: p)
 
         // Sublayers, in bounds space, through the sublayer transform about the anchor.
         let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
@@ -1054,13 +1058,33 @@ open class CALayer: NSObject, CAMediaTiming {
             ctx.restoreGState()
         }
 
-        if p._borderWidth > 0, let bc = p._borderColor {
-            ctx.setStrokeColor(bc)
-            ctx.setLineWidth(p._borderWidth)
-            p._addBoundsPath(ctx, b.insetBy(dx: p._borderWidth / 2, dy: p._borderWidth / 2), radiusInset: p._borderWidth / 2)
-            ctx.strokePath()
-        }
+        p._drawBorder(into: ctx)
         ctx.restoreGState()
+    }
+
+    /// Background, `contents` and delegate/subclass drawing, in the layer's oriented bounds
+    /// space. `presentation` carries the animated values; `self` is the model the delegate sees.
+    func _drawOwnContent(into ctx: CGContext, presentation p: CALayer) {
+        if _needsDisplay { display() }
+        if let bg = p._backgroundColor {
+            ctx.setFillColor(bg)
+            p._addBoundsPath(ctx, p._bounds)
+            ctx.fillPath()
+        }
+        p._drawContents(in: ctx, flipped: p._isGeometryFlipped)
+        delegate?.layerWillDraw(self)
+        ctx.saveGState()
+        p._drawContent(in: ctx, model: self)
+        ctx.restoreGState()
+    }
+
+    /// The border, stroked inside the bounds (drawn above sublayers).
+    func _drawBorder(into ctx: CGContext) {
+        guard _borderWidth > 0, let bc = _borderColor else { return }
+        ctx.setStrokeColor(bc)
+        ctx.setLineWidth(_borderWidth)
+        _addBoundsPath(ctx, _bounds.insetBy(dx: _borderWidth / 2, dy: _borderWidth / 2), radiusInset: _borderWidth / 2)
+        ctx.strokePath()
     }
 
     /// Converts a superlayer-space rect into this layer's bounds space (translation-only placement).

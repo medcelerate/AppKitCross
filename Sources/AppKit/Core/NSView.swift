@@ -172,6 +172,7 @@ import CoreText
         }
         _attachLayerToSuperview()
         for s in _subviews { s._becomeLayerBacked() }
+        if let w = _window, w.contentView === self { w._updateLayerHosting() }
     }
 
     private func _configureBackingLayer(_ l: CALayer) {
@@ -219,6 +220,10 @@ import CoreText
 
     /// True when this view's layer is the root of a layer tree (its superview is not layer-backed).
     private var _isLayerRoot: Bool { _layer != nil && (_superview?._layer == nil || _superview?._layerIsHosted == true) }
+
+    /// Foreign layer trees hosted by subviews (`view.layer = tree`): they sit outside this
+    /// view's layer, so the scene builder is told about them here.
+    internal var _hostedChildLayers: [CALayer] { _subviews.compactMap { $0._layerIsHosted ? $0._layer : nil } }
 
     /// Takes the one-shot `animator()` flag.
     private func _takeAnimator() -> Bool {
@@ -318,6 +323,11 @@ import CoreText
         guard !_isHidden, _alphaValue > 0 else { return }
         guard _frame.intersects(dirtyRect) else { return }
         if let l = _layer, _isLayerRoot {
+            if let w = _window, w._hostsLayersNatively, w.contentView === self {
+                // The platform composites the tree from the committed scene.
+                _clearNeedsDisplay()
+                return
+            }
             // Layer-backed subtree: Core Animation composites it (each view draws through
             // its layer's delegate callback).
             layoutSubtreeIfNeeded()
@@ -364,7 +374,11 @@ import CoreText
 
     private func _invalidate(_ rect: NSRect) {
         _needsDisplay = true
-        if !_layerIsHosted { _layer?._markNeedsDisplayQuietly() }
+        if let l = _layer, !_layerIsHosted {
+            // Under native hosting the layer's raster must be versioned and recommitted;
+            // in software the window repaint below redraws it anyway.
+            if _window?._hostsLayersNatively == true { l.setNeedsDisplay() } else { l._markNeedsDisplayQuietly() }
+        }
         if let w = _window {
             w._viewNeedsDisplay(self, rect: rect)
         }
@@ -1505,6 +1519,10 @@ extension NSView: CALayerDelegate, CALayerHost {
 
     public func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?) {
         guard root === _layer else { return }
+        if let w = _window, w._hostsLayersNatively {
+            w._setLayerSceneNeedsCommit()
+            return
+        }
         if let r = rect, let sup = _superview {
             sup.setNeedsDisplay(r.intersection(_frame))
         } else {

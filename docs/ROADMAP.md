@@ -12,7 +12,7 @@ are concrete and testable.
 | M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
 | M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
-| M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
+| M4 Core Animation | done, verified on Windows; native layer-hosting seam on main (ADR-0005), DirectComposition visuals with the Windows session |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; HLSL only, swap-chain presentation unexercised) |
@@ -122,10 +122,14 @@ compositor: the layer tree is rendered into the window's CGContext on each frame
 frame clock is a one-shot timer from the platform backend (`scheduleFrame`, WM_TIMER on
 Windows). AppKit: `wantsLayer` makes the subtree layer-backed (views draw through
 `CALayerDelegate`), `layer =` hosts a foreign tree, `animator()` plus `NSAnimationContext`
-animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Not done:
-DirectComposition visuals (the compositor stays in-process until M3's DXGI presentation
-settles), group opacity (opacity applies per primitive), blurred shadows, `mask` alpha
-masks (shape masks clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation (M7).
+animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Native
+hosting (2026-10-29, ADR-0005): a fully layer-backed window hands its tree to the platform
+as a retained scene (`PlatformWindow.hostLayerScene`, nodes with transform/opacity/clip and
+versioned `draw` closures; masks, shadows and sublayer transforms flatten their subtree);
+the host backend's reference compositor matches the software composite in tests, and the
+DirectComposition visual tree on Windows is with the Windows session. Not done: group
+opacity (opacity applies per primitive), blurred shadows, `mask` alpha masks (shape masks
+clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation (M7).
 
 ## M5: Auto Layout and view controllers
 
