@@ -89,6 +89,9 @@ public protocol PlatformWindow: AnyObject {
 /// Implemented by `NSWindow`. Callbacks arrive on the main actor.
 @MainActor
 public protocol PlatformWindowOwner: AnyObject {
+    /// Whether this window carries the application's menu bar on platforms that attach
+    /// menus per window (Windows). Panels and utility windows do not.
+    var platformWantsMenuBar: Bool { get }
     /// The native frame changed (size and/or origin). `frame` is in screen coordinates.
     func platformWindowDidChangeFrame(_ frame: NSRect)
     func platformWindowShouldClose() -> Bool

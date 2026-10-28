@@ -50,15 +50,17 @@ monitors.
 over `IFileDialog`. Target/action and `NSControl` validation.
 
 Status (2026-10-28): done and verified on Windows: `NSCell`/`NSControl`/`NSButton`
-(push, checkbox, radio), `NSTextField` labels and inline single-line editing (no field
-editor or IME yet), `NSMenu`/`NSMenuItem` on a Win32 menu bar with key equivalents and
-validation, selector-free target/action (`NSSelectorHandling`, `setActionHandler`).
-`NSScrollView`/`NSClipView`/`NSScroller` verified too. Done, awaiting Windows
-verification: `NSImage`/`NSImageView`/`NSBitmapImageRep` (WIC decode/encode, Direct2D
-bitmaps, `lockFocus` via a WIC render target), `NSSlider`, `NSCursor` with cursor rects.
-Decision: Ctrl maps to `.command` and the Windows key to `.control`. Remaining:
-`NSPasteboard` (OLE clipboard), `NSAlert` and modal sessions, open/save panels
-(`IFileDialog`), field editor/IME for text fields.
+(push, checkbox, radio; the Return button draws with the accent fill), `NSTextField`
+labels and inline single-line editing (no field editor or IME yet), `NSMenu`/`NSMenuItem`
+on a Win32 menu bar with key equivalents and validation (panels do not carry the bar),
+selector-free target/action (`NSSelectorHandling`, `setActionHandler`),
+`NSScrollView`/`NSClipView`/`NSScroller`, `NSImage`/`NSImageView`/`NSBitmapImageRep`
+(WIC decode/encode, Direct2D bitmaps, `lockFocus` via a WIC render target), `NSSlider`,
+`NSCursor` with cursor rects, `NSPasteboard` (CF_UNICODETEXT both ways), `NSAlert` and
+modal sessions (`runModal`, disabled owner window). Done, awaiting Windows verification:
+`NSOpenPanel`/`NSSavePanel` over `IFileDialog`. Decision: Ctrl maps to `.command` and
+the Windows key to `.control`. Deferred: field editor/IME for text fields (M5 with the
+text system).
 
 ## M3: DirectX 12 presentation
 

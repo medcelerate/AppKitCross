@@ -24,6 +24,7 @@ final class Win32Window: PlatformWindow {
     init(backend: Win32Backend, owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) {
         self.backend = backend
         self.owner = owner
+        self.ownerWantsMenuBar = owner.platformWantsMenuBar
         self._styleMask = styleMask
         let (style, ex) = Win32Backend.styles(for: styleMask)
         let frame = backend.frameRect(forContentRect: contentRect, styleMask: styleMask)
@@ -39,7 +40,8 @@ final class Win32Window: PlatformWindow {
     }
 
     /// Titled windows carry the application menu bar (AppKit's main menu is global).
-    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) }
+    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) && ownerWantsMenuBar }
+    private let ownerWantsMenuBar: Bool
 
     private var scale: CGFloat { CGFloat(dpi) / 96 }
 

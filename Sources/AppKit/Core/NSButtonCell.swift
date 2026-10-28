@@ -155,6 +155,10 @@ import CoreText
         set { _bezelStyle = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/drawbezel(withframe:in:)
+    /// AppKit draws the push button whose key equivalent is Return with the accent colour.
+    private var _isDefaultButton: Bool {
+        _isEnabled && _keyEquivalent == "\r" && (_bezelStyle == .rounded || _bezelStyle == .push || _bezelStyle == .automatic || _bezelStyle == .flexiblePush)
+    }
     @MainActor open func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
         guard _isBordered, !_isTransparent else { return }
         let r = frame.insetBy(dx: 0.5, dy: 0.5)
@@ -163,7 +167,7 @@ import CoreText
         let stateOn = _state != .off && _showsStateBy.contains(.changeBackgroundCellMask)
         var fill: NSColor = _backgroundColor ?? .controlColor
         if !_isEnabled { fill = NSColor.controlColor.withAlphaComponent(0.6) }
-        else if pressed || stateOn { fill = NSColor.controlAccentColor }
+        else if pressed || stateOn || _isDefaultButton { fill = NSColor.controlAccentColor }
         else if _isHighlighted && _highlightsBy.contains(.changeBackgroundCellMask) { fill = NSColor.selectedControlColor }
         fill.setFill()
         path.fill()
@@ -177,7 +181,7 @@ import CoreText
     @MainActor open func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
         let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
         var attrs = _textAttributes
-        if pressed && _isBordered { attrs[.foregroundColor] = NSColor.white }
+        if (pressed || (_isDefaultButton && _isEnabled)) && _isBordered { attrs[.foregroundColor] = NSColor.white }
         let text = (_isHighlighted && _highlightsBy.contains(.contentsCellMask) && !_alternateTitle.isEmpty) ? _alternateTitle : title.string
         _drawText(text, attributes: attrs, in: frame, alignment: _alignment, flipped: controlView.isFlipped)
         let size = text.size(withAttributes: attrs)

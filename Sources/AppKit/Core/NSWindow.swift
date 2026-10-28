@@ -1237,4 +1237,6 @@ import CoreText
     }
 }
 
-extension NSWindow: PlatformWindowOwner {}
+extension NSWindow: PlatformWindowOwner {
+    public var platformWantsMenuBar: Bool { !(self is NSPanel) }
+}

@@ -843,3 +843,33 @@ final class FileDialogTests: XCTestCase {
         panel.close(); save.close()
     }
 }
+
+@MainActor
+final class DefaultButtonTests: XCTestCase {
+    func testDefaultButtonUsesAccentFill() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let plain = NSButton(title: "Later", target: nil, action: nil)
+        plain.frame = NSRect(x: 10, y: 30, width: 80, height: 28)
+        let def = NSButton(title: "OK", target: nil, action: nil)
+        def.keyEquivalent = "\r"
+        def.frame = NSRect(x: 110, y: 30, width: 80, height: 28)
+        w.contentView!.addSubview(plain); w.contentView!.addSubview(def)
+        w.makeKeyAndOrderFront(nil)
+        w.displayIfNeeded()
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        guard let image = platform?.lastImage else { return XCTFail("no image") }
+        func pixel(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+            let data = image.dataProvider!.data! as Data
+            let row = image.height - 1 - y * 2
+            let i = row * image.bytesPerRow + x * 2 * 4
+            return (data[i + 2], data[i + 1], data[i])
+        }
+        let a = pixel(115, 32)   // inside the default button, away from the title
+        let b = pixel(15, 32)
+        XCTAssertGreaterThan(a.b, 200); XCTAssertLessThan(a.r, 80)
+        XCTAssertGreaterThan(b.r, 200)
+        XCTAssertFalse(NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true).platformWantsMenuBar)
+        XCTAssertTrue(w.platformWantsMenuBar)
+        w.close()
+    }
+}
