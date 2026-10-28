@@ -4,6 +4,11 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <dxgi1_3.h>
+#include <dxgidebug.h>
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
@@ -11,11 +16,22 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cstdio>
 
 struct CD2DFactory { ID2D1Factory *factory = nullptr; };
 struct CD2DTarget {
     ID2D1RenderTarget *target = nullptr;          // used for all drawing calls
-    ID2D1HwndRenderTarget *hwnd = nullptr;        // non-null for window targets
+    ID2D1HwndRenderTarget *hwnd = nullptr;        // non-null for legacy window targets
+    // Swap-chain presentation (Milestone 3). All non-null only for swap-chain targets;
+    // `target` then points at `dc`.
+    ID3D11Device *d3dDevice = nullptr;
+    ID3D11DeviceContext *d3dContext = nullptr;
+    IDXGISwapChain1 *swapChain = nullptr;
+    ID2D1Device *d2dDevice = nullptr;
+    ID2D1DeviceContext *dc = nullptr;
+    ID2D1Bitmap1 *backBuffer = nullptr;
+    float dpi = 96;
+    bool lost = false;                            // device removed/reset: end_draw reports it
 };
 struct CD2DBrush { ID2D1SolidColorBrush *brush = nullptr; };
 struct CD2DStrokeStyle { ID2D1StrokeStyle *style = nullptr; };
@@ -59,19 +75,149 @@ CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t w
     return r;
 }
 
+// ---------------------------------------------------------------- swap-chain target
+
+static bool isDeviceLost(HRESULT hr) {
+    return hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == D2DERR_RECREATE_TARGET;
+}
+
+/// Wraps swap-chain buffer 0 in an ID2D1Bitmap1 and makes it the device context's target.
+static bool createBackBufferBitmap(CD2DTarget *t) {
+    IDXGISurface *surface = nullptr;
+    HRESULT hr = t->swapChain->GetBuffer(0, __uuidof(IDXGISurface), reinterpret_cast<void **>(&surface));
+    if (FAILED(hr)) { t->lost = true; return false; }
+    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), t->dpi, t->dpi);
+    hr = t->dc->CreateBitmapFromDxgiSurface(surface, &props, &t->backBuffer);
+    surface->Release();
+    if (FAILED(hr)) { t->lost = true; return false; }
+    t->dc->SetTarget(t->backBuffer);
+    t->dc->SetDpi(t->dpi, t->dpi);
+    return true;
+}
+
+static void releaseBackBufferBitmap(CD2DTarget *t) {
+    if (t->dc) t->dc->SetTarget(nullptr);
+    safeRelease(t->backBuffer);
+    // ResizeBuffers needs every reference to the buffers gone, including any the D3D
+    // immediate context still holds for in-flight work.
+    if (t->d3dContext) { t->d3dContext->ClearState(); t->d3dContext->Flush(); }
+}
+
+static HRESULT createD3DDevice(ID3D11Device **device, ID3D11DeviceContext **context) {
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    // APPKITWIN_DXGI_DEBUG=1 also asks for the D3D11 debug layer (needs the optional
+    // "Graphics Tools" feature; silently dropped below when it is not installed).
+    char dbg[8] = {};
+    if (GetEnvironmentVariableA("APPKITWIN_DXGI_DEBUG", dbg, sizeof dbg) == 1 && dbg[0] == '1') flags |= D3D11_CREATE_DEVICE_DEBUG;
+    static const D3D_FEATURE_LEVEL levels[] = {
+        D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0,
+        D3D_FEATURE_LEVEL_9_3, D3D_FEATURE_LEVEL_9_2, D3D_FEATURE_LEVEL_9_1 };
+    const D3D_DRIVER_TYPE drivers[] = { D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP };
+    HRESULT hr = E_FAIL;
+    for (D3D_DRIVER_TYPE driver : drivers) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            UINT f = flags;
+            if (attempt == 1) {
+                // The debug layer needs the optional "Graphics Tools" feature; retry without it.
+                if (!(f & D3D11_CREATE_DEVICE_DEBUG)) break;
+                f &= ~D3D11_CREATE_DEVICE_DEBUG;
+            }
+            D3D_FEATURE_LEVEL got;
+            hr = D3D11CreateDevice(nullptr, driver, nullptr, f, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, device, &got, context);
+            if (hr == E_INVALIDARG)   // pre-11.1 runtime does not know D3D_FEATURE_LEVEL_11_1
+                hr = D3D11CreateDevice(nullptr, driver, nullptr, f, levels + 1, ARRAYSIZE(levels) - 1, D3D11_SDK_VERSION, device, &got, context);
+            if (SUCCEEDED(hr)) return hr;
+        }
+    }
+    return hr;
+}
+
+CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
+    if (!factory || !factory->factory || !hwnd) return nullptr;
+    ID2D1Factory1 *factory1 = nullptr;
+    if (FAILED(factory->factory->QueryInterface(__uuidof(ID2D1Factory1), reinterpret_cast<void **>(&factory1)))) return nullptr;
+
+    CD2DTarget *t = new CD2DTarget();
+    t->dpi = dpi;
+    IDXGIDevice *dxgiDevice = nullptr;
+    IDXGIAdapter *adapter = nullptr;
+    IDXGIFactory2 *dxgiFactory = nullptr;
+    bool ok = false;
+    do {
+        if (FAILED(createD3DDevice(&t->d3dDevice, &t->d3dContext))) break;
+        if (FAILED(t->d3dDevice->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgiDevice)))) break;
+        if (FAILED(factory1->CreateDevice(dxgiDevice, &t->d2dDevice))) break;
+        if (FAILED(t->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &t->dc))) break;
+        if (FAILED(dxgiDevice->GetAdapter(&adapter))) break;
+        if (FAILED(adapter->GetParent(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&dxgiFactory)))) break;
+
+        DXGI_SWAP_CHAIN_DESC1 desc = {};
+        desc.Width = w ? w : 1;
+        desc.Height = h ? h : 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.Stereo = FALSE;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.BufferCount = 2;
+        desc.Scaling = DXGI_SCALING_NONE;
+        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+        desc.Flags = 0;
+        if (FAILED(dxgiFactory->CreateSwapChainForHwnd(t->d3dDevice, (HWND)hwnd, &desc, nullptr, nullptr, &t->swapChain))) break;
+        // Alt+Enter full-screen switching is not an AppKit behaviour.
+        dxgiFactory->MakeWindowAssociation((HWND)hwnd, DXGI_MWA_NO_ALT_ENTER);
+        if (!createBackBufferBitmap(t)) break;
+        // The HWND target draws text grayscale-antialiased (premultiplied alpha disables
+        // ClearType); keep that on the opaque swap-chain bitmap so frames match, and so the
+        // premultiplied swap chain of M3b changes nothing.
+        t->dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        ok = true;
+    } while (false);
+
+    safeRelease(dxgiFactory);
+    safeRelease(adapter);
+    safeRelease(dxgiDevice);
+    safeRelease(factory1);
+    if (!ok) { cd2d_target_release(t); return nullptr; }
+    t->target = t->dc;   // ID2D1DeviceContext is an ID2D1RenderTarget; drawing calls are unchanged
+    t->dc->AddRef();     // `target` owns its own reference, released in cd2d_target_release
+    return t;
+}
+
+bool cd2d_target_is_swapchain(CD2DTarget *target) {
+    return target && target->swapChain;
+}
+
 void cd2d_target_release(CD2DTarget *target) {
     if (!target) return;
+    releaseBackBufferBitmap(target);   // no-op for HWND and offscreen targets
     safeRelease(target->target);
+    safeRelease(target->dc);
+    safeRelease(target->d2dDevice);
+    safeRelease(target->swapChain);
+    safeRelease(target->d3dContext);
+    safeRelease(target->d3dDevice);
     target->hwnd = nullptr;
     delete target;
 }
 
 void cd2d_target_resize(CD2DTarget *target, uint32_t w, uint32_t h) {
-    if (target && target->hwnd) target->hwnd->Resize(D2D1::SizeU(w ? w : 1, h ? h : 1));
+    if (!target) return;
+    if (target->hwnd) { target->hwnd->Resize(D2D1::SizeU(w ? w : 1, h ? h : 1)); return; }
+    if (!target->swapChain || target->lost) return;
+    releaseBackBufferBitmap(target);
+    HRESULT hr = target->swapChain->ResizeBuffers(0, w ? w : 1, h ? h : 1, DXGI_FORMAT_UNKNOWN, 0);
+    if (FAILED(hr)) { target->lost = true; return; }
+    createBackBufferBitmap(target);
 }
 
 void cd2d_target_set_dpi(CD2DTarget *target, float dpi) {
-    if (target && target->target) target->target->SetDpi(dpi, dpi);
+    if (!target) return;
+    target->dpi = dpi;
+    if (target->target) target->target->SetDpi(dpi, dpi);
 }
 
 void cd2d_target_begin_draw(CD2DTarget *target) {
@@ -81,7 +227,37 @@ void cd2d_target_begin_draw(CD2DTarget *target) {
 bool cd2d_target_end_draw(CD2DTarget *target) {
     if (!target || !target->target) return false;
     HRESULT hr = target->target->EndDraw();
-    return hr != D2DERR_RECREATE_TARGET;
+    if (!target->swapChain) return hr != D2DERR_RECREATE_TARGET;
+    if (target->lost || isDeviceLost(hr)) return false;
+    HRESULT present = target->swapChain->Present(1, 0);
+    if (isDeviceLost(present)) { target->lost = true; return false; }
+    return true;
+}
+
+int32_t cd2d_debug_report_live_objects(void) {
+    // DXGIGetDebugInterface1 (dxgi.dll, Windows 8.1+) loads dxgidebug.dll on demand and fails
+    // cleanly when it is not installed.
+    IDXGIInfoQueue *queue = nullptr;
+    IDXGIDebug *debug = nullptr;
+    if (FAILED(DXGIGetDebugInterface1(0, __uuidof(IDXGIInfoQueue), reinterpret_cast<void **>(&queue))) || !queue) return -1;
+    if (FAILED(DXGIGetDebugInterface1(0, __uuidof(IDXGIDebug), reinterpret_cast<void **>(&debug))) || !debug) { queue->Release(); return -1; }
+    queue->ClearStoredMessages(DXGI_DEBUG_ALL);
+    debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL));
+    UINT64 count = queue->GetNumStoredMessages(DXGI_DEBUG_ALL);
+    int32_t lines = 0;
+    for (UINT64 i = 0; i < count; i++) {
+        SIZE_T length = 0;
+        if (FAILED(queue->GetMessage(DXGI_DEBUG_ALL, i, nullptr, &length)) || length == 0) continue;
+        std::vector<unsigned char> buffer(length);
+        DXGI_INFO_QUEUE_MESSAGE *msg = reinterpret_cast<DXGI_INFO_QUEUE_MESSAGE *>(buffer.data());
+        if (FAILED(queue->GetMessage(DXGI_DEBUG_ALL, i, msg, &length))) continue;
+        fprintf(stderr, "[dxgi-debug] %.*s\n", (int)msg->DescriptionByteLength, msg->pDescription);
+        lines++;
+    }
+    fflush(stderr);
+    debug->Release();
+    queue->Release();
+    return lines;
 }
 
 void cd2d_target_clear(CD2DTarget *target, float r, float g, float b, float a) {
