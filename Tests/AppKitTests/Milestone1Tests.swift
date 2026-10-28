@@ -428,3 +428,58 @@ final class ControlTests: XCTestCase {
     }
     #endif
 }
+
+@MainActor
+final class TextFieldTests: XCTestCase {
+    private func key(_ chars: String, _ w: NSWindow, flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: w.windowNumber, context: nil,
+                         characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0)!
+    }
+
+    func testLabelsSizeToFit() {
+        let label = NSTextField(labelWithString: "Hello")
+        XCTAssertFalse(label.isEditable)
+        XCTAssertFalse(label.drawsBackground)
+        XCTAssertGreaterThan(label.frame.width, 20)
+        XCTAssertGreaterThan(label.frame.height, 10)
+        let wrapping = NSTextField(wrappingLabelWithString: "one two three four five six seven eight nine ten eleven twelve")
+        wrapping.preferredMaxLayoutWidth = 80
+        XCTAssertGreaterThan(wrapping.intrinsicContentSize.height, label.frame.height * 2, "wrapped label is several lines tall")
+        XCTAssertLessThanOrEqual(wrapping.intrinsicContentSize.width, 90)
+    }
+
+    func testInlineEditingAndAction() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(string: "")
+        field.frame = NSRect(x: 10, y: 10, width: 200, height: 24)
+        w.contentView!.addSubview(field)
+        let target = NSObject()
+        var actions: [String] = []
+        target.setActionHandler(for: Selector(("entered:"))) { s in actions.append((s as? NSTextField)?.stringValue ?? "?") }
+        field.target = target
+        field.action = Selector(("entered:"))
+        nonisolated(unsafe) var changes = 0
+        let token = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: field, queue: nil) { _ in changes += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+        w.makeKeyAndOrderFront(nil)
+        // Click into the field to start editing.
+        let click = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        NSApp.sendEvent(click)
+        XCTAssertTrue(w.firstResponder === field)
+        for ch in "abc" { NSApp.sendEvent(key(String(ch), w)) }
+        XCTAssertEqual(field.stringValue, "abc")
+        NSApp.sendEvent(key("\u{7F}", w))                       // backspace
+        XCTAssertEqual(field.stringValue, "ab")
+        NSApp.sendEvent(key("\u{F702}", w))                     // left
+        NSApp.sendEvent(key("X", w))
+        XCTAssertEqual(field.stringValue, "aXb")
+        NSApp.sendEvent(key("a", w, flags: [.command]))         // select all
+        NSApp.sendEvent(key("z", w))
+        XCTAssertEqual(field.stringValue, "z")
+        XCTAssertEqual(changes, 6)
+        NSApp.sendEvent(key("\r", w))                           // Enter: ends editing and fires the action
+        XCTAssertEqual(actions, ["z"])
+        XCTAssertFalse(w.firstResponder === field)
+        w.close()
+    }
+}

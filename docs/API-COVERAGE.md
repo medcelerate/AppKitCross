@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 15 |
-| Types generated | 523 |
+| Types handwritten | 17 |
+| Types generated | 521 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10204 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 686 |
+| Members unimplemented-calls | 707 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -473,8 +473,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSTextElement | class | generated | 6 | 0 | 0 |  |
 | NSTextElementProvider | protocol | generated | 7 | 0 | 0 |  |
-| NSTextField | class | generated | 37 | 1 | 1 |  |
-| NSTextFieldCell | class | generated | 11 | 0 | 0 |  |
+| NSTextField | class | handwritten | 37 | 1 | 1 | 19 |
+| NSTextFieldCell | class | handwritten | 11 | 0 | 0 | 2 |
 | NSTextFieldDelegate | protocol | generated | 3 | 0 | 0 |  |
 | NSTextFinder | class | generated | 30 | 0 | 2 |  |
 | NSTextFinderBarContainer | protocol | generated | 4 | 0 | 0 |  |

@@ -225,22 +225,52 @@ final class Win32Window: PlatformWindow {
         owner?.platformWindowDispatch(e)
     }
 
+    /// Virtual keys that AppKit reports as function-key characters (NSEvent.SpecialKey) or
+    /// control characters, with the macOS virtual key code AppKit clients may compare against.
+    private static let specialKeys: [Int32: (String, UInt16)] = [
+        VK_LEFT: ("\u{F702}", 123), VK_RIGHT: ("\u{F703}", 124), VK_UP: ("\u{F700}", 126), VK_DOWN: ("\u{F701}", 125),
+        VK_HOME: ("\u{F729}", 115), VK_END: ("\u{F72B}", 119), VK_PRIOR: ("\u{F72C}", 116), VK_NEXT: ("\u{F72D}", 121),
+        VK_DELETE: ("\u{F728}", 117), VK_BACK: ("\u{7F}", 51), VK_RETURN: ("\r", 36), VK_TAB: ("\t", 48),
+        VK_ESCAPE: ("\u{1B}", 53), VK_INSERT: ("\u{F727}", 114),
+        VK_F1: ("\u{F704}", 122), VK_F2: ("\u{F705}", 120), VK_F3: ("\u{F706}", 99), VK_F4: ("\u{F707}", 118),
+        VK_F5: ("\u{F708}", 96), VK_F6: ("\u{F709}", 97), VK_F7: ("\u{F70A}", 98), VK_F8: ("\u{F70B}", 100),
+        VK_F9: ("\u{F70C}", 101), VK_F10: ("\u{F70D}", 109), VK_F11: ("\u{F70E}", 103), VK_F12: ("\u{F70F}", 111),
+    ]
+
     private func key(_ type: NSEvent.EventType, _ wParam: WPARAM, _ lParam: LPARAM) {
-        var state = [UInt8](repeating: 0, count: 256)
-        _ = GetKeyboardState(&state)
-        let scan = UINT((lParam >> 16) & 0xFF)
-        var buffer = [WCHAR](repeating: 0, count: 8)
-        let n = ToUnicode(UINT(wParam), scan, state, &buffer, 8, 0)
-        let chars = n > 0 ? String(decoding: buffer[0..<Int(n)], as: UTF16.self) : ""
-        state[Int(VK_CONTROL)] = 0; state[Int(VK_MENU)] = 0; state[Int(VK_LCONTROL)] = 0; state[Int(VK_RCONTROL)] = 0
-        state[Int(VK_LMENU)] = 0; state[Int(VK_RMENU)] = 0
-        var buffer2 = [WCHAR](repeating: 0, count: 8)
-        let n2 = ToUnicode(UINT(wParam), scan, state, &buffer2, 8, 0)
-        let plain = n2 > 0 ? String(decoding: buffer2[0..<Int(n2)], as: UTF16.self) : chars
+        let vk = Int32(truncatingIfNeeded: wParam)
+        var chars = "", plain = ""
+        var keyCode = UInt16(truncatingIfNeeded: wParam)
+        if let special = Win32Window.specialKeys[vk] {
+            chars = special.0
+            plain = special.0
+            keyCode = special.1
+        } else {
+            var state = [UInt8](repeating: 0, count: 256)
+            _ = GetKeyboardState(&state)
+            let scan = UINT((lParam >> 16) & 0xFF)
+            var buffer = [WCHAR](repeating: 0, count: 8)
+            let n = ToUnicode(UINT(wParam), scan, state, &buffer, 8, 0)
+            chars = n > 0 ? String(decoding: buffer[0..<Int(n)], as: UTF16.self) : ""
+            state[Int(VK_CONTROL)] = 0; state[Int(VK_MENU)] = 0; state[Int(VK_LCONTROL)] = 0; state[Int(VK_RCONTROL)] = 0
+            state[Int(VK_LMENU)] = 0; state[Int(VK_RMENU)] = 0
+            var buffer2 = [WCHAR](repeating: 0, count: 8)
+            let n2 = ToUnicode(UINT(wParam), scan, state, &buffer2, 8, 0)
+            plain = n2 > 0 ? String(decoding: buffer2[0..<Int(n2)], as: UTF16.self) : chars
+            // Control+letter yields a control character from ToUnicode; AppKit reports the letter.
+            if plain.unicodeScalars.count == 1, let v = plain.unicodeScalars.first?.value, v < 0x20, vk >= 0x41, vk <= 0x5A {
+                plain = String(UnicodeScalar(UInt8(vk) + 32))   // lowercase letter
+            }
+            if vk == VK_SHIFT || vk == VK_CONTROL || vk == VK_MENU || vk == VK_LWIN || vk == VK_RWIN || vk == VK_CAPITAL {
+                let e = NSEvent(type: .flagsChanged, location: .zero, modifierFlags: modifierFlags(), timestamp: timestamp(), windowNumber: windowNumber())
+                owner?.platformWindowDispatch(e)
+                return
+            }
+        }
         let isRepeat = (lParam & 0x4000_0000) != 0
         let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifierFlags(), timestamp: timestamp(),
                                  windowNumber: windowNumber(), context: nil, characters: chars,
-                                 charactersIgnoringModifiers: plain, isARepeat: isRepeat, keyCode: UInt16(truncatingIfNeeded: wParam))!
+                                 charactersIgnoringModifiers: plain, isARepeat: isRepeat, keyCode: keyCode)!
         owner?.platformWindowDispatch(e)
     }
 
@@ -263,11 +293,17 @@ final class Win32Window: PlatformWindow {
             owner?.platformWindowDidChangeFrame(frame)
             return 0
         case WM_DPICHANGED:
+            // Keep the content size in points exact: size the frame from the point size at
+            // the new DPI rather than taking the suggested rect's size (which rounds).
+            let pointSize = contentSize
             dpi = UINT(wParam & 0xFFFF)
             if let rt = renderTarget { cd2d_target_set_dpi(rt, Float(dpi)) }
             if let suggested = UnsafePointer<RECT>(bitPattern: Int(lParam)), let hwnd {
                 let r = suggested.pointee
-                SetWindowPos(hwnd, nil, r.left, r.top, r.right - r.left, r.bottom - r.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
+                let (style, ex) = Win32Backend.styles(for: _styleMask)
+                var client = RECT(left: 0, top: 0, right: Int32((pointSize.width * scale).rounded()), bottom: Int32((pointSize.height * scale).rounded()))
+                _ = AdjustWindowRectExForDpi(&client, style, false, ex, dpi)
+                SetWindowPos(hwnd, nil, r.left, r.top, client.right - client.left, client.bottom - client.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
             }
             owner?.platformWindowDidChangeBackingScaleFactor(scale)
             return 0

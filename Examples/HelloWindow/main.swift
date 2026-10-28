@@ -88,12 +88,17 @@ final class CanvasView: NSView {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSelectorHandling {
     var window: NSWindow!
     var canvas: CanvasView!
+    var greeting: NSTextField!
 
     // Actions arrive here by selector name (no Objective-C runtime on Windows).
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action {
         case Selector(("clearDots:")): canvas.clearDots(); return true
         case Selector(("toggleGrid:")): canvas.showsGrid = (sender as? NSButton)?.state == .on; return true
+        case Selector(("nameEntered:")):
+            let name = (sender as? NSTextField)?.stringValue ?? ""
+            greeting.stringValue = name.isEmpty ? "" : "Hello, \(name)!"
+            return true
         default: return false
         }
     }
@@ -119,6 +124,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         grid.frame.origin = NSPoint(x: clear.frame.minX - grid.frame.width - 16, y: clear.frame.midY - grid.frame.height / 2)
         grid.autoresizingMask = [.minXMargin, .minYMargin]
         canvas.addSubview(grid)
+
+        // A text field and a label that echoes it (Enter or focus loss sends the action).
+        let prompt = NSTextField(labelWithString: "Your name:")
+        prompt.frame.origin = NSPoint(x: 40, y: 290 - prompt.frame.height)
+        prompt.autoresizingMask = [.minYMargin]
+        canvas.addSubview(prompt)
+        let field = NSTextField(string: "")
+        field.placeholderString = "type here, then press Enter"
+        field.frame = NSRect(x: prompt.frame.maxX + 8, y: prompt.frame.minY - 4, width: 180, height: 24)
+        field.autoresizingMask = [.minYMargin]
+        field.target = self
+        field.action = Selector(("nameEntered:"))
+        canvas.addSubview(field)
+        let greeting = NSTextField(labelWithString: "")
+        greeting.frame = NSRect(x: field.frame.maxX + 8, y: prompt.frame.minY, width: 160, height: prompt.frame.height)
+        greeting.autoresizingMask = [.minYMargin, .width]
+        canvas.addSubview(greeting)
+        self.greeting = greeting
         self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)

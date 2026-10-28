@@ -13,6 +13,8 @@
     "NSGraphicsContext",
     "NSResponder",
     "NSScreen",
+    "NSTextField",
+    "NSTextFieldCell",
     "NSView",
     "NSWindow"
   ],

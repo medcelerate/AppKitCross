@@ -59,7 +59,7 @@ import CoreText
 
     internal var _textAttributes: [NSAttributedString.Key: Any] { [.font: _effectiveFont, .foregroundColor: _textColor] }
 
-    open override var description: String { "<\(Swift.type(of: self)) '\(stringValue)'>" }
+    open override var description: String { MainActor.assumeIsolated { "<\(Swift.type(of: self)) '\(stringValue)'>" } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/init()
     @MainActor public override init() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/init(coder:)

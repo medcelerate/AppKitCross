@@ -32,7 +32,7 @@ import CoreText
     /// Delivers the control's action; NSCell.performClick and subclasses use it.
     @MainActor internal func _fireAction() { _ = sendAction(action, to: target) }
 
-    open override var description: String { "<\(type(of: self)) frame=\(frame) '\(stringValue)'>" }
+    open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(frame) '\(stringValue)'>" } }
 
     @MainActor open override func draw(_ dirtyRect: NSRect) { _cell?.draw(withFrame: _cellFrame, in: self) }
     @MainActor open override var intrinsicContentSize: NSSize { _cell?.cellSize ?? super.intrinsicContentSize }
