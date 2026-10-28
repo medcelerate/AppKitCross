@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cstring>
 
 namespace {
 
@@ -79,10 +80,12 @@ std::wstring stripSpaces(const std::wstring &s) { std::wstring o; for (wchar_t c
 struct CDWFont {
     LONG refs = 1;
     ComPtr<IDWriteFontFace> face;
-    ComPtr<IDWriteFont> font;           // may be null for fallback faces resolved by name below
+    ComPtr<IDWriteFont> font;           // may be null for fallback faces the collection cannot map back
     float size = 12;
     DWRITE_FONT_METRICS metrics{};
     std::wstring family, style, full, postscript;
+    DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL;
+    DWRITE_FONT_STYLE fontStyle = DWRITE_FONT_STYLE_NORMAL;
     bool monospace = false;
 
     float scale() const { return metrics.designUnitsPerEm ? size / metrics.designUnitsPerEm : 0; }
@@ -102,7 +105,26 @@ struct CDWFont {
             BOOL exists = FALSE;
             if (SUCCEEDED(f->GetInformationalStrings(DWRITE_INFORMATIONAL_STRING_FULL_NAME, info.put(), &exists)) && exists) full = localizedString(info.p);
             if (SUCCEEDED(f->GetInformationalStrings(DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, info.put(), &exists)) && exists) postscript = localizedString(info.p);
+            weight = f->GetWeight();
+            fontStyle = f->GetStyle();
             if (!font) font = f;
+        } else {
+            // Fallback faces picked by IDWriteTextLayout can come from outside the system
+            // collection (GetFontFromFontFace fails with DWRITE_E_NOFONT); IDWriteFontFace3
+            // carries the names and traits itself.
+            ComPtr<IDWriteFontFace3> face3;
+            if (SUCCEEDED(face->QueryInterface(__uuidof(IDWriteFontFace3), reinterpret_cast<void **>(face3.put()))) && face3) {
+                ComPtr<IDWriteLocalizedStrings> names;
+                if (SUCCEEDED(face3->GetFamilyNames(names.put()))) family = localizedString(names.p);
+                ComPtr<IDWriteLocalizedStrings> faceNames;
+                if (SUCCEEDED(face3->GetFaceNames(faceNames.put()))) style = localizedString(faceNames.p);
+                ComPtr<IDWriteLocalizedStrings> info;
+                BOOL exists = FALSE;
+                if (SUCCEEDED(face3->GetInformationalStrings(DWRITE_INFORMATIONAL_STRING_FULL_NAME, info.put(), &exists)) && exists) full = localizedString(info.p);
+                if (SUCCEEDED(face3->GetInformationalStrings(DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, info.put(), &exists)) && exists) postscript = localizedString(info.p);
+                weight = face3->GetWeight();
+                fontStyle = face3->GetStyle();
+            }
         }
         if (style.empty()) style = L"Regular";
         if (full.empty()) full = family + L" " + style;
@@ -191,7 +213,8 @@ CDWFont *cdw_font_with_size(CDWFont *font, float size) {
     if (!font) return nullptr;
     CDWFont *f = new CDWFont();
     f->face = font->face; f->font = font->font; f->size = size;
-    f->metrics = font->metrics; f->family = font->family; f->style = font->style; f->full = font->full; f->postscript = font->postscript; f->monospace = font->monospace;
+    f->metrics = font->metrics; f->family = font->family; f->style = font->style; f->full = font->full; f->postscript = font->postscript;
+    f->weight = font->weight; f->fontStyle = font->fontStyle; f->monospace = font->monospace;
     return f;
 }
 
@@ -210,10 +233,9 @@ void cdw_font_metrics(CDWFont *font, CDWFontMetrics *out) {
     out->underlineThickness = m.underlineThickness * s;
     out->unitsPerEm = m.designUnitsPerEm;
     out->glyphCount = font->face->GetGlyphCount();
-    DWRITE_FONT_WEIGHT w = font->font ? font->font->GetWeight() : DWRITE_FONT_WEIGHT_NORMAL;
-    out->weight = w;
-    out->isBold = w >= DWRITE_FONT_WEIGHT_SEMI_BOLD;
-    out->isItalic = font->font ? font->font->GetStyle() != DWRITE_FONT_STYLE_NORMAL : false;
+    out->weight = font->weight;
+    out->isBold = font->weight >= DWRITE_FONT_WEIGHT_SEMI_BOLD;
+    out->isItalic = font->fontStyle != DWRITE_FONT_STYLE_NORMAL;
     out->isMonospace = font->monospace;
 }
 
@@ -259,21 +281,21 @@ namespace {
 struct PathSinkImpl final : ID2D1SimplifiedGeometrySink {
     CDWPathSink sink; void *context; LONG refs = 1;
     PathSinkImpl(CDWPathSink s, void *c) : sink(s), context(c) {}
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **out) override {
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **out) noexcept override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(ID2D1SimplifiedGeometrySink)) { *out = this; AddRef(); return S_OK; }
         *out = nullptr; return E_NOINTERFACE;
     }
-    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
-    ULONG STDMETHODCALLTYPE Release() override { ULONG r = InterlockedDecrement(&refs); if (!r) delete this; return r; }
-    void STDMETHODCALLTYPE SetFillMode(D2D1_FILL_MODE) override {}
-    void STDMETHODCALLTYPE SetSegmentFlags(D2D1_PATH_SEGMENT) override {}
-    void STDMETHODCALLTYPE BeginFigure(D2D1_POINT_2F p, D2D1_FIGURE_BEGIN) override { sink(context, 0, p.x, -p.y, 0, 0, 0, 0); }
-    void STDMETHODCALLTYPE AddLines(const D2D1_POINT_2F *pts, UINT32 n) override { for (UINT32 i = 0; i < n; i++) sink(context, 1, pts[i].x, -pts[i].y, 0, 0, 0, 0); }
-    void STDMETHODCALLTYPE AddBeziers(const D2D1_BEZIER_SEGMENT *b, UINT32 n) override {
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() noexcept override { ULONG r = InterlockedDecrement(&refs); if (!r) delete this; return r; }
+    void STDMETHODCALLTYPE SetFillMode(D2D1_FILL_MODE) noexcept override {}
+    void STDMETHODCALLTYPE SetSegmentFlags(D2D1_PATH_SEGMENT) noexcept override {}
+    void STDMETHODCALLTYPE BeginFigure(D2D1_POINT_2F p, D2D1_FIGURE_BEGIN) noexcept override { sink(context, 0, p.x, -p.y, 0, 0, 0, 0); }
+    void STDMETHODCALLTYPE AddLines(const D2D1_POINT_2F *pts, UINT32 n) noexcept override { for (UINT32 i = 0; i < n; i++) sink(context, 1, pts[i].x, -pts[i].y, 0, 0, 0, 0); }
+    void STDMETHODCALLTYPE AddBeziers(const D2D1_BEZIER_SEGMENT *b, UINT32 n) noexcept override {
         for (UINT32 i = 0; i < n; i++) sink(context, 2, b[i].point1.x, -b[i].point1.y, b[i].point2.x, -b[i].point2.y, b[i].point3.x, -b[i].point3.y);
     }
-    void STDMETHODCALLTYPE EndFigure(D2D1_FIGURE_END) override { sink(context, 3, 0, 0, 0, 0, 0, 0); }
-    HRESULT STDMETHODCALLTYPE Close() override { return S_OK; }
+    void STDMETHODCALLTYPE EndFigure(D2D1_FIGURE_END) noexcept override { sink(context, 3, 0, 0, 0, 0, 0, 0); }
+    HRESULT STDMETHODCALLTYPE Close() noexcept override { return S_OK; }
 };
 }
 
@@ -326,24 +348,47 @@ struct CDWShaped {
 };
 
 namespace {
+// Whether two font face objects are the same face: the layout creates its own
+// IDWriteFontFace for the base font, so pointer identity is not enough.
+bool sameFace(IDWriteFontFace *a, IDWriteFontFace *b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->GetIndex() != b->GetIndex() || a->GetSimulations() != b->GetSimulations()) return false;
+    UINT32 na = 0, nb = 0;
+    if (FAILED(a->GetFiles(&na, nullptr)) || FAILED(b->GetFiles(&nb, nullptr)) || na != nb || na == 0) return false;
+    std::vector<IDWriteFontFile *> fa(na, nullptr), fb(nb, nullptr);
+    bool same = SUCCEEDED(a->GetFiles(&na, fa.data())) && SUCCEEDED(b->GetFiles(&nb, fb.data()));
+    for (UINT32 i = 0; same && i < na; i++) {
+        const void *ka = nullptr, *kb = nullptr; UINT32 la = 0, lb = 0;
+        IDWriteFontFileLoader *loaderA = nullptr, *loaderB = nullptr;
+        same = SUCCEEDED(fa[i]->GetReferenceKey(&ka, &la)) && SUCCEEDED(fb[i]->GetReferenceKey(&kb, &lb)) && la == lb && memcmp(ka, kb, la) == 0
+            && SUCCEEDED(fa[i]->GetLoader(&loaderA)) && SUCCEEDED(fb[i]->GetLoader(&loaderB)) && loaderA == loaderB;
+        if (loaderA) loaderA->Release();
+        if (loaderB) loaderB->Release();
+    }
+    for (auto *f : fa) if (f) f->Release();
+    for (auto *f : fb) if (f) f->Release();
+    return same;
+}
+
 struct CollectingRenderer final : IDWriteTextRenderer {
     LONG refs = 1;
     CDWShaped *out;
     CDWFont *base;
     explicit CollectingRenderer(CDWShaped *o, CDWFont *b) : out(o), base(b) {}
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **o) override {
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **o) noexcept override {
         if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWritePixelSnapping) || riid == __uuidof(IDWriteTextRenderer)) { *o = this; AddRef(); return S_OK; }
         *o = nullptr; return E_NOINTERFACE;
     }
-    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
-    ULONG STDMETHODCALLTYPE Release() override { ULONG r = InterlockedDecrement(&refs); if (!r) delete this; return r; }
-    HRESULT STDMETHODCALLTYPE IsPixelSnappingDisabled(void *, BOOL *disabled) override { *disabled = TRUE; return S_OK; }
-    HRESULT STDMETHODCALLTYPE GetCurrentTransform(void *, DWRITE_MATRIX *m) override { *m = DWRITE_MATRIX{1, 0, 0, 1, 0, 0}; return S_OK; }
-    HRESULT STDMETHODCALLTYPE GetPixelsPerDip(void *, FLOAT *ppd) override { *ppd = 1; return S_OK; }
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() noexcept override { ULONG r = InterlockedDecrement(&refs); if (!r) delete this; return r; }
+    HRESULT STDMETHODCALLTYPE IsPixelSnappingDisabled(void *, BOOL *disabled) noexcept override { *disabled = TRUE; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetCurrentTransform(void *, DWRITE_MATRIX *m) noexcept override { *m = DWRITE_MATRIX{1, 0, 0, 1, 0, 0}; return S_OK; }
+    HRESULT STDMETHODCALLTYPE GetPixelsPerDip(void *, FLOAT *ppd) noexcept override { *ppd = 1; return S_OK; }
     HRESULT STDMETHODCALLTYPE DrawGlyphRun(void *, FLOAT, FLOAT, DWRITE_MEASURING_MODE, const DWRITE_GLYPH_RUN *run,
-                                           const DWRITE_GLYPH_RUN_DESCRIPTION *desc, IUnknown *) override {
+                                           const DWRITE_GLYPH_RUN_DESCRIPTION *desc, IUnknown *) noexcept override {
         CDWShapedRun r;
-        if (run->fontFace == base->face.p) {
+        if (sameFace(run->fontFace, base->face.p)) {
             r.font = cdw_font_retain(base);
         } else {
             CDWFont *f = new CDWFont();
@@ -361,30 +406,35 @@ struct CollectingRenderer final : IDWriteTextRenderer {
             r.offsets.push_back(run->glyphOffsets ? run->glyphOffsets[i].advanceOffset : 0);
             r.offsets.push_back(run->glyphOffsets ? run->glyphOffsets[i].ascenderOffset : 0);
         }
-        // clusterMap: text index → glyph index. Invert to glyph → cluster start (text index).
+        // clusterMap: text index → first glyph of its cluster. Invert to glyph → cluster start
+        // (text index). Glyphs are in visual order: for LTR a cluster's glyphs run up to the
+        // next cluster's first glyph, for RTL up to the previous cluster's (in text order).
         r.clusters.assign(run->glyphCount, 0);
+        std::vector<std::pair<UINT32, UINT32>> starts;   // (text index, glyph index) per cluster
         for (UINT32 t = 0; t < desc->stringLength; t++) {
-            UINT16 g = desc->clusterMap[t];
-            UINT16 next = (t + 1 < desc->stringLength) ? desc->clusterMap[t + 1] : static_cast<UINT16>(run->glyphCount);
-            if (t == 0 || desc->clusterMap[t - 1] != g) {
-                for (UINT16 k = g; k < next && k < run->glyphCount; k++) r.clusters[k] = t;
-                if (r.rtl) for (UINT16 k = g; k < run->glyphCount; k++) if (r.clusters[k] == 0 && k >= g) r.clusters[k] = t;
-            }
+            if (t == 0 || desc->clusterMap[t - 1] != desc->clusterMap[t]) starts.emplace_back(t, desc->clusterMap[t]);
+        }
+        for (size_t c = 0; c < starts.size(); c++) {
+            UINT32 g = starts[c].second;
+            UINT32 end = run->glyphCount;
+            if (!r.rtl && c + 1 < starts.size()) end = starts[c + 1].second;
+            if (r.rtl && c > 0) end = starts[c - 1].second;
+            for (UINT32 k = g; k < end && k < run->glyphCount; k++) r.clusters[k] = starts[c].first;
         }
         out->runs.push_back(std::move(r));
         return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE DrawUnderline(void *, FLOAT, FLOAT, const DWRITE_UNDERLINE *, IUnknown *) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE DrawStrikethrough(void *, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH *, IUnknown *) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE DrawInlineObject(void *, FLOAT, FLOAT, IDWriteInlineObject *, BOOL, BOOL, IUnknown *) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawUnderline(void *, FLOAT, FLOAT, const DWRITE_UNDERLINE *, IUnknown *) noexcept override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawStrikethrough(void *, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH *, IUnknown *) noexcept override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE DrawInlineObject(void *, FLOAT, FLOAT, IDWriteInlineObject *, BOOL, BOOL, IUnknown *) noexcept override { return S_OK; }
 };
 }
 
 CDWShaped *cdw_shape(const uint16_t *text, uint32_t count, CDWFont *font, const char *localeUTF8) {
     if (!font || !count || !factory()) return nullptr;
     std::wstring locale = localeUTF8 ? widen(localeUTF8) : L"en-us";
-    DWRITE_FONT_WEIGHT w = font->font ? font->font->GetWeight() : DWRITE_FONT_WEIGHT_NORMAL;
-    DWRITE_FONT_STYLE st = font->font ? font->font->GetStyle() : DWRITE_FONT_STYLE_NORMAL;
+    DWRITE_FONT_WEIGHT w = font->weight;
+    DWRITE_FONT_STYLE st = font->fontStyle;
     ComPtr<IDWriteTextFormat> format;
     if (FAILED(factory()->CreateTextFormat(font->family.c_str(), nullptr, w, st, DWRITE_FONT_STRETCH_NORMAL, font->size, locale.c_str(), format.put()))) return nullptr;
     format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);

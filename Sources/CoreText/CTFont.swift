@@ -19,6 +19,21 @@ public final class CTFontDescriptor: NSObject {
 
 public func CTFontDescriptorGetTypeID() -> CFTypeID { 1 }
 
+/// A numeric attribute value however it was boxed: callers store CGFloat, Double or Int
+/// in CF dictionaries, and corelibs Foundation does not bridge every one of those to
+/// NSNumber on an `as?` cast (CGFloat on Windows, for one).
+func _ctNumber(_ value: Any?) -> Double? {
+    switch value {
+    case let n as NSNumber: return n.doubleValue
+    case let d as Double: return d
+    case let f as CGFloat: return Double(f)
+    case let f as Float: return Double(f)
+    case let i as Int: return Double(i)
+    case let u as UInt32: return Double(u)
+    default: return nil
+    }
+}
+
 public func CTFontDescriptorCreateWithNameAndSize(_ name: CFString, _ size: CGFloat) -> CTFontDescriptor {
     CTFontDescriptor(attributes: [kCTFontNameAttribute as String: name as String, kCTFontSizeAttribute as String: size])
 }
@@ -45,7 +60,7 @@ public func CTFontDescriptorCreateCopyWithFamily(_ original: CTFontDescriptor, _
 public func CTFontDescriptorCreateCopyWithSymbolicTraits(_ original: CTFontDescriptor, _ symTraitValue: CTFontSymbolicTraits, _ symTraitMask: CTFontSymbolicTraits) -> CTFontDescriptor? {
     var dict = original.attributes
     var traits = (dict[kCTFontTraitsAttribute as String] as? [String: Any]) ?? [:]
-    let current = CTFontSymbolicTraits(rawValue: (traits[kCTFontSymbolicTrait as String] as? NSNumber)?.uint32Value ?? 0)
+    let current = CTFontSymbolicTraits(rawValue: _ctNumber(traits[kCTFontSymbolicTrait as String]).map { UInt32($0) } ?? 0)
     let updated = CTFontSymbolicTraits(rawValue: (current.rawValue & ~symTraitMask.rawValue) | (symTraitValue.rawValue & symTraitMask.rawValue))
     traits[kCTFontSymbolicTrait as String] = NSNumber(value: updated.rawValue)
     dict[kCTFontTraitsAttribute as String] = traits
@@ -98,16 +113,16 @@ public final class CTFont: NSObject {
     /// Resolves a descriptor (name, family, size, traits) through the engine.
     static func _resolve(_ d: CTFontDescriptor, size: CGFloat?) -> CTEngineFont? {
         let a = d.attributes
-        let pointSize = size ?? (a[kCTFontSizeAttribute as String] as? NSNumber).map { CGFloat($0.doubleValue) } ?? 12
+        let pointSize = size ?? _ctNumber(a[kCTFontSizeAttribute as String]).map { CGFloat($0) } ?? 12
         let name = (a[kCTFontNameAttribute as String] as? String) ?? (a[kCTFontFamilyNameAttribute as String] as? String)
         var weight: CGFloat? = nil
         var italic: Bool? = nil
         if let traits = a[kCTFontTraitsAttribute as String] as? [String: Any] ?? (a[kCTFontTraitsAttribute as String] as? NSDictionary).map({ d in
             var out: [String: Any] = [:]; for (k, v) in d { if let s = (k as? String) ?? (k as? NSString).map({ $0 as String }) { out[s] = v } }; return out }) {
-            if let w = traits[kCTFontWeightTrait as String] as? NSNumber { weight = CGFloat(w.doubleValue) }
-            if let s = traits[kCTFontSlantTrait as String] as? NSNumber { italic = s.doubleValue != 0 }
-            if let sym = traits[kCTFontSymbolicTrait as String] as? NSNumber {
-                let st = CTFontSymbolicTraits(rawValue: sym.uint32Value)
+            if let w = _ctNumber(traits[kCTFontWeightTrait as String]) { weight = CGFloat(w) }
+            if let s = _ctNumber(traits[kCTFontSlantTrait as String]) { italic = s != 0 }
+            if let sym = _ctNumber(traits[kCTFontSymbolicTrait as String]) {
+                let st = CTFontSymbolicTraits(rawValue: UInt32(sym))
                 if st.contains(.traitBold) { weight = max(weight ?? 0, 0.4) }
                 if st.contains(.traitItalic) { italic = true }
             }

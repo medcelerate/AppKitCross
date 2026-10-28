@@ -41,6 +41,8 @@ public final class CGContext {
     private let strokeBrush: OpaquePointer?
     /// Applied after the CTM; typically the y flip that makes the context bottom-left based.
     private let baseTransform: CGAffineTransform
+    /// The WIC bitmap behind a bitmap context (`init(data:...)`), nil for window targets.
+    private let offscreen: OpaquePointer?      // CD2DOffscreen*
 
     public private(set) var width: Int
     public private(set) var height: Int
@@ -51,6 +53,35 @@ public final class CGContext {
         self.target = target
         self.factory = factory
         self.baseTransform = baseTransform
+        self.offscreen = nil
+        self.width = width
+        self.height = height
+        fillBrush = cd2d_brush_create(target, 0, 0, 0, 1)
+        strokeBrush = cd2d_brush_create(target, 0, 0, 0, 1)
+        applyTransform()
+    }
+
+    /// A Direct2D factory for bitmap contexts made outside a window backend.
+    nonisolated(unsafe) private static let sharedFactory: OpaquePointer? = cd2d_factory_create()
+
+    /// A bitmap context, bottom-left origin as CoreGraphics' (`data` is ignored; the
+    /// pixels come back through `makeImage()`). Premultiplied BGRA at 96 DPI.
+    public convenience init?(data: UnsafeMutableRawPointer?, width: Int, height: Int, bitsPerComponent: Int, bytesPerRow: Int,
+                             space: CGColorSpace, bitmapInfo: UInt32) {
+        guard width > 0, height > 0, let factory = CGContext.sharedFactory,
+              let offscreen = cd2d_offscreen_create(factory, UInt32(width), UInt32(height), 96),
+              let target = cd2d_offscreen_target(offscreen) else { return nil }
+        cd2d_target_begin_draw(target)
+        cd2d_target_clear(target, 0, 0, 0, 0)
+        let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(height))
+        self.init(target: target, factory: factory, offscreen: offscreen, baseTransform: flip, width: width, height: height)
+    }
+
+    private init(target: OpaquePointer, factory: OpaquePointer, offscreen: OpaquePointer, baseTransform: CGAffineTransform, width: Int, height: Int) {
+        self.target = target
+        self.factory = factory
+        self.baseTransform = baseTransform
+        self.offscreen = offscreen
         self.width = width
         self.height = height
         fillBrush = cd2d_brush_create(target, 0, 0, 0, 1)
@@ -64,6 +95,26 @@ public final class CGContext {
         for (_, (_, bm)) in bitmapCache { cd2d_bitmap_release(bm) }
         cd2d_brush_release(fillBrush)
         cd2d_brush_release(strokeBrush)
+        if let offscreen {
+            _ = cd2d_target_end_draw(target)
+            cd2d_offscreen_release(offscreen)
+        }
+    }
+
+    /// The pixels of a bitmap context (premultiplied BGRA, top row first); nil for a
+    /// window target. The context stays drawable afterwards.
+    public func makeImage() -> CGImage? {
+        guard let offscreen else { return nil }
+        releaseImageCache()
+        _ = cd2d_target_end_draw(target)
+        var data = Data(count: width * height * 4)
+        let stride = data.withUnsafeMutableBytes { buf -> UInt32 in
+            cd2d_offscreen_read(offscreen, buf.baseAddress?.assumingMemoryBound(to: UInt8.self), UInt32(buf.count))
+        }
+        cd2d_target_begin_draw(target)
+        applyTransform()
+        guard stride > 0 else { return nil }
+        return CGImage.fromBGRA(width: width, height: height, stride: Int(stride), data: data)
     }
 
     // MARK: State

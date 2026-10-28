@@ -118,7 +118,75 @@ final class CTDirectWriteFont: CTEngineFont {
         ["cmap", "head", "hhea", "hmtx", "maxp", "name", "OS/2", "post", "glyf", "loca", "CFF ", "GSUB", "GPOS", "GDEF", "kern"].map { UInt32(fourCharacterCode: $0) }.filter { hasTable($0) }
     }
 
-    func glyph(named name: String) -> CGGlyph { 0 }   // DirectWrite exposes no glyph names
+    // MARK: Glyph names
+
+    /// The 258 standard Macintosh glyph names that 'post' format 1.0 and 2.0 index by order.
+    static let macGlyphNames: [String] = [
+        ".notdef", ".null", "nonmarkingreturn", "space", "exclam", "quotedbl", "numbersign", "dollar", "percent", "ampersand", "quotesingle",
+        "parenleft", "parenright", "asterisk", "plus", "comma", "hyphen", "period", "slash", "zero", "one", "two", "three", "four", "five", "six",
+        "seven", "eight", "nine", "colon", "semicolon", "less", "equal", "greater", "question", "at", "A", "B", "C", "D", "E", "F", "G", "H", "I",
+        "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "bracketleft", "backslash", "bracketright",
+        "asciicircum", "underscore", "grave", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
+        "u", "v", "w", "x", "y", "z", "braceleft", "bar", "braceright", "asciitilde", "Adieresis", "Aring", "Ccedilla", "Eacute", "Ntilde",
+        "Odieresis", "Udieresis", "aacute", "agrave", "acircumflex", "adieresis", "atilde", "aring", "ccedilla", "eacute", "egrave", "ecircumflex",
+        "edieresis", "iacute", "igrave", "icircumflex", "idieresis", "ntilde", "oacute", "ograve", "ocircumflex", "odieresis", "otilde", "uacute",
+        "ugrave", "ucircumflex", "udieresis", "dagger", "degree", "cent", "sterling", "section", "bullet", "paragraph", "germandbls", "registered",
+        "copyright", "trademark", "acute", "dieresis", "notequal", "AE", "Oslash", "infinity", "plusminus", "lessequal", "greaterequal", "yen", "mu",
+        "partialdiff", "summation", "product", "pi", "integral", "ordfeminine", "ordmasculine", "Omega", "ae", "oslash", "questiondown", "exclamdown",
+        "logicalnot", "radical", "florin", "approxequal", "Delta", "guillemotleft", "guillemotright", "ellipsis", "nonbreakingspace", "Agrave",
+        "Atilde", "Otilde", "OE", "oe", "endash", "emdash", "quotedblleft", "quotedblright", "quoteleft", "quoteright", "divide", "lozenge",
+        "ydieresis", "Ydieresis", "fraction", "currency", "guilsinglleft", "guilsinglright", "fi", "fl", "daggerdbl", "periodcentered",
+        "quotesinglbase", "quotedblbase", "perthousand", "Acircumflex", "Ecircumflex", "Aacute", "Edieresis", "Egrave", "Iacute", "Icircumflex",
+        "Idieresis", "Igrave", "Oacute", "Ocircumflex", "apple", "Ograve", "Uacute", "Ucircumflex", "Ugrave", "dotlessi", "circumflex", "tilde",
+        "macron", "breve", "dotaccent", "ring", "cedilla", "hungarumlaut", "ogonek", "caron", "Lslash", "lslash", "Scaron", "scaron", "Zcaron",
+        "zcaron", "brokenbar", "Eth", "eth", "Yacute", "yacute", "Thorn", "thorn", "minus", "multiply", "onesuperior", "twosuperior",
+        "threesuperior", "onehalf", "onequarter", "threequarters", "franc", "Gbreve", "gbreve", "Idotaccent", "Scedilla", "scedilla", "Cacute",
+        "cacute", "Ccaron", "ccaron", "dcroat",
+    ]
+
+    /// Glyph names from the 'post' table (format 1.0 and 2.0), built on first use.
+    private lazy var postGlyphNames: [String: CGGlyph] = {
+        guard let post = table(UInt32(fourCharacterCode: "post")), post.count >= 32 else { return [:] }
+        let b = [UInt8](post)
+        func u16(_ o: Int) -> Int { o + 1 < b.count ? Int(b[o]) << 8 | Int(b[o + 1]) : 0 }
+        let version = UInt32(u16(0)) << 16 | UInt32(u16(2))
+        var names: [String: CGGlyph] = [:]
+        switch version {
+        case 0x0001_0000:
+            for (i, n) in CTDirectWriteFont.macGlyphNames.enumerated() { names[n] = CGGlyph(i) }
+        case 0x0002_0000:
+            let count = u16(32)
+            var custom: [String] = []
+            var p = 34 + count * 2
+            while p < b.count {
+                let len = Int(b[p]); p += 1
+                guard p + len <= b.count else { break }
+                custom.append(String(decoding: b[p..<p + len], as: UTF8.self)); p += len
+            }
+            for g in 0..<count {
+                let index = u16(34 + g * 2)
+                let name: String? = index < 258 ? CTDirectWriteFont.macGlyphNames[index] : (index - 258 < custom.count ? custom[index - 258] : nil)
+                if let name, names[name] == nil { names[name] = CGGlyph(g) }
+            }
+        default: break
+        }
+        return names
+    }()
+
+    func glyph(named name: String) -> CGGlyph {
+        if let g = postGlyphNames[name] { return g }
+        // Without names in the font (post 3.0): "uniXXXX" / "uXXXX[XX]" forms, "gidN", and the
+        // standard Macintosh names of the printable ASCII range, all through the cmap.
+        var scalar: UInt32? = nil
+        if name.hasPrefix("uni"), name.count == 7, let v = UInt32(name.dropFirst(3), radix: 16) { scalar = v }
+        else if name.hasPrefix("u"), (5...7).contains(name.count), let v = UInt32(name.dropFirst(1), radix: 16) { scalar = v }
+        else if name.hasPrefix("gid"), let v = UInt16(name.dropFirst(3)) { return CGGlyph(v) }
+        else if let i = CTDirectWriteFont.macGlyphNames.firstIndex(of: name), (3...97).contains(i) { scalar = UInt32(0x20 + i - 3) }
+        guard let scalar else { return 0 }
+        var mapped: UInt16 = 0
+        cdw_font_glyphs(handle, [scalar], 1, &mapped)
+        return mapped
+    }
 
     func draw(glyphs: [CGGlyph], positions: [CGPoint], color: CGColor, in ctx: CGContext) {
         ctx.saveGState()
