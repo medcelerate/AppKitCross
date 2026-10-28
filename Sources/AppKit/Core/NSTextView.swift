@@ -15,7 +15,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview
-@MainActor open class NSTextView: NSText, NSColorChanging, NSMenuItemValidation, NSUserInterfaceValidations, NSTextInputClient, NSTextLayoutOrientationProvider, NSDraggingSource, NSTextInput, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent, NSCandidateListTouchBarItemDelegate, NSTouchBarDelegate {
+@MainActor open class NSTextView: NSText, NSSelectorHandling, NSColorChanging, NSMenuItemValidation, NSUserInterfaceValidations, NSTextInputClient, NSTextLayoutOrientationProvider, NSDraggingSource, NSTextInput, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent, NSCandidateListTouchBarItemDelegate, NSTouchBarDelegate {
     // MARK: Storage
     private var _typingAttributes: [NSAttributedString.Key: Any] = [:]
     private var _insertionPointColor: NSColor? = nil
@@ -242,6 +242,33 @@ import CoreText
         "selectLine:": { $0.selectLine($1) }, "selectParagraph:": { $0.selectParagraph($1) },
         "copy:": { $0.copy($1) }, "cut:": { $0.cut($1) }, "paste:": { $0.paste($1) }, "delete:": { $0.delete($1) },
     ]
+
+    // MARK: Responder-chain actions (menus, nil-target sends)
+
+    /// The editing selectors double as responder-chain actions, so Edit menu items with a
+    /// nil target reach the text view.
+    public func respondsToSelectorAction(_ action: Selector) -> Bool {
+        NSTextView._selectorDispatch[NSStringFromSelector(action)] != nil
+    }
+
+    public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
+        handler(self, sender)
+        return true
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/validatemenuitem(_:)
+    open func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let action = menuItem.action else { return true }
+        let hasSelection = selectedRange.length > 0
+        switch NSStringFromSelector(action) {
+        case "copy:": return isSelectable && hasSelection
+        case "cut:", "delete:": return isEditable && hasSelection
+        case "paste:": return isEditable && NSPasteboard.general.string(forType: .string) != nil
+        case "selectAll:": return isSelectable && !string.isEmpty
+        default: return true
+        }
+    }
 
     // MARK: NSTextInputClient
 

@@ -184,6 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
         fileItem.submenu = file
         main.addItem(fileItem)
+        // Edit menu: nil targets reach the field editor through the responder chain.
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+        edit.addItem(NSMenuItem.separator())
+        edit.addItem(withTitle: "Select All", action: Selector(("selectAll:")), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
         let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         let view = NSMenu(title: "View")
         gridMenuItem = view.addItem(withTitle: "Show Grid", action: Selector(("toggleGridMenu:")), keyEquivalent: "g")
@@ -194,7 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
         let help = NSMenu(title: "Help")
         help.addItem(withTitle: "About HelloWindow", action: Selector(("showAbout:")), keyEquivalent: "")
-        help.addItem(withTitle: "Copy Greeting", action: Selector(("copyGreeting:")), keyEquivalent: "c")
+        let copyGreeting = help.addItem(withTitle: "Copy Greeting", action: Selector(("copyGreeting:")), keyEquivalent: "c")
+        copyGreeting.keyEquivalentModifierMask = [.command, .shift]
         let glass = help.addItem(withTitle: "Glass Window", action: Selector(("showGlassWindow:")), keyEquivalent: "g")
         glass.keyEquivalentModifierMask = [.command, .shift]
         helpItem.submenu = help

@@ -107,6 +107,32 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testMenuActionsReachTheTextView() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            tv.string = "hello world"
+            w.contentView!.addSubview(tv)
+            w.makeKeyAndOrderFront(nil)
+            _ = w.makeFirstResponder(tv)
+            let copy = NSMenuItem(title: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
+            let open = NSMenuItem(title: "Open", action: Selector(("openFile:")), keyEquivalent: "o")
+            // The text view is the target for editing actions only; others walk past it.
+            XCTAssertTrue(NSApp._target(forAction: copy.action!) === tv)
+            XCTAssertFalse(NSApp._target(forAction: open.action!) === tv)
+            XCTAssertFalse(tv.validateMenuItem(copy), "nothing selected")
+            tv.setSelectedRange(NSRange(location: 0, length: 5))
+            XCTAssertTrue(tv.validateMenuItem(copy))
+            _ = NSPasteboard.general.clearContents()
+            XCTAssertTrue(NSApp.sendAction(copy.action!, to: nil, from: copy))
+            XCTAssertEqual(NSPasteboard.general.string(forType: .string), "hello")
+            tv.setSelectedRange(NSRange(location: 11, length: 0))
+            XCTAssertTrue(NSApp.sendAction(Selector(("paste:")), to: nil, from: nil))
+            XCTAssertEqual(tv.string, "hello worldhello")
+            w.close()
+        }
+    }
+
     func testInputMethodCompositionThroughTheSeam() {
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)

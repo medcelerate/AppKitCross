@@ -11,6 +11,14 @@ import Foundation
 public protocol NSSelectorHandling: AnyObject {
     /// Return true when the action was handled.
     @MainActor func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool
+    /// Whether `performSelectorAction` would handle `action` (the responder-chain target
+    /// search and menu validation ask this before sending). Defaults to true: a handler
+    /// that switches on the selector and returns false for the rest lets the chain continue.
+    @MainActor func respondsToSelectorAction(_ action: Selector) -> Bool
+}
+
+extension NSSelectorHandling {
+    @MainActor public func respondsToSelectorAction(_ action: Selector) -> Bool { true }
 }
 
 @MainActor
@@ -38,7 +46,7 @@ enum ActionRegistry {
     /// adopt `NSSelectorHandling` decide at call time, so they count as able.
     static func canPerform(_ action: Selector, on target: AnyObject) -> Bool {
         if let e = entries[ObjectIdentifier(target)], e.object === target, e.handlers[action] != nil { return true }
-        return target is NSSelectorHandling
+        return (target as? NSSelectorHandling)?.respondsToSelectorAction(action) ?? false
     }
 
     /// Delivers `action` to `target` alone (no responder-chain walk). True if handled.
