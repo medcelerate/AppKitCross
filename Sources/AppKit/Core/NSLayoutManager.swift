@@ -184,15 +184,21 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         let out = NSMutableAttributedString(string: storage.string)
         let n = storage.length
         guard n > 0 else { return out }
+        // Semantic colours resolve under the text view's appearance (a dark field editor
+        // draws light text), not whatever appearance happens to be current during layout.
+        let appearance: NSAppearance? = MainActor.assumeIsolated { firstTextView?.effectiveAppearance }
         func convert(_ attrs: [NSAttributedString.Key: Any], into range: NSRange) {
             var ct: [NSAttributedString.Key: Any] = [:]
             MainActor.assumeIsolated {
                 let font = (attrs[.font] as? NSFont) ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
                 ct[NSAttributedString.Key(kCTFontAttributeName as String)] = font._coreTextFont
                 let color = (attrs[.foregroundColor] as? NSColor) ?? NSColor.textColor
-                ct[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = color.cgColor
+                let underlineColor = attrs[.underlineColor] as? NSColor
+                var cg = color.cgColor, ucg = underlineColor?.cgColor
+                appearance?.performAsCurrentDrawingAppearance { cg = color.cgColor; ucg = underlineColor?.cgColor }
+                ct[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = cg
                 if let u = attrs[.underlineStyle] as? NSNumber, u.intValue != 0 { ct[NSAttributedString.Key(kCTUnderlineStyleAttributeName as String)] = u }
-                if let uc = attrs[.underlineColor] as? NSColor { ct[NSAttributedString.Key(kCTUnderlineColorAttributeName as String)] = uc.cgColor }
+                if let ucg { ct[NSAttributedString.Key(kCTUnderlineColorAttributeName as String)] = ucg }
             }
             if let k = attrs[.kern] as? NSNumber { ct[NSAttributedString.Key(kCTKernAttributeName as String)] = k }
             if let b = attrs[.baselineOffset] as? NSNumber { ct[NSAttributedString.Key(kCTBaselineOffsetAttributeName as String)] = b }

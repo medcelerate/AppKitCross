@@ -325,7 +325,8 @@ final class TextDrawingTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(anyDark(10..<60, 60..<100), "text leaked above its box in non-flipped view")
             // Flipped: box top-left at (10,10) from the top, so glyphs are near the top: AppKit y 50...90.
             XCTAssertTrue(anyDark(110..<160, 52..<88), "text missing in flipped view")
-            XCTAssertFalse(anyDark(110..<160, 0..<40), "text at the wrong end of the flipped view")
+            // The forbidden band leaves room for fonts whose ascent exceeds the em (Segoe UI).
+            XCTAssertFalse(anyDark(110..<160, 0..<30), "text at the wrong end of the flipped view")
             w.close()
         }
     }

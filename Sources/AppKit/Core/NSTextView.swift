@@ -492,6 +492,13 @@ import CoreText
         _syncContainerSize()
     }
 
+    /// Colours were resolved at layout time, so a theme change lays the text out again.
+    open override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        _invalidateLayout()
+        needsDisplay = true
+    }
+
     open override var isFieldEditor: Bool {
         get { super.isFieldEditor }
         set { super.isFieldEditor = newValue; _syncContainerSize() }

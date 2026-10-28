@@ -282,7 +282,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
 
     func testDevicesAcceptMSL() throws {
         try MainActor.assumeIsolated {
-            let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+            let device = MTLReferenceDevice()   // the reference device: these tests check its behaviour, not the GPU backend
             let lib = try device.makeLibrary(source: Self.triangleMSL, options: nil)
             XCTAssertEqual(Set(lib.functionNames), ["triangleVertex", "triangleFragment"])
             XCTAssertEqual(lib.makeFunction(name: "triangleVertex")?.functionType, .vertex)

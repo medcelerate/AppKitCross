@@ -8,7 +8,7 @@ import MetalKit
 final class MetalReferenceDeviceTests: XCTestCase, @unchecked Sendable {
     func testBuffersTexturesBlitsAndCommandBuffers() throws {
         try MainActor.assumeIsolated {
-            let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+            let device = MTLReferenceDevice()   // the reference device: these tests check its behaviour, not the GPU backend
             XCTAssertFalse(device.supportsRasterization)
             let queue = try XCTUnwrap(device.makeCommandQueue())
             var floats: [Float] = [1, 2, 3, 4]
@@ -44,7 +44,7 @@ final class MetalReferenceDeviceTests: XCTestCase, @unchecked Sendable {
 
     func testLibrariesAndPipelines() throws {
         try MainActor.assumeIsolated {
-            let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+            let device = MTLReferenceDevice()   // the reference device: these tests check its behaviour, not the GPU backend
             let msl = """
             #include <metal_stdlib>
             using namespace metal;
