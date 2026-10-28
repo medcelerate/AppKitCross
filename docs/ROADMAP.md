@@ -7,7 +7,7 @@ are concrete and testable.
 
 | Milestone | State |
 |---|---|
-| M0 Foundation | done (CI still open) |
+| M0 Foundation | done |
 | M1 Window and drawing | done, verified on Windows |
 | M2 Controls and text | done, verified on Windows (field editor/IME deferred) |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
@@ -27,8 +27,9 @@ a remote session on a Windows 11 machine from the checklists in the commit histo
 - [x] Full public API inventory extracted from the macOS SDK (`api-inventory/`).
 - [x] Stub generator with coverage report (`tools/apigen`).
 - [x] Package layout that builds on macOS (host) and Windows.
-- [ ] CI: macOS host build + test, Windows build (GitHub Actions `windows-latest` with
-      the swift.org toolchain).
+- [x] CI: macOS host build + test, Windows build (GitHub Actions `windows-latest` with
+      the swift.org toolchain), Linux build in the `swift:6.2-noble` container
+      (`.github/workflows/ci.yml`).
 
 ## M1: Open a window and draw
 
