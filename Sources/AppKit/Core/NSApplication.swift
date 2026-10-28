@@ -187,7 +187,7 @@ import CoreText
     @MainActor open var dockTile: NSDockTile { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/effectiveappearance
     @available(macOS 10.14, *)
-    @MainActor open var effectiveAppearance: NSAppearance { unimplemented() }
+    @MainActor open var effectiveAppearance: NSAppearance { _appearance ?? NSAppearance(named: Platform.backend.systemAppearanceIsDark ? .darkAqua : .aqua)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enablerelaunchonlogin()
     @MainActor open func enableRelaunchOnLogin() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enabledremotenotificationtypes

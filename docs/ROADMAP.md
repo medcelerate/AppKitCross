@@ -181,7 +181,10 @@ bar, hidden title, transparent title bar, backdrop, transparency, shadow, movabl
 background, rounded corners) derived from `NSWindow` properties and pushed to the
 platform window; `platformWindowHitTest` decides caption vs client for dragging;
 `NSVisualEffectView` (materials map to Mica/Acrylic behind the window, translucent tint
-otherwise). HelloWindow: Help > Glass Window. Win32 side done and verified on Windows 11 Pro 25H2
+otherwise; HUD and dark materials carry the vibrant dark appearance). `NSAppearance`
+with effective-appearance inheritance (application → window → view) and dynamic semantic
+`NSColor`s (light and dark values resolved while a view draws; the application follows
+the Windows theme). HelloWindow: Help > Glass Window. Win32 side done and verified on Windows 11 Pro 25H2
 (build 26200.9711): windows whose content covers the frame (`fullSizeContentView` or
 borderless) keep their Win32 styles but answer `WM_NCCALCSIZE` so the client area is the
 whole window (maximised windows are inset by the frame), extend the DWM frame by one pixel

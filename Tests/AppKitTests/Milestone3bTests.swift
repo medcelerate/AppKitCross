@@ -73,3 +73,65 @@ final class WindowChromeTests: XCTestCase {
         w.close()
     }
 }
+
+@MainActor
+final class AppearanceTests: XCTestCase {
+    func testEffectiveAppearanceInheritsAndColoursResolve() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 50))
+        w.contentView!.addSubview(v)
+        XCTAssertEqual(v.effectiveAppearance.name, .aqua)
+        w.appearance = NSAppearance(named: .darkAqua)
+        XCTAssertEqual(v.effectiveAppearance.name, .darkAqua)
+        XCTAssertTrue(v.effectiveAppearance.isDark)
+        v.appearance = NSAppearance(named: .aqua)
+        XCTAssertEqual(v.effectiveAppearance.name, .aqua)
+        XCTAssertNil(NSAppearance(named: NSAppearance.Name("bogus")))
+        XCTAssertEqual(NSAppearance(named: .darkAqua)!.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
+        XCTAssertEqual(NSAppearance(named: .aqua)!.bestMatch(from: [.vibrantDark, .darkAqua]), .darkAqua)
+        // Semantic colours follow the drawing appearance.
+        XCTAssertEqual(NSColor.textBackgroundColor.redComponent, 1)
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance {
+            XCTAssertLessThan(NSColor.textBackgroundColor.redComponent, 0.2)
+            XCTAssertGreaterThan(NSColor.labelColor.redComponent, 0.9)
+        }
+        XCTAssertEqual(NSColor.textBackgroundColor.redComponent, 1)
+        w.close()
+    }
+
+    func testHUDEffectViewDrawsFieldsDark() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        effect.material = .hudWindow
+        XCTAssertEqual(effect.effectiveAppearance.name, .vibrantDark)
+        let field = NSTextField()
+        field.frame = NSRect(x: 20, y: 40, width: 120, height: 24)
+        effect.addSubview(field)
+        XCTAssertTrue(field.effectiveAppearance.isDark)
+        w.contentView!.addSubview(effect)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        let platform = Mirror(reflecting: w).descendant("_platform") as! HostWindow
+        let image = platform.lastImage!
+        let data = _pixels(image)
+        func pixel(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+            let row = image.height - 1 - y * 2
+            let i = row * image.bytesPerRow + x * 2 * 4
+            return (data[i + 2], data[i + 1], data[i])
+        }
+        let inField = pixel(80, 52)
+        XCTAssertLessThan(inField.r, 90, "the field bezel is dark on a HUD material")
+        // A field on a plain window stays light.
+        let light = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let f2 = NSTextField()
+        f2.frame = NSRect(x: 20, y: 40, width: 120, height: 24)
+        light.contentView!.addSubview(f2)
+        light.makeKeyAndOrderFront(nil)
+        light.display()
+        let p2 = Mirror(reflecting: light).descendant("_platform") as! HostWindow
+        let d2 = _pixels(p2.lastImage!)
+        let i2 = (p2.lastImage!.height - 1 - 52 * 2) * p2.lastImage!.bytesPerRow + 80 * 2 * 4
+        XCTAssertGreaterThan(d2[i2 + 2], 200)
+        w.close(); light.close()
+    }
+}

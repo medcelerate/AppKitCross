@@ -52,7 +52,8 @@
     "NSTabViewController",
     "NSTabView",
     "NSTabViewItem",
-    "NSVisualEffectView"
+    "NSVisualEffectView",
+    "NSAppearance"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",

@@ -221,6 +221,7 @@ final class Win32Backend: PlatformBackend {
     }
 
     func beep() { MessageBeep(UINT(MB_OK)) }
+    var systemAppearanceIsDark: Bool { Win32Window.systemAppThemeIsDark() }
 
     // MARK: File dialogs
 

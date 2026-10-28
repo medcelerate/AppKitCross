@@ -149,6 +149,7 @@ final class LinuxBackend: PlatformBackend {
     }
 
     func beep() { XBell(display, 0) }
+    var systemAppearanceIsDark: Bool { false }
 
     var mouseLocation: NSPoint {
         var rootReturn: Window = 0, childReturn: Window = 0

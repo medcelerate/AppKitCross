@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 53 |
-| Types generated | 485 |
+| Types handwritten | 54 |
+| Types generated | 484 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10205 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 956 |
+| Members unimplemented-calls | 955 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -82,9 +82,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAnimationDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSAnimationEffect | enum | generated | 3 | 0 | 0 |  |
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
-| NSAppearance | class | generated | 18 | 0 | 1 |  |
+| NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 49 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 48 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |

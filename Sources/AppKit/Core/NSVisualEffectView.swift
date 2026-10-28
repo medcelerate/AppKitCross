@@ -16,7 +16,16 @@ import Foundation
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsvisualeffectview/material
     open var material: NSVisualEffectView.Material {
         get { _material }
-        set { _material = newValue; _applyBackdrop(); needsDisplay = true }
+        set { _material = newValue; _applyMaterialAppearance(); _applyBackdrop(); needsDisplay = true }
+    }
+
+    /// HUD and dark materials carry the vibrant dark appearance so their content draws dark.
+    private func _applyMaterialAppearance() {
+        switch _material {
+        case .hudWindow, .dark, .ultraDark: appearance = NSAppearance(named: .vibrantDark)
+        case .light, .mediumLight: appearance = NSAppearance(named: .vibrantLight)
+        default: break
+        }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsvisualeffectview/blendingmode

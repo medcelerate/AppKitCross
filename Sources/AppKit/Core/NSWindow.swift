@@ -49,6 +49,7 @@ import CoreText
     private var _toolbar: NSToolbar? = nil
     private var _titleVisibility: NSWindow.TitleVisibility = .visible
     private var _titlebarAppearsTransparent = false
+    private var _appearance: NSAppearance? = nil
     /// Backdrop requested by an NSVisualEffectView blending behind the window.
     internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { _updateChrome() } }
     private weak var _windowController: NSWindowController?
@@ -123,6 +124,15 @@ import CoreText
         _contentView?.needsDisplay = true
         _platform?.setNeedsDisplay(nil)
     }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/appearance
+    @MainActor public var appearance: NSAppearance? {
+        get { _appearance }
+        set { _appearance = newValue; _contentView?._effectiveAppearanceDidChange(); _platform?.setNeedsDisplay(nil) }
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/effectiveappearance
+    @MainActor public var effectiveAppearance: NSAppearance { _appearance ?? NSApplication.shared.effectiveAppearance }
 
     /// The chrome the backend should show for the current properties.
     internal var _chrome: PlatformWindowChrome {

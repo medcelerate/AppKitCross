@@ -68,6 +68,7 @@ final class HostBackend: PlatformBackend {
     }
 
     func beep() { beepCount += 1 }
+    var systemAppearanceIsDark = false
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 

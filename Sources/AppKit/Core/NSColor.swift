@@ -25,15 +25,37 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         case rgb(CGFloat, CGFloat, CGFloat, CGFloat)
         case gray(CGFloat, CGFloat)
         case named(String, CGFloat, CGFloat, CGFloat, CGFloat)
+        /// A semantic colour whose alpha was replaced (`withAlphaComponent`): the hue still
+        /// follows the appearance, the alpha is the caller's.
+        case namedAlpha(String, CGFloat, CGFloat, CGFloat, CGFloat)
 
         var rgba: (CGFloat, CGFloat, CGFloat, CGFloat) {
             switch self {
             case let .rgb(r, g, b, a): return (r, g, b, a)
             case let .gray(w, a): return (w, w, w, a)
-            case let .named(_, r, g, b, a): return (r, g, b, a)
+            case let .named(name, r, g, b, a):
+                if NSAppearance.currentIsDark, let dark = NSColor.darkValues[name] { return dark }
+                return (r, g, b, a)
+            case let .namedAlpha(name, r, g, b, a):
+                if NSAppearance.currentIsDark, let dark = NSColor.darkValues[name] { return (dark.0, dark.1, dark.2, a) }
+                return (r, g, b, a)
             }
         }
     }
+
+    /// Dark-appearance values of the semantic colours (Apple's dark Aqua palette).
+    internal static let darkValues: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = [
+        "alternatingContentBackgroundColors0": (0.118, 0.118, 0.118, 1), "alternatingContentBackgroundColors1": (0.145, 0.145, 0.145, 1),
+        "controlBackgroundColor": (0.118, 0.118, 0.118, 1), "controlColor": (0.4, 0.4, 0.4, 1), "controlTextColor": (1, 1, 1, 0.85),
+        "disabledControlTextColor": (1, 1, 1, 0.25), "gridColor": (0.1, 0.1, 0.1, 1), "headerTextColor": (1, 1, 1, 0.85),
+        "keyboardFocusIndicatorColor": (0.1, 0.47, 0.9, 0.5), "labelColor": (1, 1, 1, 0.85), "linkColor": (0.25, 0.56, 1, 1),
+        "placeholderTextColor": (1, 1, 1, 0.25), "quaternaryLabelColor": (1, 1, 1, 0.1), "scrollBarColor": (0.5, 0.5, 0.5, 1),
+        "secondaryLabelColor": (1, 1, 1, 0.55), "selectedContentBackgroundColor": (0, 0.345, 0.74, 1), "selectedControlColor": (0.24, 0.42, 0.62, 1),
+        "selectedTextBackgroundColor": (0.24, 0.42, 0.62, 1), "selectedTextColor": (1, 1, 1, 1), "separatorColor": (1, 1, 1, 0.1),
+        "tertiaryLabelColor": (1, 1, 1, 0.25), "textBackgroundColor": (0.118, 0.118, 0.118, 0.92), "textColor": (1, 1, 1, 1),
+        "underPageBackgroundColor": (0.16, 0.16, 0.16, 0.9), "unemphasizedSelectedContentBackgroundColor": (0.27, 0.27, 0.27, 1),
+        "windowBackgroundColor": (0.196, 0.196, 0.196, 1), "windowFrameTextColor": (1, 1, 1, 0.85),
+    ]
     internal let storage: Storage
 
     private init(storage: Storage) {
@@ -82,6 +104,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         case let .rgb(r, g, b, a): return "sRGB IEC61966-2.1 colorspace \(r) \(g) \(b) \(a)"
         case let .gray(w, a): return "Generic Gray Gamma 2.2 Profile colorspace \(w) \(a)"
         case let .named(n, _, _, _, _): return "Catalog color: System \(n)"
+        case let .namedAlpha(n, _, _, _, a): return "Catalog color: System \(n) alpha \(a)"
         }
     }
     open override func isEqual(_ object: Any?) -> Bool {
@@ -537,7 +560,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         switch storage {
         case let .rgb(r, g, b, _): return NSColor(storage: .rgb(r, g, b, alpha))
         case let .gray(w, _): return NSColor(storage: .gray(w, alpha))
-        case let .named(n, r, g, b, _): return NSColor(storage: .named(n, r, g, b, alpha))
+        case let .named(n, r, g, b, _), let .namedAlpha(n, r, g, b, _): return NSColor(storage: .namedAlpha(n, r, g, b, alpha))
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/withsystemeffect(_:)

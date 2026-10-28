@@ -34,6 +34,7 @@ import CoreText
     private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
+    private var _appearance: NSAppearance? = nil
     private var _constraints: [NSLayoutConstraint] = []
     private var _layoutGuides: [NSLayoutGuide] = []
     private var _anchors: [NSLayoutConstraint.Attribute: AnyObject] = [:]
@@ -343,11 +344,14 @@ import CoreText
         let gc = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
+        let previousAppearance = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
         viewWillDraw()
         _dirtyRect = localDirty
         draw(localDirty)
         _dirtyRect = nil
         for sub in _subviews { sub._displayHierarchy(in: ctx, dirtyRect: localDirty) }
+        NSAppearance.current = previousAppearance
         NSGraphicsContext.current = previous
         ctx.restoreGState()
         _needsDisplay = false
@@ -365,6 +369,23 @@ import CoreText
             w._viewNeedsDisplay(self, rect: rect)
         }
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/appearance
+    @MainActor public var appearance: NSAppearance? {
+        get { _appearance }
+        set { _appearance = newValue; _effectiveAppearanceDidChange(); setNeedsDisplay(bounds) }
+    }
+
+    /// Inherited from the superview, then the window, then the application.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/effectiveappearance
+    @MainActor public var effectiveAppearance: NSAppearance {
+        _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
+    }
+
+    internal func _effectiveAppearanceDidChange() {
+        viewDidChangeEffectiveAppearance()
+        for s in _subviews where s._appearance == nil { s._effectiveAppearanceDidChange() }
+    }
+
     /// The animator proxy. The next `frame`/`alphaValue` change on a layer-backed view
     /// animates over `NSAnimationContext.current.duration`; other views change at once.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimatablepropertycontainer/animator()
@@ -441,6 +462,7 @@ import CoreText
         view._setWindow(_window)
         if _layer != nil && !_layerIsHosted { view._becomeLayerBacked() } else if view._layer != nil { view._attachLayerToSuperview() }
         _setNeedsConstraintLayout()
+        if view._appearance == nil { view._effectiveAppearanceDidChange() }
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
@@ -1441,12 +1463,15 @@ extension NSView: CALayerDelegate, CALayerHost {
         let gc = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
+        let previousAppearance = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
         viewWillDraw()
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }
         _dirtyRect = b
         if wantsUpdateLayer { updateLayer() } else { draw(b) }
         _dirtyRect = nil
+        NSAppearance.current = previousAppearance
         NSGraphicsContext.current = previous
         _needsDisplay = false
     }

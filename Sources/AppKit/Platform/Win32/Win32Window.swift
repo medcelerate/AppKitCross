@@ -87,7 +87,7 @@ final class Win32Window: PlatformWindow {
     }
 
     /// Whether the system app theme is dark (HKCU ...\Themes\Personalize\AppsUseLightTheme == 0).
-    private static func systemAppThemeIsDark() -> Bool {
+    static func systemAppThemeIsDark() -> Bool {
         var value: DWORD = 1
         var size = DWORD(MemoryLayout<DWORD>.size)
         // HKEY_CURRENT_USER is ((HKEY)(ULONG_PTR)((LONG)0x80000001)), sign-extended on x64.
