@@ -113,7 +113,7 @@ final class Win32Backend: PlatformBackend {
             if mask.contains(.miniaturizable) { style |= DWORD(WS_MINIMIZEBOX) }
             if mask.contains(.resizable) { style |= DWORD(WS_THICKFRAME | WS_MAXIMIZEBOX) }
         } else {
-            style |= DWORD(WS_POPUP | WS_CLIPCHILDREN)
+            style |= DWORD(WS_POPUP) | DWORD(WS_CLIPCHILDREN)
             if mask.contains(.resizable) { style |= DWORD(WS_THICKFRAME) }
         }
         if mask.contains(.utilityWindow) { ex |= DWORD(WS_EX_TOOLWINDOW) }
@@ -151,8 +151,8 @@ final class Win32Backend: PlatformBackend {
         running = true
         var msg = MSG()
         while running {
-            let r = GetMessageW(&msg, nil, 0, 0)
-            if r == 0 || r == -1 { break }
+            // The overlay imports BOOL as Bool: WM_QUIT (0) and errors (-1) both end the loop.
+            if !GetMessageW(&msg, nil, 0, 0) { break }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
         }
@@ -190,7 +190,7 @@ final class Win32Backend: PlatformBackend {
             wc.style = UINT(CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS)
             wc.lpfnWndProc = Win32Window.windowProc
             wc.hInstance = hInstance
-            wc.hCursor = LoadCursorW(nil, IDC_ARROW)
+            wc.hCursor = LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32512))   // IDC_ARROW
             wc.hbrBackground = nil
             wc.lpszClassName = name
             _ = RegisterClassExW(&wc)
@@ -207,7 +207,7 @@ final class Win32Backend: PlatformBackend {
 
     private func createMessageWindow() {
         messageWindow = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
-            CreateWindowExW(0, name, name, 0, 0, 0, 0, 0, HWND_MESSAGE, nil, hInstance, nil)
+            CreateWindowExW(0, name, name, 0, 0, 0, 0, 0, HWND(bitPattern: -3) /* HWND_MESSAGE */, nil, hInstance, nil)
         }
         if let hwnd = messageWindow {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))

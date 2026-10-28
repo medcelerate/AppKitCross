@@ -114,7 +114,7 @@ final class Win32Window: PlatformWindow {
     func show() { if let hwnd { ShowWindow(hwnd, SW_SHOWNORMAL); UpdateWindow(hwnd) } }
     func hide() { if let hwnd { ShowWindow(hwnd, SW_HIDE) } }
     func makeKey() { if let hwnd { SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd) } }
-    func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }
+    func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND(bitPattern: 1) /* HWND_BOTTOM */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }
 
     func close() {
         guard let hwnd, !destroying else { return }
