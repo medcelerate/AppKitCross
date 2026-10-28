@@ -16,10 +16,10 @@ are concrete and testable.
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised) |
-| M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 92/92 tests pass in the `swift:6.2-noble` container |
-| M9 CoreText | module on main (ADR-0007): Linux engine verified (tests and HelloWindow); DirectWrite engine awaiting Windows compile |
+| M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 98/98 tests pass in the `swift:6.2-noble` container |
+| M9 CoreText and the text system | CoreText module on main (ADR-0007): Linux engine verified, DirectWrite engine awaiting Windows compile; NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them (98/98 tests on macOS and Linux) |
 
-The macOS host build and the Linux container run the full test suite (92 tests); Windows verification is done by
+The macOS host build and the Linux container run the full test suite (98 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
 
 ## M0: Foundation (this milestone)
