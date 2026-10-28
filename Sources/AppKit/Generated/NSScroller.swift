@@ -24,7 +24,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/checkspaceforparts()
     @MainActor open func checkSpaceForParts() { unimplemented() }
-    // INHERITED (identical redeclaration): @MainActor var controlSize: NSControl.ControlSize { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/controlsize
+    @MainActor open override var controlSize: NSControl.ControlSize {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/controltint
     @MainActor open var controlTint: NSControlTint {
         get { unimplemented() }

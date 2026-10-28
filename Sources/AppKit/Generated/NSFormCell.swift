@@ -26,7 +26,8 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
-    // INHERITED (identical redeclaration): @MainActor var isOpaque: Bool { get }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsformcell/isopaque
+    @MainActor open override var isOpaque: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsformcell/placeholderattributedstring
     @MainActor open var placeholderAttributedString: NSAttributedString? {
         get { unimplemented() }
@@ -42,7 +43,11 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
-    // INHERITED (identical redeclaration): @MainActor var title: String { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsformcell/title
+    @MainActor open override var title: String {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsformcell/titlealignment
     @MainActor open var titleAlignment: NSTextAlignment {
         get { unimplemented() }

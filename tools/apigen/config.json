@@ -1,8 +1,13 @@
 {
   "handwritten": [
+    "NSActionCell",
     "NSApplication",
     "NSBezierPath",
+    "NSButton",
+    "NSButtonCell",
+    "NSCell",
     "NSColor",
+    "NSControl",
     "NSEvent",
     "NSFont",
     "NSGraphicsContext",

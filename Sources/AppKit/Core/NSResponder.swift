@@ -164,7 +164,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/touchesmoved(with:)
     @MainActor open func touchesMoved(with event: NSEvent) { nextResponder?.touchesMoved(with: event) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/trytoperform(_:with:)
-    @MainActor open func tryToPerform(_ action: Selector, with object: Any?) -> Bool { nextResponder?.tryToPerform(action, with: object) ?? false }
+    @MainActor open func tryToPerform(_ action: Selector, with object: Any?) -> Bool {
+        if ActionRegistry.perform(action, on: self, with: object) { return true }
+        return nextResponder?.tryToPerform(action, with: object) ?? false
+    }
     // SKIPPED (Foundation.UndoManager not in corelibs): @MainActor var undoManager: UndoManager? { get }
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor func updateUserActivityState(_ userActivity: NSUserActivity)
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor var userActivity: NSUserActivity? { get set }

@@ -5,6 +5,12 @@ import AppKit
 
 final class CanvasView: NSView {
     private var clicks: [NSPoint] = []
+    var showsGrid = true { didSet { needsDisplay = true } }
+
+    func clearDots() {
+        clicks.removeAll()
+        needsDisplay = true
+    }
 
     override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
@@ -14,16 +20,18 @@ final class CanvasView: NSView {
         NSBezierPath.fill(bounds)
 
         // Background grid
-        NSColor.separatorColor.setStroke()
-        var x: CGFloat = 0
-        while x < bounds.width {
-            NSBezierPath.strokeLine(from: NSPoint(x: x, y: 0), to: NSPoint(x: x, y: bounds.height))
-            x += 40
-        }
-        var y: CGFloat = 0
-        while y < bounds.height {
-            NSBezierPath.strokeLine(from: NSPoint(x: 0, y: y), to: NSPoint(x: bounds.width, y: y))
-            y += 40
+        if showsGrid {
+            NSColor.separatorColor.setStroke()
+            var x: CGFloat = 0
+            while x < bounds.width {
+                NSBezierPath.strokeLine(from: NSPoint(x: x, y: 0), to: NSPoint(x: x, y: bounds.height))
+                x += 40
+            }
+            var y: CGFloat = 0
+            while y < bounds.height {
+                NSBezierPath.strokeLine(from: NSPoint(x: 0, y: y), to: NSPoint(x: bounds.width, y: y))
+                y += 40
+            }
         }
 
         // Filled rounded rectangle with a stroke
@@ -70,16 +78,25 @@ final class CanvasView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.characters == "c" {
-            clicks.removeAll()
-            needsDisplay = true
+            clearDots()
         } else {
             super.keyDown(with: event)
         }
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSelectorHandling {
     var window: NSWindow!
+    var canvas: CanvasView!
+
+    // Actions arrive here by selector name (no Objective-C runtime on Windows).
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action {
+        case Selector(("clearDots:")): canvas.clearDots(); return true
+        case Selector(("toggleGrid:")): canvas.showsGrid = (sender as? NSButton)?.state == .on; return true
+        default: return false
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
@@ -90,6 +107,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let canvas = CanvasView(frame: window.contentView!.bounds)
         canvas.autoresizingMask = [.width, .height]
         window.contentView = canvas
+
+        // Milestone 2: a push button and a checkbox wired with target/action.
+        let clear = NSButton(title: "Clear dots", target: self, action: Selector(("clearDots:")))
+        clear.frame.origin = NSPoint(x: canvas.bounds.maxX - clear.frame.width - 16, y: canvas.bounds.maxY - clear.frame.height - 16)
+        clear.autoresizingMask = [.minXMargin, .minYMargin]
+        clear.keyEquivalent = "\r"
+        canvas.addSubview(clear)
+        let grid = NSButton(checkboxWithTitle: "Show grid", target: self, action: Selector(("toggleGrid:")))
+        grid.state = .on
+        grid.frame.origin = NSPoint(x: clear.frame.minX - grid.frame.width - 16, y: clear.frame.midY - grid.frame.height / 2)
+        grid.autoresizingMask = [.minXMargin, .minYMargin]
+        canvas.addSubview(grid)
+        self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)
         _ = window.makeFirstResponder(canvas)

@@ -333,12 +333,17 @@ import CoreText
     @MainActor open func searchString(_ searchString: String, inUserInterfaceItemString stringToSearch: String, range searchRange: NSRange, found foundRange: UnsafeMutablePointer<NSRange>?) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendaction(_:to:from:)
     @MainActor open func sendAction(_ action: Selector, to target: Any?, from sender: Any?) -> Bool {
-        // Selector dispatch without an ObjC runtime is routed through NSResponder.tryToPerform,
-        // which the control classes will build on. Explicit targets are not yet supported.
-        if target != nil { return false }
+        // See TargetAction.swift: explicit targets get the action directly; nil walks the
+        // responder chain from the key window's first responder, then the main window's,
+        // then the application and its delegate.
+        if let target {
+            return ActionRegistry.perform(action, on: target as AnyObject, with: sender)
+        }
         if let key = keyWindow, key.firstResponder?.tryToPerform(action, with: sender) == true { return true }
         if let main = mainWindow, main !== keyWindow, main.firstResponder?.tryToPerform(action, with: sender) == true { return true }
-        return tryToPerform(action, with: sender)
+        if tryToPerform(action, with: sender) { return true }
+        if let d = delegate { return ActionRegistry.perform(action, on: d, with: sender) }
+        return false
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
     @MainActor open func sendEvent(_ event: NSEvent) {

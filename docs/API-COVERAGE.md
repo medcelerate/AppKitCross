@@ -9,11 +9,11 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 10 |
-| Types generated | 528 |
+| Types handwritten | 15 |
+| Types generated | 523 |
 | Types pending | 3 |
 | Types skipped | 0 |
-| Members emitted | 10192 |
+| Members emitted | 10204 |
 | Members blocked | 187 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 605 |
+| Members unimplemented-calls | 686 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -69,7 +69,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAccessibilitySwitch | protocol | generated | 3 | 0 | 0 |  |
 | NSAccessibilityTable | protocol | generated | 13 | 0 | 0 |  |
 | NSAccessibilityUnits | enum | generated | 5 | 0 | 0 |  |
-| NSActionCell | class | generated | 0 | 0 | 0 |  |
+| NSActionCell | class | handwritten | 3 | 0 | 0 | 2 |
 | NSAdaptiveImageGlyph | class | generated | 5 | 2 | 0 |  |
 | NSAlert | class | generated | 21 | 0 | 1 |  |
 | NSAlertDelegate | protocol | generated | 1 | 0 | 0 |  |
@@ -97,15 +97,15 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
 | NSBox | class | generated | 29 | 0 | 2 |  |
 | NSBrowser | class | generated | 95 | 1 | 3 |  |
-| NSBrowserCell | class | generated | 11 | 0 | 0 |  |
+| NSBrowserCell | class | generated | 12 | 0 | 0 |  |
 | NSBrowserDelegate | protocol | generated | 34 | 0 | 0 |  |
-| NSButton | class | generated | 77 | 0 | 3 |  |
-| NSButtonCell | class | generated | 31 | 1 | 0 |  |
+| NSButton | class | handwritten | 77 | 0 | 3 | 17 |
+| NSButtonCell | class | handwritten | 32 | 1 | 0 | 9 |
 | NSButtonTouchBarItem | class | generated | 9 | 1 | 0 |  |
 | NSCIImageRep | class | generated | 0 | 2 | 0 |  |
 | NSCandidateListTouchBarItem | class | generated | 10 | 1 | 0 |  |
 | NSCandidateListTouchBarItemDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSCell | class | generated | 128 | 0 | 5 |  |
+| NSCell | class | handwritten | 128 | 0 | 5 | 41 |
 | NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |
 | NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |
 | NSClickGestureRecognizer | class | generated | 3 | 0 | 0 |  |
@@ -174,7 +174,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSComboBoxDelegate | protocol | generated | 4 | 0 | 0 |  |
 | NSComboButton | class | generated | 9 | 1 | 1 |  |
 | NSCompositingOperation | enum | generated | 28 | 0 | 0 |  |
-| NSControl | class | generated | 80 | 0 | 4 |  |
+| NSControl | class | handwritten | 80 | 0 | 4 | 12 |
 | NSControlTextEditingDelegate | protocol | generated | 10 | 0 | 0 |  |
 | NSControlTint | enum | generated | 4 | 0 | 0 |  |
 | NSController | class | generated | 8 | 0 | 0 |  |
@@ -235,7 +235,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
 | NSForm | class | generated | 21 | 0 | 0 |  |
-| NSFormCell | class | generated | 11 | 0 | 0 |  |
+| NSFormCell | class | generated | 13 | 0 | 0 |  |
 | NSGestureRecognizer | class | generated | 52 | 0 | 1 |  |
 | NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |
 | NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |
@@ -286,7 +286,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMenuDelegate | protocol | generated | 8 | 0 | 0 |  |
 | NSMenuItem | class | generated | 42 | 0 | 0 |  |
 | NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |
-| NSMenuItemCell | class | generated | 19 | 0 | 0 |  |
+| NSMenuItemCell | class | generated | 20 | 0 | 0 |  |
 | NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |
 | NSMenuToolbarItem | class | generated | 2 | 0 | 0 |  |
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
@@ -323,14 +323,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPasteboardWriting | protocol | generated | 3 | 0 | 0 |  |
 | NSPathCell | class | generated | 16 | 0 | 0 |  |
 | NSPathCellDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSPathComponentCell | class | generated | 1 | 0 | 0 |  |
+| NSPathComponentCell | class | generated | 2 | 0 | 0 |  |
 | NSPathControl | class | generated | 18 | 0 | 1 |  |
 | NSPathControlDelegate | protocol | generated | 6 | 0 | 0 |  |
 | NSPathControlItem | class | generated | 4 | 0 | 0 |  |
 | NSPersistentDocument | class | generated | 5 | 2 | 0 |  |
 | NSPickerTouchBarItem | class | generated | 24 | 1 | 2 |  |
 | NSPopUpButton | class | generated | 42 | 0 | 1 |  |
-| NSPopUpButtonCell | class | generated | 39 | 0 | 0 |  |
+| NSPopUpButtonCell | class | generated | 40 | 0 | 0 |  |
 | NSPopover | class | generated | 29 | 0 | 3 |  |
 | NSPopoverDelegate | protocol | generated | 8 | 0 | 0 |  |
 | NSPopoverTouchBarItem | class | generated | 9 | 1 | 0 |  |
@@ -358,7 +358,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSScreen | class | handwritten | 30 | 0 | 0 | 19 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
 | NSScrollView | class | generated | 61 | 0 | 2 |  |
-| NSScroller | class | generated | 41 | 0 | 6 |  |
+| NSScroller | class | generated | 42 | 0 | 6 |  |
 | NSScrubber | class | generated | 35 | 0 | 2 |  |
 | NSScrubberArrangedView | class | generated | 3 | 0 | 0 |  |
 | NSScrubberDataSource | protocol | generated | 2 | 0 | 0 |  |
@@ -399,7 +399,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSlider | class | generated | 25 | 0 | 2 |  |
 | NSSliderAccessory | class | generated | 5 | 0 | 1 |  |
 | NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |
-| NSSliderCell | class | generated | 20 | 0 | 0 |  |
+| NSSliderCell | class | generated | 21 | 0 | 0 |  |
 | NSSliderTouchBarItem | class | generated | 10 | 2 | 0 |  |
 | NSSound | class | generated | 24 | 2 | 3 |  |
 | NSSoundDelegate | protocol | generated | 1 | 0 | 0 |  |

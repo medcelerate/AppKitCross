@@ -60,7 +60,8 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
-    // INHERITED (identical redeclaration): @MainActor class var prefersTrackingUntilMouseUp: Bool { get }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/preferstrackinguntilmouseup
+    @MainActor class public override var prefersTrackingUntilMouseUp: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/rectoftickmark(at:)
     @MainActor open func rectOfTickMark(at index: Int) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/slidertype

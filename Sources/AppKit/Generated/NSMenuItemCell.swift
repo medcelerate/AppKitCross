@@ -60,7 +60,11 @@ import CoreText
     @MainActor open func stateImageRect(forBounds cellFrame: NSRect) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitemcell/stateimagewidth
     @MainActor open var stateImageWidth: CGFloat { unimplemented() }
-    // INHERITED (identical redeclaration): @MainActor var tag: Int { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitemcell/tag
+    @MainActor open override var tag: Int {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitemcell/titlerect(forbounds:)
     @MainActor open override func titleRect(forBounds cellFrame: NSRect) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitemcell/titlewidth

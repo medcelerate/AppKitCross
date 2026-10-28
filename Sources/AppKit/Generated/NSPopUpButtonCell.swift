@@ -70,7 +70,11 @@ import CoreText
     @MainActor open var itemTitles: [String] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/lastitem
     @MainActor open var lastItem: NSMenuItem? { unimplemented() }
-    // INHERITED (identical redeclaration): @MainActor var menu: NSMenu? { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/menu
+    @MainActor open override var menu: NSMenu? {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/numberofitems
     @MainActor open var numberOfItems: Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/performclick(withframe:in:)

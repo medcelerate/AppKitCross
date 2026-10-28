@@ -307,3 +307,124 @@ final class TextDrawingTests: XCTestCase {
     }
     #endif
 }
+
+@MainActor
+final class ControlTests: XCTestCase {
+    final class Target: NSObject, NSSelectorHandling {
+        var received: [String] = []
+        func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+            received.append("\(action)")
+            return true
+        }
+    }
+
+    func testButtonSendsActionToTargetOnClick() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        let target = Target()
+        let button = NSButton(title: "Press", target: target, action: Selector(("press:")))
+        XCTAssertGreaterThan(button.frame.width, 40, "sizeToFit gives the button a width")
+        button.setFrameOrigin(NSPoint(x: 20, y: 20))
+        w.contentView!.addSubview(button)
+        w.makeKeyAndOrderFront(nil)
+        let inside = NSPoint(x: button.frame.midX, y: button.frame.midY)
+        let down = NSEvent.mouseEvent(with: .leftMouseDown, location: inside, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        let up = NSEvent.mouseEvent(with: .leftMouseUp, location: inside, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!
+        NSApp.sendEvent(down)
+        XCTAssertTrue(button.isHighlighted)
+        NSApp.sendEvent(up)
+        XCTAssertFalse(button.isHighlighted)
+        XCTAssertEqual(target.received, ["press:"])
+        // Releasing outside cancels.
+        NSApp.sendEvent(down)
+        let outside = NSEvent.mouseEvent(with: .leftMouseUp, location: NSPoint(x: 290, y: 190), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 3, clickCount: 1, pressure: 0)!
+        NSApp.sendEvent(outside)
+        XCTAssertEqual(target.received.count, 1)
+        button.isEnabled = false
+        button.performClick(nil)
+        XCTAssertEqual(target.received.count, 1, "disabled buttons do not fire")
+        w.close()
+    }
+
+    func testCheckboxTogglesStateAndClosureHandlers() {
+        let box = NSButton(checkboxWithTitle: "Enable", target: nil, action: Selector(("toggle:")))
+        XCTAssertEqual(box.state, .off)
+        var fired = 0
+        let handler = NSObject()
+        handler.setActionHandler(for: Selector(("toggle:"))) { _ in fired += 1 }
+        box.target = handler
+        box.performClick(nil)
+        XCTAssertEqual(box.state, .on)
+        XCTAssertEqual(fired, 1)
+        box.performClick(nil)
+        XCTAssertEqual(box.state, .off)
+        box.allowsMixedState = true
+        box.state = .mixed
+        box.setNextState()
+        XCTAssertEqual(box.state, .on)
+    }
+
+    func testActionWalksResponderChainAndKeyEquivalent() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        final class Host: NSView, NSSelectorHandling {
+            var got = 0
+            override var acceptsFirstResponder: Bool { true }
+            func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+                guard action == Selector(("go:")) else { return false }
+                got += 1
+                return true
+            }
+        }
+        let host = Host(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        w.contentView = host
+        let button = NSButton(title: "Go", target: nil, action: Selector(("go:")))
+        button.keyEquivalent = "\r"
+        host.addSubview(button)
+        w.makeKeyAndOrderFront(nil)
+        XCTAssertTrue(w.makeFirstResponder(host))
+        button.performClick(nil)
+        XCTAssertEqual(host.got, 1, "nil target reaches the first responder through the responder chain")
+        let ret = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)!
+        NSApp.sendEvent(ret)
+        XCTAssertEqual(host.got, 2, "return key triggers the default button")
+        w.close()
+    }
+
+    func testControlValuesAndCell() {
+        let c = NSControl(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        XCTAssertNil(c.cell)
+        c.cell = NSCell(textCell: "42")
+        XCTAssertEqual(c.stringValue, "42")
+        XCTAssertEqual(c.integerValue, 42)
+        c.doubleValue = 2.5
+        XCTAssertEqual(c.stringValue, "2.5")
+        XCTAssertEqual(c.floatValue, 2.5)
+        c.isEnabled = false
+        XCTAssertFalse(c.cell!.isEnabled)
+    }
+
+    #if canImport(CoreGraphics)
+    func testButtonDrawsBezel() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        w.backgroundColor = .white
+        let b = NSButton(title: "OK", target: nil, action: nil)
+        b.frame = NSRect(x: 20, y: 30, width: 120, height: 32)
+        w.contentView!.addSubview(b)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        guard let image = platform?.lastImage else { return XCTFail("no image") }
+        let data = image.dataProvider!.data! as Data
+        func px(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8) {
+            let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
+            return (data[i + 2], data[i + 1], data[i])
+        }
+        // Some pixel on the border is not white; the far background is white.
+        var nonWhite = false
+        for x in 20..<140 { let p = px(x, 30); if p.0 < 250 || p.1 < 250 || p.2 < 250 { nonWhite = true; break } }
+        XCTAssertTrue(nonWhite, "button border drawn")
+        let bg = px(180, 90)
+        XCTAssertGreaterThan(bg.0, 250)
+        w.close()
+    }
+    #endif
+}

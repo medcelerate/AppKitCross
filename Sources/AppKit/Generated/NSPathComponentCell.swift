@@ -17,7 +17,11 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcomponentcell
 @MainActor open class NSPathComponentCell: NSTextFieldCell {
-    // INHERITED (identical redeclaration): @MainActor var image: NSImage? { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcomponentcell/image
+    @MainActor open override var image: NSImage? {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcomponentcell/url
     @MainActor open var url: URL? {
         get { unimplemented() }

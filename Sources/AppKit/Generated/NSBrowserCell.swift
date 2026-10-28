@@ -34,7 +34,11 @@ import CoreText
     @MainActor open func highlightColor(in controlView: NSView) -> NSColor? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbrowsercell/highlightedbranchimage
     @MainActor class public var highlightedBranchImage: NSImage? { unimplemented() }
-    // INHERITED (identical redeclaration): @MainActor var image: NSImage? { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbrowsercell/image
+    @MainActor open override var image: NSImage? {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbrowsercell/isleaf
     @MainActor open var isLeaf: Bool {
         get { unimplemented() }
