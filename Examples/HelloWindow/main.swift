@@ -430,8 +430,25 @@ enum MetalSelfTest {
     struct VSOut { float4 position : SV_Position; float4 color : COLOR0; };
     VSOut triangleVertex(VSIn v) { VSOut o; o.position = float4(v.position, 0, 1); o.color = v.color * tint; return o; }
     float4 triangleFragment(VSOut i) : SV_Target { return i.color; }
+    Texture2D image;
+    SamplerState imageSampler;
+    float4 sampledFragment(VSOut i) : SV_Target { return image.Sample(imageSampler, i.color.xy); }
     """
     struct Vertex { var x: Float, y: Float, r: Float, g: Float, b: Float, a: Float }
+
+    static func render(_ queue: any MTLCommandQueue, _ pass: MTLRenderPassDescriptor, _ pipeline: any MTLRenderPipelineState, _ vertices: any MTLBuffer, tint: inout [Float], texture: (any MTLTexture)? = nil, sampler: (any MTLSamplerState)? = nil) -> Bool {
+        guard let cb = queue.makeCommandBuffer(), let encoder = cb.makeRenderCommandEncoder(descriptor: pass) else { return false }
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setVertexBytes(&tint, length: 16, index: 0)
+        encoder.setVertexBuffer(vertices, offset: 0, index: 1)
+        if let texture { encoder.setFragmentTexture(texture, index: 0) }
+        if let sampler { encoder.setFragmentSamplerState(sampler, index: 0) }
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        return cb.status == .completed
+    }
 
     nonisolated(unsafe) static var failures: Int32 = 0
     static func check(_ condition: Bool, _ what: String) {
@@ -511,14 +528,7 @@ enum MetalSelfTest {
                 pass.colorAttachments[0].texture = target
                 pass.colorAttachments[0].loadAction = .clear
                 pass.colorAttachments[0].clearColor = clear
-                guard let cb = queue.makeCommandBuffer(), let encoder = cb.makeRenderCommandEncoder(descriptor: pass) else { check(false, "render encoder"); return }
-                encoder.setRenderPipelineState(pipeline)
-                encoder.setVertexBytes(&tint, length: 16, index: 0)
-                encoder.setVertexBuffer(vertices, offset: 0, index: 1)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-                encoder.endEncoding()
-                cb.commit()
-                cb.waitUntilCompleted()
+                check(render(queue, pass, pipeline, vertices, tint: &tint), "render command buffer completes")
                 let expectedCorner: [UInt8] = [UInt8(clear.blue * 255), UInt8(clear.green * 255), UInt8(clear.red * 255), 255]
                 check(pixel(target, 1, 1) == expectedCorner && pixel(target, 62, 1) == expectedCorner, "corners are the clear colour \(expectedCorner): \(pixel(target, 1, 1)) \(pixel(target, 62, 1))")
                 if device.supportsRasterization { check(pixel(target, 32, 32) == [0, 255, 0, 255], "centre is the green triangle: \(pixel(target, 32, 32))") }
@@ -529,6 +539,52 @@ enum MetalSelfTest {
                 cb.commit()
                 cb.waitUntilCompleted()
                 check(pixel(copy, 1, 1) == [255, 0, 0, 255] && (!device.supportsRasterization || pixel(copy, 32, 40) == [0, 255, 0, 255]), "texture copy carries the frame: \(pixel(copy, 1, 1)) \(pixel(copy, 32, 40))")
+            }
+
+            if device.supportsRasterization {
+                // Sampling: every vertex carries uv (0.75, 0.75) in its colour, so the whole
+                // triangle shows texel (1, 1) of a 2x2 image with point sampling.
+                let sd = MTLRenderPipelineDescriptor()
+                sd.vertexFunction = library.makeFunction(name: "triangleVertex")
+                sd.fragmentFunction = library.makeFunction(name: "sampledFragment")
+                sd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                sd.vertexDescriptor = vd
+                let sampled = try device.makeRenderPipelineState(descriptor: sd)
+                let id = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 2, height: 2, mipmapped: false)
+                id.usage = .shaderRead
+                guard let image = device.makeTexture(descriptor: id) else { check(false, "sampled texture"); return }
+                let texels: [UInt8] = [255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 40, 80, 120, 255]   // BGRA: blue, green, red, (40,80,120)
+                image.replace(region: MTLRegionMake2D(0, 0, 2, 2), mipmapLevel: 0, withBytes: texels, bytesPerRow: 8)
+                let uvTriangle = triangle.map { Vertex(x: $0.x, y: $0.y, r: 0.75, g: 0.75, b: 0, a: 1) }
+                guard let uvVertices = uvTriangle.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }) else { check(false, "uv vertex buffer"); return }
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = target
+                pass.colorAttachments[0].loadAction = .clear
+                pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+                let sampler = device.makeSamplerState(descriptor: MTLSamplerDescriptor())
+                check(render(queue, pass, sampled, uvVertices, tint: &tint, texture: image, sampler: sampler), "sampled render completes")
+                check(pixel(target, 32, 32) == [40, 80, 120, 255] && pixel(target, 1, 1) == [0, 0, 0, 255], "fragment samples texel (1,1) through t0/s0: \(pixel(target, 32, 32)) corner \(pixel(target, 1, 1))")
+
+                // A depth attachment: the pass clears and binds it; the colour result is unchanged.
+                let dd = MTLRenderPipelineDescriptor()
+                dd.vertexFunction = library.makeFunction(name: "triangleVertex")
+                dd.fragmentFunction = library.makeFunction(name: "triangleFragment")
+                dd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                dd.depthAttachmentPixelFormat = .depth32Float
+                dd.vertexDescriptor = vd
+                let depthPipeline = try device.makeRenderPipelineState(descriptor: dd)
+                let depthDesc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: 64, height: 64, mipmapped: false)
+                depthDesc.usage = .renderTarget
+                guard let depth = device.makeTexture(descriptor: depthDesc) else { check(false, "depth texture"); return }
+                let depthPass = MTLRenderPassDescriptor()
+                depthPass.colorAttachments[0].texture = target
+                depthPass.colorAttachments[0].loadAction = .clear
+                depthPass.colorAttachments[0].clearColor = MTLClearColorMake(1, 1, 1, 1)
+                depthPass.depthAttachment.texture = depth
+                depthPass.depthAttachment.loadAction = .clear
+                depthPass.depthAttachment.clearDepth = 1
+                check(render(queue, depthPass, depthPipeline, vertices, tint: &tint), "render with a depth attachment completes")
+                check(pixel(target, 32, 32) == [0, 255, 0, 255] && pixel(target, 1, 1) == [255, 255, 255, 255], "triangle over a cleared depth attachment: \(pixel(target, 32, 32)) corner \(pixel(target, 1, 1))")
             }
         } catch { check(false, "triangle pipeline: \(error)") }
 
