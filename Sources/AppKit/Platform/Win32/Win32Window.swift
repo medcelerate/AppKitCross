@@ -282,7 +282,11 @@ final class Win32Window: PlatformWindow {
             }
             return 0
         case WM_CLOSE:
-            if owner?.platformWindowShouldClose() ?? true { close() }
+            // Route through NSWindow.close() so delegates, notifications and the
+            // last-window-closed check run; NSWindow then calls close() here.
+            if owner?.platformWindowShouldClose() ?? true {
+                if let owner { owner.platformWindowWillClose() } else { close() }
+            }
             return 0
         case WM_DESTROY:
             discardRenderTarget()

@@ -18,12 +18,13 @@ Done when `swift run HelloWindow` on Windows shows a resizable, DPI-aware window
 custom `NSView` subclass draws filled/stroked paths and text via `draw(_:)`, closes
 cleanly, and `NSApplicationDelegate` lifecycle callbacks fire in AppKit order.
 
-Status (2026-10-28): the platform-independent core below is implemented and covered by
-`Tests/AppKitTests` through the headless host backend on macOS (window geometry,
-autoresizing, coordinate conversion, hit testing, event dispatch, first responder,
-delegate callbacks, pixel-checked drawing). The Win32/Direct2D backend and the Windows
-`CoreGraphics` module are written but not yet compiled: the Windows test machine has no
-Swift toolchain yet. Text drawing (`NSFont`, `NSString.draw`) is not started.
+Status (2026-10-28): HelloWindow builds with Swift 6.4.1 on Windows 11 and runs: window
+with title and standard frame, Direct2D drawing of the sample (grid, rounded rect, circle,
+dashed curve), mouse clicks dispatched to the view in AppKit coordinates, key events,
+programmatic resize with clean repaint, close through `NSWindow.close()` with app
+termination. The core is covered by `Tests/AppKitTests` on the macOS host backend.
+Not yet done for M1: text drawing (`NSFont`, `NSString.draw`), live-resize (WM_SIZING)
+verification, DPI-change verification across monitors.
 
 - `NSApplication` run loop over the Win32 message loop; `NSApp`, `NSApplicationMain`
   equivalents; `applicationDidFinishLaunching`, `applicationShouldTerminate`,
