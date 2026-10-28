@@ -1,0 +1,250 @@
+import XCTest
+@testable import AppKit
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
+/// A view that fills itself with a color and records the rects it was asked to draw.
+@MainActor
+final class ColorView: NSView {
+    var color: NSColor
+    var drawnRects: [NSRect] = []
+    var mouseDowns: [NSPoint] = []
+    var keyDowns: [String] = []
+    var flipped = false
+
+    init(frame: NSRect, color: NSColor) {
+        self.color = color
+        super.init(frame: frame)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { flipped }
+    override var acceptsFirstResponder: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawnRects.append(dirtyRect)
+        color.setFill()
+        NSBezierPath.fill(bounds)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDowns.append(convert(event.locationInWindow, from: nil))
+    }
+
+    override func keyDown(with event: NSEvent) {
+        keyDowns.append(event.characters ?? "")
+    }
+}
+
+@MainActor
+final class RecordingDelegate: NSObject, NSWindowDelegate, NSApplicationDelegate {
+    var events: [String] = []
+    var allowClose = true
+    func windowDidResize(_ notification: Notification) { events.append("resize") }
+    func windowDidBecomeKey(_ notification: Notification) { events.append("key") }
+    func windowDidResignKey(_ notification: Notification) { events.append("resignKey") }
+    func windowWillClose(_ notification: Notification) { events.append("close") }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { allowClose }
+    func applicationDidFinishLaunching(_ notification: Notification) { events.append("launched") }
+}
+
+@MainActor
+final class Milestone1Tests: XCTestCase {
+
+    private func makeWindow(_ rect: NSRect = NSRect(x: 100, y: 100, width: 400, height: 300)) -> NSWindow {
+        NSWindow(contentRect: rect, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+    }
+
+    private var host: HostBackend { Platform.backend as! HostBackend }
+
+    func testWindowGeometry() {
+        let w = makeWindow()
+        XCTAssertEqual(w.contentView?.frame, NSRect(x: 0, y: 0, width: 400, height: 300))
+        XCTAssertEqual(w.contentRect(forFrameRect: w.frame).size, NSSize(width: 400, height: 300))
+        XCTAssertEqual(w.frame.height, 300 + HostWindow.titleBarHeight)
+        XCTAssertEqual(w.frame.origin, NSPoint(x: 100, y: 100))
+        XCTAssertEqual(w.convertToScreen(NSRect(x: 1, y: 2, width: 3, height: 4)), NSRect(x: 101, y: 102, width: 3, height: 4))
+        XCTAssertEqual(w.convertPoint(fromScreen: NSPoint(x: 101, y: 102)), NSPoint(x: 1, y: 2))
+        XCTAssertEqual(w.backingScaleFactor, 2)
+        XCTAssertTrue(NSApplication.shared.windows.contains { $0 === w })
+        w.close()
+        XCTAssertFalse(NSApplication.shared.windows.contains { $0 === w })
+    }
+
+    func testTitleAndVisibility() {
+        let w = makeWindow()
+        w.title = "Hello"
+        XCTAssertEqual(w.title, "Hello")
+        XCTAssertFalse(w.isVisible)
+        w.makeKeyAndOrderFront(nil)
+        XCTAssertTrue(w.isVisible)
+        XCTAssertTrue(w.isKeyWindow)
+        XCTAssertTrue(w.isMainWindow)
+        XCTAssertTrue(NSApplication.shared.keyWindow === w)
+        w.orderOut(nil)
+        XCTAssertFalse(w.isVisible)
+        XCTAssertFalse(w.isKeyWindow)
+        w.close()
+    }
+
+    func testResizeAutoresizesContentAndNotifiesDelegate() {
+        let w = makeWindow()
+        let d = RecordingDelegate()
+        w.delegate = d
+        let child = ColorView(frame: NSRect(x: 10, y: 10, width: 100, height: 50), color: .red)
+        child.autoresizingMask = [.width, .maxYMargin]
+        w.contentView!.addSubview(child)
+        w.setContentSize(NSSize(width: 600, height: 300))
+        XCTAssertEqual(w.contentView?.frame.size, NSSize(width: 600, height: 300))
+        XCTAssertEqual(child.frame, NSRect(x: 10, y: 10, width: 300, height: 50))
+        XCTAssertEqual(d.events, ["resize"])
+        w.close()
+        XCTAssertEqual(d.events, ["resize", "close"])
+    }
+
+    func testAutoresizingMargins() {
+        let w = makeWindow(NSRect(x: 0, y: 0, width: 200, height: 200))
+        let v = NSView(frame: NSRect(x: 50, y: 50, width: 100, height: 100))
+        v.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        w.contentView!.addSubview(v)
+        w.setContentSize(NSSize(width: 400, height: 300))
+        // Both margins flexible and equal: the view stays centred.
+        XCTAssertEqual(v.frame, NSRect(x: 150, y: 100, width: 100, height: 100))
+        w.close()
+    }
+
+    func testCoordinateConversionAndHitTesting() {
+        let w = makeWindow(NSRect(x: 0, y: 0, width: 200, height: 200))
+        let outer = ColorView(frame: NSRect(x: 20, y: 20, width: 100, height: 100), color: .blue)
+        let inner = ColorView(frame: NSRect(x: 10, y: 10, width: 50, height: 50), color: .green)
+        inner.flipped = true
+        w.contentView!.addSubview(outer)
+        outer.addSubview(inner)
+        // inner's origin (10,10) in outer -> (30,30) in the window
+        XCTAssertEqual(inner.convert(NSPoint.zero, to: nil), NSPoint(x: 30, y: 80))     // flipped: bounds origin is the top-left
+        XCTAssertEqual(inner.convert(NSPoint(x: 0, y: 50), to: nil), NSPoint(x: 30, y: 30))
+        XCTAssertEqual(outer.convert(NSPoint(x: 30, y: 30), from: nil), NSPoint(x: 10, y: 10))
+        XCTAssertEqual(inner.convert(NSRect(x: 0, y: 0, width: 50, height: 50), to: nil), NSRect(x: 30, y: 30, width: 50, height: 50))
+        XCTAssertTrue(w.contentView!.hitTest(NSPoint(x: 35, y: 35)) === inner)
+        XCTAssertTrue(w.contentView!.hitTest(NSPoint(x: 25, y: 25)) === outer)
+        XCTAssertTrue(w.contentView!.hitTest(NSPoint(x: 5, y: 5)) === w.contentView)
+        XCTAssertNil(w.contentView!.hitTest(NSPoint(x: -1, y: 5)))
+        inner.isHidden = true
+        XCTAssertTrue(w.contentView!.hitTest(NSPoint(x: 35, y: 35)) === outer)
+        w.close()
+    }
+
+    func testEventDispatchAndFirstResponder() {
+        let w = makeWindow(NSRect(x: 0, y: 0, width: 200, height: 200))
+        let v = ColorView(frame: NSRect(x: 50, y: 50, width: 100, height: 100), color: .red)
+        w.contentView!.addSubview(v)
+        w.makeKeyAndOrderFront(nil)
+        let down = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 60, y: 70), modifierFlags: [], timestamp: 1,
+                                      windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        XCTAssertTrue(down.window === w)
+        NSApplication.shared.sendEvent(down)
+        XCTAssertEqual(v.mouseDowns, [NSPoint(x: 10, y: 20)])
+        XCTAssertTrue(w.firstResponder === v, "clicking a view that accepts first responder makes it first responder")
+        let key = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 2, windowNumber: w.windowNumber,
+                                   context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)!
+        NSApplication.shared.sendEvent(key)
+        XCTAssertEqual(v.keyDowns, ["a"])
+        XCTAssertTrue(NSApplication.shared.currentEvent === key)
+        w.close()
+    }
+
+    func testCloseCanBeVetoedByDelegate() {
+        let w = makeWindow()
+        let d = RecordingDelegate()
+        d.allowClose = false
+        w.delegate = d
+        w.performClose(nil)
+        XCTAssertTrue(NSApplication.shared.windows.contains { $0 === w })
+        d.allowClose = true
+        w.performClose(nil)
+        XCTAssertFalse(NSApplication.shared.windows.contains { $0 === w })
+        XCTAssertEqual(d.events, ["close"])
+    }
+
+    func testApplicationLifecycle() {
+        let app = NSApplication.shared
+        XCTAssertTrue(NSApp === app)
+        let d = RecordingDelegate()
+        app.delegate = d
+        app.finishLaunching()
+        XCTAssertEqual(d.events, ["launched"])
+        XCTAssertTrue(app.isActive)
+        app.delegate = nil
+    }
+
+    func testResponderChain() {
+        let w = makeWindow()
+        let a = NSView(frame: .zero), b = NSView(frame: .zero)
+        w.contentView!.addSubview(a)
+        a.addSubview(b)
+        XCTAssertTrue(b.nextResponder === a)
+        XCTAssertTrue(a.nextResponder === w.contentView)
+        XCTAssertTrue(w.contentView?.nextResponder === w)
+        XCTAssertTrue(b.window === w)
+        b.removeFromSuperview()
+        XCTAssertNil(b.window)
+        XCTAssertNil(b.nextResponder)
+        w.close()
+    }
+
+    func testNSColorAndBezierPath() {
+        let c = NSColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 0.5)
+        XCTAssertEqual(c.redComponent, 0.2)
+        XCTAssertEqual(c.alphaComponent, 0.5)
+        XCTAssertEqual(c.withAlphaComponent(1).alphaComponent, 1)
+        XCTAssertEqual(NSColor.white.blended(withFraction: 0.5, of: .black)?.redComponent, 0.5)
+        XCTAssertEqual(NSColor(hue: 0, saturation: 1, brightness: 1, alpha: 1), NSColor.red)
+        let p = NSBezierPath(rect: NSRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertEqual(p.elementCount, 5)
+        XCTAssertEqual(p.bounds, NSRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertTrue(p.contains(NSPoint(x: 2, y: 3)))
+        XCTAssertFalse(p.contains(NSPoint(x: 10, y: 10)))
+        let oval = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: 10, height: 10))
+        XCTAssertEqual(oval.bounds.width, 10, accuracy: 0.01)
+        XCTAssertEqual(oval.bounds.height, 10, accuracy: 0.01)
+        let arc = NSBezierPath()
+        arc.appendArc(withCenter: NSPoint(x: 0, y: 0), radius: 10, startAngle: 0, endAngle: 90)
+        XCTAssertEqual(arc.currentPoint.x, 0, accuracy: 0.001)
+        XCTAssertEqual(arc.currentPoint.y, 10, accuracy: 0.001)
+    }
+
+    #if canImport(CoreGraphics)
+    func testDrawingProducesPixels() {
+        let w = makeWindow(NSRect(x: 0, y: 0, width: 100, height: 100))
+        w.backgroundColor = .white
+        let v = ColorView(frame: NSRect(x: 0, y: 0, width: 50, height: 50), color: .red)
+        let flipped = ColorView(frame: NSRect(x: 50, y: 50, width: 50, height: 50), color: .blue)
+        flipped.flipped = true
+        w.contentView!.addSubview(v)
+        w.contentView!.addSubview(flipped)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        XCTAssertEqual(v.drawnRects.last, NSRect(x: 0, y: 0, width: 50, height: 50))
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        XCTAssertNotNil(platform)
+        guard let image = platform?.lastImage else { return XCTFail("no image") }
+        XCTAssertEqual(image.width, 200)   // 100 points at 2x
+        XCTAssertEqual(image.height, 200)
+        func pixel(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+            // y is in AppKit coordinates (bottom-left origin); CG images are top-down.
+            let data = image.dataProvider!.data! as Data
+            let row = image.height - 1 - y
+            let i = row * image.bytesPerRow + x * 4
+            return (data[i + 2], data[i + 1], data[i])   // BGRA little-endian premultiplied
+        }
+        let red = pixel(25 * 2, 25 * 2)
+        XCTAssertGreaterThan(red.r, 200); XCTAssertLessThan(red.g, 30); XCTAssertLessThan(red.b, 30)
+        let blue = pixel(75 * 2, 75 * 2)
+        XCTAssertLessThan(blue.r, 30); XCTAssertGreaterThan(blue.b, 200)
+        let white = pixel(75 * 2, 25 * 2)
+        XCTAssertGreaterThan(white.r, 200); XCTAssertGreaterThan(white.g, 200); XCTAssertGreaterThan(white.b, 200)
+        w.close()
+    }
+    #endif
+}

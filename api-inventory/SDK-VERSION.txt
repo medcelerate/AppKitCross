@@ -1,0 +1,5 @@
+ProductName:		macOS
+ProductVersion:		15.8
+BuildVersion:		24H23
+swift-driver version: 1.127.14.1 Apple Swift version 6.2.3 (swiftlang-6.2.3.3.21 clang-1700.6.3.2)
+sdk: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
