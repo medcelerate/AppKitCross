@@ -15,8 +15,8 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | API, reference device and MTKView done; D3D12 shim implementation open |
-| M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite on Linux in progress |
+| M7 Metal | API, reference device, MTKView and the Swift D3D12 device done; the C++ D3D12 shim is in progress on `m7-d3d12-backend` |
+| M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite blocked by XCTest-on-Linux `@MainActor` discovery |
 
 The macOS host build runs the full test suite (64 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
@@ -226,8 +226,13 @@ with the same Ctrl-as-Command convention, cursors, PangoCairo text, PNG images, 
 in-process pasteboard, zenity file dialogs; no native menu bar). The core needed no
 changes beyond widening non-Darwin conditionals. `tools/linux/Dockerfile` builds on
 `swift:6.2-noble`, runs the test suite on the host backend (`APPKITWIN_HOST_BACKEND=1`)
-and HelloWindow under Xvfb for a screenshot. Open: Wayland, X11 selections for the
-pasteboard, JPEG via gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
+and HelloWindow under Xvfb for a screenshot (the sample renders fully: text, paths,
+controls, scroll view, the Core Animation badge). Open: the test suite does not run on
+Linux yet because swift-corelibs-xctest's test discovery cannot call `@MainActor`-isolated
+test methods ("Could not cast value of type '(T) -> @MainActor () -> ()'"); the CI job
+builds the tests but tolerates the run failing until the tests are restructured (or
+migrated to swift-testing). Also open: Wayland, X11 selections for the pasteboard, JPEG
+via gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
 
 ## Reference projects
 
