@@ -55,3 +55,9 @@ tools/apigen/extract.sh      # macOS only: dumps symbol graphs from the SDK
 tools/apigen/probe.sh        # macOS only: records enum raw values and string constants
 python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API-COVERAGE.md
 ```
+
+## Linux
+
+`tools/linux/Dockerfile` builds the package on `swift:6.2-noble` with X11, Cairo and Pango, runs the test suite on the headless host backend and HelloWindow under Xvfb. The sample as rendered there (no window manager, so no decorations):
+
+![HelloWindow on Linux under Xvfb](docs/images/hellowindow-linux-xvfb.png)

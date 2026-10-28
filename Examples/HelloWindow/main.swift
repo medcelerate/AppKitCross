@@ -413,8 +413,13 @@ app.run()
 final class FormViewController: NSViewController, NSSelectorHandling {
     let status = NSTextField(labelWithString: "Fill in the form.")
 
-    override func loadView() {
+    init() {
+        super.init(nibName: nil, bundle: nil)
         title = "Form"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -505,8 +510,13 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     private var frame = 0
     private let label = NSTextField(labelWithString: "")
 
-    override func loadView() {
+    init() {
+        super.init(nibName: nil, bundle: nil)
         title = "Metal"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
         let device = MTLCreateSystemDefaultDevice()
         let mtk = MTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
         mtk.delegate = self

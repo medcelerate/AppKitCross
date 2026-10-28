@@ -16,7 +16,7 @@ are concrete and testable.
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | API, reference device and MTKView done; D3D12 shim implementation open |
-| M8 Linux | backend written; builds in Docker, headless run being verified |
+| M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite on Linux in progress |
 
 The macOS host build runs the full test suite (64 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.

@@ -64,7 +64,7 @@ final class WindowChromeTests: XCTestCase {
         // The tint is translucent: the pixel is lighter than the HUD material would be but not opaque white.
         let platform = host(w)
         let image = platform.lastImage!
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         let i = (image.height - 1 - 100) * image.bytesPerRow + 100 * 4
         let alpha = data[i + 3]
         XCTAssertGreaterThan(alpha, 20)

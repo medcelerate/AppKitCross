@@ -233,7 +233,7 @@ final class Milestone1Tests: XCTestCase {
         XCTAssertEqual(image.height, 200)
         func pixel(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
             // y is in AppKit coordinates (bottom-left origin); CG images are top-down.
-            let data = image.dataProvider!.data! as Data
+            let data = _pixels(image)
             let row = image.height - 1 - y
             let i = row * image.bytesPerRow + x * 4
             return (data[i + 2], data[i + 1], data[i])   // BGRA little-endian premultiplied
@@ -288,7 +288,7 @@ final class TextDrawingTests: XCTestCase {
         w.display()
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         guard let image = platform?.lastImage else { return XCTFail("no image") }
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         func dark(x: Int, y: Int) -> Bool {   // AppKit coords in points
             let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
             return data[i] < 128 && data[i + 1] < 128 && data[i + 2] < 128
@@ -413,7 +413,7 @@ final class ControlTests: XCTestCase {
         w.display()
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         guard let image = platform?.lastImage else { return XCTFail("no image") }
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         func px(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8) {
             let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
             return (data[i + 2], data[i + 1], data[i])
@@ -633,7 +633,7 @@ final class ScrollViewTests: XCTestCase {
         XCTAssertEqual(canvas.drawnRects.first, NSRect(x: 60, y: 60, width: 30, height: 30))
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         guard let image = platform?.lastImage else { return XCTFail("no image") }
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         func px(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8) {
             let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
             return (data[i + 2], data[i + 1], data[i])
@@ -695,7 +695,7 @@ final class ImageTests: XCTestCase {
         w.display()
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         guard let bitmap = platform?.lastImage else { return XCTFail("no image") }
-        let data = bitmap.dataProvider!.data! as Data
+        let data = _pixels(bitmap)
         func px(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
             let row = bitmap.height - 1 - y * 2, i = row * bitmap.bytesPerRow + x * 2 * 4
             return (data[i + 2], data[i + 1], data[i])
@@ -859,7 +859,7 @@ final class DefaultButtonTests: XCTestCase {
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         guard let image = platform?.lastImage else { return XCTFail("no image") }
         func pixel(_ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
-            let data = image.dataProvider!.data! as Data
+            let data = _pixels(image)
             let row = image.height - 1 - y * 2
             let i = row * image.bytesPerRow + x * 2 * 4
             return (data[i + 2], data[i + 1], data[i])

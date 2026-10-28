@@ -117,6 +117,8 @@ import CoreText
         _platform?.title = _title
         _isClosing = false
         _updateChrome()
+        // The frame (not just the content) is restored so per-window menu bars do not shift it.
+        if _lastFrame.width > 0 { _platform?.frame = _lastFrame }
         NSApplication.shared._register(window: self)
         _contentView?.needsDisplay = true
         _platform?.setNeedsDisplay(nil)
@@ -422,6 +424,7 @@ import CoreText
         post(NSWindow.willCloseNotification)
         delegate?.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: self))
         let disappearing = isVisible
+        let wasKey = _isKey
         if disappearing { _contentView?._windowVisibilityWillChange(false) }
         if _isKey { resignKey() }
         if _isMain { resignMain() }
@@ -433,6 +436,10 @@ import CoreText
         _platform = nil
         if disappearing { _contentView?._windowVisibilityDidChange(false) }
         NSApplication.shared._unregister(window: self)
+        // Another visible window becomes key, as AppKit does when the key window closes.
+        if wasKey, let next = NSApplication.shared.windows.last(where: { $0 !== self && $0.isVisible && $0.canBecomeKey }) {
+            next.makeKeyAndOrderFront(nil)
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior
     @MainActor open var collectionBehavior: NSWindow.CollectionBehavior {

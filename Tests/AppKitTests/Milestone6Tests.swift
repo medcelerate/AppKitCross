@@ -48,7 +48,7 @@ final class HostingTests: XCTestCase {
     private func pixel(_ w: NSWindow, _ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         let image = platform!.lastImage!
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         let row = image.height - 1 - y * 2
         let i = row * image.bytesPerRow + x * 2 * 4
         return (data[i + 2], data[i + 1], data[i])

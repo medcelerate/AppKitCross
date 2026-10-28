@@ -104,7 +104,7 @@ final class MTKViewTests: XCTestCase {
         w.display()
         let platform = Mirror(reflecting: w).descendant("_platform") as! HostWindow
         let image = platform.lastImage!
-        let data = image.dataProvider!.data! as Data
+        let data = _pixels(image)
         let row = image.height - 1 - 30 * 2
         let i = row * image.bytesPerRow + 30 * 2 * 4
         XCTAssertGreaterThan(data[i], 200)      // blue
