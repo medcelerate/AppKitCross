@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 27 |
-| Types generated | 511 |
+| Types handwritten | 30 |
+| Types generated | 508 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10204 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 971 |
+| Members unimplemented-calls | 972 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -178,7 +178,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSControlTextEditingDelegate | protocol | generated | 10 | 0 | 0 |  |
 | NSControlTint | enum | generated | 4 | 0 | 0 |  |
 | NSController | class | generated | 8 | 0 | 0 |  |
-| NSCursor | class | generated | 76 | 0 | 9 |  |
+| NSCursor | class | handwritten | 76 | 0 | 9 | 2 |
 | NSCustomImageRep | class | generated | 5 | 0 | 0 |  |
 | NSCustomTouchBarItem | class | generated | 1 | 2 | 0 |  |
 | NSDataAsset | class | generated | 6 | 0 | 1 |  |
@@ -396,10 +396,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSharingServicePickerToolbarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSSharingServicePickerTouchBarItem | class | generated | 4 | 0 | 0 |  |
 | NSSharingServicePickerTouchBarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSlider | class | generated | 25 | 0 | 2 |  |
+| NSSlider | class | handwritten | 25 | 0 | 2 | 6 |
 | NSSliderAccessory | class | generated | 5 | 0 | 1 |  |
 | NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |
-| NSSliderCell | class | generated | 21 | 0 | 0 |  |
+| NSSliderCell | class | handwritten | 21 | 0 | 0 | 3 |
 | NSSliderTouchBarItem | class | generated | 10 | 2 | 0 |  |
 | NSSound | class | generated | 24 | 2 | 3 |  |
 | NSSoundDelegate | protocol | generated | 1 | 0 | 0 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 199 |
+| NSView | class | handwritten | 361 | 3 | 19 | 195 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | generated | 56 | 1 | 2 |  |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | generated | 32 | 0 | 3 |  |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 188 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 182 |
 | NSWindowController | class | generated | 28 | 0 | 1 |  |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

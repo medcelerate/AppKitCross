@@ -43,6 +43,19 @@ import CoreText
     private var _frameRotation: CGFloat = 0
     private var _boundsRotation: CGFloat = 0
     private var _preparedContentRect: NSRect? = nil
+    internal var _cursorRects: [(NSRect, NSCursor)] = []
+    internal var _cursorRectsValid = false
+
+    /// Cursor for a point in this view's bounds, consulting (and lazily rebuilding) cursor rects.
+    @MainActor internal func _cursor(at point: NSPoint) -> NSCursor? {
+        if !_cursorRectsValid {
+            _cursorRects.removeAll()
+            resetCursorRects()
+            _cursorRectsValid = true
+        }
+        for (rect, cursor) in _cursorRects.reversed() where rect.contains(point) { return cursor }
+        return nil
+    }
 
     open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(_frame)>" } }
 
@@ -159,7 +172,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addconstraints(_:)
     @MainActor open func addConstraints(_ constraints: [NSLayoutConstraint]) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addcursorrect(_:cursor:)
-    @MainActor open func addCursorRect(_ rect: NSRect, cursor object: NSCursor) { unimplemented() }
+    @MainActor open func addCursorRect(_ rect: NSRect, cursor object: NSCursor) { _cursorRects.append((rect, object)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addgesturerecognizer(_:)
     @available(macOS 10.10, *)
     @MainActor open func addGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) { unimplemented() }
@@ -378,7 +391,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/didupdatetrackingareasnotification
     static public var didUpdateTrackingAreasNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSViewDidUpdateTrackingAreasNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/discardcursorrects()
-    @MainActor open func discardCursorRects() { unimplemented() }
+    @MainActor open func discardCursorRects() { _cursorRects.removeAll(); _cursorRectsValid = false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/display()
     @MainActor open func display() { display(bounds) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/display(_:)
@@ -734,7 +747,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removeconstraints(_:)
     @MainActor open func removeConstraints(_ constraints: [NSLayoutConstraint]) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removecursorrect(_:cursor:)
-    @MainActor open func removeCursorRect(_ rect: NSRect, cursor object: NSCursor) { unimplemented() }
+    @MainActor open func removeCursorRect(_ rect: NSRect, cursor object: NSCursor) { _cursorRects.removeAll { $0.0 == rect && $0.1 === object } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removefromsuperview()
     @MainActor open func removeFromSuperview() {
         let f = _frame
@@ -778,7 +791,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/requiresconstraintbasedlayout
     @MainActor class public var requiresConstraintBasedLayout: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/resetcursorrects()
-    @MainActor open func resetCursorRects() { unimplemented() }
+    @MainActor open func resetCursorRects() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/resize(witholdsuperviewsize:)
     @MainActor open func resize(withOldSuperviewSize oldSize: NSSize) {
         guard let sup = _superview, !_autoresizingMask.isEmpty else { return }
@@ -894,6 +907,7 @@ import CoreText
         guard newSize != _frame.size else { return }
         let old = _frame
         _frame.size = newSize
+        _cursorRectsValid = false
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
         _superview?.setNeedsDisplay(old.union(_frame))
         setNeedsDisplay(bounds)

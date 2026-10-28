@@ -69,6 +69,18 @@ import CoreText
     private var _resizeIncrements = NSSize(width: 1, height: 1)
     private var _aspectRatio = NSSize.zero
     private var _toolbarStyle: NSWindow.ToolbarStyle = .automatic
+    private var _cursorRectsEnabled = true
+
+    /// Chooses the cursor for the mouse position (content coordinates) from cursor rects.
+    @MainActor private func _updateCursor(at location: NSPoint) {
+        guard _cursorRectsEnabled else { return }
+        var v = _contentView?.hitTest(location)
+        while let view = v {
+            if let c = view._cursor(at: view.convert(location, from: nil)) { c.set(); return }
+            v = view.superview
+        }
+        NSCursor.arrow.set()
+    }
 
     open override var description: String { MainActor.assumeIsolated { "<NSWindow \(_windowNumber) '\(_title)' \(frame)>" } }
 
@@ -246,7 +258,7 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/arecursorrectsenabled
-    @MainActor open var areCursorRectsEnabled: Bool { unimplemented() }
+    @MainActor open var areCursorRectsEnabled: Bool { _cursorRectsEnabled }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/aspectratio
     @MainActor open var aspectRatio: NSSize {
         get { _aspectRatio }
@@ -508,7 +520,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/didupdatenotification
     static public var didUpdateNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSWindowDidUpdateNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablecursorrects()
-    @MainActor open func disableCursorRects() { unimplemented() }
+    @MainActor open func disableCursorRects() { _cursorRectsEnabled = false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disableflushing()
     @MainActor open func disableFlushing() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablekeyequivalentfordefaultbuttoncell()
@@ -520,7 +532,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardcachedimage()
     @MainActor open func discardCachedImage() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardcursorrects()
-    @MainActor open func discardCursorRects() { unimplemented() }
+    @MainActor open func discardCursorRects() {
+        func visit(_ v: NSView) { v.discardCursorRects(); v.subviews.forEach(visit) }
+        if let cv = _contentView { visit(cv) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardevents(matching:before:)
     @MainActor open func discardEvents(matching mask: NSEvent.EventTypeMask, before lastEvent: NSEvent?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/display()
@@ -542,7 +557,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/drawers
     @MainActor open var drawers: [NSDrawer]? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablecursorrects()
-    @MainActor open func enableCursorRects() { unimplemented() }
+    @MainActor open func enableCursorRects() { _cursorRectsEnabled = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enableflushing()
     @MainActor open func enableFlushing() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablekeyequivalentfordefaultbuttoncell()
@@ -615,7 +630,7 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open func insertTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController, at index: Int) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/invalidatecursorrects(for:)
-    @MainActor open func invalidateCursorRects(for view: NSView) { unimplemented() }
+    @MainActor open func invalidateCursorRects(for view: NSView) { view._cursorRectsValid = false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/invalidateshadow()
     @MainActor open func invalidateShadow() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isautodisplay
@@ -885,7 +900,7 @@ import CoreText
     @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws { unimplemented() }
     // DUPLICATE: @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resetcursorrects()
-    @MainActor open func resetCursorRects() { unimplemented() }
+    @MainActor open func resetCursorRects() { discardCursorRects() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignkey()
     @MainActor open func resignKey() {
         guard _isKey else { return }
@@ -960,6 +975,7 @@ import CoreText
             _mouseDownView = nil
             _dispatchMouse(event, to: target)
         case .mouseMoved:
+            _updateCursor(at: event.locationInWindow)
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _contentView?.hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:

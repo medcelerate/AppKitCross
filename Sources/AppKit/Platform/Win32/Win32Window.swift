@@ -332,6 +332,12 @@ final class Win32Window: PlatformWindow {
                 if let owner { owner.platformWindowWillClose() } else { close() }
             }
             return 0
+        case WM_SETCURSOR:
+            if (lParam & 0xFFFF) == HTCLIENT {
+                SetCursor(backend.currentCursor)
+                return 1
+            }
+            return nil
         case WM_INITMENUPOPUP:
             if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
             return 0

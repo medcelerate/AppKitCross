@@ -196,6 +196,71 @@ final class Win32Backend: PlatformBackend {
 
     func beep() { MessageBeep(UINT(MB_OK)) }
 
+    // MARK: Cursor
+
+    private(set) var currentCursor: HCURSOR? = LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: 32512))
+    private var customCursor: HCURSOR? = nil
+    private var cursorHiddenDepth = 0
+
+    private static func systemCursor(_ id: Int) -> HCURSOR? { LoadCursorW(nil, UnsafePointer<WCHAR>(bitPattern: id)) }
+
+    func setCursor(_ cursor: PlatformCursor) {
+        let h: HCURSOR?
+        switch cursor {
+        case .arrow, .openHand, .closedHand, .dragCopy, .dragLink, .contextualMenu: h = Win32Backend.systemCursor(32512)   // IDC_ARROW
+        case .iBeam, .iBeamVertical: h = Win32Backend.systemCursor(32513)          // IDC_IBEAM
+        case .wait: h = Win32Backend.systemCursor(32514)                            // IDC_WAIT
+        case .crosshair: h = Win32Backend.systemCursor(32515)                       // IDC_CROSS
+        case .resizeAll: h = Win32Backend.systemCursor(32646)                       // IDC_SIZEALL
+        case .resizeLeftRight: h = Win32Backend.systemCursor(32644)                 // IDC_SIZEWE
+        case .resizeUpDown: h = Win32Backend.systemCursor(32645)                    // IDC_SIZENS
+        case .operationNotAllowed: h = Win32Backend.systemCursor(32648)             // IDC_NO
+        case .pointingHand: h = Win32Backend.systemCursor(32649)                    // IDC_HAND
+        case let .custom(width, height, hotX, hotY, pixels):
+            if let old = customCursor { DestroyIcon(old); customCursor = nil }
+            h = makeCursor(width: width, height: height, hotSpot: (hotX, hotY), bgra: pixels) ?? Win32Backend.systemCursor(32512)
+            customCursor = h
+        }
+        currentCursor = h
+        SetCursor(h)
+    }
+
+    func setCursorHidden(_ hidden: Bool) {
+        if hidden { cursorHiddenDepth += 1; ShowCursor(false) } else if cursorHiddenDepth > 0 { cursorHiddenDepth -= 1; ShowCursor(true) }
+    }
+
+    /// Builds a color cursor (an icon with a hot spot) from premultiplied BGRA pixels.
+    private func makeCursor(width: Int, height: Int, hotSpot: (Int, Int), bgra: [UInt8]) -> HCURSOR? {
+        guard bgra.count >= width * height * 4 else { return nil }
+        var bi = BITMAPV5HEADER()
+        bi.bV5Size = DWORD(MemoryLayout<BITMAPV5HEADER>.size)
+        bi.bV5Width = Int32(width)
+        bi.bV5Height = -Int32(height)      // top-down
+        bi.bV5Planes = 1
+        bi.bV5BitCount = 32
+        bi.bV5Compression = DWORD(BI_BITFIELDS)
+        bi.bV5RedMask = 0x00FF0000; bi.bV5GreenMask = 0x0000FF00; bi.bV5BlueMask = 0x000000FF; bi.bV5AlphaMask = 0xFF000000
+        let dc = GetDC(nil)
+        defer { ReleaseDC(nil, dc) }
+        var bits: UnsafeMutableRawPointer? = nil
+        let color = withUnsafePointer(to: &bi) { p -> HBITMAP? in
+            p.withMemoryRebound(to: BITMAPINFO.self, capacity: 1) { CreateDIBSection(dc, $0, UINT(DIB_RGB_COLORS), &bits, nil, 0) }
+        }
+        guard let color, let bits else { return nil }
+        bgra.withUnsafeBytes { src in bits.copyMemory(from: src.baseAddress!, byteCount: width * height * 4) }
+        let mask = CreateBitmap(Int32(width), Int32(height), 1, 1, nil)
+        var info = ICONINFO()
+        info.fIcon = false
+        info.xHotspot = DWORD(hotSpot.0)
+        info.yHotspot = DWORD(hotSpot.1)
+        info.hbmMask = mask
+        info.hbmColor = color
+        let cursor = CreateIconIndirect(&info)
+        DeleteObject(color)
+        DeleteObject(mask)
+        return cursor
+    }
+
     // MARK: Window classes
 
     private func registerClasses() {

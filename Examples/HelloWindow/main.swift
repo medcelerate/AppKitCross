@@ -6,6 +6,7 @@ import AppKit
 final class CanvasView: NSView {
     private var clicks: [NSPoint] = []
     var showsGrid = true { didSet { needsDisplay = true } }
+    var circleSize: CGFloat = 120 { didSet { needsDisplay = true } }
 
     func clearDots() {
         clicks.removeAll()
@@ -43,7 +44,7 @@ final class CanvasView: NSView {
         box.stroke()
 
         // A circle
-        let circle = NSBezierPath(ovalIn: NSRect(x: 300, y: 60, width: 120, height: 120))
+        let circle = NSBezierPath(ovalIn: NSRect(x: 360 - circleSize / 2, y: 120 - circleSize / 2, width: circleSize, height: circleSize))
         NSColor.systemOrange.setFill()
         circle.fill()
 
@@ -125,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             gridCheckbox.state = gridMenuItem.state
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("sizeChanged:")):
+            canvas.circleSize = CGFloat((sender as? NSSlider)?.doubleValue ?? 120)
+            return true
         case Selector(("nameEntered:")):
             let name = (sender as? NSTextField)?.stringValue ?? ""
             greeting.stringValue = name.isEmpty ? "" : "Hello, \(name)!"
@@ -220,6 +224,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         imageView.imageFrameStyle = .grayBezel
         imageView.autoresizingMask = [.minXMargin, .maxYMargin]
         canvas.addSubview(imageView)
+
+        // A slider controlling the circle's size.
+        let slider = NSSlider(value: 120, minValue: 40, maxValue: 200, target: self, action: Selector(("sizeChanged:")))
+        slider.frame = NSRect(x: 40, y: 20, width: 220, height: 21)
+        slider.numberOfTickMarks = 5
+        slider.autoresizingMask = [.maxYMargin]
+        canvas.addSubview(slider)
         self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)

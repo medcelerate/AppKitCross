@@ -42,6 +42,9 @@ public protocol PlatformBackend: AnyObject {
     var text: any PlatformTextBackend { get }
     /// Image decoding and offscreen surfaces.
     var image: any PlatformImageBackend { get }
+    /// Sets the mouse cursor shown over this application's windows.
+    func setCursor(_ cursor: PlatformCursor)
+    func setCursorHidden(_ hidden: Bool)
     /// Installs (or with nil removes) the application menu bar on every titled window.
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?)
     /// Frame/content conversion for a window that does not exist yet.

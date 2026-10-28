@@ -35,6 +35,10 @@ import CoreText
 
     internal var _fieldCell: NSTextFieldCell? { _cell as? NSTextFieldCell }
 
+    @MainActor open override func resetCursorRects() {
+        if isEnabled && (isEditable || isSelectable) { addCursorRect(bounds, cursor: .iBeam) }
+    }
+
     /// True while editing: Return commits the field before key equivalents run.
     internal var _consumesReturnKey: Bool { _isEditing && isEditable }
 

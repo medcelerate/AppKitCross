@@ -58,6 +58,11 @@ final class HostBackend: PlatformBackend {
 
     func beep() { beepCount += 1 }
 
+    private(set) var cursor: PlatformCursor = .arrow
+    private(set) var cursorHidden = false
+    func setCursor(_ cursor: PlatformCursor) { self.cursor = cursor }
+    func setCursorHidden(_ hidden: Bool) { cursorHidden = hidden }
+
     private(set) var mainMenu: PlatformMenu?
     private weak var menuHost: PlatformMenuHost?
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {

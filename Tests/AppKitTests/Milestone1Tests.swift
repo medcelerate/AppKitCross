@@ -708,3 +708,56 @@ final class ImageTests: XCTestCase {
     }
 }
 #endif
+
+@MainActor
+final class SliderAndCursorTests: XCTestCase {
+    func testSliderTracksAndSnaps() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let target = NSObject()
+        var values: [Double] = []
+        target.setActionHandler(for: Selector(("changed:"))) { s in values.append((s as? NSSlider)?.doubleValue ?? -1) }
+        let slider = NSSlider(value: 0, minValue: 0, maxValue: 10, target: target, action: Selector(("changed:")))
+        slider.frame = NSRect(x: 10, y: 40, width: 215, height: 21)   // bar 211 wide, knob 15: 196 pt of travel
+        w.contentView!.addSubview(slider)
+        w.makeKeyAndOrderFront(nil)
+        w.display()                                                     // lays out the cell's track rect
+        let mid = NSPoint(x: slider.frame.minX + 2 + 7.5 + 98, y: 50)
+        let down = NSEvent.mouseEvent(with: .leftMouseDown, location: mid, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        NSApp.sendEvent(down)
+        XCTAssertEqual(slider.doubleValue, 5, accuracy: 0.2)
+        XCTAssertEqual(values.count, 1, "continuous sliders send the action on mouse down")
+        let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 1000, y: 50), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
+        NSApp.sendEvent(drag)
+        XCTAssertEqual(slider.doubleValue, 10)
+        slider.numberOfTickMarks = 3
+        slider.allowsTickMarkValuesOnly = true
+        slider.doubleValue = 6
+        let up = NSEvent.mouseEvent(with: .leftMouseUp, location: mid, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 3, clickCount: 1, pressure: 0)!
+        NSApp.sendEvent(up)
+        XCTAssertEqual(slider.closestTickMarkValue(toValue: 6), 5)
+        XCTAssertEqual(slider.tickMarkValue(at: 2), 10)
+        w.close()
+    }
+
+    func testCursorRectsFollowTheMouse() {
+        let host = Platform.backend as! HostBackend
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        let field = NSTextField(string: "x")
+        field.frame = NSRect(x: 10, y: 10, width: 100, height: 24)
+        w.contentView!.addSubview(field)
+        w.makeKeyAndOrderFront(nil)
+        func move(_ p: NSPoint) {
+            NSApp.sendEvent(NSEvent.mouseEvent(with: .mouseMoved, location: p, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 0, pressure: 0)!)
+        }
+        move(NSPoint(x: 50, y: 20))
+        XCTAssertEqual(host.cursor, .iBeam)
+        XCTAssertTrue(NSCursor.current === NSCursor.iBeam)
+        move(NSPoint(x: 150, y: 80))
+        XCTAssertEqual(host.cursor, .arrow)
+        NSCursor.pointingHand.push()
+        XCTAssertEqual(host.cursor, .pointingHand)
+        NSCursor.pop()
+        XCTAssertEqual(host.cursor, .arrow)
+        w.close()
+    }
+}
