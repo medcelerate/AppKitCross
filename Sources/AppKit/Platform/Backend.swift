@@ -40,6 +40,8 @@ public protocol PlatformBackend: AnyObject {
     var mouseLocation: NSPoint { get }
     /// Text measurement and drawing.
     var text: any PlatformTextBackend { get }
+    /// Installs (or with nil removes) the application menu bar on every titled window.
+    func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?)
     /// Frame/content conversion for a window that does not exist yet.
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect

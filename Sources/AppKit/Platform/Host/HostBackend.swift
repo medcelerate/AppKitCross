@@ -53,6 +53,17 @@ final class HostBackend: PlatformBackend {
 
     func beep() { beepCount += 1 }
 
+    private(set) var mainMenu: PlatformMenu?
+    private weak var menuHost: PlatformMenuHost?
+    func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
+        mainMenu = menu
+        menuHost = host
+    }
+    /// Test hook: simulate the user choosing a menu item.
+    func chooseMenuItem(_ id: Int) { menuHost?.platformMenuItemSelected(id) }
+    /// Test hook: simulate a menu opening and return what would be shown.
+    func openMenu(_ id: Int) -> PlatformMenu? { menuHost?.platformMenuWillOpen(id) }
+
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect {
         guard styleMask.contains(.titled) else { return contentRect }
         return NSRect(x: contentRect.minX, y: contentRect.minY, width: contentRect.width, height: contentRect.height + HostWindow.titleBarHeight)

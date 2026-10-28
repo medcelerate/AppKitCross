@@ -35,7 +35,11 @@ final class Win32Window: PlatformWindow {
         guard let hwnd else { return }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
         dpi = GetDpiForWindow(hwnd)
+        backend.register(self)
     }
+
+    /// Titled windows carry the application menu bar (AppKit's main menu is global).
+    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) }
 
     private var scale: CGFloat { CGFloat(dpi) / 96 }
 
@@ -207,9 +211,11 @@ final class Win32Window: PlatformWindow {
     private func modifierFlags() -> NSEvent.ModifierFlags {
         var flags: NSEvent.ModifierFlags = []
         if GetKeyState(VK_SHIFT) < 0 { flags.insert(.shift) }
-        if GetKeyState(VK_CONTROL) < 0 { flags.insert(.control) }
+        // Ctrl plays the role of Command so AppKit key equivalents (Cmd+S, Cmd+Q) land on the
+        // keys Windows users press; the Windows key maps to .control.
+        if GetKeyState(VK_CONTROL) < 0 { flags.insert(.command) }
         if GetKeyState(VK_MENU) < 0 { flags.insert(.option) }
-        if GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0 { flags.insert(.command) }
+        if GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0 { flags.insert(.control) }
         if (GetKeyState(VK_CAPITAL) & 1) != 0 { flags.insert(.capsLock) }
         NSEvent._currentModifierFlags = flags
         return flags
@@ -324,7 +330,15 @@ final class Win32Window: PlatformWindow {
                 if let owner { owner.platformWindowWillClose() } else { close() }
             }
             return 0
+        case WM_INITMENUPOPUP:
+            if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
+            return 0
+        case WM_COMMAND:
+            if (wParam >> 16) & 0xFFFF == 0, lParam == 0, backend.menuBar.command(Int(wParam & 0xFFFF)) { return 0 }
+            return nil
         case WM_DESTROY:
+            if let hwnd { backend.menuBar.windowDestroyed(hwnd) }
+            backend.unregister(self)
             discardRenderTarget()
             if let hwnd { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) }
             hwnd = nil

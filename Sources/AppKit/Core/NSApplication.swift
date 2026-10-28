@@ -15,7 +15,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication
-@MainActor open class NSApplication: NSResponder, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization {
+@MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization {
     @MainActor public override init() {
         super.init()
         if NSApplication._shared == nil { NSApplication._shared = self }
@@ -250,7 +250,42 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/mainmenu
     @MainActor open var mainMenu: NSMenu? {
         get { _mainMenu }
-        set { _mainMenu = newValue }
+        set {
+            _mainMenu = newValue
+            _mainMenuDidChange()
+        }
+    }
+
+    /// Rebuilds the platform menu bar from the main menu tree.
+    @MainActor internal func _mainMenuDidChange() {
+        Platform.backend.setMainMenu(_mainMenu?._platformMenu(), host: self)
+    }
+
+    /// The object that would receive `action` for a nil target (responder chain from the
+    /// key window's first responder, then the application, then its delegate).
+    @MainActor internal func _target(forAction action: Selector) -> AnyObject? {
+        var r: NSResponder? = keyWindow?.firstResponder
+        while let cur = r {
+            if ActionRegistry.canPerform(action, on: cur) { return cur }
+            r = cur.nextResponder
+        }
+        if ActionRegistry.canPerform(action, on: self) { return self }
+        if let d = delegate, ActionRegistry.canPerform(action, on: d) { return d }
+        return nil
+    }
+
+    // MARK: PlatformMenuHost
+
+    public func platformMenuWillOpen(_ menuID: Int) -> PlatformMenu? {
+        guard let menu = _mainMenu?._menu(withID: menuID) else { return nil }
+        menu.update()
+        return menu._platformMenu()
+    }
+
+    public func platformMenuItemSelected(_ itemID: Int) {
+        guard let item = _mainMenu?._item(withCommandID: itemID), let menu = item.menu else { return }
+        menu.update()
+        menu.performActionForItem(at: menu.index(of: item))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/mainwindow
     @MainActor open var mainWindow: NSWindow? { _mainWindow }
@@ -348,6 +383,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
+        // Menu key equivalents take precedence over the key window's handling, as in AppKit.
+        if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
             keyWindow?.sendEvent(event)
         }

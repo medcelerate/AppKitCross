@@ -19,6 +19,21 @@ final class Win32Backend: PlatformBackend {
     private var running = false
     private var classesRegistered = false
     let text: any PlatformTextBackend = Win32TextBackend()
+    let menuBar = Win32MenuBar()
+    private(set) var windows: [Win32Window] = []
+
+    func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
+        menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
+    }
+
+    func register(_ window: Win32Window) {
+        windows.append(window)
+        if let hwnd = window.hwnd, window.wantsMenuBar { menuBar.apply(to: hwnd) }
+    }
+
+    func unregister(_ window: Win32Window) {
+        windows.removeAll { $0 === window }
+    }
 
     init() {
         // Per-monitor v2 DPI awareness; the manifest can set this too, in which case the

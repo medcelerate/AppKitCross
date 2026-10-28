@@ -34,6 +34,13 @@ enum ActionRegistry {
         }
     }
 
+    /// Whether `target` has a registered handler or declares selector handling. Objects that
+    /// adopt `NSSelectorHandling` decide at call time, so they count as able.
+    static func canPerform(_ action: Selector, on target: AnyObject) -> Bool {
+        if let e = entries[ObjectIdentifier(target)], e.object === target, e.handlers[action] != nil { return true }
+        return target is NSSelectorHandling
+    }
+
     /// Delivers `action` to `target` alone (no responder-chain walk). True if handled.
     static func perform(_ action: Selector, on target: AnyObject, with sender: Any?) -> Bool {
         if let e = entries[ObjectIdentifier(target)], e.object === target, let h = e.handlers[action] {

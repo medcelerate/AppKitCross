@@ -89,12 +89,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     var window: NSWindow!
     var canvas: CanvasView!
     var greeting: NSTextField!
+    var gridMenuItem: NSMenuItem!
+    var gridCheckbox: NSButton!
 
     // Actions arrive here by selector name (no Objective-C runtime on Windows).
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action {
         case Selector(("clearDots:")): canvas.clearDots(); return true
-        case Selector(("toggleGrid:")): canvas.showsGrid = (sender as? NSButton)?.state == .on; return true
+        case Selector(("toggleGrid:")):
+            canvas.showsGrid = (sender as? NSButton)?.state == .on
+            gridMenuItem.state = canvas.showsGrid ? .on : .off
+            return true
+        case Selector(("toggleGridMenu:")):
+            canvas.showsGrid.toggle()
+            gridMenuItem.state = canvas.showsGrid ? .on : .off
+            gridCheckbox.state = gridMenuItem.state
+            return true
+        case Selector(("quit:")): NSApp.terminate(sender); return true
         case Selector(("nameEntered:")):
             let name = (sender as? NSTextField)?.stringValue ?? ""
             greeting.stringValue = name.isEmpty ? "" : "Hello, \(name)!"
@@ -104,6 +115,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Main menu: AppKit menus become the window's menu bar on Windows.
+        let main = NSMenu(title: "Main")
+        let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let file = NSMenu(title: "File")
+        file.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "k")
+        file.addItem(NSMenuItem.separator())
+        file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
+        fileItem.submenu = file
+        main.addItem(fileItem)
+        let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        let view = NSMenu(title: "View")
+        gridMenuItem = view.addItem(withTitle: "Show Grid", action: Selector(("toggleGridMenu:")), keyEquivalent: "g")
+        gridMenuItem.state = .on
+        viewItem.submenu = view
+        main.addItem(viewItem)
+        NSApp.mainMenu = main
+
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
@@ -124,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         grid.frame.origin = NSPoint(x: clear.frame.minX - grid.frame.width - 16, y: clear.frame.midY - grid.frame.height / 2)
         grid.autoresizingMask = [.minXMargin, .minYMargin]
         canvas.addSubview(grid)
+        gridCheckbox = grid
 
         // A text field and a label that echoes it (Enter or focus loss sends the action).
         let prompt = NSTextField(labelWithString: "Your name:")

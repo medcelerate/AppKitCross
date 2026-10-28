@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 17 |
-| Types generated | 521 |
+| Types handwritten | 19 |
+| Types generated | 519 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10204 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 707 |
+| Members unimplemented-calls | 739 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -282,9 +282,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMatrix | class | generated | 83 | 0 | 1 |  |
 | NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
 | NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
-| NSMenu | class | generated | 72 | 1 | 3 |  |
+| NSMenu | class | handwritten | 72 | 1 | 3 | 21 |
 | NSMenuDelegate | protocol | generated | 8 | 0 | 0 |  |
-| NSMenuItem | class | generated | 42 | 0 | 0 |  |
+| NSMenuItem | class | handwritten | 42 | 0 | 0 | 11 |
 | NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |
 | NSMenuItemCell | class | generated | 20 | 0 | 0 |  |
 | NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |

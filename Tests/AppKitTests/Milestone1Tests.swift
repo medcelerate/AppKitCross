@@ -483,3 +483,75 @@ final class TextFieldTests: XCTestCase {
         w.close()
     }
 }
+
+@MainActor
+final class MenuTests: XCTestCase {
+    final class Handler: NSObject, NSSelectorHandling, NSMenuItemValidation {
+        var fired: [String] = []
+        var allowSave = true
+        func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+            fired.append("\(action)")
+            return true
+        }
+        func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+            menuItem.action == Selector(("save:")) ? allowSave : true
+        }
+    }
+
+    func testMainMenuInstallsAndDispatches() {
+        let host = Platform.backend as! HostBackend
+        let handler = Handler()
+        let main = NSMenu(title: "Main")
+        let file = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: "File")
+        let save = fileMenu.addItem(withTitle: "Save", action: Selector(("save:")), keyEquivalent: "s")
+        save.target = handler
+        fileMenu.addItem(NSMenuItem.separator())
+        let quit = fileMenu.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
+        quit.target = handler
+        file.submenu = fileMenu
+        main.addItem(file)
+        NSApp.mainMenu = main
+        defer { NSApp.mainMenu = nil }
+
+        let spec = host.mainMenu
+        XCTAssertEqual(spec?.items.count, 1)
+        XCTAssertEqual(spec?.items.first?.title, "File")
+        XCTAssertEqual(spec?.items.first?.submenu?.items.map { $0.title }, ["Save", "", "Quit"])
+        XCTAssertEqual(spec?.items.first?.submenu?.items.first?.keyEquivalentLabel, "Ctrl+S")
+        XCTAssertTrue(spec!.items.first!.submenu!.items[1].isSeparator)
+
+        // Choosing the item through the platform fires the action.
+        host.chooseMenuItem(spec!.items.first!.submenu!.items[0].id)
+        XCTAssertEqual(handler.fired, ["save:"])
+
+        // Validation disables the item when the menu opens.
+        handler.allowSave = false
+        let refreshed = host.openMenu(fileMenu._menuID)
+        XCTAssertEqual(refreshed?.items.first?.isEnabled, false)
+        XCTAssertFalse(save.isEnabled)
+        host.chooseMenuItem(save._commandID)
+        XCTAssertEqual(handler.fired.count, 1, "disabled items do not fire")
+        handler.allowSave = true
+
+        // Key equivalent through the application.
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        w.makeKeyAndOrderFront(nil)
+        let cmdQ = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: w.windowNumber, context: nil,
+                                    characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12)!
+        NSApp.sendEvent(cmdQ)
+        XCTAssertEqual(handler.fired, ["save:", "quit:"])
+        let plainQ = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil,
+                                      characters: "q", charactersIgnoringModifiers: "q", isARepeat: false, keyCode: 12)!
+        NSApp.sendEvent(plainQ)
+        XCTAssertEqual(handler.fired.count, 2, "without the modifier the key is not an equivalent")
+        w.close()
+
+        // Edits propagate to the platform description.
+        save.state = .on
+        XCTAssertEqual(host.mainMenu?.items.first?.submenu?.items.first?.isChecked, true)
+        XCTAssertTrue(save.menu === fileMenu)
+        XCTAssertTrue(fileMenu.supermenu === main)
+        XCTAssertEqual(main.index(of: file), 0)
+    }
+}

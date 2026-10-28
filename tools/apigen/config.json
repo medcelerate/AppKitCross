@@ -11,6 +11,8 @@
     "NSEvent",
     "NSFont",
     "NSGraphicsContext",
+    "NSMenu",
+    "NSMenuItem",
     "NSResponder",
     "NSScreen",
     "NSTextField",
