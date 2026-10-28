@@ -368,3 +368,29 @@ final class WindowReopenTests: XCTestCase {
         w.close()
     }
 }
+
+@MainActor
+final class CollapsedGeometryTests: XCTestCase {
+    func testCollapsingAWindowKeepsGeometryFinite() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let scroll = NSScrollView(frame: NSRect(x: 10, y: 10, width: 280, height: 180))
+        scroll.autoresizingMask = [.width, .height]
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.documentView = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 1000))
+        w.contentView!.addSubview(scroll)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        // What a minimised Win32 window reports: a 0x0 client area.
+        w.setContentSize(NSSize(width: 0, height: 0))
+        w.display()
+        XCTAssertTrue(scroll.frame.width.isFinite && scroll.frame.height.isFinite)
+        XCTAssertTrue(scroll.contentView.frame.width.isFinite && scroll.contentView.frame.minY.isFinite)
+        w.setContentSize(NSSize(width: 300, height: 200))
+        w.display()
+        // Autoresizing through a 0x0 pass is lossy (as in AppKit); what matters is sane geometry.
+        XCTAssertTrue(scroll.frame.width.isFinite && scroll.frame.width >= 0 && scroll.frame.height >= 0)
+        XCTAssertTrue(scroll.contentView.frame.width.isFinite && scroll.contentView.frame.width >= 0)
+        w.close()
+    }
+}

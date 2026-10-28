@@ -376,6 +376,11 @@ import CoreText
         defer { _tiling = false }
         let inset = _borderInset
         var content = bounds.insetBy(dx: inset, dy: inset)
+        // A scroll view smaller than its border (a collapsed or minimised window) must not
+        // produce the null rect's infinities.
+        if content.isNull || content.width < 0 || content.height < 0 {
+            content = NSRect(x: bounds.minX + min(inset, bounds.width / 2), y: bounds.minY + min(inset, bounds.height / 2), width: 0, height: 0)
+        }
         let doc = _contentView.documentRect
         let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
         var showV = _hasVerticalScroller, showH = _hasHorizontalScroller
@@ -385,9 +390,9 @@ import CoreText
             showH = _hasHorizontalScroller && doc.width > content.width - (showV ? w : 0)
             showV = _hasVerticalScroller && doc.height > content.height - (showH ? w : 0)
         }
-        if showV { content.size.width -= w }
+        if showV { content.size.width = max(0, content.size.width - w) }
         if showH {
-            content.size.height -= w
+            content.size.height = max(0, content.size.height - w)
             if !isFlipped { content.origin.y += w }
         }
         if let v = _verticalScroller {

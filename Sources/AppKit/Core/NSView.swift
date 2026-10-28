@@ -1221,6 +1221,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframeorigin(_:)
     @MainActor open func setFrameOrigin(_ newOrigin: NSPoint) {
         let animate = _takeAnimator()
+        guard newOrigin.x.isFinite, newOrigin.y.isFinite else { return }   // never adopt NaN/inf geometry
         guard newOrigin != _frame.origin else { return }
         let old = _frame
         _frame.origin = newOrigin
@@ -1234,6 +1235,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframesize(_:)
     @MainActor open func setFrameSize(_ newSize: NSSize) {
         let animate = _takeAnimator()
+        guard newSize.width.isFinite, newSize.height.isFinite else { return }
+        let newSize = NSSize(width: max(0, newSize.width), height: max(0, newSize.height))
         guard newSize != _frame.size else { return }
         let old = _frame
         let oldBounds = bounds
