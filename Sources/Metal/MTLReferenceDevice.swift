@@ -453,7 +453,7 @@ final class MTLReferenceComputeCommandEncoder: MTLReferenceEncoder, MTLComputeCo
 /// (MTKView draws it through CoreGraphics).
 public final class MTLReferenceDrawable: MTLDrawable {
     public let drawableID: Int
-    public private(set) var presentedTime: CFTimeInterval = 0
+    public private(set) var presentedTime: TimeInterval = 0
     public let texture: any MTLTexture
     private var handlers: [(any MTLDrawable) -> Void] = []
     private let onPresent: (MTLReferenceDrawable) -> Void
@@ -472,6 +472,6 @@ public final class MTLReferenceDrawable: MTLDrawable {
         for h in handlers { h(self) }
     }
 
-    public func present(atTime presentationTime: CFTimeInterval) { present() }
+    public func present(atTime presentationTime: TimeInterval) { present() }
     public func addPresentedHandler(_ block: @escaping (any MTLDrawable) -> Void) { handlers.append(block) }
 }

@@ -168,9 +168,9 @@ public protocol MTLComputeCommandEncoder: MTLCommandEncoder {
 /// - SeeAlso: https://developer.apple.com/documentation/metal/mtldrawable
 public protocol MTLDrawable: AnyObject {
     var drawableID: Int { get }
-    var presentedTime: CFTimeInterval { get }
+    var presentedTime: TimeInterval { get }
     func present()
-    func present(atTime presentationTime: CFTimeInterval)
+    func present(atTime presentationTime: TimeInterval)
     func addPresentedHandler(_ block: @escaping (any MTLDrawable) -> Void)
 }
 
