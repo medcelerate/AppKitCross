@@ -2,6 +2,8 @@
 // Builds against this package on Windows and against Apple's AppKit on macOS unchanged.
 
 import AppKit
+import Metal
+import MetalKit
 
 final class CanvasView: NSView {
     private var clicks: [NSPoint] = []
@@ -386,6 +388,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         split.title = "Split"
         split.view.frame = NSRect(x: 0, y: 0, width: 420, height: 260)
         tabs.addChild(split)
+        tabs.addChild(MetalDemoViewController())
         tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
@@ -492,5 +495,44 @@ final class ColorViewController: NSViewController {
             label.centerYAnchor.constraint(equalTo: pane.centerYAnchor),
         ])
         view = pane
+    }
+}
+
+
+/// An MTKView on the reference device: the clear colour cycles every frame through the
+/// display link, which exercises MTLCommandBuffer, drawables and presentation.
+final class MetalDemoViewController: NSViewController, MTKViewDelegate {
+    private var frame = 0
+    private let label = NSTextField(labelWithString: "")
+
+    override func loadView() {
+        title = "Metal"
+        let device = MTLCreateSystemDefaultDevice()
+        let mtk = MTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
+        mtk.delegate = self
+        mtk.preferredFramesPerSecond = 30
+        mtk.colorPixelFormat = .bgra8Unorm
+        label.stringValue = "Device: \(device?.name ?? "none")"
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        mtk.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: mtk.leadingAnchor, constant: 12),
+            label.topAnchor.constraint(equalTo: mtk.topAnchor, constant: 12),
+        ])
+        view = mtk
+    }
+
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+
+    func draw(in view: MTKView) {
+        frame += 1
+        let t = Double(frame) / 60
+        view.clearColor = MTLClearColorMake(0.5 + 0.5 * sin(t), 0.5 + 0.5 * sin(t * 1.3 + 2), 0.5 + 0.5 * sin(t * 0.7 + 4), 1)
+        guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
+              let queue = view.device?.makeCommandQueue(), let cb = queue.makeCommandBuffer() else { return }
+        cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cb.present(drawable)
+        cb.commit()
     }
 }
