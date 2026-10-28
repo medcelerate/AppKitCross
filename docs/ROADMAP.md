@@ -68,6 +68,16 @@ Replace the Direct2D HWND render target with a DXGI flip-model swap chain on a D
 device; D2D draws through `D3D11On12`. Per-monitor-v2 DPI, HDR surfaces, vsync and
 `NSWindow.displaysWhenScreenProfileChanges` equivalents.
 
+Status (2026-10-28): M3a merged (PR #1, built by the Windows session): windows present
+through an `IDXGISwapChain1` (flip-sequential, 2 buffers, BGRA, vsync) with an
+`ID2D1DeviceContext` drawing into a back-buffer `ID2D1Bitmap1`; D3D11 device with WARP
+fallback and the HWND target as a last resort (`APPKITWIN_LEGACY_D2D=1` forces it);
+device loss goes through the existing recreate path; `APPKITWIN_DXGI_DEBUG=1` prints
+live DXGI objects. Swap-chain frames repaint the whole client area. Text antialiasing is
+forced to grayscale on the swap chain so frames match the HWND target. Open: D3D12 +
+D3D11On12 (only needed for Metal/M7 sharing), HDR, a real monitor-DPI-change test, and
+DirectComposition hosting (M3b/M4b).
+
 ## M4: Core Animation
 
 `QuartzCore` over DirectComposition / `Windows.UI.Composition`: `CALayer` tree,
