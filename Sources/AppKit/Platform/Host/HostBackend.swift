@@ -23,7 +23,9 @@ final class HostBackend: PlatformBackend {
     #else
     let text: any PlatformTextBackend = NoTextBackend()
     #endif
-    #if canImport(ImageIO) && canImport(CoreGraphics)
+    // The package's own ImageIO (ADR-0009) is importable on Windows and Linux too, but AppKit
+    // keeps its platform image backends there; HostImageBackend is Apple's ImageIO on macOS.
+    #if canImport(ImageIO) && canImport(CoreGraphics) && !os(Windows) && !os(Linux)
     let image: any PlatformImageBackend = HostImageBackend()
     #elseif os(Linux)
     let image: any PlatformImageBackend = LinuxImageBackend()

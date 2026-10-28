@@ -42,9 +42,17 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
+// UniformTypeIdentifiers and ImageIO (ADR-0009): UTType over the SDK's core-type table;
+// CGImageSource/CGImageDestination over the WIC decode/encode in the CD2D shim.
+targets += [
+    .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CD2D"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
+let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
 #elseif os(Linux)
 // Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib or Wayland for windows (Milestone 8).
 targets += [
@@ -73,12 +81,23 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
+// UniformTypeIdentifiers and ImageIO (ADR-0009): UTType over the SDK's core-type table;
+// CGImageSource/CGImageDestination over Cairo's PNG reader and writer.
+targets += [
+    .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CCairo"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
+let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
 #else
+// macOS: Apple's UniformTypeIdentifiers and ImageIO are the reference the tests run against.
 appKitExclude += ["Platform/Win32", "Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = []
+let leafModuleProducts: [Product] = []
+let leafModuleTestDependencies: [Target.Dependency] = []
 #endif
 
 // QuartzCore is ours on every platform: the CALayer tree, animations and the software
@@ -127,7 +146,7 @@ targets += [
     ),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit", "Metal", "MetalKit"],
+        dependencies: ["AppKit", "Metal", "MetalKit"] + leafModuleTestDependencies,
         path: "Tests/AppKitTests"
     ),
 ]
@@ -139,7 +158,7 @@ let package = Package(
         .library(name: "AppKit", targets: ["AppKit"]),
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
-    ],
+    ] + leafModuleProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )
