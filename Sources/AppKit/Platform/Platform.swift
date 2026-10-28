@@ -8,6 +8,8 @@ public enum Platform {
 
     private static func makeBackend() -> any PlatformBackend {
         #if os(Windows)
+        // APPKITWIN_HOST_BACKEND=1 runs the headless host backend (unit tests), as on Linux.
+        if ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == "1" { return HostBackend() }
         return Win32Backend()
         #elseif os(Linux)
         // APPKITWIN_HOST_BACKEND=1 runs the headless host backend (unit tests, CI without X).

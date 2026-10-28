@@ -27,6 +27,8 @@ final class HostBackend: PlatformBackend {
     let image: any PlatformImageBackend = HostImageBackend()
     #elseif os(Linux)
     let image: any PlatformImageBackend = LinuxImageBackend()
+    #elseif os(Windows)
+    let image: any PlatformImageBackend = Win32ImageBackend()
     #else
     let image: any PlatformImageBackend = NoImageBackend()
     #endif

@@ -44,6 +44,13 @@ final class Win32Offscreen: PlatformOffscreenSurface {
 }
 
 @MainActor
+final class Win32BitmapOffscreen: PlatformOffscreenSurface {
+    let context: CGContext
+    init(context: CGContext) { self.context = context }
+    func makeImage() -> CGImage? { context.makeImage() }
+}
+
+@MainActor
 final class Win32ImageBackend: PlatformImageBackend {
     func decode(_ data: Data) -> CGImage? {
         var w: UInt32 = 0, h: UInt32 = 0, stride: UInt32 = 0
@@ -70,8 +77,16 @@ final class Win32ImageBackend: PlatformImageBackend {
     }
 
     func makeOffscreen(size: CGSize, scale: CGFloat) -> PlatformOffscreenSurface? {
-        guard let factory = (Platform.backend as? Win32Backend)?.d2dFactory else { return nil }
-        return Win32Offscreen(size: size, scale: scale, factory: factory)
+        if let factory = (Platform.backend as? Win32Backend)?.d2dFactory {
+            return Win32Offscreen(size: size, scale: scale, factory: factory)
+        }
+        // Headless host backend (unit tests): a bitmap CGContext on CoreGraphics' own factory.
+        let w = max(1, Int((size.width * scale).rounded(.up))), h = max(1, Int((size.height * scale).rounded(.up)))
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        return Win32BitmapOffscreen(context: ctx)
     }
 }
 #endif
