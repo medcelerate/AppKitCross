@@ -106,3 +106,13 @@ The target consumer is Swift (SwiftUI). Swift on Windows is a supported swift.or
 platform with Foundation, Dispatch and XCTest, and the `WinSDK` module already exposes
 Win32, DXGI, D3D12, D2D and WIC. Writing the port in C++ would add an FFI boundary for
 every AppKit object and make `@MainActor`/`Sendable` annotations impossible to honour.
+
+## SwiftUI hosting seam
+
+Apple's `NSHostingView`/`NSHostingController` live in SwiftUI and use private AppKit hooks.
+This AppKit exposes the hooks instead (`Sources/AppKit/Hosting/NSHostingSeam.swift`):
+hosted content conforms to `NSHostingContent` and yields an `NSHostingRoot`, which the host
+view drives (attach, measure with a size proposal, layout, draw, events, environment). The
+root can build on the host's backing `CALayer` tree, add `NSView`s, or draw immediately.
+A SwiftUI implementation for this AppKit refines `NSHostingContent` with its `View`
+protocol and implements its render tree as an `NSHostingRoot`.

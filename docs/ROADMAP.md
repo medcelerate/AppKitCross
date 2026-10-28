@@ -135,6 +135,19 @@ windows), popovers, storyboards/nibs, `NSSplitViewItem` accessory view controlle
 `NSHostingSizingOptions`. At this point a SwiftUI implementation can be developed
 against this AppKit.
 
+Status (2026-10-28): done (`Sources/AppKit/Hosting/NSHostingSeam.swift`). Apple keeps these
+types in SwiftUI and reaches AppKit through private hooks; here the hooks are the public
+seam: content conforms to `NSHostingContent` and produces an `NSHostingRoot` (attach /
+detach, `contentDidChange`, `environmentDidChange`, `sizeThatFits(proposal)`, `layout(in:)`,
+immediate-mode `draw`, event handling, responder hit testing); the host side is
+`NSHostingRootHost` (host view, window, backing layer, environment, invalidation, display
+links, ideal-size changes). `NSHostingView` (layer-backed, flipped, intrinsic size from the
+root, events forwarded to the root first), `NSHostingController` (`sizingOptions`,
+`preferredContentSize`, `sizeThatFits(in:)`), `NSHostingSizingOptions`,
+`NSViewRepresentable` / `NSViewControllerRepresentable` with coordinators and contexts, and
+`NSViewRepresentableHostingRoot` as the reference root. A SwiftUI port makes its `View`
+refine `NSHostingContent` and builds its render tree on `CALayer`/`NSView` through the host.
+
 ## M3b: Frameless and translucent windows (after M3)
 
 Requested test target: a borderless (or `.fullSizeContentView` + transparent title bar)
