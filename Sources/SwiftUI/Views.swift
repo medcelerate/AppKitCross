@@ -377,7 +377,13 @@ public struct Path: Equatable, @unchecked Sendable {
     public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool) {
         let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise); cgPath = m
     }
-    public static func == (a: Path, b: Path) -> Bool { a.cgPath == b.cgPath }
+    public static func == (a: Path, b: Path) -> Bool {
+        #if canImport(Darwin)
+        return a.cgPath == b.cgPath
+        #else
+        return a.cgPath === b.cgPath || a.cgPath.boundingBox == b.cgPath.boundingBox && a.cgPath.isEmpty == b.cgPath.isEmpty
+        #endif
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/angle

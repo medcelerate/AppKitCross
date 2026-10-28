@@ -242,6 +242,19 @@ public struct NSApplicationDelegateAdaptor<DelegateType: NSObject & NSApplicatio
 @MainActor
 protocol _DelegateAdaptor { func makeDelegate() -> AnyObject }
 
+/// On Windows and Linux corelibs' NSObject has no required initializer, so a delegate
+/// class adopts this (adding `required init()`) to be created by the adaptor.
+public protocol _NSApplicationDelegateConstructible: AnyObject { init() }
+
 final class _DelegateBox<T: NSObject & NSApplicationDelegate> {
-    lazy var instance: T = T()
+    lazy var instance: T = {
+        #if canImport(Darwin)
+        return T()
+        #else
+        guard let type = T.self as? any _NSApplicationDelegateConstructible.Type, let d = type.init() as? T else {
+            fatalError("\(T.self) must adopt _NSApplicationDelegateConstructible (a required init()) to be used with @NSApplicationDelegateAdaptor on this platform")
+        }
+        return d
+        #endif
+    }()
 }
