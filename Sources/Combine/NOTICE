@@ -1,0 +1,5 @@
+Sources/Combine is a port of OpenCombine (https://github.com/OpenCombine/OpenCombine),
+release 0.14.0, Copyright (c) 2019 Sergej Jaskiewicz, used under the MIT license (see LICENSE
+in this directory). The module is renamed to Combine, the OpenCombineFoundation and
+OpenCombineDispatch targets are merged in with their OCombine namespaces flattened to
+Apple's names, and the C++ helper target is replaced by Swift (see docs/decisions/ADR-0008-combine.md).

@@ -42,6 +42,16 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
+targets += [
+    // Combine (ADR-0008): a port of OpenCombine under Apple's module name, so code written
+    // against Combine compiles unchanged. On macOS the package uses Apple's Combine.
+    .target(
+        name: "Combine",
+        path: "Sources/Combine",
+        exclude: ["LICENSE", "NOTICE"],
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+]
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
@@ -70,6 +80,16 @@ targets += [
         name: "CoreText",
         dependencies: ["CoreGraphics", "CCairo"],
         path: "Sources/CoreText",
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+]
+targets += [
+    // Combine (ADR-0008): a port of OpenCombine under Apple's module name, so code written
+    // against Combine compiles unchanged. On macOS the package uses Apple's Combine.
+    .target(
+        name: "Combine",
+        path: "Sources/Combine",
+        exclude: ["LICENSE", "NOTICE"],
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
@@ -108,6 +128,15 @@ targets += [
     .target(name: "Metal", dependencies: metalDependencies, path: "Sources/Metal", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
 
+// On macOS the tests import Apple's Combine; on Windows and Linux they need our target.
+#if os(Windows) || os(Linux)
+let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
+let combineTestDependencies: [Target.Dependency] = ["Combine"]
+#else
+let combineProducts: [Product] = []
+let combineTestDependencies: [Target.Dependency] = []
+#endif
+
 targets += [
     .target(
         name: "AppKit",
@@ -127,10 +156,11 @@ targets += [
     ),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit", "Metal", "MetalKit"],
+        dependencies: ["AppKit", "Metal", "MetalKit"] + combineTestDependencies,
         path: "Tests/AppKitTests"
     ),
 ]
+
 
 let package = Package(
     name: "AppKitWin",
@@ -139,7 +169,7 @@ let package = Package(
         .library(name: "AppKit", targets: ["AppKit"]),
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
-    ],
+    ] + combineProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )
