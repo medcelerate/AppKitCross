@@ -49,8 +49,31 @@ final class LinuxTextBackend: PlatformTextBackend {
         context = fontMap.flatMap { pango_font_map_create_context($0) }
     }
 
+    /// Lower-cased names of the installed families plus fontconfig's generic aliases.
+    /// Pango substitutes a default for any unknown family, so an explicit name is checked
+    /// here to keep `NSFont(name:size:)` returning nil as AppKit does.
+    private lazy var knownFamilies: Set<String> = {
+        var names: Set<String> = ["sans", "sans-serif", "serif", "monospace", "system-ui", "cursive", "fantasy"]
+        guard let fontMap else { return names }
+        var families: UnsafeMutablePointer<UnsafeMutablePointer<PangoFontFamily>?>? = nil
+        var count: Int32 = 0
+        pango_font_map_list_families(fontMap, &families, &count)
+        if let families {
+            for i in 0..<Int(count) {
+                if let fam = families[i], let cname = pango_font_family_get_name(fam) { names.insert(String(cString: cname).lowercased()) }
+            }
+            g_free(families)
+        }
+        return names
+    }()
+
     func makeFont(family: String?, size: CGFloat, weight: CGFloat, italic: Bool, monospaced: Bool) -> PlatformFontHandle? {
         guard let context else { return nil }
+        if let family {
+            // "Family-Style" PostScript-style names: match on the family part.
+            let base = family.split(separator: "-", maxSplits: 1).first.map(String.init) ?? family
+            guard knownFamilies.contains(family.lowercased()) || knownFamilies.contains(base.lowercased()) else { return nil }
+        }
         // AppKit weight -1...1 -> Pango 100...900 (regular 400, bold 700).
         let pw = Int32(min(900, max(100, (400 + weight * 750).rounded())))
         let name = family ?? (monospaced ? "Monospace" : "Sans")

@@ -38,4 +38,3 @@ jobs:
       - run: swift build
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
-        continue-on-error: true

@@ -9,16 +9,16 @@ are concrete and testable.
 |---|---|
 | M0 Foundation | done |
 | M1 Window and drawing | done, verified on Windows |
-| M2 Controls and text | done, verified on Windows (field editor/IME deferred) |
+| M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
 | M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
 | M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; HLSL only, swap-chain presentation unexercised) |
-| M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite blocked by XCTest-on-Linux `@MainActor` discovery |
+| M8 Linux | done for X11: HelloWindow renders under Xvfb (screenshot in README), 71/71 tests pass in the `swift:6.2-noble` container (Wayland open) |
 
-The macOS host build runs the full test suite (64 tests); Windows verification is done by
+The macOS host build and the Linux container run the full test suite (71 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
 
 ## M0: Foundation (this milestone)
@@ -78,8 +78,14 @@ selector-free target/action (`NSSelectorHandling`, `setActionHandler`),
 `NSCursor` with cursor rects, `NSPasteboard` (CF_UNICODETEXT both ways), `NSAlert` and
 modal sessions (`runModal`, disabled owner window). Done, awaiting Windows verification:
 `NSOpenPanel`/`NSSavePanel` over `IFileDialog`. Decision: Ctrl maps to `.command` and
-the Windows key to `.control`. Deferred: field editor/IME for text fields (M5 with the
-text system).
+the Windows key to `.control`. Field editor (2026-10-29): `NSText`/`NSTextView` are
+hand-written (layout with wrapping, caret and selection, mouse selection, key-binding
+selectors, copy/cut/paste, `NSTextInputClient` marked text); `NSTextField` edits through
+the window's field editor (`fieldEditor(_:for:)`), Return commits and keeps the field
+editing with everything selected, Tab/Backtab move focus via
+`selectKeyView(following:/preceding:)`. Input methods reach the first responder through
+`PlatformWindowOwner.platformWindowTextInput()`; the Win32 WM_IME_* half is with the
+Windows session.
 
 ## M3: DirectX 12 presentation
 
@@ -237,11 +243,11 @@ in-process pasteboard, zenity file dialogs; no native menu bar). The core needed
 changes beyond widening non-Darwin conditionals. `tools/linux/Dockerfile` builds on
 `swift:6.2-noble`, runs the test suite on the host backend (`APPKITWIN_HOST_BACKEND=1`)
 and HelloWindow under Xvfb for a screenshot (the sample renders fully: text, paths,
-controls, scroll view, the Core Animation badge). Open: the test suite does not run on
-Linux yet because swift-corelibs-xctest's test discovery cannot call `@MainActor`-isolated
-test methods ("Could not cast value of type '(T) -> @MainActor () -> ()'"); the CI job
-builds the tests but tolerates the run failing until the tests are restructured (or
-migrated to swift-testing). Also open: Wayland, X11 selections for the pasteboard, JPEG
+controls, scroll view, the Core Animation badge). The test suite runs on Linux
+(2026-10-29, 71/71 on the host backend): swift-corelibs-xctest cannot call `@MainActor`
+test methods, so test classes are nonisolated and each body runs in
+`MainActor.assumeIsolated`; the CI job requires the run to pass. Open: Wayland, X11
+selections for the pasteboard, JPEG
 via gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
 
 ## Reference projects

@@ -63,7 +63,7 @@ final class LinuxImageBackend: PlatformImageBackend {
     private final class Writer { var data = Data() }
 
     func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
-        guard format.lowercased() == "png" else { return nil }
+        guard format.lowercased().hasSuffix("png") else { return nil }   // "png" or "public.png"
         guard let surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, Int32(image.width), Int32(image.height)),
               let dst = cairo_image_surface_get_data(surface) else { return nil }
         defer { cairo_surface_destroy(surface) }
