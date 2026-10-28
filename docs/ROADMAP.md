@@ -15,7 +15,7 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | API, reference device, MTKView and the D3D12 backend done, verified on an RTX 2070 (HLSL only; swap chain unexercised) |
+| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; HLSL only, swap-chain presentation unexercised) |
 | M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite blocked by XCTest-on-Linux `@MainActor` discovery |
 
 The macOS host build runs the full test suite (64 tests); Windows verification is done by
