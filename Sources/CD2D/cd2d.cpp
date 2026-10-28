@@ -6,6 +6,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wincodec.h>
+#include <shlwapi.h>
 #include <vector>
 #include <cstring>
 
