@@ -4,6 +4,7 @@
 import AppKit
 import Metal
 import MetalKit
+import SwiftUI
 
 /// `HelloWindow --no-layer-backing` keeps the windows' views unbacked (the Milestone 1-8
 /// drawing path); otherwise their content views are layer-backed (Milestone 9).
@@ -142,6 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         case Selector(("showLayoutDemo:")):
             showLayoutDemo()
             return true
+        case Selector(("showSwiftUIDemo:")):
+            showSwiftUIDemo()
+            return true
         case Selector(("openFile:")):
             let panel = NSOpenPanel()
             panel.title = "Choose a file"
@@ -202,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let view = NSMenu(title: "View")
         gridMenuItem = view.addItem(withTitle: "Show Grid", action: Selector(("toggleGridMenu:")), keyEquivalent: "g")
         view.addItem(withTitle: "Layout Demo", action: Selector(("showLayoutDemo:")), keyEquivalent: "l")
+        view.addItem(withTitle: "SwiftUI Demo", action: Selector(("showSwiftUIDemo:")), keyEquivalent: "u")
         gridMenuItem.state = .on
         viewItem.submenu = view
         main.addItem(viewItem)
@@ -349,6 +354,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         window.makeKeyAndOrderFront(nil)
         _ = window.makeFirstResponder(canvas)
 
+        // `HelloWindow --swiftui` opens the SwiftUI demo window (for scripted runs and screenshots).
+        if CommandLine.arguments.contains("--swiftui") { showSwiftUIDemo() }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs).
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
@@ -362,6 +369,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     var glassWindow: NSWindow?
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
+    // MARK: SwiftUI demo (ADR-0010)
+
+    var swiftUIWindow: NSWindow?
+
+    @MainActor func showSwiftUIDemo() {
+        if let w = swiftUIWindow { w.makeKeyAndOrderFront(nil); return }
+        let hosting = NSHostingView(rootView: SwiftUIDemo())
+        let size = hosting.sizeThatFits(.unspecified)
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: max(size.width, 360), height: max(size.height, 300)),
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        w.title = "SwiftUI Demo"
+        hosting.frame = w.contentView!.bounds
+        hosting.autoresizingMask = [.width, .height]
+        w.contentView = hosting
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        swiftUIWindow = w
+    }
+
     @MainActor func showGlassWindow() {
         if let g = glassWindow { g.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 280),
@@ -892,5 +918,55 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre)")
             fflush(nil)
         }
+    }
+}
+
+
+// MARK: - SwiftUI demo content
+
+final class DemoModel: ObservableObject {
+    @Published var items: [String] = ["Alpha", "Beta", "Gamma"]
+    @Published var nextIndex = 4
+}
+
+struct SwiftUIDemo: View {
+    @State private var name = ""
+    @State private var count = 0
+    @State private var enabled = true
+    @State private var amount = 0.4
+    @StateObject private var model = DemoModel()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("SwiftUI on AppKitWin").font(.title).bold()
+            Text("State, bindings and layout running over this AppKit.").foregroundColor(.secondary)
+            HStack {
+                TextField("Your name", text: $name)
+                Button("Greet") { count += 1 }
+            }
+            Text(name.isEmpty ? "Type a name and press Greet." : "Hello, \(name)! (\(count) greetings)")
+            Toggle("Enabled", isOn: $enabled)
+            HStack {
+                Slider(value: $amount, in: 0...1).disabled(!enabled)
+                Text(String(format: "%.0f%%", amount * 100)).frame(width: 44, alignment: .trailing)
+            }
+            RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(enabled ? 1 : 0.3)).frame(width: 240 * CGFloat(amount) + 20, height: 20)
+            Divider()
+            HStack {
+                Text("Items").font(.headline)
+                Spacer()
+                Button("Add") { model.items.append("Item \(model.nextIndex)"); model.nextIndex += 1 }
+                Button("Remove") { if !model.items.isEmpty { model.items.removeLast() } }
+            }
+            List(model.items, id: \.self) { item in
+                HStack {
+                    Circle().fill(Color.green).frame(width: 10, height: 10)
+                    Text(item)
+                    Spacer()
+                }
+            }.frame(height: 120)
+        }
+        .padding(16)
+        .frame(minWidth: 360)
     }
 }

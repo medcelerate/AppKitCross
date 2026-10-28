@@ -175,7 +175,7 @@ targets += [
     .target(name: "MetalKit", dependencies: ["AppKit", "Metal"], path: "Sources/MetalKit", swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("StrictConcurrency")]),
     .executableTarget(
         name: "HelloWindow",
-        dependencies: ["AppKit", "Metal", "MetalKit"],
+        dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"],
         path: "Examples/HelloWindow"
     ),
     .testTarget(

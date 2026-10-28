@@ -4,7 +4,7 @@
 import Foundation
 @_exported import AppKit
 #if canImport(Combine)
-import Combine
+@_exported import Combine     // SwiftUI re-exports Combine (ObservableObject, @Published) as Apple's does
 #endif
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view

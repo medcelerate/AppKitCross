@@ -28,6 +28,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 | `Sources/UniformTypeIdentifiers` (Windows and Linux only) | `UTType` and `UTTagClass` with Apple's API over a table generated from the macOS SDK's core types (`tools/uttypes`), dynamic `dyn.*` types encoded as Apple does (ADR-0009). |
 | `Sources/ImageIO` (Windows and Linux only) | `CGImageSource` and `CGImageDestination` over the platform codecs: WIC through `CD2D` on Windows, Cairo PNG on Linux (ADR-0009). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
+| `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
 | `Stubs/Pending` | Generated stubs that do not compile yet. Not part of any target. |
@@ -64,6 +65,10 @@ python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API
 `tools/linux/Dockerfile` builds the package on `swift:6.2-noble` with X11, Wayland, Cairo and Pango, runs the test suite on the headless host backend and HelloWindow under Xvfb. The sample as rendered there (no window manager, so no decorations):
 
 ![HelloWindow on Linux under Xvfb](docs/images/hellowindow-linux-xvfb.png)
+
+The SwiftUI demo window (`HelloWindow --swiftui`, View > SwiftUI Demo) under Xvfb:
+
+![SwiftUI demo on Linux under Xvfb](docs/images/swiftui-demo-linux-xvfb.png)
 
 Two window backends share the Cairo drawing, PangoCairo text and the rest of the Linux platform code: Wayland (`WaylandBackend`, xdg-shell toplevels with wl_shm buffers, xkbcommon keyboards, wl_cursor themes, server-side decorations through xdg-decoration) is preferred when `WAYLAND_DISPLAY` is set and the connection succeeds, X11 is the fallback; `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one. `bash tools/linux/run.sh --wayland` in the container additionally runs HelloWindow under a headless sway and screenshots it with grim (sway draws the title bar):
 

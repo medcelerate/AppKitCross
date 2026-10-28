@@ -109,7 +109,14 @@ public struct Font: Hashable, Sendable {
 public struct Color: Hashable, Sendable, View, _PrimitiveView {
     public typealias Body = Never
     public enum RGBColorSpace: Hashable, Sendable { case sRGB, sRGBLinear, displayP3 }
-    enum Storage: Hashable { case rgb(Double, Double, Double, Double), named(String), ns(String, Double, Double, Double, Double) }
+    /// An NSColor kept as is (system colours resolve dynamically); identity-hashed.
+    final class _NSColorBox: @unchecked Sendable, Hashable {
+        let color: NSColor
+        init(_ c: NSColor) { color = c }
+        static func == (a: _NSColorBox, b: _NSColorBox) -> Bool { a === b || a.color == b.color }
+        func hash(into h: inout Hasher) { h.combine(ObjectIdentifier(color)) }
+    }
+    enum Storage: Hashable { case rgb(Double, Double, Double, Double), named(String), ns(_NSColorBox) }
     let storage: Storage
     var opacityMultiplier: Double = 1
 
@@ -121,10 +128,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         storage = .rgb(Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent), opacity)
     }
     public init(_ name: String, bundle: Bundle? = nil) { storage = .named(name) }
-    @MainActor public init(nsColor: NSColor) {
-        let c = nsColor.usingColorSpace(.sRGB) ?? nsColor
-        storage = .ns("", Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent), Double(c.alphaComponent))
-    }
+    public init(nsColor: NSColor) { storage = .ns(_NSColorBox(nsColor)) }
     init(named: String) { storage = .named(named) }
 
     public static let clear = Color(named: "clear")
@@ -153,7 +157,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         let base: NSColor
         switch storage {
         case .rgb(let r, let g, let b, let a): base = NSColor(red: r, green: g, blue: b, alpha: a)
-        case .ns(_, let r, let g, let b, let a): base = NSColor(red: r, green: g, blue: b, alpha: a)
+        case .ns(let box): base = box.color
         case .named(let n):
             switch n {
             case "clear": base = .clear
