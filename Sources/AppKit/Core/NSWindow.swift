@@ -49,6 +49,8 @@ import CoreText
     private var _toolbar: NSToolbar? = nil
     private var _titleVisibility: NSWindow.TitleVisibility = .visible
     private var _titlebarAppearsTransparent = false
+    /// Backdrop requested by an NSVisualEffectView blending behind the window.
+    internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { _updateChrome() } }
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
@@ -103,6 +105,53 @@ import CoreText
     }
 
     internal var _platformWindow: (any PlatformWindow)? { _platform }
+
+    /// A closed window ordered front again gets a fresh platform window, as AppKit re-shows
+    /// a window that was not released when closed.
+    private func _reopenIfNeeded() {
+        guard _platform == nil else { return }
+        let content = Platform.backend.contentRect(forFrameRect: _lastFrame, styleMask: _styleMask)
+        _platform = Platform.backend.makeWindow(owner: self, contentRect: content, styleMask: _styleMask)
+        _platform?.title = _title
+        _isClosing = false
+        _updateChrome()
+        NSApplication.shared._register(window: self)
+        _contentView?.needsDisplay = true
+        _platform?.setNeedsDisplay(nil)
+    }
+
+    /// The chrome the backend should show for the current properties.
+    internal var _chrome: PlatformWindowChrome {
+        var c = PlatformWindowChrome()
+        c.extendsContentIntoTitleBar = _styleMask.contains(.fullSizeContentView) || !_styleMask.contains(.titled)
+        c.hidesTitle = _titleVisibility == .hidden || !_styleMask.contains(.titled)
+        c.transparentTitleBar = _titlebarAppearsTransparent
+        c.backdrop = _backdrop
+        c.isTransparent = !_isOpaque
+        c.hasShadow = _hasShadow
+        c.movableByBackground = _isMovableByWindowBackground
+        return c
+    }
+
+    internal func _updateChrome() {
+        _platform?.chrome = _chrome
+    }
+
+    /// Content that extends into the title bar is draggable in its top band (AppKit's
+    /// title bar height) and anywhere when movable by background, unless a view that
+    /// takes mouse downs is under the point.
+    public func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion {
+        guard let content = _contentView else { return .client }
+        let hit = content.hitTest(point)
+        if let v = hit, !v.mouseDownCanMoveWindow { return .client }
+        if _isMovableByWindowBackground { return .caption }
+        let chrome = _chrome
+        if chrome.extendsContentIntoTitleBar, point.y >= content.bounds.height - NSWindow._titleBarBandHeight { return .caption }
+        return .client
+    }
+
+    /// The draggable band at the top of windows whose content covers the title bar.
+    internal static let _titleBarBandHeight: CGFloat = 28
 
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
@@ -188,6 +237,7 @@ import CoreText
         let app = NSApplication.shared
         _windowNumber = app._allocateWindowNumber()
         _platform = Platform.backend.makeWindow(owner: self, contentRect: contentRect, styleMask: style)
+        _updateChrome()
         _lastFrame = _platform?.frame ?? contentRect
         _firstResponder = self
         let cv = NSView(frame: NSRect(origin: .zero, size: contentRect.size))
@@ -375,6 +425,7 @@ import CoreText
         if _isMain { resignMain() }
         for child in _childWindows { child.close() }
         _parent?.removeChildWindow(self)
+        _lastFrame = frame
         _platform?.close()
         _platform = nil
         if disappearing { _contentView?._windowVisibilityDidChange(false) }
@@ -631,7 +682,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hasshadow
     @MainActor open var hasShadow: Bool {
         get { _hasShadow }
-        set { _hasShadow = newValue }
+        set { _hasShadow = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hastitlebar
     @MainActor open var hasTitleBar: Bool { unimplemented() }
@@ -696,7 +747,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismovablebywindowbackground
     @MainActor open var isMovableByWindowBackground: Bool {
         get { _isMovableByWindowBackground }
-        set { _isMovableByWindowBackground = newValue }
+        set { _isMovableByWindowBackground = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isonactivespace
     @MainActor open var isOnActiveSpace: Bool { unimplemented() }
@@ -708,7 +759,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isopaque
     @MainActor open var isOpaque: Bool {
         get { _isOpaque }
-        set { _isOpaque = newValue }
+        set { _isOpaque = newValue; _updateChrome(); _platform?.setNeedsDisplay(nil) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isreleasedwhenclosed
     @MainActor open var isReleasedWhenClosed: Bool {
@@ -836,6 +887,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderback(_:)
     @MainActor open func orderBack(_ sender: Any?) {
+        _reopenIfNeeded()
         let appearing = !isVisible
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
@@ -844,6 +896,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfront(_:)
     @MainActor open func orderFront(_ sender: Any?) {
+        _reopenIfNeeded()
         let appearing = !isVisible
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
@@ -1104,7 +1157,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/stylemask
     @MainActor open var styleMask: NSWindow.StyleMask {
         get { _styleMask }
-        set { _styleMask = newValue; _platform?.styleMask = newValue }
+        set { _styleMask = newValue; _platform?.styleMask = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/subtitle
     @available(macOS 11.0, *)
@@ -1142,7 +1195,7 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open var titleVisibility: NSWindow.TitleVisibility {
         get { _titleVisibility }
-        set { _titleVisibility = newValue }
+        set { _titleVisibility = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebaraccessoryviewcontrollers
     @available(macOS 10.10, *)
@@ -1154,7 +1207,7 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open var titlebarAppearsTransparent: Bool {
         get { _titlebarAppearsTransparent }
-        set { _titlebarAppearsTransparent = newValue }
+        set { _titlebarAppearsTransparent = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebarseparatorstyle
     @available(macOS 11.0, *)

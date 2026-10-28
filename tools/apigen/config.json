@@ -51,7 +51,8 @@
     "NSSplitViewItem",
     "NSTabViewController",
     "NSTabView",
-    "NSTabViewItem"
+    "NSTabViewItem",
+    "NSVisualEffectView"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",

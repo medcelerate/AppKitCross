@@ -82,6 +82,8 @@ public protocol PlatformWindow: AnyObject {
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
     func setNeedsDisplay(_ rect: NSRect?)
+    /// Chrome beyond the style mask: title bar treatment, backdrop, shadow (Milestone 3b).
+    var chrome: PlatformWindowChrome { get set }
     /// Repaints synchronously if anything is marked dirty.
     func displayIfNeeded()
     /// Repaints synchronously.
@@ -94,6 +96,8 @@ public protocol PlatformWindowOwner: AnyObject {
     /// Whether this window carries the application's menu bar on platforms that attach
     /// menus per window (Windows). Panels and utility windows do not.
     var platformWantsMenuBar: Bool { get }
+    /// Whether a point (content coordinates) drags the window (caption) or is content.
+    func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion
     /// The native frame changed (size and/or origin). `frame` is in screen coordinates.
     func platformWindowDidChangeFrame(_ frame: NSRect)
     func platformWindowShouldClose() -> Bool
@@ -125,3 +129,27 @@ public struct PlatformFileDialogOptions: Sendable {
     public var showsHiddenFiles = false
     public init() {}
 }
+
+/// Window chrome a backend can offer beyond the style mask (Milestone 3b: frameless and
+/// translucent windows). Windows maps these onto DWM attributes and custom non-client
+/// handling; the host backend records them.
+public struct PlatformWindowChrome: Equatable, Sendable {
+    public enum Backdrop: Sendable { case none, mica, micaAlt, acrylic }
+    /// `NSWindow.StyleMask.fullSizeContentView`: the content covers the title bar area.
+    public var extendsContentIntoTitleBar = false
+    /// `titleVisibility == .hidden`.
+    public var hidesTitle = false
+    /// `titlebarAppearsTransparent`.
+    public var transparentTitleBar = false
+    /// System backdrop behind the content (from `NSVisualEffectView` materials).
+    public var backdrop: Backdrop = .none
+    /// `!isOpaque`: the content is drawn with alpha over the backdrop.
+    public var isTransparent = false
+    public var hasShadow = true
+    /// `isMovableByWindowBackground`.
+    public var movableByBackground = false
+    public var roundedCorners = true
+    public init() {}
+}
+
+public enum PlatformWindowHitRegion: Sendable { case client, caption }

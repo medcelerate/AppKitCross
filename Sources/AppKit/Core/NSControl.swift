@@ -66,7 +66,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/attributedstringvalue
     @MainActor open var attributedStringValue: NSAttributedString {
         get { _cell?.attributedStringValue ?? NSAttributedString(string: "") }
-        set { _cell?.attributedStringValue = newValue; needsDisplay = true }
+        set { _cell?.attributedStringValue = newValue; invalidateIntrinsicContentSize(); needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/basewritingdirection
     @MainActor open var baseWritingDirection: NSWritingDirection {
@@ -206,8 +206,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/stringvalue
     @MainActor open var stringValue: String {
         get { _cell?.stringValue ?? "" }
-        set { _cell?.stringValue = newValue; needsDisplay = true }
+        set { _cell?.stringValue = newValue; invalidateIntrinsicContentSize(); needsDisplay = true }
     }
+    /// Controls take mouse downs, so they never drag a window that is movable by background.
+    @MainActor open override var mouseDownCanMoveWindow: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/tag
     @MainActor open override var tag: Int {
         get { _cell?.tag ?? 0 }

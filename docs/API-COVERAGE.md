@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 52 |
-| Types generated | 486 |
+| Types handwritten | 53 |
+| Types generated | 485 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10205 |
@@ -560,7 +560,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewInvalidating | protocol | generated | 6 | 0 | 0 |  |
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
-| NSVisualEffectView | class | generated | 32 | 0 | 3 |  |
+| NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
 | NSWindow | class | handwritten | 391 | 3 | 20 | 180 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |

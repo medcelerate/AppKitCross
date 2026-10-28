@@ -42,6 +42,20 @@ final class Win32Window: PlatformWindow {
     /// Titled windows carry the application menu bar (AppKit's main menu is global).
     var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) && ownerWantsMenuBar }
     private let ownerWantsMenuBar: Bool
+    private var _chrome = PlatformWindowChrome()
+    var chrome: PlatformWindowChrome {
+        get { _chrome }
+        set {
+            guard newValue != _chrome else { return }
+            _chrome = newValue
+            applyChrome()
+        }
+    }
+
+    /// Milestone 3b (branch m3b-frameless-glass): DWM backdrop and corner attributes,
+    /// WM_NCCALCSIZE for content that extends into the title bar, a composition swap
+    /// chain for transparent windows. Until then the chrome is recorded only.
+    private func applyChrome() {}
 
     private var scale: CGFloat { CGFloat(dpi) / 96 }
 

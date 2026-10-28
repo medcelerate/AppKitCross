@@ -131,6 +131,7 @@ final class HostWindow: PlatformWindow {
     /// Last rendered content, for tests. Premultiplied BGRA, `backingScaleFactor` scaled.
     #if canImport(CoreGraphics)
     private(set) var lastImage: CGImage?
+    var chrome = PlatformWindowChrome()
     private var surface: CGContext?     // retained between paints, like the Direct2D target
     #endif
     private(set) var paintCount = 0

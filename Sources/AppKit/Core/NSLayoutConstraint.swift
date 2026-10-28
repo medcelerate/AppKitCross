@@ -226,7 +226,7 @@ import Foundation
             let name = s + identifier()
             if let m = metrics[name] {
                 if let d = m as? Double { return CGFloat(d) }
-                if let n = m as? NSNumber { return CGFloat(truncating: n) }
+                if let n = m as? NSNumber { return CGFloat(n.doubleValue) }
                 if let f = m as? CGFloat { return f }
                 if let x = m as? Int { return CGFloat(x) }
             }
@@ -247,7 +247,7 @@ import Foundation
                 } else {
                     let name = identifier()
                     if let v = views[name] { view = v as AnyObject }
-                    else if let m = metrics[name] { constant = (m as? NSNumber).map { CGFloat(truncating: $0) } ?? (m as? CGFloat) ?? CGFloat((m as? Double) ?? 0) }
+                    else if let m = metrics[name] { constant = (m as? NSNumber).map { CGFloat($0.doubleValue) } ?? (m as? CGFloat) ?? CGFloat((m as? Double) ?? 0) }
                 }
                 var priority = NSLayoutConstraint.Priority.required
                 if takeIf("@") { priority = NSLayoutConstraint.Priority(Float(number())) }

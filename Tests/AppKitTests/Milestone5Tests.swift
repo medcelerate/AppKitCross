@@ -346,3 +346,25 @@ final class ControllerTests: XCTestCase {
         w.close()
     }
 }
+
+@MainActor
+final class WindowReopenTests: XCTestCase {
+    func testClosedWindowCanBeShownAgain() {
+        let vc = NSViewController()
+        vc.view = NSView(frame: NSRect(x: 0, y: 0, width: 150, height: 100))
+        let wc = NSWindowController(window: NSWindow(contentViewController: vc))
+        wc.showWindow(nil)
+        let w = wc.window!
+        XCTAssertTrue(w.isVisible)
+        let frame = w.frame
+        w.close()
+        XCTAssertFalse(w.isVisible)
+        XCTAssertFalse(NSApplication.shared.windows.contains { $0 === w })
+        wc.showWindow(nil)
+        XCTAssertTrue(w.isVisible)
+        XCTAssertEqual(w.frame, frame)
+        XCTAssertTrue(NSApplication.shared.windows.contains { $0 === w })
+        XCTAssertTrue(w.contentView === vc.view)
+        w.close()
+    }
+}

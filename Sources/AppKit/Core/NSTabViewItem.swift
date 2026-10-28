@@ -49,9 +49,10 @@ import CoreText
     open func drawLabel(_ shouldTruncateLabel: Bool, in labelRect: NSRect) {
         let font = _tabView?.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
         let color: NSColor = _tabState == .selectedTab ? .controlTextColor : .secondaryLabelColor
-        let size = _label.size(withAttributes: [.font: font])
+        let text = label
+        let size = text.size(withAttributes: [.font: font])
         let origin = NSPoint(x: labelRect.midX - size.width / 2, y: labelRect.midY - size.height / 2)
-        _label.draw(at: origin, withAttributes: [.font: font, .foregroundColor: color])
+        text.draw(at: origin, withAttributes: [.font: font, .foregroundColor: color])
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewitem/identifier
     open var identifier: Any? {

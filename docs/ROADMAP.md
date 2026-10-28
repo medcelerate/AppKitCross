@@ -157,6 +157,15 @@ maps to `WM_NCCALCSIZE` custom non-client handling (keeping DWM shadow/snap/resi
 `DWMWA_WINDOW_CORNER_PREFERENCE`, with a premultiplied-alpha swap chain so the backdrop
 shows through. Depends on M3's DXGI/DirectComposition presentation.
 
+Status (2026-10-28): AppKit side done: `PlatformWindowChrome` (content into the title
+bar, hidden title, transparent title bar, backdrop, transparency, shadow, movable by
+background, rounded corners) derived from `NSWindow` properties and pushed to the
+platform window; `platformWindowHitTest` decides caption vs client for dragging;
+`NSVisualEffectView` (materials map to Mica/Acrylic behind the window, translucent tint
+otherwise). HelloWindow: Help > Glass Window. Win32 side (WM_NCCALCSIZE, DWM attributes,
+DirectComposition swap chain for transparency) is being built by the Windows session on
+branch `m3b-frameless-glass`.
+
 ## M7: Metal translation layer (separate track)
 
 Only needed for `MTKView`/`CAMetalLayer` and apps that use Metal directly. Options to

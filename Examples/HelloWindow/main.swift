@@ -126,6 +126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             gridCheckbox.state = gridMenuItem.state
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("closeGlass:")):
+            glassWindow?.close()
+            glassWindow = nil
+            return true
+        case Selector(("showGlassWindow:")):
+            showGlassWindow()
+            return true
         case Selector(("showLayoutDemo:")):
             showLayoutDemo()
             return true
@@ -186,6 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let help = NSMenu(title: "Help")
         help.addItem(withTitle: "About HelloWindow", action: Selector(("showAbout:")), keyEquivalent: "")
         help.addItem(withTitle: "Copy Greeting", action: Selector(("copyGreeting:")), keyEquivalent: "c")
+        let glass = help.addItem(withTitle: "Glass Window", action: Selector(("showGlassWindow:")), keyEquivalent: "g")
+        glass.keyEquivalentModifierMask = [.command, .shift]
         helpItem.submenu = help
         main.addItem(helpItem)
         NSApp.mainMenu = main
@@ -320,6 +329,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     var layoutWindowController: NSWindowController?
+    var glassWindow: NSWindow?
+
+    /// Milestone 3b: a frameless, translucent window over the system backdrop.
+    @MainActor func showGlassWindow() {
+        if let g = glassWindow { g.makeKeyAndOrderFront(nil); return }
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 280),
+                         styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.title = "Glass"
+        w.titleVisibility = .hidden
+        w.titlebarAppearsTransparent = true
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.isMovableByWindowBackground = true
+        let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: w.contentRect(forFrameRect: w.frame).size))
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.autoresizingMask = [.width, .height]
+        w.contentView = effect
+        let title = NSTextField(labelWithString: "Liquid glass")
+        title.font = NSFont.boldSystemFont(ofSize: 22)
+        title.textColor = .white
+        title.translatesAutoresizingMaskIntoConstraints = false
+        let field = NSTextField()
+        field.placeholderString = "Type over the backdrop"
+        field.translatesAutoresizingMaskIntoConstraints = false
+        let close = NSButton(title: "Close", target: self, action: Selector(("closeGlass:")))
+        close.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(title); effect.addSubview(field); effect.addSubview(close)
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 24),
+            title.topAnchor.constraint(equalTo: effect.topAnchor, constant: 40),
+            field.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 24),
+            field.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 16),
+            field.widthAnchor.constraint(equalToConstant: 240),
+            close.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -24),
+            close.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -20),
+        ])
+        glassWindow = w
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+    }
 
     /// A second window built with view controllers and Auto Layout: a tab view controller
     /// whose first tab is a form in a stack view and whose second is a split view.
