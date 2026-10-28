@@ -19,6 +19,7 @@ public typealias CFAttributedString = NSAttributedString
 public typealias CFMutableAttributedString = NSMutableAttributedString
 public typealias CFCharacterSet = NSCharacterSet
 public typealias CFData = NSData
+public typealias CFMutableData = NSMutableData
 public typealias CFURL = NSURL
 public typealias CFTypeID = UInt
 

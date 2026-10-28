@@ -1,7 +1,8 @@
-// ImageIO-backed images for the macOS host build.
+// ImageIO-backed images for the macOS host build (Apple's ImageIO; on Windows and Linux
+// the platform backends decode and encode, see HostBackend).
 
 import Foundation
-#if canImport(CoreGraphics) && canImport(ImageIO)
+#if canImport(CoreGraphics) && canImport(ImageIO) && !os(Windows) && !os(Linux)
 import CoreGraphics
 import ImageIO
 
