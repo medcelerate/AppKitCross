@@ -29,12 +29,12 @@ jobs:
       - run: swift build -c debug
 
   linux:
-    name: Linux build (X11, Cairo)
+    name: Linux build (X11 + Wayland, Cairo)
     runs-on: ubuntu-24.04
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev
       - run: swift build
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
