@@ -91,6 +91,18 @@ CD2DTarget *cd2d_offscreen_target(CD2DOffscreen *offscreen);
 uint32_t cd2d_offscreen_read(CD2DOffscreen *offscreen, uint8_t *buffer, uint32_t bufferSize);
 void cd2d_offscreen_release(CD2DOffscreen *offscreen);
 
+// File dialogs (IFileDialog)
+typedef struct CD2DFileDialogOptions {
+    bool isSave, canChooseFiles, canChooseDirectories, allowsMultiple, allowsOtherTypes, showsHidden;
+} CD2DFileDialogOptions;
+/// Shows the dialog modally. Strings are NUL-terminated UTF-16 ("" = default); `extensions`
+/// is ';'-separated. On success `paths` holds NUL-separated UTF-16 paths (`length` code units);
+/// free with cd2d_file_dialog_free. Returns false when cancelled or failed.
+bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, const uint16_t *title, const uint16_t *okLabel,
+                      const uint16_t *defaultName, const uint16_t *directory, const uint16_t *extensions,
+                      uint16_t **paths, uint32_t *length);
+void cd2d_file_dialog_free(uint16_t *paths);
+
 // DirectWrite
 typedef struct CD2DTextFormat CD2DTextFormat;
 typedef struct CD2DTextLayout CD2DTextLayout;

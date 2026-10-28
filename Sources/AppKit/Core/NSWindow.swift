@@ -1226,6 +1226,11 @@ import CoreText
     // Requirement of NSAccessibilityElementProtocol
     open func accessibilityIdentifier() -> String { unimplemented() }
     // Required by the superclass (NSCoding).
+    /// AppKit's plain initializer: a small titled window, as `NSWindow()` gives on macOS.
+    @MainActor public override convenience init() {
+        self.init(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: true)
+    }
+
     @MainActor public required init?(coder: NSCoder) {
         _styleMask = []
         super.init(coder: coder)

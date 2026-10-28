@@ -7,6 +7,8 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
+#include <shobjidl.h>
+#include <string>
 #include <vector>
 #include <cstring>
 
@@ -383,6 +385,113 @@ void cd2d_offscreen_release(CD2DOffscreen *o) {
     safeRelease(o->wic);
     delete o;
 }
+
+// ---------------------------------------------------------------- File dialogs
+
+bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uint16_t *title, const uint16_t *okLabel,
+                      const uint16_t *defaultName, const uint16_t *directory, const uint16_t *extensions,
+                      uint16_t **paths, uint32_t *length) {
+    if (!o || !paths || !length) return false;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    IFileDialog *dlg = nullptr;
+    HRESULT hr = o->isSave ? CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg))
+                           : CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg));
+    if (FAILED(hr) || !dlg) return false;
+    FILEOPENDIALOGOPTIONS flags = 0;
+    dlg->GetOptions(&flags);
+    flags |= FOS_FORCEFILESYSTEM;
+    if (!o->isSave) {
+        if (o->allowsMultiple) flags |= FOS_ALLOWMULTISELECT;
+        if (o->canChooseDirectories && !o->canChooseFiles) flags |= FOS_PICKFOLDERS;
+        flags |= FOS_FILEMUSTEXIST;
+    } else {
+        flags |= FOS_OVERWRITEPROMPT;
+    }
+    if (o->showsHidden) flags |= FOS_FORCESHOWHIDDEN;
+    dlg->SetOptions(flags);
+    if (title && title[0]) dlg->SetTitle(reinterpret_cast<LPCWSTR>(title));
+    if (okLabel && okLabel[0]) dlg->SetOkButtonLabel(reinterpret_cast<LPCWSTR>(okLabel));
+    if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
+    if (directory && directory[0]) {
+        IShellItem *folder = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(reinterpret_cast<LPCWSTR>(directory), nullptr, IID_PPV_ARGS(&folder))) && folder) {
+            dlg->SetFolder(folder);
+            folder->Release();
+        }
+    }
+    std::vector<std::wstring> specs;
+    std::vector<COMDLG_FILTERSPEC> filters;
+    if (extensions && extensions[0]) {
+        std::wstring all(reinterpret_cast<const wchar_t *>(extensions));
+        std::wstring pattern;
+        size_t start = 0;
+        while (start <= all.size()) {
+            size_t end = all.find(L';', start);
+            if (end == std::wstring::npos) end = all.size();
+            std::wstring ext = all.substr(start, end - start);
+            if (!ext.empty()) { if (!pattern.empty()) pattern += L";"; pattern += L"*." + ext; }
+            start = end + 1;
+        }
+        specs.push_back(L"Supported files");
+        specs.push_back(pattern);
+        filters.push_back({ specs[0].c_str(), specs[1].c_str() });
+        if (o->allowsOtherTypes) {
+            specs.push_back(L"All files");
+            specs.push_back(L"*.*");
+            filters.push_back({ specs[2].c_str(), specs[3].c_str() });
+        }
+        dlg->SetFileTypes((UINT)filters.size(), filters.data());
+        if (!o->isSave && !pattern.empty()) {
+            size_t dot = pattern.find(L'.');
+            if (dot != std::wstring::npos) {
+                size_t semi = pattern.find(L';');
+                std::wstring first = pattern.substr(dot + 1, (semi == std::wstring::npos ? pattern.size() : semi) - dot - 1);
+                dlg->SetDefaultExtension(first.c_str());
+            }
+        } else if (o->isSave && !pattern.empty()) {
+            size_t dot = pattern.find(L'.');
+            size_t semi = pattern.find(L';');
+            if (dot != std::wstring::npos) dlg->SetDefaultExtension(pattern.substr(dot + 1, (semi == std::wstring::npos ? pattern.size() : semi) - dot - 1).c_str());
+        }
+    }
+    hr = dlg->Show((HWND)ownerHwnd);
+    if (FAILED(hr)) { dlg->Release(); return false; }
+    std::wstring joined;
+    auto append = [&](IShellItem *item) {
+        PWSTR path = nullptr;
+        if (item && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+            joined += path;
+            joined.push_back(L'\0');
+            CoTaskMemFree(path);
+        }
+    };
+    if (!o->isSave && o->allowsMultiple) {
+        IFileOpenDialog *open = nullptr;
+        if (SUCCEEDED(dlg->QueryInterface(IID_PPV_ARGS(&open))) && open) {
+            IShellItemArray *items = nullptr;
+            if (SUCCEEDED(open->GetResults(&items)) && items) {
+                DWORD n = 0; items->GetCount(&n);
+                for (DWORD i = 0; i < n; i++) { IShellItem *it = nullptr; if (SUCCEEDED(items->GetItemAt(i, &it)) && it) { append(it); it->Release(); } }
+                items->Release();
+            }
+            open->Release();
+        }
+    } else {
+        IShellItem *item = nullptr;
+        if (SUCCEEDED(dlg->GetResult(&item)) && item) { append(item); item->Release(); }
+    }
+    dlg->Release();
+    if (joined.empty()) return false;
+    uint16_t *out = (uint16_t *)malloc((joined.size() + 1) * sizeof(uint16_t));
+    if (!out) return false;
+    memcpy(out, joined.data(), joined.size() * sizeof(uint16_t));
+    out[joined.size()] = 0;
+    *paths = out;
+    *length = (uint32_t)joined.size();
+    return true;
+}
+
+void cd2d_file_dialog_free(uint16_t *paths) { free(paths); }
 
 // ---------------------------------------------------------------- DirectWrite
 

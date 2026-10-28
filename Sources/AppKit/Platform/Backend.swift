@@ -44,6 +44,8 @@ public protocol PlatformBackend: AnyObject {
     var image: any PlatformImageBackend { get }
     /// The system clipboard.
     var systemPasteboard: any PlatformPasteboard { get }
+    /// Shows the native open/save dialog modally; nil when cancelled.
+    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]?
     /// Runs a nested event loop for a modal window until `stop` reports true.
     /// Other windows of the application do not receive input meanwhile.
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
@@ -100,4 +102,21 @@ public protocol PlatformWindowOwner: AnyObject {
     /// An input event for this window, already translated into an `NSEvent` whose
     /// `locationInWindow` is in content coordinates.
     func platformWindowDispatch(_ event: NSEvent)
+}
+
+public struct PlatformFileDialogOptions: Sendable {
+    public var isSave = false
+    public var title: String? = nil
+    public var prompt: String? = nil            // confirm button label
+    public var message: String? = nil
+    public var directory: URL? = nil
+    public var defaultName: String? = nil
+    public var allowedExtensions: [String] = []  // without dots; empty = any
+    public var allowsOtherTypes = true
+    public var canChooseFiles = true
+    public var canChooseDirectories = false
+    public var allowsMultipleSelection = false
+    public var canCreateDirectories = true
+    public var showsHiddenFiles = false
+    public init() {}
 }

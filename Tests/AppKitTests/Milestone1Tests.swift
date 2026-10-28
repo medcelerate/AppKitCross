@@ -811,3 +811,35 @@ final class PasteboardAndAlertTests: XCTestCase {
         XCTAssertFalse(alert.window.isVisible)
     }
 }
+
+@MainActor
+final class FileDialogTests: XCTestCase {
+    func testOpenPanelReturnsChosenURLs() {
+        let host = Platform.backend as! HostBackend
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.allowedFileTypes = ["png", "jpg"]
+        panel.title = "Pick images"
+        host.nextFileDialogResult = [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.jpg")]
+        XCTAssertEqual(panel.runModal(), .OK)
+        XCTAssertEqual(panel.urls.map { $0.lastPathComponent }, ["a.png", "b.jpg"])
+        XCTAssertEqual(panel.url?.lastPathComponent, "a.png")
+        let o = host.lastFileDialogOptions!
+        XCTAssertFalse(o.isSave)
+        XCTAssertTrue(o.allowsMultipleSelection)
+        XCTAssertTrue(o.canChooseDirectories)
+        XCTAssertEqual(o.allowedExtensions, ["png", "jpg"])
+        host.nextFileDialogResult = nil
+        XCTAssertEqual(panel.runModal(), .cancel)
+        XCTAssertNil(panel.url)
+        let save = NSSavePanel()
+        save.nameFieldStringValue = "Untitled.txt"
+        host.nextFileDialogResult = [URL(fileURLWithPath: "/tmp/Untitled.txt")]
+        XCTAssertEqual(save.runModal(), .OK)
+        XCTAssertTrue(host.lastFileDialogOptions!.isSave)
+        XCTAssertEqual(host.lastFileDialogOptions!.defaultName, "Untitled.txt")
+        XCTAssertEqual(save.url?.path, "/tmp/Untitled.txt")
+        panel.close(); save.close()
+    }
+}

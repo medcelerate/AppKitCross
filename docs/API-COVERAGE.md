@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 34 |
-| Types generated | 504 |
+| Types handwritten | 36 |
+| Types generated | 502 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10205 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 981 |
+| Members unimplemented-calls | 985 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -300,7 +300,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSOpenGLPixelFormat | class | generated | 1 | 4 | 0 |  |
 | NSOpenGLPixelFormatAttribute | typealias | generated | 1 | 0 | 0 |  |
 | NSOpenGLView | class | generated | 10 | 0 | 0 |  |
-| NSOpenPanel | class | generated | 8 | 0 | 0 |  |
+| NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |
 | NSOpenSavePanelDelegate | protocol | generated | 6 | 2 | 0 |  |
 | NSOutlineView | class | generated | 34 | 6 | 0 |  |
 | NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |
@@ -354,7 +354,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRulerMarker | class | generated | 14 | 0 | 0 |  |
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
 | NSRunningApplication | class | generated | 22 | 2 | 0 |  |
-| NSSavePanel | class | generated | 24 | 4 | 0 |  |
+| NSSavePanel | class | handwritten | 24 | 4 | 0 | 2 |
 | NSScreen | class | handwritten | 30 | 0 | 0 | 19 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
 | NSScrollView | class | handwritten | 61 | 0 | 2 | 4 |

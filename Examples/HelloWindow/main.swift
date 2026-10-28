@@ -126,6 +126,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             gridCheckbox.state = gridMenuItem.state
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("openFile:")):
+            let panel = NSOpenPanel()
+            panel.title = "Choose a file"
+            panel.allowedFileTypes = ["png", "jpg", "jpeg", "bmp", "gif", "txt"]
+            panel.allowsOtherFileTypes = true
+            if panel.runModal() == .OK, let url = panel.url {
+                greeting.stringValue = url.lastPathComponent
+            } else {
+                greeting.stringValue = "Open cancelled"
+            }
+            return true
         case Selector(("showAbout:")):
             let alert = NSAlert()
             alert.messageText = "HelloWindow"
@@ -155,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let main = NSMenu(title: "Main")
         let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
         let file = NSMenu(title: "File")
+        file.addItem(withTitle: "Open\u{2026}", action: Selector(("openFile:")), keyEquivalent: "o")
         file.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "k")
         file.addItem(NSMenuItem.separator())
         file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")

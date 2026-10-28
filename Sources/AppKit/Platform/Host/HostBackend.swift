@@ -60,6 +60,14 @@ final class HostBackend: PlatformBackend {
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 
+    /// Test hook: what the next file dialog "chooses" (nil = cancel).
+    var nextFileDialogResult: [URL]? = nil
+    private(set) var lastFileDialogOptions: PlatformFileDialogOptions? = nil
+    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
+        lastFileDialogOptions = options
+        return nextFileDialogResult
+    }
+
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
         // Tests end modal sessions from inside the loop via posted blocks.
         var guardCount = 0
