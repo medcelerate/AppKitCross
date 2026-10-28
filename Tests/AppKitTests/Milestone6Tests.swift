@@ -43,9 +43,8 @@ struct BlockContent: NSHostingContent {
     @MainActor func _updateHostingRoot(_ root: any NSHostingRoot) { (root as? Root)?.content = self }
 }
 
-@MainActor
-final class HostingTests: XCTestCase {
-    private func pixel(_ w: NSWindow, _ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+final class HostingTests: XCTestCase, @unchecked Sendable {
+    @MainActor private func pixel(_ w: NSWindow, _ x: Int, _ y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
         let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
         let image = platform!.lastImage!
         let data = _pixels(image)
@@ -55,53 +54,57 @@ final class HostingTests: XCTestCase {
     }
 
     func testHostingViewMeasuresLaysOutDrawsAndRoutesEvents() {
-        let hosting = NSHostingView(rootView: BlockContent(size: NSSize(width: 60, height: 40), color: .red))
-        let root = hosting.hostingRoot as! BlockContent.Root
-        XCTAssertTrue(root.attached)
-        XCTAssertNotNil(hosting.layer, "hosting views are layer-backed")
-        XCTAssertEqual(hosting.intrinsicContentSize, NSSize(width: 60, height: 40))
-        XCTAssertEqual(hosting.sizeThatFits(NSHostingSizeProposal(width: 30, height: nil)), NSSize(width: 30, height: 40))
-        // In a window, pinned with Auto Layout: the intrinsic size sizes it.
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        w.contentView!.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: w.contentView!.leadingAnchor, constant: 10),
-            hosting.bottomAnchor.constraint(equalTo: w.contentView!.bottomAnchor, constant: -10),
-        ])
-        w.makeKeyAndOrderFront(nil)
-        w.display()
-        XCTAssertEqual(hosting.frame, NSRect(x: 10, y: 10, width: 60, height: 40))
-        XCTAssertEqual(root.layouts.last, NSRect(x: 0, y: 0, width: 60, height: 40))
-        XCTAssertGreaterThan(root.draws, 0)
-        XCTAssertEqual(root.environment?.isKeyWindow, true)
-        let p = pixel(w, 20, 20)
-        XCTAssertGreaterThan(p.r, 200); XCTAssertLessThan(p.g, 30)
-        // Replacing the content updates the root in place and re-measures.
-        hosting.rootView = BlockContent(size: NSSize(width: 80, height: 20), color: .blue)
-        XCTAssertTrue(hosting.hostingRoot === root)
-        w.layoutIfNeeded()
-        XCTAssertEqual(hosting.frame.size, NSSize(width: 80, height: 20))
-        w.display()
-        let q = pixel(w, 20, 15)
-        XCTAssertGreaterThan(q.b, 200)
-        // Events reach the root first.
-        let click = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 15), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
-        w.sendEvent(click)
-        XCTAssertEqual(root.clicks, 1)
-        w.close()
+        MainActor.assumeIsolated {
+            let hosting = NSHostingView(rootView: BlockContent(size: NSSize(width: 60, height: 40), color: .red))
+            let root = hosting.hostingRoot as! BlockContent.Root
+            XCTAssertTrue(root.attached)
+            XCTAssertNotNil(hosting.layer, "hosting views are layer-backed")
+            XCTAssertEqual(hosting.intrinsicContentSize, NSSize(width: 60, height: 40))
+            XCTAssertEqual(hosting.sizeThatFits(NSHostingSizeProposal(width: 30, height: nil)), NSSize(width: 30, height: 40))
+            // In a window, pinned with Auto Layout: the intrinsic size sizes it.
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            w.contentView!.addSubview(hosting)
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(equalTo: w.contentView!.leadingAnchor, constant: 10),
+                hosting.bottomAnchor.constraint(equalTo: w.contentView!.bottomAnchor, constant: -10),
+            ])
+            w.makeKeyAndOrderFront(nil)
+            w.display()
+            XCTAssertEqual(hosting.frame, NSRect(x: 10, y: 10, width: 60, height: 40))
+            XCTAssertEqual(root.layouts.last, NSRect(x: 0, y: 0, width: 60, height: 40))
+            XCTAssertGreaterThan(root.draws, 0)
+            XCTAssertEqual(root.environment?.isKeyWindow, true)
+            let p = pixel(w, 20, 20)
+            XCTAssertGreaterThan(p.r, 200); XCTAssertLessThan(p.g, 30)
+            // Replacing the content updates the root in place and re-measures.
+            hosting.rootView = BlockContent(size: NSSize(width: 80, height: 20), color: .blue)
+            XCTAssertTrue(hosting.hostingRoot === root)
+            w.layoutIfNeeded()
+            XCTAssertEqual(hosting.frame.size, NSSize(width: 80, height: 20))
+            w.display()
+            let q = pixel(w, 20, 15)
+            XCTAssertGreaterThan(q.b, 200)
+            // Events reach the root first.
+            let click = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 15), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            w.sendEvent(click)
+            XCTAssertEqual(root.clicks, 1)
+            w.close()
+        }
     }
 
     func testHostingControllerSizesItsWindow() {
-        let hc = NSHostingController(rootView: BlockContent(size: NSSize(width: 120, height: 90), color: .green))
-        hc.sizingOptions = [.preferredContentSize]
-        let w = NSWindow(contentViewController: hc)
-        XCTAssertEqual(w.contentView!.frame.size, NSSize(width: 120, height: 90))
-        XCTAssertEqual(hc.preferredContentSize, NSSize(width: 120, height: 90))
-        XCTAssertEqual(hc.sizeThatFits(in: NSSize(width: 50, height: 500)), NSSize(width: 50, height: 90))
-        hc.rootView = BlockContent(size: NSSize(width: 10, height: 10), color: .green)
-        XCTAssertEqual(hc.hostingView.intrinsicContentSize, NSSize(width: 10, height: 10))
-        w.close()
+        MainActor.assumeIsolated {
+            let hc = NSHostingController(rootView: BlockContent(size: NSSize(width: 120, height: 90), color: .green))
+            hc.sizingOptions = [.preferredContentSize]
+            let w = NSWindow(contentViewController: hc)
+            XCTAssertEqual(w.contentView!.frame.size, NSSize(width: 120, height: 90))
+            XCTAssertEqual(hc.preferredContentSize, NSSize(width: 120, height: 90))
+            XCTAssertEqual(hc.sizeThatFits(in: NSSize(width: 50, height: 500)), NSSize(width: 50, height: 90))
+            hc.rootView = BlockContent(size: NSSize(width: 10, height: 10), color: .green)
+            XCTAssertEqual(hc.hostingView.intrinsicContentSize, NSSize(width: 10, height: 10))
+            w.close()
+        }
     }
 
     struct Slider: NSViewRepresentable {
@@ -120,17 +123,19 @@ final class HostingTests: XCTestCase {
     }
 
     func testRepresentableRoundTrip() {
-        let hosting = NSHostingView(rootView: NSViewRepresentableContent(Slider(value: 0.25)))
-        let root = hosting.hostingRoot as! NSViewRepresentableHostingRoot<Slider>
-        let slider = hosting.subviews.first as! NSSlider
-        XCTAssertEqual(slider.doubleValue, 0.25)
-        hosting.rootView = NSViewRepresentableContent(Slider(value: 0.75))
-        XCTAssertEqual(slider.doubleValue, 0.75)
-        XCTAssertEqual(hosting.sizeThatFits(.unspecified).height, slider.fittingSize.height)
-        hosting.frame = NSRect(x: 0, y: 0, width: 200, height: 30)
-        hosting.layoutSubtreeIfNeeded()
-        XCTAssertEqual(slider.frame, hosting.bounds)
-        root.detach()
-        XCTAssertNil(slider.superview)
+        MainActor.assumeIsolated {
+            let hosting = NSHostingView(rootView: NSViewRepresentableContent(Slider(value: 0.25)))
+            let root = hosting.hostingRoot as! NSViewRepresentableHostingRoot<Slider>
+            let slider = hosting.subviews.first as! NSSlider
+            XCTAssertEqual(slider.doubleValue, 0.25)
+            hosting.rootView = NSViewRepresentableContent(Slider(value: 0.75))
+            XCTAssertEqual(slider.doubleValue, 0.75)
+            XCTAssertEqual(hosting.sizeThatFits(.unspecified).height, slider.fittingSize.height)
+            hosting.frame = NSRect(x: 0, y: 0, width: 200, height: 30)
+            hosting.layoutSubtreeIfNeeded()
+            XCTAssertEqual(slider.frame, hosting.bounds)
+            root.detach()
+            XCTAssertNil(slider.superview)
+        }
     }
 }

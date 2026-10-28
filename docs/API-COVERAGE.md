@@ -9,11 +9,11 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 54 |
-| Types generated | 484 |
+| Types handwritten | 56 |
+| Types generated | 482 |
 | Types pending | 3 |
 | Types skipped | 0 |
-| Members emitted | 10205 |
+| Members emitted | 10212 |
 | Members blocked | 187 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
@@ -450,7 +450,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceSectionHeaderViewProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewRowAction | class | generated | 7 | 0 | 1 |  |
-| NSText | class | generated | 57 | 0 | 0 |  |
+| NSText | class | handwritten | 57 | 0 | 0 | 0 |
 | NSTextAlignment | enum | generated | 5 | 0 | 0 |  |
 | NSTextAlternatives | class | generated | 5 | 0 | 0 |  |
 | NSTextAttachment | class | generated | 12 | 2 | 0 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | generated | 8 | 0 | 1 |  |
 | NSTextTable | class | generated | 9 | 0 | 1 |  |
 | NSTextTableBlock | class | generated | 6 | 0 | 0 |  |
-| NSTextView | class | generated | 175 | 6 | 0 |  |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 0 |
 | NSTextViewDelegate | protocol | generated | 27 | 3 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |

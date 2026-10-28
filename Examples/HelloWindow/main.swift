@@ -464,7 +464,7 @@ enum MetalSelfTest {
     static func run() -> Int32 {
         exercise()
         print("device released")
-        fflush(stdout)
+        fflush(nil)
         return failures
     }
 
@@ -810,7 +810,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             let c = view.clearColor
             let expected = [Int(c.blue * 255 + 0.5), Int(c.green * 255 + 0.5), Int(c.red * 255 + 0.5), 255]
             print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre)")
-            fflush(stdout)
+            fflush(nil)
         }
     }
 }
