@@ -155,7 +155,7 @@ open class CAShapeLayer: CALayer {
                 default: ctx.setLineJoin(.miter)
                 }
                 if let dash = _lineDashPattern, !dash.isEmpty {
-                    ctx.setLineDash(phase: _lineDashPhase, lengths: dash.map { CGFloat(truncating: $0) })
+                    ctx.setLineDash(phase: _lineDashPhase, lengths: dash.map { CGFloat($0.doubleValue) })
                 }
                 ctx.addPath(_strokeStart > 0 || _strokeEnd < 1 ? CAShapeLayer._trim(path, from: _strokeStart, to: _strokeEnd) : path)
                 ctx.strokePath()
@@ -255,7 +255,7 @@ open class CAGradientLayer: CALayer {
         let stops = (_colors ?? []).compactMap { CAInterpolation.asColor($0) }
         let b = bounds
         if stops.count >= 2 {
-            let locs: [CGFloat] = _locations.map { $0.map { CGFloat(truncating: $0) } } ?? (0..<stops.count).map { CGFloat($0) / CGFloat(stops.count - 1) }
+            let locs: [CGFloat] = _locations.map { $0.map { CGFloat($0.doubleValue) } } ?? (0..<stops.count).map { CGFloat($0) / CGFloat(stops.count - 1) }
             let bands = 64
             ctx.saveGState()
             _addBoundsPath(ctx, b)

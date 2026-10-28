@@ -97,7 +97,7 @@ import CoreText
         guard let view else { return }
         let cr = contentRect(forFrameRect: frame)
         view.frame = NSRect(origin: .zero, size: cr.size)
-        view.nextResponder = self
+        if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(self)
         _platform?.setNeedsDisplay(nil)
     }
@@ -203,7 +203,17 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/init(contentviewcontroller:)
     @available(macOS 10.10, *)
-    @MainActor public convenience init(contentViewController: NSViewController) { unimplemented() }
+    @MainActor public convenience init(contentViewController: NSViewController) {
+        let v = contentViewController.view
+        var size = v.frame.size
+        if size.width <= 0 || size.height <= 0 {
+            let fitting = v.fittingSize
+            size = NSSize(width: max(fitting.width, 100), height: max(fitting.height, 100))
+        }
+        self.init(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        self.contentViewController = contentViewController
+        if let t = contentViewController.title { title = t }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/init(windowref:)
     @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/acceptsmousemovedevents
@@ -359,12 +369,15 @@ import CoreText
         _isClosing = true
         post(NSWindow.willCloseNotification)
         delegate?.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: self))
+        let disappearing = isVisible
+        if disappearing { _contentView?._windowVisibilityWillChange(false) }
         if _isKey { resignKey() }
         if _isMain { resignMain() }
         for child in _childWindows { child.close() }
         _parent?.removeChildWindow(self)
         _platform?.close()
         _platform = nil
+        if disappearing { _contentView?._windowVisibilityDidChange(false) }
         NSApplication.shared._unregister(window: self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior
@@ -430,7 +443,14 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open var contentViewController: NSViewController? {
         get { _contentViewController }
-        set { _contentViewController = newValue; if let vc = newValue { contentView = vc.view } }
+        set {
+            _contentViewController = newValue
+            if let vc = newValue {
+                let v = vc.view
+                if v.frame.size.width > 0 && v.frame.size.height > 0 && _contentView == nil { setContentSize(v.frame.size) }
+                contentView = v
+            }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/convertfrombacking(_:)
     @MainActor open func convertFromBacking(_ rect: NSRect) -> NSRect { let s = backingScaleFactor; return NSRect(x: rect.minX / s, y: rect.minY / s, width: rect.width / s, height: rect.height / s) }
@@ -816,21 +836,30 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderback(_:)
     @MainActor open func orderBack(_ sender: Any?) {
+        let appearing = !isVisible
+        if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.orderBack()
+        if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfront(_:)
     @MainActor open func orderFront(_ sender: Any?) {
+        let appearing = !isVisible
+        if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.displayIfNeeded()
+        if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfrontregardless()
     @MainActor open func orderFrontRegardless() { orderFront(nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderout(_:)
     @MainActor open func orderOut(_ sender: Any?) {
+        let disappearing = isVisible
+        if disappearing { _contentView?._windowVisibilityWillChange(false) }
         if _isKey { resignKey() }
         if _isMain { resignMain() }
         _platform?.hide()
+        if disappearing { _contentView?._windowVisibilityDidChange(false) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderedindex
     @MainActor open var orderedIndex: Int {

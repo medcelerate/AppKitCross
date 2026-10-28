@@ -126,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             gridCheckbox.state = gridMenuItem.state
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("showLayoutDemo:")):
+            showLayoutDemo()
+            return true
         case Selector(("openFile:")):
             let panel = NSOpenPanel()
             panel.title = "Choose a file"
@@ -175,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         let view = NSMenu(title: "View")
         gridMenuItem = view.addItem(withTitle: "Show Grid", action: Selector(("toggleGridMenu:")), keyEquivalent: "g")
+        view.addItem(withTitle: "Layout Demo", action: Selector(("showLayoutDemo:")), keyEquivalent: "l")
         gridMenuItem.state = .on
         viewItem.submenu = view
         main.addItem(viewItem)
@@ -315,6 +319,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    var layoutWindowController: NSWindowController?
+
+    /// A second window built with view controllers and Auto Layout: a tab view controller
+    /// whose first tab is a form in a stack view and whose second is a split view.
+    @MainActor func showLayoutDemo() {
+        if let wc = layoutWindowController { wc.showWindow(nil); return }
+        let tabs = NSTabViewController()
+        tabs.addChild(FormViewController())
+        let split = NSSplitViewController()
+        let sidebar = ColorViewController(color: NSColor(red: 0.85, green: 0.9, blue: 1, alpha: 1), text: "Sidebar")
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        sidebarItem.minimumThickness = 80
+        split.addSplitViewItem(sidebarItem)
+        split.addSplitViewItem(NSSplitViewItem(viewController: ColorViewController(color: NSColor(red: 1, green: 0.95, blue: 0.85, alpha: 1), text: "Drag the divider")))
+        split.title = "Split"
+        split.view.frame = NSRect(x: 0, y: 0, width: 420, height: 260)
+        tabs.addChild(split)
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
+        let window = NSWindow(contentViewController: tabs)
+        window.title = "Layout Demo"
+        let wc = NSWindowController(window: window)
+        layoutWindowController = wc
+        window.center()
+        wc.showWindow(nil)
+    }
+
     func windowDidResize(_ notification: Notification) {
         window.contentView?.needsDisplay = true
     }
@@ -324,3 +354,93 @@ let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
 app.run()
+
+
+/// A form laid out entirely with Auto Layout: labels and fields in a vertical stack.
+final class FormViewController: NSViewController, NSSelectorHandling {
+    let status = NSTextField(labelWithString: "Fill in the form.")
+
+    override func loadView() {
+        title = "Form"
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+        for (label, placeholder) in [("Name", "Jane Appleseed"), ("Email", "jane@example.com"), ("City", "Cupertino")] {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.spacing = 8
+            let l = NSTextField(labelWithString: label + ":")
+            l.setContentHuggingPriority(.required, for: .horizontal)
+            let f = NSTextField()
+            f.placeholderString = placeholder
+            f.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            row.addArrangedSubview(l)
+            row.addArrangedSubview(f)
+            stack.addArrangedSubview(row)
+        }
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        let ok = NSButton(title: "Submit", target: self, action: Selector(("submit:")))
+        ok.keyEquivalent = "\r"
+        buttons.addArrangedSubview(NSButton(title: "Reset", target: self, action: Selector(("reset:"))))
+        buttons.addArrangedSubview(ok)
+        stack.addArrangedSubview(buttons)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -20),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+        ])
+        view = root
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action {
+        case Selector(("submit:")): status.stringValue = "Submitted at \(Date())"; return true
+        case Selector(("reset:")): status.stringValue = "Fill in the form."; return true
+        default: return false
+        }
+    }
+}
+
+/// A coloured pane with a centred label, for the split view.
+final class ColorViewController: NSViewController {
+    let color: NSColor
+    let text: String
+    init(color: NSColor, text: String) {
+        self.color = color
+        self.text = text
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    final class PaneView: NSView {
+        var color = NSColor.white
+        override var isOpaque: Bool { true }
+        override func draw(_ dirtyRect: NSRect) {
+            color.setFill()
+            NSBezierPath(rect: bounds).fill()
+        }
+    }
+
+    override func loadView() {
+        let pane = PaneView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        pane.color = color
+        let label = NSTextField(labelWithString: text)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: pane.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: pane.centerYAnchor),
+        ])
+        view = pane
+    }
+}

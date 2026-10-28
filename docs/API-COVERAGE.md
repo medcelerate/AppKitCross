@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 37 |
-| Types generated | 501 |
+| Types handwritten | 52 |
+| Types generated | 486 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10205 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 985 |
+| Members unimplemented-calls | 956 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -154,7 +154,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | generated | 3 | 0 | 0 |  |
-| NSColor | class | handwritten | 167 | 5 | 4 | 41 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 40 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
 | NSColorList | class | generated | 16 | 0 | 1 |  |
 | NSColorPanel | class | generated | 35 | 0 | 2 |  |
@@ -267,14 +267,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSInputServerMouseTracker | protocol | generated | 0 | 0 | 0 |  |
 | NSInputServiceProvider | protocol | generated | 0 | 0 | 0 |  |
 | NSItemBadge | struct | generated | 5 | 0 | 0 |  |
-| NSLayoutAnchor | class | generated | 10 | 0 | 0 |  |
-| NSLayoutConstraint | class | generated | 57 | 0 | 5 |  |
-| NSLayoutDimension | class | generated | 9 | 0 | 0 |  |
-| NSLayoutGuide | class | generated | 15 | 0 | 0 |  |
+| NSLayoutAnchor | class | handwritten | 10 | 0 | 0 | 0 |
+| NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |
+| NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |
+| NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |
 | NSLayoutManager | class | generated | 144 | 8 | 4 |  |
 | NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |
-| NSLayoutXAxisAnchor | class | generated | 4 | 0 | 0 |  |
-| NSLayoutYAxisAnchor | class | generated | 4 | 0 | 0 |  |
+| NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
+| NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
 | NSLevelIndicator | class | generated | 25 | 0 | 2 |  |
 | NSLevelIndicatorCell | class | generated | 11 | 0 | 0 |  |
 | NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |
@@ -355,7 +355,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
 | NSRunningApplication | class | generated | 22 | 2 | 0 |  |
 | NSSavePanel | class | handwritten | 24 | 4 | 0 | 2 |
-| NSScreen | class | handwritten | 30 | 0 | 0 | 19 |
+| NSScreen | class | handwritten | 30 | 0 | 0 | 18 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
 | NSScrollView | class | handwritten | 61 | 0 | 2 | 4 |
 | NSScroller | class | handwritten | 42 | 0 | 6 | 3 |
@@ -408,15 +408,15 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSpeechSynthesizer | class | generated | 81 | 0 | 12 |  |
 | NSSpeechSynthesizerDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSSpellChecker | class | generated | 75 | 3 | 3 |  |
-| NSSplitView | class | generated | 25 | 0 | 2 |  |
-| NSSplitViewController | class | generated | 17 | 0 | 0 |  |
+| NSSplitView | class | handwritten | 25 | 0 | 2 | 2 |
+| NSSplitViewController | class | handwritten | 17 | 0 | 0 | 2 |
 | NSSplitViewDelegate | protocol | generated | 12 | 0 | 0 |  |
-| NSSplitViewItem | class | generated | 36 | 0 | 2 |  |
+| NSSplitViewItem | class | handwritten | 36 | 0 | 2 | 2 |
 | NSSplitViewItemAccessoryViewController | class | generated | 7 | 0 | 0 |  |
 | NSSpringLoadingDestination | protocol | generated | 6 | 0 | 0 |  |
 | NSSpringLoadingHighlight | enum | generated | 3 | 0 | 0 |  |
 | NSSpringLoadingOptions | struct | generated | 4 | 0 | 0 |  |
-| NSStackView | class | generated | 43 | 0 | 3 |  |
+| NSStackView | class | handwritten | 43 | 0 | 3 | 0 |
 | NSStackViewDelegate | protocol | generated | 2 | 0 | 0 |  |
 | NSStandardKeyBindingResponding | protocol | generated | 96 | 0 | 0 |  |
 | NSStatusBar | class | generated | 5 | 0 | 0 |  |
@@ -432,10 +432,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSuggestionItemResponse | struct | generated | 18 | 0 | 4 |  |
 | NSSuggestionItemSection | struct | generated | 5 | 0 | 1 |  |
 | NSSwitch | class | generated | 1 | 0 | 0 |  |
-| NSTabView | class | generated | 44 | 0 | 3 |  |
-| NSTabViewController | class | generated | 22 | 0 | 1 |  |
+| NSTabView | class | handwritten | 44 | 0 | 3 | 2 |
+| NSTabViewController | class | handwritten | 22 | 0 | 1 | 3 |
 | NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSTabViewItem | class | generated | 17 | 0 | 1 |  |
+| NSTabViewItem | class | handwritten | 17 | 0 | 1 | 2 |
 | NSTableCellView | class | generated | 6 | 0 | 0 |  |
 | NSTableColumn | class | generated | 19 | 0 | 1 |  |
 | NSTableHeaderCell | class | generated | 2 | 0 | 0 |  |
@@ -552,17 +552,17 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 195 |
+| NSView | class | handwritten | 361 | 3 | 19 | 151 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
-| NSViewController | class | generated | 56 | 1 | 2 |  |
+| NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
 | NSViewControllerPresentationAnimator | protocol | generated | 2 | 0 | 0 |  |
 | NSViewInvalidating | protocol | generated | 6 | 0 | 0 |  |
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | generated | 32 | 0 | 3 |  |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 182 |
-| NSWindowController | class | generated | 28 | 0 | 1 |  |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 180 |
+| NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |
 | NSWindowTab | class | generated | 4 | 0 | 0 |  |

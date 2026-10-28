@@ -5,6 +5,10 @@ import Foundation
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
+#if os(Windows) || os(Linux)
+// swift-corelibs-foundation does not export CoreFoundation's CFTimeInterval.
+public typealias CFTimeInterval = Double
+#endif
 
 /// Seconds on the system's monotonic clock, as Core Animation's `CACurrentMediaTime()`.
 /// Tests can substitute a clock through `CARuntime.now`.

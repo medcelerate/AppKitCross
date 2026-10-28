@@ -36,7 +36,22 @@
     "NSTextFieldCell",
     "NSView",
     "NSWindow",
-    "NSAnimationContext"
+    "NSAnimationContext",
+    "NSLayoutConstraint",
+    "NSLayoutAnchor",
+    "NSLayoutXAxisAnchor",
+    "NSLayoutYAxisAnchor",
+    "NSLayoutDimension",
+    "NSLayoutGuide",
+    "NSStackView",
+    "NSViewController",
+    "NSWindowController",
+    "NSSplitViewController",
+    "NSSplitView",
+    "NSSplitViewItem",
+    "NSTabViewController",
+    "NSTabView",
+    "NSTabViewItem"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",
@@ -247,7 +262,14 @@
     "NSWindowDelegate.window(_:didDecodeRestorableState:)": "",
     "NSWindowDelegate.previewRepresentableActivityItems(for:)": "return nil",
     "NSMenuItemValidation.validateMenuItem(_:)": "return true",
-    "NSUserInterfaceValidations.validateUserInterfaceItem(_:)": "return true"
+    "NSUserInterfaceValidations.validateUserInterfaceItem(_:)": "return true",
+    "NSSplitViewDelegate.splitView(_:constrainMinCoordinate:ofSubviewAt:)": "return proposedMinimumPosition",
+    "NSSplitViewDelegate.splitView(_:constrainMaxCoordinate:ofSubviewAt:)": "return proposedMaximumPosition",
+    "NSSplitViewDelegate.splitView(_:constrainSplitPosition:ofSubviewAt:)": "return proposedPosition",
+    "NSSplitViewDelegate.splitView(_:effectiveRect:forDrawnRect:ofDividerAt:)": "return proposedEffectiveRect",
+    "NSSplitViewDelegate.splitView(_:additionalEffectiveRectOfDividerAt:)": "return .zero",
+    "NSSplitViewDelegate.splitView(_:shouldAdjustSizeOfSubview:)": "return true",
+    "NSTabViewDelegate.tabView(_:shouldSelect:)": "return true"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",

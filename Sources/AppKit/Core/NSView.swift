@@ -34,8 +34,21 @@ import CoreText
     private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
+    private var _constraints: [NSLayoutConstraint] = []
+    private var _layoutGuides: [NSLayoutGuide] = []
+    private var _anchors: [NSLayoutConstraint.Attribute: AnyObject] = [:]
+    private var _huggingPriority: [NSLayoutConstraint.Orientation: NSLayoutConstraint.Priority] = [:]
+    private var _compressionPriority: [NSLayoutConstraint.Orientation: NSLayoutConstraint.Priority] = [:]
+    private var _needsUpdateConstraints = true
+    private var _constraintsDirty = false       // on a layout root: the engine must run
+    private var _applyingLayout = false
+    private var _engine: LayoutEngine? = nil
+    private var _marginsGuide: NSLayoutGuide? = nil
+    private var _safeAreaGuide: NSLayoutGuide? = nil
+    /// The controller whose view this is (set by NSViewController).
+    internal weak var _viewController: NSViewController? = nil
     private var _alphaValue: CGFloat = 1
-    private var _needsLayout = false
+    private var _needsLayout = true          // AppKit lays a view out at least once
     private var _translatesAutoresizingMaskIntoConstraints = true
     private var _identifier: NSUserInterfaceItemIdentifier? = nil
     private var _toolTip: String? = nil
@@ -63,6 +76,87 @@ import CoreText
     }
 
     open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(_frame)>" } }
+
+    // MARK: Auto Layout plumbing
+
+    /// The view whose engine solves this view's constraints: the topmost ancestor.
+    internal var _layoutRoot: NSView {
+        var v = self
+        while let s = v._superview { v = s }
+        return v
+    }
+
+    /// Marks the engine root dirty; the next layout pass re-solves.
+    internal func _setNeedsConstraintLayout() {
+        let root = _layoutRoot
+        root._constraintsDirty = true
+        root._needsLayout = true
+        if let w = root._window, root === w.contentView { w._viewNeedsDisplay(root, rect: root.bounds) }
+    }
+
+    /// Whether any view in the subtree has constraints, layout guides or opts out of
+    /// autoresizing translation (the engine is only built when it has work).
+    private var _subtreeUsesConstraints: Bool {
+        if !_constraints.isEmpty || !_layoutGuides.isEmpty || !_translatesAutoresizingMaskIntoConstraints { return true }
+        return _subviews.contains { $0._subtreeUsesConstraints }
+    }
+
+    /// Runs the engine for this root if anything changed.
+    private func _solveConstraintsIfNeeded() {
+        guard _constraintsDirty else { return }
+        _constraintsDirty = false
+        updateConstraintsForSubtreeIfNeeded()
+        guard _subtreeUsesConstraints else { return }
+        if _engine == nil { _engine = LayoutEngine(root: self) }
+        _applyingLayout = true
+        _engine!.solve(root: self)
+        _applyingLayout = false
+    }
+
+    /// Sets a frame computed by the engine without re-dirtying the engine.
+    internal func _applyLayoutFrame(_ f: NSRect) {
+        guard f != _frame else { return }
+        let root = _layoutRoot
+        let wasDirty = root._constraintsDirty
+        let old = _frame
+        setFrameOrigin(f.origin)
+        setFrameSize(f.size)
+        root._constraintsDirty = wasDirty
+        if old.size != f.size { _needsLayout = true }
+    }
+
+    private func anchorX(_ a: NSLayoutConstraint.Attribute) -> NSLayoutXAxisAnchor {
+        if let x = _anchors[a] as? NSLayoutXAxisAnchor { return x }
+        let x = NSLayoutXAxisAnchor(item: self, attribute: a)
+        _anchors[a] = x
+        return x
+    }
+    private func anchorY(_ a: NSLayoutConstraint.Attribute) -> NSLayoutYAxisAnchor {
+        if let y = _anchors[a] as? NSLayoutYAxisAnchor { return y }
+        let y = NSLayoutYAxisAnchor(item: self, attribute: a)
+        _anchors[a] = y
+        return y
+    }
+    private func anchorDimension(_ a: NSLayoutConstraint.Attribute) -> NSLayoutDimension {
+        if let d = _anchors[a] as? NSLayoutDimension { return d }
+        let d = NSLayoutDimension(item: self, attribute: a)
+        _anchors[a] = d
+        return d
+    }
+
+    /// A guide pinned to the view's edges (layout margins and safe area are the bounds here).
+    private func _edgeGuide(_ slot: inout NSLayoutGuide?, name: String) -> NSLayoutGuide {
+        if let g = slot { return g }
+        let g = NSLayoutGuide()
+        g.identifier = NSUserInterfaceItemIdentifier(name)
+        addLayoutGuide(g)
+        NSLayoutConstraint.activate([
+            g.leadingAnchor.constraint(equalTo: leadingAnchor), g.trailingAnchor.constraint(equalTo: trailingAnchor),
+            g.topAnchor.constraint(equalTo: topAnchor), g.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        slot = g
+        return g
+    }
 
     // MARK: Layer backing
 
@@ -147,12 +241,31 @@ import CoreText
 
     internal func _setWindow(_ window: NSWindow?) {
         guard _window !== window else { return }
+        let old = _window
+        // Appearance callbacks follow on-screen visibility, as in AppKit.
+        let appearing = window?.isVisible == true, disappearing = old?.isVisible == true && window == nil
+        if appearing { _viewController?.viewWillAppear() } else if disappearing { _viewController?.viewWillDisappear() }
         viewWillMove(toWindow: window)
         for s in _subviews { s._setWindow(window) }
         _window = window
         if let l = _layer, let w = window { l.contentsScale = w.backingScaleFactor }
         viewDidMoveToWindow()
+        if appearing { _viewController?.viewDidAppear() } else if disappearing { _viewController?.viewDidDisappear() }
     }
+
+    /// The window is about to be shown or hidden: view controllers in the tree hear about it.
+    internal func _windowVisibilityWillChange(_ visible: Bool) {
+        if visible { _viewController?.viewWillAppear() } else { _viewController?.viewWillDisappear() }
+        for s in _subviews { s._windowVisibilityWillChange(visible) }
+    }
+
+    internal func _windowVisibilityDidChange(_ visible: Bool) {
+        if visible { _viewController?.viewDidAppear() } else { _viewController?.viewDidDisappear() }
+        for s in _subviews { s._windowVisibilityDidChange(visible) }
+    }
+
+    /// Called on the superview when a subview's `isHidden` changes (stack views re-layout).
+    internal func _subviewDidChangeHidden(_ subview: NSView) { }
 
     // MARK: Coordinate math (own bounds <-> superview coordinates)
 
@@ -265,6 +378,9 @@ import CoreText
         _frame = .zero
         super.init(coder: coder)
     }
+    /// AppKit inherits `init()` from NSObject; it is a zero frame.
+    @MainActor public convenience override init() { self.init(frame: .zero) }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/init(frame:)
     @MainActor public init(frame frameRect: NSRect) {
         _frame = frameRect
@@ -278,9 +394,15 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addconstraint(_:)
-    @MainActor open func addConstraint(_ constraint: NSLayoutConstraint) { unimplemented() }
+    @MainActor open func addConstraint(_ constraint: NSLayoutConstraint) {
+        if let h = constraint._holder, h !== self { h.removeConstraint(constraint) }
+        guard !_constraints.contains(where: { $0 === constraint }) else { return }
+        _constraints.append(constraint)
+        constraint._setActiveFlag(true, holder: self)
+        _setNeedsConstraintLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addconstraints(_:)
-    @MainActor open func addConstraints(_ constraints: [NSLayoutConstraint]) { unimplemented() }
+    @MainActor open func addConstraints(_ constraints: [NSLayoutConstraint]) { for c in constraints { addConstraint(c) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addcursorrect(_:cursor:)
     @MainActor open func addCursorRect(_ rect: NSRect, cursor object: NSCursor) { _cursorRects.append((rect, object)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addgesturerecognizer(_:)
@@ -288,7 +410,12 @@ import CoreText
     @MainActor open func addGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addlayoutguide(_:)
     @available(macOS 10.11, *)
-    @MainActor open func addLayoutGuide(_ guide: NSLayoutGuide) { unimplemented() }
+    @MainActor open func addLayoutGuide(_ guide: NSLayoutGuide) {
+        guide.owningView?.removeLayoutGuide(guide)
+        _layoutGuides.append(guide)
+        guide.owningView = self
+        _setNeedsConstraintLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addsubview(_:)
     @MainActor open func addSubview(_ view: NSView) {
         addSubview(view, positioned: .above, relativeTo: nil)
@@ -310,9 +437,10 @@ import CoreText
         }
         _subviews.insert(view, at: index)
         view._superview = self
-        view.nextResponder = self
+        if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(_window)
         if _layer != nil && !_layerIsHosted { view._becomeLayerBacked() } else if view._layer != nil { view._attachLayerToSuperview() }
+        _setNeedsConstraintLayout()
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
@@ -338,7 +466,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alignmentrect(forframe:)
     @MainActor open func alignmentRect(forFrame frame: NSRect) -> NSRect { frame }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alignmentrectinsets
-    @MainActor open var alignmentRectInsets: NSEdgeInsets { unimplemented() }
+    @MainActor open var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/allocategstate()
     @MainActor open func allocateGState() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/allowedtouchtypes
@@ -388,7 +516,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/backingalignedrect(_:options:)
     @MainActor open func backingAlignedRect(_ rect: NSRect, options: AlignmentOptions = []) -> NSRect { centerScanRect(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/baselineoffsetfrombottom
-    @MainActor open var baselineOffsetFromBottom: CGFloat { unimplemented() }
+    @MainActor open var baselineOffsetFromBottom: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindocument()
     @MainActor open func beginDocument() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)
@@ -399,7 +527,7 @@ import CoreText
     @MainActor open func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bottomanchor
     @available(macOS 10.11, *)
-    @MainActor open var bottomAnchor: NSLayoutYAxisAnchor { unimplemented() }
+    @MainActor open var bottomAnchor: NSLayoutYAxisAnchor { anchorY(.bottom) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bounds
     @MainActor open var bounds: NSRect {
         get { NSRect(origin: _boundsOrigin, size: _boundsSize ?? _frame.size) }
@@ -442,10 +570,10 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/centerxanchor
     @available(macOS 10.11, *)
-    @MainActor open var centerXAnchor: NSLayoutXAxisAnchor { unimplemented() }
+    @MainActor open var centerXAnchor: NSLayoutXAxisAnchor { anchorX(.centerX) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/centeryanchor
     @available(macOS 10.11, *)
-    @MainActor open var centerYAnchor: NSLayoutYAxisAnchor { unimplemented() }
+    @MainActor open var centerYAnchor: NSLayoutYAxisAnchor { anchorY(.centerY) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/clipstobounds
     @MainActor open var clipsToBounds: Bool {
         get { _clipsToBounds }
@@ -453,14 +581,26 @@ import CoreText
     }
     // SKIPPED (unknown module (CoreImage CIFilter)): @MainActor var compositingFilter: CIFilter? { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/constraints
-    @MainActor open var constraints: [NSLayoutConstraint] { unimplemented() }
+    @MainActor open var constraints: [NSLayoutConstraint] { _constraints.filter { !$0._isInternal } }
+    /// Every active constraint held here, including engine-internal ones.
+    internal var _allConstraints: [NSLayoutConstraint] { _constraints }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/constraintsaffectinglayout(for:)
-    @MainActor open func constraintsAffectingLayout(for orientation: NSLayoutConstraint.Orientation) -> [NSLayoutConstraint] { unimplemented() }
+    @MainActor open func constraintsAffectingLayout(for orientation: NSLayoutConstraint.Orientation) -> [NSLayoutConstraint] {
+        let horizontal: Set<NSLayoutConstraint.Attribute> = [.left, .right, .leading, .trailing, .width, .centerX]
+        let attrs = orientation == .horizontal ? horizontal : Set([.top, .bottom, .height, .centerY, .firstBaseline, .lastBaseline])
+        var out: [NSLayoutConstraint] = []
+        var v: NSView? = self
+        while let cur = v {
+            out += cur._constraints.filter { ($0.firstItem === self && attrs.contains($0.firstAttribute)) || ($0.secondItem === self && attrs.contains($0.secondAttribute)) }
+            v = cur._superview
+        }
+        return out
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/contentcompressionresistancepriority(for:)
-    @MainActor open func contentCompressionResistancePriority(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Priority { unimplemented() }
+    @MainActor open func contentCompressionResistancePriority(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Priority { _compressionPriority[orientation] ?? .defaultHigh }
     // SKIPPED (unknown module (CoreImage CIFilter)): @MainActor var contentFilters: [CIFilter] { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/contenthuggingpriority(for:)
-    @MainActor open func contentHuggingPriority(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Priority { unimplemented() }
+    @MainActor open func contentHuggingPriority(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Priority { _huggingPriority[orientation] ?? .defaultLow }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:from:)
     @MainActor open func convert(_ point: NSPoint, from view: NSView?) -> NSPoint { _fromWindow(view?._toWindow(point) ?? point) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:from:)
@@ -573,17 +713,26 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enterfullscreenmode(_:withoptions:)
     @MainActor open func enterFullScreenMode(_ screen: NSScreen, withOptions options: [NSView.FullScreenModeOptionKey : Any]? = nil) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/exerciseambiguityinlayout()
-    @MainActor open func exerciseAmbiguityInLayout() { unimplemented() }
+    @MainActor open func exerciseAmbiguityInLayout() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/exitfullscreenmode(options:)
     @MainActor open func exitFullScreenMode(options: [NSView.FullScreenModeOptionKey : Any]? = nil) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/firstbaselineanchor
     @available(macOS 10.11, *)
-    @MainActor open var firstBaselineAnchor: NSLayoutYAxisAnchor { unimplemented() }
+    @MainActor open var firstBaselineAnchor: NSLayoutYAxisAnchor { anchorY(.firstBaseline) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/firstbaselineoffsetfromtop
     @available(macOS 10.11, *)
-    @MainActor open var firstBaselineOffsetFromTop: CGFloat { unimplemented() }
+    @MainActor open var firstBaselineOffsetFromTop: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/fittingsize
-    @MainActor open var fittingSize: NSSize { let s = intrinsicContentSize; return NSSize(width: max(0, s.width), height: max(0, s.height)) }
+    @MainActor open var fittingSize: NSSize {
+        if _subtreeUsesConstraints {
+            updateConstraintsForSubtreeIfNeeded()
+            let engine = LayoutEngine(root: self)
+            let s = engine.solve(root: self, fittingRoot: true, apply: false)
+            return NSSize(width: s.width.rounded(), height: s.height.rounded())
+        }
+        let s = intrinsicContentSize
+        return NSSize(width: max(0, s.width), height: max(0, s.height))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringmaskbounds
     @MainActor open var focusRingMaskBounds: NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringtype
@@ -630,12 +779,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/globalframedidchangenotification
     static public var globalFrameDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSViewGlobalFrameDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/hasambiguouslayout
-    @MainActor open var hasAmbiguousLayout: Bool { unimplemented() }
+    @MainActor open var hasAmbiguousLayout: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightadjustlimit
     @MainActor open var heightAdjustLimit: CGFloat { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightanchor
     @available(macOS 10.11, *)
-    @MainActor open var heightAnchor: NSLayoutDimension { unimplemented() }
+    @MainActor open var heightAnchor: NSLayoutDimension { anchorDimension(.height) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/hittest(_:)
     @MainActor open func hitTest(_ point: NSPoint) -> NSView? {
         guard !_isHidden else { return nil }
@@ -651,7 +800,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/intrinsiccontentsize
     @MainActor open var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/invalidateintrinsiccontentsize()
-    @MainActor open func invalidateIntrinsicContentSize() { _superview?.needsLayout = true }
+    @MainActor open func invalidateIntrinsicContentSize() { _superview?.needsLayout = true; _setNeedsConstraintLayout() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/iscompatiblewithresponsivescrolling
     @MainActor class public var isCompatibleWithResponsiveScrolling: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isdescendant(of:)
@@ -670,6 +819,7 @@ import CoreText
         set {
             guard newValue != _isHidden else { return }
             _isHidden = newValue
+            _superview?._subviewDidChangeHidden(self)
             if let l = _layer, !_layerIsHosted {
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.isHidden = newValue
@@ -707,10 +857,10 @@ import CoreText
     @MainActor open func knowsPageRange(_ range: NSRangePointer) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lastbaselineanchor
     @available(macOS 10.11, *)
-    @MainActor open var lastBaselineAnchor: NSLayoutYAxisAnchor { unimplemented() }
+    @MainActor open var lastBaselineAnchor: NSLayoutYAxisAnchor { anchorY(.lastBaseline) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lastbaselineoffsetfrombottom
     @available(macOS 10.11, *)
-    @MainActor open var lastBaselineOffsetFromBottom: CGFloat { unimplemented() }
+    @MainActor open var lastBaselineOffsetFromBottom: CGFloat { baselineOffsetFromBottom }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layer
     @MainActor open var layer: CALayer? {
         get { _layer }
@@ -756,21 +906,27 @@ import CoreText
     @MainActor open func layoutGuide(for region: NSView.LayoutRegion) -> NSLayoutGuide { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutguides
     @available(macOS 10.11, *)
-    @MainActor open var layoutGuides: [NSLayoutGuide] { unimplemented() }
+    @MainActor open var layoutGuides: [NSLayoutGuide] { _layoutGuides }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutmarginsguide
     @available(macOS 11.0, *)
-    @MainActor open var layoutMarginsGuide: NSLayoutGuide { unimplemented() }
+    @MainActor open var layoutMarginsGuide: NSLayoutGuide { _edgeGuide(&_marginsGuide, name: "layoutMargins") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutsubtreeifneeded()
     @MainActor open func layoutSubtreeIfNeeded() {
-        if _needsLayout { _needsLayout = false; layout() }
+        if _superview == nil { _solveConstraintsIfNeeded() }
+        if _needsLayout {
+            _needsLayout = false
+            _viewController?.viewWillLayout()
+            layout()
+            _viewController?.viewDidLayout()
+        }
         for s in _subviews { s.layoutSubtreeIfNeeded() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/leadinganchor
     @available(macOS 10.11, *)
-    @MainActor open var leadingAnchor: NSLayoutXAxisAnchor { unimplemented() }
+    @MainActor open var leadingAnchor: NSLayoutXAxisAnchor { anchorX(.leading) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/leftanchor
     @available(macOS 10.11, *)
-    @MainActor open var leftAnchor: NSLayoutXAxisAnchor { unimplemented() }
+    @MainActor open var leftAnchor: NSLayoutXAxisAnchor { anchorX(.left) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/locationofprintrect(_:)
     @MainActor open func locationOfPrintRect(_ rect: NSRect) -> NSPoint { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocus()
@@ -801,8 +957,8 @@ import CoreText
     @MainActor open func needsToDraw(_ rect: NSRect) -> Bool { (_dirtyRect ?? bounds).intersects(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needsupdateconstraints
     @MainActor open var needsUpdateConstraints: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _needsUpdateConstraints }
+        set { _needsUpdateConstraints = newValue; if newValue { _setNeedsConstraintLayout() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/nextkeyview
     @MainActor open var nextKeyView: NSView? {
@@ -892,9 +1048,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removealltooltips()
     @MainActor open func removeAllToolTips() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removeconstraint(_:)
-    @MainActor open func removeConstraint(_ constraint: NSLayoutConstraint) { unimplemented() }
+    @MainActor open func removeConstraint(_ constraint: NSLayoutConstraint) {
+        guard let i = _constraints.firstIndex(where: { $0 === constraint }) else { return }
+        _constraints.remove(at: i)
+        constraint._setActiveFlag(false, holder: nil)
+        _setNeedsConstraintLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removeconstraints(_:)
-    @MainActor open func removeConstraints(_ constraints: [NSLayoutConstraint]) { unimplemented() }
+    @MainActor open func removeConstraints(_ constraints: [NSLayoutConstraint]) { for c in constraints { removeConstraint(c) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removecursorrect(_:cursor:)
     @MainActor open func removeCursorRect(_ rect: NSRect, cursor object: NSCursor) { _cursorRects.removeAll { $0.0 == rect && $0.1 === object } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removefromsuperview()
@@ -909,6 +1070,14 @@ import CoreText
         guard let sup = _superview else { return }
         sup.willRemoveSubview(self)
         sup._subviews.removeAll { $0 === self }
+        // Constraints held by ancestors that mention this view go away with it.
+        var a: NSView? = sup
+        while let cur = a {
+            for c in cur._constraints where c.firstItem === self || c.secondItem === self { c._setActiveFlag(false, holder: nil) }
+            cur._constraints.removeAll { $0.firstItem === self || $0.secondItem === self }
+            a = cur._superview
+        }
+        sup._setNeedsConstraintLayout()
         viewWillMove(toSuperview: nil)
         _superview = nil
         nextResponder = nil
@@ -922,7 +1091,12 @@ import CoreText
     @MainActor open func removeGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removelayoutguide(_:)
     @available(macOS 10.11, *)
-    @MainActor open func removeLayoutGuide(_ guide: NSLayoutGuide) { unimplemented() }
+    @MainActor open func removeLayoutGuide(_ guide: NSLayoutGuide) {
+        _layoutGuides.removeAll { $0 === guide }
+        guide.owningView = nil
+        _constraints.removeAll { $0.firstItem === guide || $0.secondItem === guide }
+        _setNeedsConstraintLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetooltip(_:)
     @MainActor open func removeToolTip(_ tag: NSView.ToolTipTag) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetrackingarea(_:)
@@ -939,7 +1113,7 @@ import CoreText
         if let below { addSubview(newView, positioned: .below, relativeTo: below) } else { addSubview(newView) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/requiresconstraintbasedlayout
-    @MainActor class public var requiresConstraintBasedLayout: Bool { unimplemented() }
+    @MainActor class public var requiresConstraintBasedLayout: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/resetcursorrects()
     @MainActor open func resetCursorRects() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/resize(witholdsuperviewsize:)
@@ -973,7 +1147,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rightanchor
     @available(macOS 10.11, *)
-    @MainActor open var rightAnchor: NSLayoutXAxisAnchor { unimplemented() }
+    @MainActor open var rightAnchor: NSLayoutXAxisAnchor { anchorX(.right) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rotate(bydegrees:)
     @MainActor open func rotate(byDegrees angle: CGFloat) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didadd:)
@@ -1005,7 +1179,7 @@ import CoreText
     @MainActor open var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/safearealayoutguide
     @available(macOS 11.0, *)
-    @MainActor open var safeAreaLayoutGuide: NSLayoutGuide { unimplemented() }
+    @MainActor open var safeAreaLayoutGuide: NSLayoutGuide { _edgeGuide(&_safeAreaGuide, name: "safeArea") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/safearearect
     @available(macOS 11.0, *)
     @MainActor open var safeAreaRect: NSRect { unimplemented() }
@@ -1041,9 +1215,9 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setcontentcompressionresistancepriority(_:for:)
-    @MainActor open func setContentCompressionResistancePriority(_ priority: NSLayoutConstraint.Priority, for orientation: NSLayoutConstraint.Orientation) { unimplemented() }
+    @MainActor open func setContentCompressionResistancePriority(_ priority: NSLayoutConstraint.Priority, for orientation: NSLayoutConstraint.Orientation) { _compressionPriority[orientation] = priority; _setNeedsConstraintLayout() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setcontenthuggingpriority(_:for:)
-    @MainActor open func setContentHuggingPriority(_ priority: NSLayoutConstraint.Priority, for orientation: NSLayoutConstraint.Orientation) { unimplemented() }
+    @MainActor open func setContentHuggingPriority(_ priority: NSLayoutConstraint.Priority, for orientation: NSLayoutConstraint.Orientation) { _huggingPriority[orientation] = priority; _setNeedsConstraintLayout() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframeorigin(_:)
     @MainActor open func setFrameOrigin(_ newOrigin: NSPoint) {
         let animate = _takeAnimator()
@@ -1068,6 +1242,7 @@ import CoreText
         _syncLayerGeometry()
         if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
+        if !_applyingLayout { _needsLayout = true; _setNeedsConstraintLayout() }
         _superview?.setNeedsDisplay(old.union(_frame))
         setNeedsDisplay(bounds)
         if _postsFrameChangedNotifications {
@@ -1115,12 +1290,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/topanchor
     @available(macOS 10.11, *)
-    @MainActor open var topAnchor: NSLayoutYAxisAnchor { unimplemented() }
+    @MainActor open var topAnchor: NSLayoutYAxisAnchor { anchorY(.top) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/trackingareas
     @MainActor open var trackingAreas: [NSTrackingArea] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/trailinganchor
     @available(macOS 10.11, *)
-    @MainActor open var trailingAnchor: NSLayoutXAxisAnchor { unimplemented() }
+    @MainActor open var trailingAnchor: NSLayoutXAxisAnchor { anchorX(.trailing) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translateorigin(to:)
     @MainActor open func translateOrigin(to translation: NSPoint) { setBoundsOrigin(NSPoint(x: _boundsOrigin.x - translation.x, y: _boundsOrigin.y - translation.y)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translaterectsneedingdisplay(in:by:)
@@ -1128,7 +1303,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translatesautoresizingmaskintoconstraints
     @MainActor open var translatesAutoresizingMaskIntoConstraints: Bool {
         get { _translatesAutoresizingMaskIntoConstraints }
-        set { _translatesAutoresizingMaskIntoConstraints = newValue }
+        set { _translatesAutoresizingMaskIntoConstraints = newValue; _setNeedsConstraintLayout() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/unlockfocus()
     @MainActor open func unlockFocus() { unimplemented() }
@@ -1137,7 +1312,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updateconstraints()
     @MainActor open func updateConstraints() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updateconstraintsforsubtreeifneeded()
-    @MainActor open func updateConstraintsForSubtreeIfNeeded() { unimplemented() }
+    @MainActor open func updateConstraintsForSubtreeIfNeeded() {
+        for s in _subviews { s.updateConstraintsForSubtreeIfNeeded() }
+        if _needsUpdateConstraints {
+            _needsUpdateConstraints = false
+            updateConstraints()
+            _viewController?.updateViewConstraints()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updatelayer()
     @MainActor open func updateLayer() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updatetrackingareas()
@@ -1218,7 +1400,7 @@ import CoreText
     @MainActor open var widthAdjustLimit: CGFloat { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/widthanchor
     @available(macOS 10.11, *)
-    @MainActor open var widthAnchor: NSLayoutDimension { unimplemented() }
+    @MainActor open var widthAnchor: NSLayoutDimension { anchorDimension(.width) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/willopenmenu(_:with:)
     @available(macOS 10.11, *)
     @MainActor open func willOpenMenu(_ menu: NSMenu, with event: NSEvent) { unimplemented() }

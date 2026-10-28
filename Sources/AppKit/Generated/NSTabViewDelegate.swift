@@ -28,7 +28,7 @@ extension NSTabViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewdelegate/tabview(_:didselect:)
     @MainActor public func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewdelegate/tabview(_:shouldselect:)
-    @MainActor public func tabView(_ tabView: NSTabView, shouldSelect tabViewItem: NSTabViewItem?) -> Bool { return false }
+    @MainActor public func tabView(_ tabView: NSTabView, shouldSelect tabViewItem: NSTabViewItem?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewdelegate/tabview(_:willselect:)
     @MainActor public func tabView(_ tabView: NSTabView, willSelect tabViewItem: NSTabViewItem?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewdelegate/tabviewdidchangenumberoftabviewitems(_:)

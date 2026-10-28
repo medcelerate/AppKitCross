@@ -36,21 +36,21 @@ public protocol NSSplitViewDelegate: NSObjectProtocol {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSSplitViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:additionaleffectiverectofdividerat:)
-    @MainActor public func splitView(_ splitView: NSSplitView, additionalEffectiveRectOfDividerAt dividerIndex: Int) -> NSRect { unimplementedOptionalRequirement() }
+    @MainActor public func splitView(_ splitView: NSSplitView, additionalEffectiveRectOfDividerAt dividerIndex: Int) -> NSRect { return .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:cancollapsesubview:)
     @MainActor public func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:constrainmaxcoordinate:ofsubviewat:)
-    @MainActor public func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { return proposedMaximumPosition }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:constrainmincoordinate:ofsubviewat:)
-    @MainActor public func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { return proposedMinimumPosition }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:constrainsplitposition:ofsubviewat:)
-    @MainActor public func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { return proposedPosition }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:effectiverect:fordrawnrect:ofdividerat:)
-    @MainActor public func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect { unimplementedOptionalRequirement() }
+    @MainActor public func splitView(_ splitView: NSSplitView, effectiveRect proposedEffectiveRect: NSRect, forDrawnRect drawnRect: NSRect, ofDividerAt dividerIndex: Int) -> NSRect { return proposedEffectiveRect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:resizesubviewswitholdsize:)
     @MainActor public func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:shouldadjustsizeofsubview:)
-    @MainActor public func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool { return false }
+    @MainActor public func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:shouldcollapsesubview:fordoubleclickondividerat:)
     public func splitView(_ splitView: NSSplitView, shouldCollapseSubview subview: NSView, forDoubleClickOnDividerAt dividerIndex: Int) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitviewdelegate/splitview(_:shouldhidedividerat:)

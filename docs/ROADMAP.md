@@ -107,6 +107,28 @@ masks (shape masks clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentatio
 `NSLayoutConstraint`, `NSLayoutAnchor`, `NSStackView` (Cassowary solver),
 `NSViewController` / `NSWindowController` / `NSSplitViewController` / `NSTabViewController`.
 
+Status (2026-10-28): done on macOS, awaiting Windows verification. A kiwi-style Cassowary
+solver (`Layout/Cassowary.swift`) and a layout engine (`Layout/LayoutEngine.swift`) that
+rebuilds the tableau per pass from the active constraints of a window's view tree, with
+intrinsic content sizes through hugging / compression priorities, frames of views that
+translate their autoresizing mask pinned, layout guides, `fittingSize`. Engine coordinates
+are y-down so constants keep Apple's sign conventions across flipped and unflipped views.
+`NSLayoutConstraint` (activation on the common ancestor, priorities, identifiers, the
+visual format language with metrics, predicates, priorities and alignment options),
+anchors (`NSLayoutXAxisAnchor`/`YAxisAnchor`/`Dimension`, `anchorWithOffset`, system
+spacing), `NSLayoutGuide`, `layoutMarginsGuide`/`safeAreaLayoutGuide` (the bounds).
+`NSStackView` generates constraints like AppKit's (gravity areas, fill, fillEqually,
+fillProportionally, equalSpacing, equalCentering, custom spacing, edge insets, alignment,
+hidden-view detaching with delegate calls). `NSViewController` (view loading, lifecycle
+calls driven by the view entering/leaving a window, children, responder chain, modal
+presentation, transitions), `NSWindowController` (lazy window loading, content view
+controller), `NSSplitView` (manual layout with holding priorities, divider dragging and
+cursors, collapse) + `NSSplitViewItem` + `NSSplitViewController` (sidebar/inspector
+toggles), `NSTabView` (drawn tab strip, selection by click) + `NSTabViewItem` +
+`NSTabViewController`. Not done: incremental solver updates (each pass rebuilds), RTL
+leading/trailing, baselines beyond `baselineOffsetFromBottom`, sheets (presented as modal
+windows), popovers, storyboards/nibs, `NSSplitViewItem` accessory view controllers.
+
 ## M6: SwiftUI hosting seam
 
 `NSHostingView`, `NSHostingController`, `NSViewRepresentable`, `NSViewControllerRepresentable`,

@@ -66,7 +66,7 @@ open class CAAnimation: NSObject, CAMediaTiming, CAAction {
     #else
     open func value(forKey key: String) -> Any? { userValues[key] }
     open func setValue(_ value: Any?, forKey key: String) { userValues[key] = value }
-    open func copy() -> Any { _copy() }
+    open override func copy() -> Any { MainActor.assumeIsolated { _copy() } }
     #endif
 
     func _copy() -> CAAnimation {
@@ -271,7 +271,7 @@ open class CAKeyframeAnimation: CAPropertyAnimation {
         guard !frames.isEmpty else { return }
         if frames.count == 1 { write(frames[0], to: presentation); return }
         let p = CGFloat(progress(localTime: t))
-        let times: [CGFloat] = keyTimes.map { $0.map { CGFloat(truncating: $0) } } ?? (0..<frames.count).map { CGFloat($0) / CGFloat(frames.count - 1) }
+        let times: [CGFloat] = keyTimes.map { $0.map { CGFloat($0.doubleValue) } } ?? (0..<frames.count).map { CGFloat($0) / CGFloat(frames.count - 1) }
         var i = 0
         while i + 1 < times.count && times[i + 1] <= p { i += 1 }
         if i >= frames.count - 1 { write(frames[frames.count - 1], to: presentation); return }
@@ -462,7 +462,7 @@ enum CAInterpolation {
         case let x as Double: return CGFloat(x)
         case let x as Float: return CGFloat(x)
         case let x as Int: return CGFloat(x)
-        case let x as NSNumber: return CGFloat(truncating: x)
+        case let x as NSNumber: return CGFloat(x.doubleValue)
         default: return nil
         }
     }
