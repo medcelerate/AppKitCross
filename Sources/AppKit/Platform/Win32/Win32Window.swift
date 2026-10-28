@@ -17,6 +17,8 @@ final class Win32Window: PlatformWindow {
     private(set) var isKey = false
     private var destroying = false
     private var pressedButtons = 0
+    /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
+    private var composing = false
     private var dpi: UINT = 96
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
@@ -414,6 +416,9 @@ final class Win32Window: PlatformWindow {
 
     private func key(_ type: NSEvent.EventType, _ wParam: WPARAM, _ lParam: LPARAM) {
         let vk = Int32(truncatingIfNeeded: wParam)
+        // An active input method owns the keyboard: the keystrokes it consumes arrive as
+        // VK_PROCESSKEY and come back as WM_IME_* messages, so they are not key events too.
+        if vk == VK_PROCESSKEY || composing { return }
         var chars = "", plain = ""
         var keyCode = UInt16(truncatingIfNeeded: wParam)
         if let special = Win32Window.specialKeys[vk] {
@@ -447,6 +452,33 @@ final class Win32Window: PlatformWindow {
                                  windowNumber: windowNumber(), context: nil, characters: chars,
                                  charactersIgnoringModifiers: plain, isARepeat: isRepeat, keyCode: keyCode)!
         owner?.platformWindowDispatch(e)
+    }
+
+    // MARK: Input methods (IME)
+
+    /// The composition string of one kind (`GCS_COMPSTR`, `GCS_RESULTSTR`) as text.
+    private func compositionString(_ himc: HIMC, _ kind: DWORD) -> String {
+        let bytes = ImmGetCompositionStringW(himc, kind, nil, 0)
+        guard bytes > 0 else { return "" }
+        var buffer = [WCHAR](repeating: 0, count: Int(bytes) / 2)
+        let got = buffer.withUnsafeMutableBytes { ImmGetCompositionStringW(himc, kind, $0.baseAddress, DWORD(bytes)) }
+        guard got > 0 else { return "" }
+        return String(decoding: buffer[0..<Int(got) / 2], as: UTF16.self)
+    }
+
+    /// Puts the input method's (suppressed) composition window and its candidate list at the
+    /// marked text or caret rectangle, so candidates pop up under the text being composed.
+    private func positionInputMethodWindows(_ input: PlatformTextInput) {
+        guard let hwnd, let rect = input.markedRect(), let himc = ImmGetContext(hwnd) else { return }
+        defer { _ = ImmReleaseContext(hwnd, himc) }
+        let h = contentSize.height
+        let x = Int32((rect.minX * scale).rounded(.down))
+        let top = Int32(((h - rect.maxY) * scale).rounded(.down))
+        let bottom = Int32(((h - rect.minY) * scale).rounded(.up))
+        var composition = COMPOSITIONFORM(dwStyle: DWORD(CFS_POINT), ptCurrentPos: POINT(x: x, y: top), rcArea: RECT())
+        _ = ImmSetCompositionWindow(himc, &composition)
+        var candidates = CANDIDATEFORM(dwIndex: 0, dwStyle: DWORD(CFS_CANDIDATEPOS), ptCurrentPos: POINT(x: x, y: bottom), rcArea: RECT())
+        _ = ImmSetCandidateWindow(himc, &candidates)
     }
 
     // MARK: Window procedure
@@ -631,6 +663,40 @@ final class Win32Window: PlatformWindow {
             let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: modifierFlags(), timestamp: timestamp(),
                                          windowNumber: windowNumber(), deltaX: horizontal ? -delta : 0, deltaY: horizontal ? 0 : delta, precise: false)
             owner?.platformWindowDispatch(e)
+            return 0
+        case WM_IME_STARTCOMPOSITION:
+            // The text view draws the composition (marked text) itself, so the input
+            // method's own composition window is suppressed (no DefWindowProc) and its
+            // candidate list is placed by the caret. Without a text view the default applies.
+            guard let input = owner?.platformWindowTextInput() else { composing = false; return nil }
+            composing = true
+            positionInputMethodWindows(input)
+            return 0
+        case WM_IME_COMPOSITION:
+            guard composing, let hwnd, let input = owner?.platformWindowTextInput(), let himc = ImmGetContext(hwnd) else { return nil }
+            defer { _ = ImmReleaseContext(hwnd, himc) }
+            let flags = DWORD(truncatingIfNeeded: lParam)
+            var handled = false
+            if flags & DWORD(GCS_RESULTSTR) != 0 {
+                // Committed text (replaces the marked text); a new composition may follow below.
+                let result = compositionString(himc, DWORD(GCS_RESULTSTR))
+                if !result.isEmpty { input.insertText(result) }
+                handled = true
+            }
+            if flags & DWORD(GCS_COMPSTR) != 0 {
+                let composition = compositionString(himc, DWORD(GCS_COMPSTR))
+                var cursor = composition.utf16.count
+                if flags & DWORD(GCS_CURSORPOS) != 0 {
+                    cursor = max(0, min(cursor, Int(ImmGetCompositionStringW(himc, DWORD(GCS_CURSORPOS), nil, 0))))
+                }
+                input.setMarkedText(composition, NSRange(location: cursor, length: 0))
+                positionInputMethodWindows(input)
+                handled = true
+            }
+            return handled ? 0 : nil
+        case WM_IME_ENDCOMPOSITION:
+            composing = false
+            if let input = owner?.platformWindowTextInput(), input.hasMarkedText() { input.unmarkText() }
             return 0
         case WM_KEYDOWN, WM_SYSKEYDOWN:
             key(.keyDown, wParam, lParam)
