@@ -70,7 +70,7 @@ import CoreText
     private var _aspectRatio = NSSize.zero
     private var _toolbarStyle: NSWindow.ToolbarStyle = .automatic
 
-    open override var description: String { "<NSWindow \(_windowNumber) '\(_title)' \(frame)>" }
+    open override var description: String { MainActor.assumeIsolated { "<NSWindow \(_windowNumber) '\(_title)' \(frame)>" } }
 
     private func post(_ name: NSNotification.Name) {
         NotificationCenter.default.post(name: name, object: self)

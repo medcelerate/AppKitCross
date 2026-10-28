@@ -44,7 +44,7 @@ import CoreText
     private var _boundsRotation: CGFloat = 0
     private var _preparedContentRect: NSRect? = nil
 
-    open override var description: String { "<\(type(of: self)) frame=\(_frame)>" }
+    open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(_frame)>" } }
 
     // MARK: Window propagation
 
