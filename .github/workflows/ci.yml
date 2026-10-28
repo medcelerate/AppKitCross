@@ -17,7 +17,8 @@ jobs:
 
   windows:
     name: Windows build
-    runs-on: windows-latest
+    # windows-latest ships VS 2026 (MSVC 14.5x), whose STL needs Clang 20; Swift 6.2's clang is older.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: compnerd/gha-setup-swift@main
