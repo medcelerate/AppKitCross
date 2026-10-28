@@ -613,7 +613,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/clipstobounds
     @MainActor open var clipsToBounds: Bool {
         get { _clipsToBounds }
-        set { _clipsToBounds = newValue }
+        set {
+            _clipsToBounds = newValue
+            if let l = _layer, !_layerIsHosted { l.masksToBounds = newValue }
+        }
     }
     // SKIPPED (unknown module (CoreImage CIFilter)): @MainActor var compositingFilter: CIFilter? { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/constraints

@@ -12,7 +12,7 @@ are concrete and testable.
 | M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
 | M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
-| M4 Core Animation | done, verified on Windows; native layer-hosting seam on main (ADR-0005), DirectComposition visuals with the Windows session |
+| M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; HLSL only, swap-chain presentation unexercised) |
@@ -126,10 +126,15 @@ animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Nati
 hosting (2026-10-29, ADR-0005): a fully layer-backed window hands its tree to the platform
 as a retained scene (`PlatformWindow.hostLayerScene`, nodes with transform/opacity/clip and
 versioned `draw` closures; masks, shadows and sublayer transforms flatten their subtree);
-the host backend's reference compositor matches the software composite in tests, and the
-DirectComposition visual tree on Windows is with the Windows session. Not done: group
-opacity (opacity applies per primitive), blurred shadows, `mask` alpha masks (shape masks
-clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation (M7).
+the host backend's reference compositor matches the software composite in tests. The
+DirectComposition visual tree (PR #5, `cd2d_comp_*` in CD2D, `Win32Window.hostLayerScene`)
+reproduces the software output on the Windows machine and drops the animating badge from
+8.4 % to 0.6 % of a core; `APPKITWIN_SOFTWARE_LAYERS=1` forces the software compositor and
+HelloWindow `--no-layer-backing` leaves views unbacked. A layer draws only within its
+bounds in both paths (as on macOS). Not done: group opacity (the software compositor
+applies opacity per primitive, DirectComposition per subtree), blurred shadows, `mask`
+alpha masks (shape masks clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation
+(M7), a real DPI-change exercise of the hosted tree.
 
 ## M5: Auto Layout and view controllers
 

@@ -1066,6 +1066,11 @@ open class CALayer: NSObject, CAMediaTiming {
     /// space. `presentation` carries the animated values; `self` is the model the delegate sees.
     func _drawOwnContent(into ctx: CGContext, presentation p: CALayer) {
         if _needsDisplay { display() }
+        // A layer's own content lives in its backing store, so it never extends past the
+        // bounds (sublayers may, unless masksToBounds); native hosts rasterise exactly this.
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.clip(to: p._bounds)
         if let bg = p._backgroundColor {
             ctx.setFillColor(bg)
             p._addBoundsPath(ctx, p._bounds)

@@ -74,7 +74,9 @@ extension CALayer {
         func animates(_ a: CAAnimation) -> Bool {
             if let g = a as? CAAnimationGroup { return (g.animations ?? []).contains(where: animates) }
             guard let kp = (a as? CAPropertyAnimation)?.keyPath else { return true }
-            return !CALayer.compositingOnlyKeys.contains(kp)
+            // "transform.scale", "position.x": the property is the first path component.
+            let property = kp.split(separator: ".", maxSplits: 1).first.map(String.init) ?? kp
+            return !CALayer.compositingOnlyKeys.contains(property)
         }
         return animations.contains { animates($0.animation) }
     }

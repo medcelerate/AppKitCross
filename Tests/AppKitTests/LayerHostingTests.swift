@@ -182,6 +182,39 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testLayerBackedScrollViewClipsItsDocument() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            w.backgroundColor = .white
+            let scroll = NSScrollView(frame: NSRect(x: 50, y: 50, width: 100, height: 100))
+            scroll.hasVerticalScroller = false
+            scroll.drawsBackground = false
+            let doc = BoxView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+            scroll.documentView = doc
+            w.contentView!.addSubview(scroll)
+            w.contentView!.wantsLayer = true
+            w.makeKeyAndOrderFront(nil)
+            XCTAssertTrue(scroll.contentView.layer?.masksToBounds == true)
+            for hosted in [false, true] {
+                let host = hostWindow(w)
+                host.layerHostingEnabled = hosted
+                w._updateLayerHosting()
+                w.display()
+                let px = _pixels(host.lastImage!)
+                let img = host.lastImage!
+                func pixel(_ x: Int, _ y: Int) -> [UInt8] {      // y from the top, in pixels
+                    let i = y * img.bytesPerRow + x * 4
+                    return [px[i], px[i + 1], px[i + 2], px[i + 3]]
+                }
+                let s = Int(w.backingScaleFactor)
+                // Inside the scroll view the document's box shows; outside it the window is white.
+                XCTAssertNotEqual(pixel(60 * s, 60 * s), [255, 255, 255, 255], "hosted=\(hosted)")
+                XCTAssertEqual(pixel(40 * s, 40 * s), [255, 255, 255, 255], "hosted=\(hosted): clipped outside the scroll view")
+            }
+            w.close()
+        }
+    }
+
     func testUnsupportedFeaturesFlattenTheirSubtree() {
         MainActor.assumeIsolated {
             let (w, panel, _) = makeWindow()

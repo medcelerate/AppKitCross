@@ -387,6 +387,8 @@ final class LayerBackedViewTests: XCTestCase, @unchecked Sendable {
             let v = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
             v.wantsLayer = true
             let shape = CAShapeLayer()
+            shape.anchorPoint = .zero
+            shape.frame = CGRect(x: 0, y: 0, width: 50, height: 50)   // a layer draws only within its bounds
             shape.path = CGPath(rect: CGRect(x: 10, y: 10, width: 30, height: 30), transform: nil)
             shape.fillColor = CGColor(srgbRed: 0, green: 1, blue: 0, alpha: 1)
             shape.strokeColor = CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)

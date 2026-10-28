@@ -26,6 +26,17 @@ import CoreText
     private var _automaticallyAdjustsContentInsets = true
     private var _frameObserver: Any? = nil
 
+    /// A clip view always clips: under layer backing that is the layer's masksToBounds.
+    @MainActor public override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        clipsToBounds = true
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        MainActor.assumeIsolated { clipsToBounds = true }
+    }
+
     @MainActor open override var isFlipped: Bool { _documentView?.isFlipped ?? false }
     @MainActor open override var isOpaque: Bool { _drawsBackground }
 

@@ -293,8 +293,13 @@ import CoreText
     public func platformWindowDidChangeBackingScaleFactor(_ scale: CGFloat) {
         post(NSWindow.didChangeBackingPropertiesNotification)
         delegate?.windowDidChangeBackingProperties(Notification(name: NSWindow.didChangeBackingPropertiesNotification, object: self))
-        func visit(_ v: NSView) { v.viewDidChangeBackingProperties(); v.subviews.forEach(visit) }
+        func visit(_ v: NSView) {
+            v.layer?.contentsScale = scale        // re-rasterises the layer, so a hosted scene recommits
+            v.viewDidChangeBackingProperties()
+            v.subviews.forEach(visit)
+        }
         if let cv = _contentView { visit(cv) }
+        _setLayerSceneNeedsCommit()
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
