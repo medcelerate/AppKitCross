@@ -121,7 +121,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     public init?(catalogName listName: NSColorList.Name, colorName: NSColor.Name) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(cgcolor:)
     public convenience init?(cgColor: CGColor) {
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         let (r, g, b, a) = cgColor.rgba
         #else
         let space = CGColorSpace(name: CGColorSpace.sRGB)!

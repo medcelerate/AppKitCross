@@ -59,7 +59,7 @@ open class NSCursor: NSObject, NSSecureCoding, NSCoding {
         let scale: CGFloat = 1
         let pixels: [UInt8] = MainActor.assumeIsolated {
             guard let cg = newImage._cgImage(scale: scale) else { return [] }
-            #if os(Windows)
+            #if os(Windows) || os(Linux)
             return [UInt8](cg.data.prefix(cg.bytesPerRow * cg.height))
             #else
             return []

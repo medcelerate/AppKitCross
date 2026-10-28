@@ -173,10 +173,32 @@ evaluate when we get here: a Swift `Metal` module over D3D12 (shader translation
 Metal Shading Language → DXIL is the hard part) or over Vulkan via SPIR-V. Not a
 prerequisite for SwiftUI.
 
+Status (2026-10-28): decided in ADR-0004. `Sources/Metal` has Metal's object model as
+protocols (`MTLDevice`, queues, command buffers, render/blit/compute encoders, buffers,
+textures, libraries, pipeline states, drawables, descriptors, the common enums) and
+`MTLReferenceDevice`: CPU resources, blits, render-pass clears, command-buffer
+completion, library scanning (MSL or HLSL entry points), no rasterization. `Sources/MetalKit`
+has `MTKView`/`MTKViewDelegate` on AppKit's display link, presenting reference drawables
+through CoreGraphics. `Sources/CMetalD3D12` fixes the C interface of the Direct3D 12
+backend (device, queue/fence, upload-heap buffers, textures, HLSL compile, PSOs, command
+lists, HWND swap chain); its implementation is a placeholder that returns no device until
+the D3D12 pull request lands. Shaders: HLSL/DXIL first; MSL translation is open.
+
 ## M8: Linux backend
 
 New `Platform/Linux` (Wayland/X11 + Vulkan + Skia or Cairo for `CGContext`). The core
 and the SwiftUI layer should need no changes; that is the test of the architecture.
+
+Status (2026-10-28): groundwork in place: `CoreGraphics/CGContextCairo.swift` (the
+Direct2D context's API over Cairo, plus bitmap contexts), `CCairo`/`CX11` system library
+modules, and `Platform/Linux` (Xlib windows with Cairo backing surfaces, a poll()-based
+event loop that also serves posted blocks and the frame clock, key/mouse translation
+with the same Ctrl-as-Command convention, cursors, PangoCairo text, PNG images, an
+in-process pasteboard, zenity file dialogs; no native menu bar). The core needed no
+changes beyond widening non-Darwin conditionals. `tools/linux/Dockerfile` builds on
+`swift:6.2-noble`, runs the test suite on the host backend (`APPKITWIN_HOST_BACKEND=1`)
+and HelloWindow under Xvfb for a screenshot. Open: Wayland, X11 selections for the
+pasteboard, JPEG via gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
 
 ## Reference projects
 

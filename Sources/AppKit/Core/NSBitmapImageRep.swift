@@ -69,7 +69,7 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/colorat(x:y:)
     open func colorAt(x: Int, y: Int) -> NSColor? {
         guard let image = _image, x >= 0, y >= 0, x < image.width, y < image.height, image.bitsPerPixel == 32 else { return nil }
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         let d = image.data
         #else
         guard let provider = image.dataProvider, let cf = provider.data else { return nil }

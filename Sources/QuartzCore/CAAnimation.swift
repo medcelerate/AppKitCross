@@ -468,7 +468,7 @@ enum CAInterpolation {
     }
 
     static func rgba(_ c: CGColor) -> [CGFloat] {
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         let (r, g, b, a) = c.rgba
         return [r, g, b, a]
         #else
@@ -487,7 +487,7 @@ enum CAInterpolation {
 
     static func asPath(_ v: Any?) -> CGPath? {
         guard let v else { return nil }
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         return v as? CGPath
         #else
         if CFGetTypeID(v as CFTypeRef) == CGPath.typeID { return (v as! CGPath) }
@@ -497,7 +497,7 @@ enum CAInterpolation {
 
     static func asColor(_ v: Any?) -> CGColor? {
         guard let v else { return nil }
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         return v as? CGColor
         #else
         if CFGetTypeID(v as CFTypeRef) == CGColor.typeID { return (v as! CGColor) }

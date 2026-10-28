@@ -9,5 +9,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
-RUN swift build 2>&1 | tail -20
+RUN swift build 2>&1 | grep -E "error:|Build complete|Compiling" | grep -v "^\[" | head -120 ; test -x .build/debug/HelloWindow
 CMD ["bash", "tools/linux/run.sh"]

@@ -66,6 +66,20 @@ targets += [
 ]
 appKitDependencies += ["QuartzCore"]
 
+// Metal (ADR-0004): the API as protocols plus the reference device, on every platform;
+// MetalKit's MTKView sits on AppKit. The D3D12 shim is Windows-only.
+#if os(Windows)
+targets += [
+    .target(name: "CMetalD3D12", path: "Sources/CMetalD3D12", linkerSettings: [.linkedLibrary("d3d12"), .linkedLibrary("dxgi"), .linkedLibrary("d3dcompiler")]),
+]
+let metalDependencies: [Target.Dependency] = ["CMetalD3D12"]
+#else
+let metalDependencies: [Target.Dependency] = []
+#endif
+targets += [
+    .target(name: "Metal", dependencies: metalDependencies, path: "Sources/Metal", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+
 targets += [
     .target(
         name: "AppKit",
@@ -77,6 +91,7 @@ targets += [
             .enableUpcomingFeature("StrictConcurrency"),
         ]
     ),
+    .target(name: "MetalKit", dependencies: ["AppKit", "Metal"], path: "Sources/MetalKit", swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("StrictConcurrency")]),
     .executableTarget(
         name: "HelloWindow",
         dependencies: ["AppKit"],
@@ -84,7 +99,7 @@ targets += [
     ),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit"],
+        dependencies: ["AppKit", "Metal", "MetalKit"],
         path: "Tests/AppKitTests"
     ),
 ]
@@ -94,6 +109,8 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "AppKit", targets: ["AppKit"]),
+        .library(name: "Metal", targets: ["Metal"]),
+        .library(name: "MetalKit", targets: ["MetalKit"]),
     ],
     targets: targets,
     cxxLanguageStandard: .cxx17

@@ -1152,7 +1152,7 @@ open class CALayer: NSObject, CAMediaTiming {
 
     static func _image(from contents: Any?) -> CGImage? {
         guard let c = contents else { return nil }
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         return c as? CGImage
         #else
         if CFGetTypeID(c as CFTypeRef) == CGImage.typeID { return (c as! CGImage) }
