@@ -163,8 +163,13 @@ final class LinuxBackend: PlatformBackend {
     let image: any PlatformImageBackend
     let systemPasteboard: any PlatformPasteboard = LinuxPasteboard()
 
-    /// Runs zenity when available; otherwise the dialog is cancelled.
     func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
+        LinuxBackend.runZenity(options)
+    }
+
+    /// Runs zenity when available; otherwise the dialog is cancelled. Shared with the
+    /// Wayland backend.
+    static func runZenity(_ options: PlatformFileDialogOptions) -> [URL]? {
         let zenity = ["/usr/bin/zenity", "/usr/local/bin/zenity"].first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let zenity else { return nil }
         var args = ["--file-selection"]
