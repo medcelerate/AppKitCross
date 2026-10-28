@@ -199,18 +199,23 @@ final class LinuxBackend: PlatformBackend {
 
     // MARK: Cursors
 
-    private static let cursorShapes: [PlatformCursor: Int32] = [
-        .arrow: 68, .iBeam: 152, .crosshair: 34, .pointingHand: 60, .openHand: 58, .closedHand: 58, .resizeLeftRight: 108,
-        .resizeUpDown: 116, .resizeAll: 52, .operationNotAllowed: 0, .contextualMenu: 68, .dragCopy: 68, .dragLink: 68,
-        .iBeamVertical: 152, .wait: 150,
-    ]
+    /// X cursor font shapes (cursorfont.h).
+    private static func shape(for cursor: PlatformCursor) -> Int32 {
+        switch cursor {
+        case .arrow, .contextualMenu, .dragCopy, .dragLink, .operationNotAllowed, .custom: return 68   // XC_left_ptr
+        case .iBeam, .iBeamVertical: return 152                                                           // XC_xterm
+        case .crosshair: return 34
+        case .pointingHand: return 60                                                                     // XC_hand2
+        case .openHand, .closedHand: return 58                                                            // XC_hand1
+        case .resizeLeftRight: return 108
+        case .resizeUpDown: return 116
+        case .resizeAll: return 52                                                                        // XC_fleur
+        case .wait: return 150
+        }
+    }
 
     func setCursor(_ cursor: PlatformCursor) {
-        let shape: Int32
-        switch cursor {
-        case .custom: shape = 68
-        default: shape = LinuxBackend.cursorShapes[cursor] ?? 68
-        }
+        let shape = LinuxBackend.shape(for: cursor)
         if cursors[shape] == nil { cursors[shape] = XCreateFontCursor(display, UInt32(shape)) }
         currentCursor = cursors[shape] ?? 0
         if !cursorHidden { for w in windows { w.applyCursor(currentCursor) } }

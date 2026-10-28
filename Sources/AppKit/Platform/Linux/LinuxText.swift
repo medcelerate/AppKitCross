@@ -41,7 +41,7 @@ final class LinuxFont: PlatformFontHandle {
 
 @MainActor
 final class LinuxTextBackend: PlatformTextBackend {
-    private let fontMap: OpaquePointer?
+    private let fontMap: UnsafeMutablePointer<PangoFontMap>?
     private let context: OpaquePointer?
 
     init() {

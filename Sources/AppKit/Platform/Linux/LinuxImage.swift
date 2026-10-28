@@ -53,8 +53,8 @@ final class LinuxImageBackend: PlatformImageBackend {
         var copy = Data(bytes: base, count: stride * h)
         if cairo_image_surface_get_format(surface) == CAIRO_FORMAT_RGB24 {
             // RGB24 leaves the alpha byte undefined; make it opaque.
-            copy.withUnsafeMutableBytes { buf in
-                for row in 0..<h { for x in 0..<w { buf[row * stride + x * 4 + 3] = 255 } }
+            copy.withUnsafeMutableBytes { (buf: UnsafeMutableRawBufferPointer) in
+                for row in 0..<h { for x in 0..<w { buf.storeBytes(of: UInt8(255), toByteOffset: row * stride + x * 4 + 3, as: UInt8.self) } }
             }
         }
         return CGImage.fromBGRA(width: w, height: h, stride: stride, data: copy)

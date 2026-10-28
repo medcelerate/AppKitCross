@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")/../.."
 echo "== tests (host backend)"
-APPKITWIN_HOST_BACKEND=1 swift test 2>&1 | grep -E "error:|Executed .* tests" | tail -5
+APPKITWIN_HOST_BACKEND=1 swift test 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:" | tail -12
 echo "== HelloWindow under Xvfb"
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 export DISPLAY=:99

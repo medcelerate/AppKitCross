@@ -150,7 +150,7 @@ final class LinuxWindow: PlatformWindow {
 
     func makeKey() {
         wantsKey = true
-        if isVisible { XSetInputFocus(backend.display, xid, RevertToParent, CurrentTime) }
+        if isVisible { XSetInputFocus(backend.display, xid, RevertToParent, Time(CurrentTime)) }
     }
 
     func orderBack() { XLowerWindow(backend.display, xid) }
@@ -297,7 +297,7 @@ final class LinuxWindow: PlatformWindow {
         var text = ""
         if n > 0 {
             let bytes = buffer[0..<Int(n)].map { UInt8(bitPattern: $0) }
-            text = String(decoding: bytes, as: Unicode.ISOLatin1.self)
+            text = String(String.UnicodeScalarView(bytes.map { UnicodeScalar($0) }))
         } else if keysym & 0x0100_0000 != 0, let scalar = UnicodeScalar(UInt32(keysym & 0x00FF_FFFF)) {
             text = String(scalar)
         }
@@ -342,7 +342,7 @@ final class LinuxWindow: PlatformWindow {
             let c = event.xconfigure
             let newSize = NSSize(width: CGFloat(c.width) / scale, height: CGFloat(c.height) / scale)
             var x = c.x, y = c.y
-            if !c.send_event {
+            if c.send_event == 0 {
                 // Position is relative to the parent (frame) window: translate to root.
                 var child: Window = 0
                 XTranslateCoordinates(backend.display, xid, backend.root, 0, 0, &x, &y, &child)
@@ -357,7 +357,7 @@ final class LinuxWindow: PlatformWindow {
             if old != _frame { owner?.platformWindowDidChangeFrame(_frame) }
         case MapNotify:
             isVisible = true
-            if wantsKey { XSetInputFocus(backend.display, xid, RevertToParent, CurrentTime) }
+            if wantsKey { XSetInputFocus(backend.display, xid, RevertToParent, Time(CurrentTime)) }
             dirty = NSRect(origin: .zero, size: _frame.size)
         case UnmapNotify:
             isVisible = false

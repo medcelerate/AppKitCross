@@ -3,6 +3,24 @@
 Milestones are ordered so that each one produces something runnable. "Done" criteria
 are concrete and testable.
 
+## Status at a glance (2026-10-29)
+
+| Milestone | State |
+|---|---|
+| M0 Foundation | done (CI still open) |
+| M1 Window and drawing | done, verified on Windows |
+| M2 Controls and text | done, verified on Windows (field editor/IME deferred) |
+| M3a DXGI swap chain | done, verified on Windows (PR #1) |
+| M3b Frameless glass window | AppKit side done; Win32 side in progress on `m3b-frameless-glass` |
+| M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
+| M5 Auto Layout and controllers | done, verified on Windows |
+| M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
+| M7 Metal | API, reference device and MTKView done; D3D12 shim implementation open |
+| M8 Linux | backend written; builds in Docker, headless run being verified |
+
+The macOS host build runs the full test suite (64 tests); Windows verification is done by
+a remote session on a Windows 11 machine from the checklists in the commit history.
+
 ## M0: Foundation (this milestone)
 
 - [x] Architecture and decision records.
