@@ -170,20 +170,44 @@ final class Win32Window: PlatformWindow {
 
     // MARK: Painting
 
+    /// `APPKITWIN_LEGACY_D2D=1` selects the Milestone 1 `ID2D1HwndRenderTarget` instead of
+    /// the DXGI flip-model swap chain (Milestone 3).
+    private static let useLegacyHwndTarget = ProcessInfo.processInfo.environment["APPKITWIN_LEGACY_D2D"] == "1"
+    /// `APPKITWIN_DXGI_DEBUG=1` prints the DXGI debug layer's live-object report to stderr
+    /// whenever a window target is released (and asks for the D3D11 debug layer).
+    private static let reportsLiveObjects = ProcessInfo.processInfo.environment["APPKITWIN_DXGI_DEBUG"] == "1"
+
     private func ensureRenderTarget() -> OpaquePointer? {
         if let rt = renderTarget { return rt }
         guard let hwnd, let factory = backend.d2dFactory else { return nil }
         var client = RECT()
         GetClientRect(hwnd, &client)
-        let rt = cd2d_target_create_hwnd(factory, UnsafeMutableRawPointer(hwnd),
-                                         UInt32(max(1, client.right - client.left)), UInt32(max(1, client.bottom - client.top)), Float(dpi))
+        let width = UInt32(max(1, client.right - client.left))
+        let height = UInt32(max(1, client.bottom - client.top))
+        var rt: OpaquePointer? = nil
+        if !Win32Window.useLegacyHwndTarget {
+            rt = cd2d_target_create_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+        }
+        if rt == nil {
+            // Legacy path, or no usable D3D11/DXGI device: the HWND render target still works.
+            rt = cd2d_target_create_hwnd(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+        }
         renderTarget = rt
+        if Win32Window.reportsLiveObjects, let rt {
+            reportLiveObjects("after creating the \(cd2d_target_is_swapchain(rt) ? "swap-chain" : "HWND") window target")
+        }
         return rt
     }
 
     private func discardRenderTarget() {
         cd2d_target_release(renderTarget)
         renderTarget = nil
+        if Win32Window.reportsLiveObjects { reportLiveObjects("after releasing the window target") }
+    }
+
+    private func reportLiveObjects(_ when: String) {
+        let lines = cd2d_debug_report_live_objects()
+        fputs("[dxgi-debug] live DXGI/D3D objects \(when): \(lines < 0 ? "debug layer unavailable" : "\(lines)")\n", stderr)
     }
 
     private func paint() {
@@ -193,10 +217,15 @@ final class Win32Window: PlatformWindow {
         defer { EndPaint(hwnd, &ps) }
         guard let rt = ensureRenderTarget(), let factory = backend.d2dFactory else { return }
         let size = contentSize
-        let dirty = NSRect(x: CGFloat(ps.rcPaint.left) / scale,
-                           y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
-                           width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
-                           height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
+        // A flip-model swap chain does not retain the previous frame, so every frame
+        // repaints the whole client area; the HWND target keeps its contents and can take
+        // the dirty rect Windows reports.
+        let dirty = cd2d_target_is_swapchain(rt)
+            ? NSRect(origin: .zero, size: size)
+            : NSRect(x: CGFloat(ps.rcPaint.left) / scale,
+                     y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
+                     width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
+                     height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
         cd2d_target_begin_draw(rt)
         // Flip: CoreGraphics is bottom-left in points; Direct2D is top-left in DIPs.
         let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)

@@ -29,12 +29,28 @@ void cd2d_factory_release(CD2DFactory *factory);
 
 /// Creates a render target for a window. `hwnd` is the HWND cast to void*.
 CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+/// Creates a window target presented through a DXGI flip-model swap chain (Milestone 3):
+/// a D3D11 device (BGRA support), an IDXGISwapChain1 from CreateSwapChainForHwnd
+/// (DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2 buffers, B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE)
+/// and an ID2D1DeviceContext drawing into an ID2D1Bitmap1 over the back buffer. Every
+/// cd2d_target_* call works on it; end_draw presents with vsync. The swap chain does not
+/// retain contents between frames, so each frame must repaint the whole client area.
+/// Returns NULL when the device or swap chain cannot be created (the caller may fall
+/// back to cd2d_target_create_hwnd).
+CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+/// True when the target presents through a swap chain (created with cd2d_target_create_swapchain).
+bool cd2d_target_is_swapchain(CD2DTarget *target);
 void cd2d_target_release(CD2DTarget *target);
 void cd2d_target_resize(CD2DTarget *target, uint32_t pixelWidth, uint32_t pixelHeight);
 void cd2d_target_set_dpi(CD2DTarget *target, float dpi);
 void cd2d_target_begin_draw(CD2DTarget *target);
-/// Returns false when the target was lost and must be recreated.
+/// Returns false when the target was lost and must be recreated (D2DERR_RECREATE_TARGET,
+/// or DXGI_ERROR_DEVICE_REMOVED / DXGI_ERROR_DEVICE_RESET from the swap chain).
 bool cd2d_target_end_draw(CD2DTarget *target);
+/// Debug aid: asks the DXGI debug layer (dxgidebug.dll) for every live DXGI/D3D object
+/// and writes the report to stderr. Returns the number of report lines, or -1 when the
+/// debug layer is unavailable. Zero lines means nothing is alive.
+int32_t cd2d_debug_report_live_objects(void);
 void cd2d_target_clear(CD2DTarget *target, float r, float g, float b, float a);
 void cd2d_target_set_transform(CD2DTarget *target, const CD2DMatrix *m);
 void cd2d_target_set_antialias(CD2DTarget *target, bool antialias);
