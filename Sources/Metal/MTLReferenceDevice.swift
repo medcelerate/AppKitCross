@@ -49,11 +49,12 @@ public final class MTLReferenceDevice: MTLDevice, @unchecked Sendable {
 
     public func makeDefaultLibrary() -> (any MTLLibrary)? { nil }
 
-    /// Parses function declarations out of the source so `makeFunction(name:)` works;
-    /// nothing is compiled (the reference device does not run shaders).
+    /// MSL is translated to HLSL (ADR-0006) so unsupported constructs fail here as they
+    /// would on the D3D12 device; HLSL is scanned for its entry points. Nothing is
+    /// compiled (the reference device does not run shaders).
     public func makeLibrary(source: String, options: MTLCompileOptions?) throws -> any MTLLibrary {
-        let functions = MTLReferenceLibrary.scanFunctions(in: source, language: options?.shaderLanguage ?? .metal)
-        return MTLReferenceLibrary(device: self, functions: functions)
+        let (functions, translation) = try MTLReferenceLibrary.prepare(source: source, options: options)
+        return MTLReferenceLibrary(device: self, functions: functions, translation: translation)
     }
 
     public func makeLibrary(data: Data) throws -> any MTLLibrary {
@@ -226,9 +227,26 @@ public final class MTLReferenceLibrary: MTLLibrary {
     public var label: String?
     public let device: any MTLDevice
     let functions: [(String, MTLFunctionType)]
+    /// The MSL → HLSL translation when the source was MSL.
+    public let translation: MSLTranslation?
+    /// The HLSL the library compiles (translated from MSL); nil for HLSL sources.
+    public var hlslSource: String? { translation?.hlsl }
     public var functionNames: [String] { functions.map(\.0) }
 
-    init(device: any MTLDevice, functions: [(String, MTLFunctionType)]) { self.device = device; self.functions = functions }
+    init(device: any MTLDevice, functions: [(String, MTLFunctionType)], translation: MSLTranslation? = nil) { self.device = device; self.functions = functions; self.translation = translation }
+
+    /// Shared by the devices: picks the dialect (`options.shaderLanguage`, else detected
+    /// from the source), translates MSL and lists the entry points.
+    static func prepare(source: String, options: MTLCompileOptions?) throws -> ([(String, MTLFunctionType)], MSLTranslation?) {
+        let language = options?.shaderLanguage == .hlsl ? MTLShaderLanguage.hlsl : MSLTranslator.detectLanguage(source)
+        if language == .hlsl { return (scanFunctions(in: source, language: .hlsl), nil) }
+        do {
+            let translation = try MSLTranslator.translate(source)
+            return (translation.functions.map { ($0.name, $0.type) }, translation)
+        } catch let error as MSLTranslationError {
+            throw MTLLibraryError(code: .compileFailure, message: "MSL translation failed at \(error)")
+        }
+    }
 
     public func makeFunction(name: String) -> (any MTLFunction)? {
         guard let f = functions.first(where: { $0.0 == name }) else { return nil }
