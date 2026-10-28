@@ -1,0 +1,4 @@
+// Cairo and PangoCairo for the Linux CoreGraphics and text backends.
+#include <cairo.h>
+#include <cairo-xlib.h>
+#include <pango/pangocairo.h>

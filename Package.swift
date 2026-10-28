@@ -30,10 +30,26 @@ targets += [
     ),
 ]
 appKitDependencies += ["CoreGraphics", "CD2D"]
-appKitExclude += ["Platform/Host"]
+appKitExclude += ["Platform/Host", "Platform/Linux"]
+let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+#elseif os(Linux)
+// Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib for windows (Milestone 8).
+targets += [
+    .systemLibrary(name: "CCairo", path: "Sources/CCairo", pkgConfig: "pangocairo",
+                   providers: [.apt(["libcairo2-dev", "libpango1.0-dev", "libx11-dev"])]),
+    .systemLibrary(name: "CX11", path: "Sources/CX11", pkgConfig: "x11", providers: [.apt(["libx11-dev"])]),
+    .target(
+        name: "CoreGraphics",
+        dependencies: ["CCairo"],
+        path: "Sources/CoreGraphics",
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
+]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11"]
+appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 #else
-appKitExclude += ["Platform/Win32"]
+appKitExclude += ["Platform/Win32", "Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = []
 #endif
 

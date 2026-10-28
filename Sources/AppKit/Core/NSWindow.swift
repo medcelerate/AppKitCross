@@ -54,6 +54,8 @@ import CoreText
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
+    /// Content rect at the time of the last close (the platform window knows its real frame insets).
+    private var _lastContentRect: NSRect? = nil
     private var _animationBehavior: NSWindow.AnimationBehavior = .default
     private var _tabbingMode: NSWindow.TabbingMode = .automatic
     private var _frameAutosaveName: NSWindow.FrameAutosaveName = ""
@@ -110,7 +112,7 @@ import CoreText
     /// a window that was not released when closed.
     private func _reopenIfNeeded() {
         guard _platform == nil else { return }
-        let content = Platform.backend.contentRect(forFrameRect: _lastFrame, styleMask: _styleMask)
+        let content = _lastContentRect ?? Platform.backend.contentRect(forFrameRect: _lastFrame, styleMask: _styleMask)
         _platform = Platform.backend.makeWindow(owner: self, contentRect: content, styleMask: _styleMask)
         _platform?.title = _title
         _isClosing = false
@@ -426,6 +428,7 @@ import CoreText
         for child in _childWindows { child.close() }
         _parent?.removeChildWindow(self)
         _lastFrame = frame
+        _lastContentRect = _platform?.contentRect(forFrameRect: frame)
         _platform?.close()
         _platform = nil
         if disappearing { _contentView?._windowVisibilityDidChange(false) }
