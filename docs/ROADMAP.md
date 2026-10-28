@@ -17,7 +17,7 @@ are concrete and testable.
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised) |
 | M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 98/98 tests pass in the `swift:6.2-noble` container |
-| M9 CoreText and the text system | CoreText module on main (ADR-0007): Linux engine verified, DirectWrite engine awaiting Windows compile; NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them (98/98 tests on macOS and Linux) |
+| M9 CoreText and the text system | done on all three platforms: CoreText module (ADR-0007) with Pango/HarfBuzz and DirectWrite engines (PR #7, DrawGlyphRun parity in PR #8); NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them; 98/98 tests on macOS, Linux and Windows |
 
 The macOS host build and the Linux container run the full test suite (98 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
