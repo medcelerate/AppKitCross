@@ -212,7 +212,9 @@ final class HostWindow: PlatformWindow {
         let rect = dirty ?? NSRect(origin: .zero, size: content.size)
         dirty = nil
         paintCount += 1
-        #if canImport(CoreGraphics)
+        // The offscreen surface needs a bitmap CGContext (Apple's, or Cairo on Linux); the
+        // Direct2D CGContext has none, and Windows never runs this backend.
+        #if canImport(CoreGraphics) && !os(Windows)
         let scale = backingScaleFactor
         let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))
         if surface == nil || surface!.width != w || surface!.height != h {
@@ -250,7 +252,7 @@ final class HostWindow: PlatformWindow {
         return true
     }
 
-    #if canImport(CoreGraphics)
+    #if canImport(CoreGraphics) && !os(Windows)
     /// Draws the scene over the window content: each node's content is rasterised once per
     /// version, then placed by its transform, exactly as a visual tree would be.
     private func composite(_ scene: PlatformLayerScene, into ctx: CGContext, height: CGFloat) {
