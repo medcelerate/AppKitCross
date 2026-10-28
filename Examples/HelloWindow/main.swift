@@ -700,29 +700,6 @@ final class ColorViewController: NSViewController {
 }
 
 
-/// An MTKView whose drawable is a plain texture (the Direct3D 12 device): the presented
-/// texture is read back and blitted through CoreGraphics, the way MTKView itself does it
-/// for the reference device.
-final class ReadbackMTKView: MTKView {
-    override func draw(_ dirtyRect: NSRect) {
-        #if os(Windows) || os(Linux)
-        guard let tex = presentedTexture, !(tex is MTLReferenceTexture), let gc = NSGraphicsContext.current else { super.draw(dirtyRect); return }
-        let stride = tex.width * 4
-        var bytes = [UInt8](repeating: 0, count: stride * tex.height)
-        bytes.withUnsafeMutableBytes { tex.getBytes($0.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0) }
-        guard let image = CGImage.fromBGRA(width: tex.width, height: tex.height, stride: stride, data: Data(bytes)) else { return }
-        let ctx = gc.cgContext
-        ctx.saveGState()
-        ctx.translateBy(x: 0, y: bounds.height)
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.draw(image, in: NSRect(origin: .zero, size: bounds.size))
-        ctx.restoreGState()
-        #else
-        super.draw(dirtyRect)
-        #endif
-    }
-}
-
 /// An MTKView on the system device: the clear colour cycles every frame through the
 /// display link and an HLSL pipeline draws a spinning triangle over it (the reference
 /// device does not rasterize, so there only the clear shows). With `--metal-log` the
@@ -762,7 +739,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
 
     override func loadView() {
         let device = MTLCreateSystemDefaultDevice()
-        let mtk = ReadbackMTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
+        let mtk = MTKView(frame: NSRect(x: 0, y: 0, width: 420, height: 260), device: device)
         mtk.delegate = self
         mtk.preferredFramesPerSecond = 30
         mtk.colorPixelFormat = .bgra8Unorm

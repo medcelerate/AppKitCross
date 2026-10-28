@@ -145,20 +145,22 @@ public protocol MTKViewDelegate: AnyObject {
             draw()
         }
         _needsPresentImage = false
-        guard let tex = _presented as? MTLReferenceTexture, let gc = NSGraphicsContext.current else {
+        guard let tex = _presented, tex.pixelFormat.bytesPerPixel == 4, let gc = NSGraphicsContext.current else {
             NSColor(red: CGFloat(clearColor.red), green: CGFloat(clearColor.green), blue: CGFloat(clearColor.blue), alpha: CGFloat(clearColor.alpha)).setFill()
             NSBezierPath(rect: bounds).fill()
             return
         }
-        // Present the reference texture through CoreGraphics (BGRA premultiplied expected).
-        var bytes = [UInt8](repeating: 0, count: tex.bytesPerRow * tex.height)
+        // Present any 32-bit drawable texture through CoreGraphics (reference device, or a
+        // GPU device read back; BGRA premultiplied expected, RGBA swizzled).
+        let stride = tex.width * 4
+        var bytes = [UInt8](repeating: 0, count: stride * tex.height)
         bytes.withUnsafeMutableBytes { buf in
-            tex.getBytes(buf.baseAddress!, bytesPerRow: tex.bytesPerRow, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0)
+            tex.getBytes(buf.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0)
         }
         if tex.pixelFormat == .rgba8Unorm || tex.pixelFormat == .rgba8Unorm_srgb {
             for i in stride(from: 0, to: bytes.count, by: 4) { bytes.swapAt(i, i + 2) }
         }
-        guard let image = MTKView._makeImage(width: tex.width, height: tex.height, stride: tex.bytesPerRow, data: Data(bytes)) else { return }
+        guard let image = MTKView._makeImage(width: tex.width, height: tex.height, stride: stride, data: Data(bytes)) else { return }
         let ctx = gc.cgContext
         ctx.saveGState()
         // The view is flipped; CGContext.draw expects a y-up rect, so mirror within bounds.
