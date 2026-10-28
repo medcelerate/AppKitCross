@@ -152,15 +152,15 @@ public protocol MTKViewDelegate: AnyObject {
         }
         // Present any 32-bit drawable texture through CoreGraphics (reference device, or a
         // GPU device read back; BGRA premultiplied expected, RGBA swizzled).
-        let stride = tex.width * 4
-        var bytes = [UInt8](repeating: 0, count: stride * tex.height)
+        let rowBytes = tex.width * 4
+        var bytes = [UInt8](repeating: 0, count: rowBytes * tex.height)
         bytes.withUnsafeMutableBytes { buf in
-            tex.getBytes(buf.baseAddress!, bytesPerRow: stride, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0)
+            tex.getBytes(buf.baseAddress!, bytesPerRow: rowBytes, from: MTLRegionMake2D(0, 0, tex.width, tex.height), mipmapLevel: 0)
         }
         if tex.pixelFormat == .rgba8Unorm || tex.pixelFormat == .rgba8Unorm_srgb {
             for i in stride(from: 0, to: bytes.count, by: 4) { bytes.swapAt(i, i + 2) }
         }
-        guard let image = MTKView._makeImage(width: tex.width, height: tex.height, stride: stride, data: Data(bytes)) else { return }
+        guard let image = MTKView._makeImage(width: tex.width, height: tex.height, stride: rowBytes, data: Data(bytes)) else { return }
         let ctx = gc.cgContext
         ctx.saveGState()
         // The view is flipped; CGContext.draw expects a y-up rect, so mirror within bounds.
