@@ -124,6 +124,56 @@ CD2DTarget *cd2d_offscreen_target(CD2DOffscreen *offscreen);
 uint32_t cd2d_offscreen_read(CD2DOffscreen *offscreen, uint8_t *buffer, uint32_t bufferSize);
 void cd2d_offscreen_release(CD2DOffscreen *offscreen);
 
+// DirectComposition visual tree (Milestone 9, ADR-0005)
+//
+// A retained tree of IDCompositionVisuals under a composition swap-chain target's visual,
+// keyed by the caller's node ids (any non-zero int64; 0 names the tree root). Children
+// composite above their parent's content; the swap chain (window background) sits below
+// everything. Coordinates are pixels in the parent visual's space: the caller folds the
+// DPI scale into translations, clip rects and surface sizes.
+//
+// An update is bracketed by begin_update/end_update: every visual that should survive is
+// ensured (in back-to-front order under its parent) between the two, visuals that are not
+// ensured are destroyed by end_update, which also reorders children that moved and commits
+// the device.
+typedef struct CD2DCompTree CD2DCompTree;
+
+/// Creates a tree on a composition swap-chain target (cd2d_target_create_composition_swapchain);
+/// returns NULL for any other target. The tree must be released before the target.
+CD2DCompTree *cd2d_comp_tree_create(CD2DTarget *target);
+void cd2d_comp_tree_release(CD2DCompTree *tree);
+void cd2d_comp_tree_begin_update(CD2DCompTree *tree);
+/// Creates the visual for `id` if needed and places it as the next child (front-most so far
+/// in this update) of `parentId` (0 = root). `parentId` must have been ensured earlier in
+/// this update. Returns false when the visual cannot be created.
+bool cd2d_comp_tree_ensure_visual(CD2DCompTree *tree, int64_t id, int64_t parentId);
+/// Local → parent space, as a 3x2 matrix (row-vector convention: x' = x*m11 + y*m21 + dx).
+void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, float m12, float m21, float m22, float dx, float dy);
+/// 0..1, applied to the visual's content and subtree (IDCompositionVisual3::SetOpacity, or an
+/// effect group where Visual3 is unavailable).
+void cd2d_comp_tree_set_opacity(CD2DCompTree *tree, int64_t id, float opacity);
+/// Clips the visual's content and children to a rectangle in its local space with
+/// per-corner radii (an IDCompositionRectangleClip); `enabled` false removes the clip.
+void cd2d_comp_tree_set_clip(CD2DCompTree *tree, int64_t id, bool enabled, float left, float top, float right, float bottom,
+                             float radiusTopLeft, float radiusTopRight, float radiusBottomLeft, float radiusBottomRight);
+/// Begins drawing the visual's content surface (created or recreated at `pixelWidth` x
+/// `pixelHeight`, B8G8R8A8 premultiplied, cleared to transparent) and returns a target
+/// whose Direct2D context draws into it at `dpi` (one DIP = one point): every
+/// cd2d_target_* drawing call and CGContext work on it until surface_end_draw. Do not call
+/// cd2d_target_begin_draw/end_draw/release on it. Returns NULL on failure (then nothing
+/// is pending). Only one surface draw can be open at a time.
+CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+void cd2d_comp_tree_surface_end_draw(CD2DCompTree *tree, int64_t id);
+/// Drops the visual's content surface (a node that no longer draws).
+void cd2d_comp_tree_remove_surface(CD2DCompTree *tree, int64_t id);
+/// Destroys a visual and its surface outside an update (end_update does this for every
+/// visual the update did not ensure).
+void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id);
+/// Destroys the visuals the update did not ensure, reorders children, and commits.
+void cd2d_comp_tree_end_update(CD2DCompTree *tree);
+/// Number of live visuals (debug aid).
+uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree);
+
 // File dialogs (IFileDialog)
 typedef struct CD2DFileDialogOptions {
     bool isSave, canChooseFiles, canChooseDirectories, allowsMultiple, allowsOtherTypes, showsHidden;

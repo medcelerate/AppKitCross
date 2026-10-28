@@ -4,6 +4,7 @@
 import Foundation
 import WinSDK
 import CoreGraphics
+import QuartzCore
 import CD2D
 
 @MainActor
@@ -317,7 +318,9 @@ final class Win32Window: PlatformWindow {
         if !Win32Window.useLegacyHwndTarget {
             // Transparent windows (Milestone 3b): a premultiplied composition swap chain
             // under DirectComposition, so the DWM backdrop shows through unpainted pixels.
-            if _chrome.isTransparent {
+            // Windows hosting their layer tree (Milestone 9) need the same chain: the
+            // visuals hang under its DirectComposition visual.
+            if _chrome.isTransparent || hostedScene != nil {
                 rt = cd2d_target_create_composition_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
             }
             if rt == nil {
@@ -337,6 +340,7 @@ final class Win32Window: PlatformWindow {
     }
 
     private func discardRenderTarget() {
+        releaseCompositionTree()         // its visuals and surfaces live on the target's devices
         cd2d_target_release(renderTarget)
         renderTarget = nil
         if Win32Window.reportsLiveObjects { reportLiveObjects("after releasing the window target") }
@@ -353,6 +357,11 @@ final class Win32Window: PlatformWindow {
         _ = BeginPaint(hwnd, &ps)
         defer { EndPaint(hwnd, &ps) }
         guard let rt = ensureRenderTarget(), let factory = backend.d2dFactory else { return }
+        // A hosted scene whose visual tree went with a discarded target is rebuilt on the
+        // new one (device loss, a chrome change) before the frame it sits on is drawn.
+        if let scene = hostedScene, compositionTree == nil, !applyLayerScene(scene, to: rt) {
+            tearDownLayerHosting()
+        }
         let size = contentSize
         // A flip-model swap chain does not retain the previous frame, so every frame
         // repaints the whole client area; the HWND target keeps its contents and can take
@@ -363,6 +372,8 @@ final class Win32Window: PlatformWindow {
                      y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
                      width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
                      height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
+        painting = true
+        defer { painting = false }
         cd2d_target_begin_draw(rt)
         // A transparent window starts every frame fully transparent so unpainted areas
         // show the backdrop; an opaque window fills its background in NSWindow.
@@ -374,7 +385,124 @@ final class Win32Window: PlatformWindow {
                                 width: Int(size.width * scale), height: Int(size.height * scale))
             owner?.platformWindowDraw(into: ctx, dirtyRect: dirty.isEmpty ? NSRect(origin: .zero, size: size) : dirty)
         }
-        if !cd2d_target_end_draw(rt) { discardRenderTarget() }
+        if !cd2d_target_end_draw(rt) {
+            discardRenderTarget()
+        } else if hostedScene != nil, !cd2d_target_is_composition(rt) {
+            // Hosting started during this paint on an opaque swap chain: swap the target for
+            // a composition one now that the frame is out, and build the tree on it.
+            discardRenderTarget()
+            setNeedsDisplay(nil)
+        }
+    }
+
+    // MARK: Native layer hosting (Milestone 9, ADR-0005)
+
+    /// `APPKITWIN_SOFTWARE_LAYERS=1` declines every scene, so the window composites its
+    /// layer tree in software (to compare against the DirectComposition tree).
+    private static let softwareLayers = ProcessInfo.processInfo.environment["APPKITWIN_SOFTWARE_LAYERS"] == "1"
+    private var compositionTree: OpaquePointer?       // CD2DCompTree*, built on `renderTarget`
+    /// The last scene committed; non-nil while hosting. Kept so the tree can be rebuilt on a
+    /// new target (device loss, chrome change) or at a new DPI without a new commit.
+    private var hostedScene: PlatformLayerScene?
+    /// What each content node's surface holds: redrawn when any of these change.
+    private var surfaceRasters: [Int: (version: Int, width: Int, height: Int, scale: CGFloat)] = [:]
+    private var painting = false
+
+    func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
+        guard let scene else { tearDownLayerHosting(); return true }
+        guard !Win32Window.softwareLayers, !Win32Window.useLegacyHwndTarget, hwnd != nil, !destroying else { return false }
+        hostedScene = scene
+        // An opaque window on the HWND swap chain moves to the composition swap chain the
+        // visuals need. Not while the chain is mid-frame: paint() swaps it afterwards.
+        if let rt = renderTarget, !cd2d_target_is_composition(rt) {
+            guard !painting else { return true }
+            discardRenderTarget()
+            setNeedsDisplay(nil)
+        }
+        guard let rt = ensureRenderTarget(), cd2d_target_is_composition(rt) else {
+            tearDownLayerHosting()
+            return false
+        }
+        guard applyLayerScene(scene, to: rt) else {
+            tearDownLayerHosting()
+            return false
+        }
+        return true
+    }
+
+    private func tearDownLayerHosting() {
+        hostedScene = nil
+        releaseCompositionTree()
+        // The composition swap chain keeps serving an opaque window; nothing to switch back.
+    }
+
+    private func releaseCompositionTree() {
+        guard let tree = compositionTree else { return }
+        cd2d_comp_tree_release(tree)
+        compositionTree = nil
+        surfaceRasters.removeAll()
+    }
+
+    /// Mirrors the scene into the visual tree on `rt`: one visual per node, placed by its
+    /// transform with the DPI scale folded into translations, clips and surface sizes
+    /// (DirectComposition composes in pixels), and one surface per content node that is
+    /// redrawn only when its version, pixel size or scale changed.
+    private func applyLayerScene(_ scene: PlatformLayerScene, to rt: OpaquePointer) -> Bool {
+        guard let factory = backend.d2dFactory else { return false }
+        if compositionTree == nil {
+            compositionTree = cd2d_comp_tree_create(rt)
+            surfaceRasters.removeAll()
+        }
+        guard let tree = compositionTree else { return false }
+        let s = scale
+        let dpi = Float(96 * s)
+        cd2d_comp_tree_begin_update(tree)
+        var live = Set<Int>()
+        for node in scene.nodes {
+            let id = Int64(node.id)
+            live.insert(node.id)
+            let parent = node.parent.map { Int64(scene.nodes[$0].id) } ?? 0
+            guard cd2d_comp_tree_ensure_visual(tree, id, parent) else {
+                cd2d_comp_tree_end_update(tree)
+                return false
+            }
+            let t = node.transform
+            cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(t.tx * s), Float(t.ty * s))
+            cd2d_comp_tree_set_opacity(tree, id, node.opacity)
+            if node.clipsToBounds {
+                let w = node.size.width * s, h = node.size.height * s
+                let r = min(node.cornerRadius * s, w / 2, h / 2)
+                func radius(_ corner: CACornerMask) -> Float { node.maskedCorners.contains(corner) ? Float(r) : 0 }
+                cd2d_comp_tree_set_clip(tree, id, true, 0, 0, Float(w), Float(h),
+                                        radius(.layerMinXMinYCorner), radius(.layerMaxXMinYCorner),
+                                        radius(.layerMinXMaxYCorner), radius(.layerMaxXMaxYCorner))
+            } else {
+                cd2d_comp_tree_set_clip(tree, id, false, 0, 0, 0, 0, 0, 0, 0, 0)
+            }
+            guard let content = node.content else {
+                if surfaceRasters.removeValue(forKey: node.id) != nil { cd2d_comp_tree_remove_surface(tree, id) }
+                continue
+            }
+            let width = max(1, Int((node.size.width * s).rounded(.up)))
+            let height = max(1, Int((node.size.height * s).rounded(.up)))
+            if let r = surfaceRasters[node.id], r.version == content.version, r.width == width, r.height == height, r.scale == s { continue }
+            guard let surface = cd2d_comp_tree_surface_begin_draw(tree, id, UInt32(width), UInt32(height), dpi) else {
+                surfaceRasters[node.id] = nil
+                continue
+            }
+            do {
+                // Points, bottom-left origin, flipped by the node height: the same space
+                // Win32Offscreen gives lockFocus drawing.
+                let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: node.size.height)
+                let ctx = CGContext(target: surface, factory: factory, baseTransform: flip, width: width, height: height)
+                content.draw(ctx)
+            }
+            cd2d_comp_tree_surface_end_draw(tree, id)
+            surfaceRasters[node.id] = (content.version, width, height, s)
+        }
+        cd2d_comp_tree_end_update(tree)
+        surfaceRasters = surfaceRasters.filter { live.contains($0.key) }
+        return true
     }
 
     // MARK: Input
@@ -511,7 +639,12 @@ final class Win32Window: PlatformWindow {
             // the new DPI rather than taking the suggested rect's size (which rounds).
             let pointSize = contentSize
             dpi = UINT(wParam & 0xFFFF)
-            if let rt = renderTarget { cd2d_target_set_dpi(rt, Float(dpi)) }
+            if let rt = renderTarget {
+                cd2d_target_set_dpi(rt, Float(dpi))
+                // The content size in points is unchanged, so no scene commit follows: the
+                // hosted tree is re-placed and re-rasterised at the new scale here.
+                if let scene = hostedScene, compositionTree != nil { _ = applyLayerScene(scene, to: rt) }
+            }
             if let suggested = UnsafePointer<RECT>(bitPattern: Int(lParam)), let hwnd {
                 let r = suggested.pointee
                 let i = nonClientInsets(dpi: dpi)
@@ -598,6 +731,7 @@ final class Win32Window: PlatformWindow {
         case WM_DESTROY:
             if let hwnd { backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
+            tearDownLayerHosting()
             discardRenderTarget()
             if let hwnd { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) }
             hwnd = nil
