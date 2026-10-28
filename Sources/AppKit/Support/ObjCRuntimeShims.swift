@@ -13,3 +13,9 @@ public struct Selector: Hashable, Sendable, ExpressibleByStringLiteral, CustomSt
 public func NSStringFromSelector(_ sel: Selector) -> String { sel.name }
 public func NSSelectorFromString(_ name: String) -> Selector { Selector(name) }
 #endif
+
+#if !canImport(ObjectiveC)
+/// Objective-C out-parameters (`NSError **`, `NSArray **`) are imported on Darwin as
+/// autoreleasing pointers. Without the ObjC runtime they are ordinary pointers.
+public typealias AutoreleasingUnsafeMutablePointer<Pointee> = UnsafeMutablePointer<Pointee>
+#endif

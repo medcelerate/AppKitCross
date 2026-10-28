@@ -25,8 +25,15 @@ targets += [
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
+    // Placeholder CALayer family until Milestone 4 (DirectComposition).
+    .target(
+        name: "QuartzCore",
+        dependencies: ["CoreGraphics"],
+        path: "Sources/QuartzCore",
+        swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
 ]
-appKitDependencies += ["CoreGraphics", "CD2D"]
+appKitDependencies += ["CoreGraphics", "CD2D", "QuartzCore"]
 appKitExclude += ["Platform/Host"]
 #else
 appKitExclude += ["Platform/Win32"]

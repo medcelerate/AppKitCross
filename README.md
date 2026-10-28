@@ -23,6 +23,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 | `Sources/AppKit/Platform` | Backend protocols plus the Win32/DirectX backend and a headless host backend used for tests on macOS/Linux. |
 | `Sources/CoreGraphics` | Windows implementation of the CoreGraphics drawing API over Direct2D (Windows only). |
 | `Sources/CoreGraphics` (Windows only) | `CGContext`, `CGPath`, `CGColor` over Direct2D. |
+| `Sources/QuartzCore` (Windows only) | Placeholder `CALayer` family until Milestone 4. |
 | `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
 | `Stubs/Pending` | Generated stubs that do not compile yet. Not part of any target. |
 | `api-inventory` | Condensed public API inventory extracted from the macOS SDK. Source of truth for stubs and coverage. |
