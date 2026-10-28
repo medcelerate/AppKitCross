@@ -20,8 +20,6 @@ final class HostBackend: PlatformBackend {
     var beepCount = 0
     #if canImport(CoreText) && canImport(CoreGraphics)
     let text: any PlatformTextBackend = HostTextBackend()
-    #elseif os(Linux)
-    let text: any PlatformTextBackend = LinuxTextBackend()
     #else
     let text: any PlatformTextBackend = NoTextBackend()
     #endif

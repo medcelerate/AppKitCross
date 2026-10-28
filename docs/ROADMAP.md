@@ -16,9 +16,10 @@ are concrete and testable.
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
 | M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised) |
-| M8 Linux | done for X11: HelloWindow renders under Xvfb (screenshot in README), 71/71 tests pass in the `swift:6.2-noble` container (Wayland open) |
+| M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 92/92 tests pass in the `swift:6.2-noble` container |
+| M9 CoreText | module on main (ADR-0007): Linux engine verified (tests and HelloWindow); DirectWrite engine awaiting Windows compile |
 
-The macOS host build and the Linux container run the full test suite (71 tests); Windows verification is done by
+The macOS host build and the Linux container run the full test suite (92 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
 
 ## M0: Foundation (this milestone)
@@ -263,9 +264,40 @@ and HelloWindow under Xvfb for a screenshot (the sample renders fully: text, pat
 controls, scroll view, the Core Animation badge). The test suite runs on Linux
 (2026-10-29, 71/71 on the host backend): swift-corelibs-xctest cannot call `@MainActor`
 test methods, so test classes are nonisolated and each body runs in
-`MainActor.assumeIsolated`; the CI job requires the run to pass. Open: Wayland, X11
-selections for the pasteboard, JPEG
-via gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
+`MainActor.assumeIsolated`; the CI job requires the run to pass.
+
+Wayland (2026-10-28): `WaylandBackend`/`WaylandWindow` next to the X11 classes, over a
+`CWayland` C target (libwayland-client, wayland-cursor, xkbcommon, and the xdg-shell and
+xdg-decoration protocol tables as checked-in wayland-scanner output;
+`tools/linux/gen-wayland-protocols.sh` regenerates them). Registry binding of
+compositor, shm, seat, outputs, `xdg_wm_base` and `zxdg_decoration_manager_v1`;
+xdg_toplevel windows with title, app id, min/max size, server-side decorations when the
+compositor offers them, configure/resize through `platformWindowDidChangeFrame`, close
+requests through `platformWindowShouldClose`/`WillClose`; two wl_shm buffers copied from
+the same persistent Cairo backing surface the X11 window draws into (dirty rect clipped,
+`wl_surface.damage_buffer`), surface frame callbacks firing the `scheduleFrame` clock
+early (the 1/60 s timer remains the fallback); the poll()-based loop reads the display fd
+with `prepare_read`/`read_events`. Input: xkbcommon keymaps from the seat with the same
+Ctrl-as-Command mapping, `charactersIgnoringModifiers` from the level-0 keysym, pointer
+motion/buttons/axis (one notch = 3 lines, batched per `wl_pointer.frame`) in content
+coordinates, double-click counting; HiDPI by taking the largest scale of the outputs the
+surface entered and `set_buffer_scale`; cursors from the wl_cursor theme
+(`XCURSOR_THEME`/`XCURSOR_SIZE`). Selection: Wayland when `WAYLAND_DISPLAY` is set and
+the connection succeeds, else X11; `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one;
+`APPKITWIN_HOST_BACKEND=1` is unchanged. Verified in the container with
+`tools/linux/run.sh --wayland`: sway 1.9 headless (pixman renderer, no seat), grim
+screenshot in the README, plus an interaction pass through a virtual pointer and wtype
+(clicks add dots at the right points, the text field takes typed text, the wheel
+scrolls the list, the compositor's close request terminates the app). Not covered on
+Wayland: client-side decorations (compositors without xdg-decoration show a bare
+surface), window positions (`frame.origin` is never honoured; `mouseLocation` is relative
+to the window under the pointer), `makeKey`/`orderBack` (no focus requests; xdg-activation
+not used), key repeat, touch and tablet input, fractional scaling, the cursor-shape
+protocol, Wayland clipboard/data-device (the pasteboard stays in-process), drag and drop,
+IME (text-input-v3), `wp_viewporter`, and a GPU path.
+
+Open on Linux: X11 selections and Wayland data devices for the pasteboard, JPEG via
+gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
 
 ## Reference projects
 

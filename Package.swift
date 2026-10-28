@@ -46,11 +46,18 @@ appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 #elseif os(Linux)
-// Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib for windows (Milestone 8).
+// Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib or Wayland for windows (Milestone 8).
 targets += [
     .systemLibrary(name: "CCairo", path: "Sources/CCairo", pkgConfig: "pangocairo",
                    providers: [.apt(["libcairo2-dev", "libpango1.0-dev", "libx11-dev"])]),
     .systemLibrary(name: "CX11", path: "Sources/CX11", pkgConfig: "x11", providers: [.apt(["libx11-dev"])]),
+    // Wayland client + xkbcommon + wl_cursor, with the xdg-shell protocol tables compiled in
+    // (wayland-scanner output, see tools/linux/gen-wayland-protocols.sh).
+    .target(
+        name: "CWayland",
+        path: "Sources/CWayland",
+        linkerSettings: [.linkedLibrary("wayland-client"), .linkedLibrary("wayland-cursor"), .linkedLibrary("xkbcommon")]
+    ),
     .target(
         name: "CoreGraphics",
         dependencies: ["CCairo"],
@@ -66,7 +73,7 @@ targets += [
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
-appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CoreText"]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 #else
