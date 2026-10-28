@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "cd2d.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +59,12 @@ bool cdw_font_glyph_path(CDWFont *font, uint16_t glyph, CDWPathSink sink, void *
 /// Raw table bytes (valid until cdw_font_table_release with the same `context`).
 bool cdw_font_table(CDWFont *font, uint32_t tag, const void **data, uint32_t *size, void **context);
 void cdw_font_table_release(CDWFont *font, void *context);
+
+/// Draws `glyphs` of `font` with their origins at `positionsXY` (x, y pairs in the target's
+/// current user space, y up, DIPs) in a solid colour through ID2D1RenderTarget::DrawGlyphRun,
+/// using the transform already set on the target. Returns false when the target cannot draw
+/// glyph runs (the caller then fills outlines instead).
+bool cdw_draw_glyphs(CD2DTarget *target, CDWFont *font, const uint16_t *glyphs, const float *positionsXY, uint32_t count, float r, float g, float b, float a);
 
 /// Installed family names.
 uint32_t cdw_family_count(void);

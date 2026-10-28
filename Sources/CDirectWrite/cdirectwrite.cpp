@@ -318,6 +318,39 @@ bool cdw_font_table(CDWFont *font, uint32_t tag, const void **data, uint32_t *si
 
 void cdw_font_table_release(CDWFont *font, void *context) { if (font && context) font->face->ReleaseFontTable(context); }
 
+bool cdw_draw_glyphs(CD2DTarget *target, CDWFont *font, const uint16_t *glyphs, const float *positionsXY, uint32_t count, float r, float g, float b, float a) {
+    ID2D1RenderTarget *rt = static_cast<ID2D1RenderTarget *>(cd2d_target_render_target(target));
+    if (!rt || !font || !font->face || !glyphs || !positionsXY) return false;
+    if (count == 0) return true;
+    ComPtr<ID2D1SolidColorBrush> brush;
+    if (FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(r, g, b, a), brush.put())) || !brush) return false;
+    // The context's user space is y up; DirectWrite draws y down. Flip the y axis in front of
+    // the current transform (the same flip the outline sink applies) and place each glyph by
+    // offset: a glyph at user (x, y) sits at (x, -y) in the flipped space, which is an
+    // ascender offset of +y. Advances are zero so every glyph is positioned absolutely.
+    D2D1_MATRIX_3X2_F current;
+    rt->GetTransform(&current);
+    rt->SetTransform(D2D1::Matrix3x2F(1, 0, 0, -1, 0, 0) * current);
+    std::vector<float> advances(count, 0.0f);
+    std::vector<DWRITE_GLYPH_OFFSET> offsets(count);
+    for (uint32_t i = 0; i < count; i++) {
+        offsets[i].advanceOffset = positionsXY[i * 2];
+        offsets[i].ascenderOffset = positionsXY[i * 2 + 1];
+    }
+    DWRITE_GLYPH_RUN run{};
+    run.fontFace = font->face.p;
+    run.fontEmSize = font->size;
+    run.glyphCount = count;
+    run.glyphIndices = glyphs;
+    run.glyphAdvances = advances.data();
+    run.glyphOffsets = offsets.data();
+    run.isSideways = FALSE;
+    run.bidiLevel = 0;
+    rt->DrawGlyphRun(D2D1::Point2F(0, 0), &run, brush.p, DWRITE_MEASURING_MODE_NATURAL);
+    rt->SetTransform(current);
+    return true;
+}
+
 uint32_t cdw_family_count(void) { IDWriteFontCollection *c = systemCollection(); return c ? c->GetFontFamilyCount() : 0; }
 
 size_t cdw_family_name(uint32_t index, char *buf, size_t capacity) {
