@@ -240,10 +240,10 @@ final class LinuxWindow: PlatformWindow {
     private static var blank: Cursor = 0
     func blankCursor() -> Cursor {
         if LinuxWindow.blank == 0 {
-            var color = XColor()
-            var bits: [UInt8] = [0]
+            var fg = XColor(), bg = XColor()
+            var bits: [CChar] = [0]
             let pixmap = XCreateBitmapFromData(backend.display, xid, &bits, 1, 1)
-            LinuxWindow.blank = XCreatePixmapCursor(backend.display, pixmap, pixmap, &color, &color, 0, 0)
+            LinuxWindow.blank = XCreatePixmapCursor(backend.display, pixmap, pixmap, &fg, &bg, 0, 0)
             XFreePixmap(backend.display, pixmap)
         }
         return LinuxWindow.blank
