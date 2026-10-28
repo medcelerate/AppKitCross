@@ -25,6 +25,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 | `Sources/CoreGraphics` (Windows only) | `CGContext`, `CGPath`, `CGColor` over Direct2D. |
 | `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004), used on Windows unless `APPKITWIN_METAL_REFERENCE=1`. |
 | `Sources/AppKit/Platform/Linux`, `Sources/CCairo`, `Sources/CX11`, `Sources/CWayland` | Linux backend: Wayland (xdg-shell) or X11 windows, Cairo drawing, PangoCairo text (`tools/linux/Dockerfile` builds and screenshots both). |
+| `Sources/UniformTypeIdentifiers` (Windows and Linux only) | `UTType` and `UTTagClass` with Apple's API over a table generated from the macOS SDK's core types (`tools/uttypes`), dynamic `dyn.*` types encoded as Apple does (ADR-0009). |
+| `Sources/ImageIO` (Windows and Linux only) | `CGImageSource` and `CGImageDestination` over the platform codecs: WIC through `CD2D` on Windows, Cairo PNG on Linux (ADR-0009). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
 | `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
 | `Stubs/Pending` | Generated stubs that do not compile yet. Not part of any target. |
