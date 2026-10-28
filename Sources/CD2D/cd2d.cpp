@@ -42,7 +42,7 @@ CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t w
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
         dpi, dpi);
     D2D1_HWND_RENDER_TARGET_PROPERTIES hp = D2D1::HwndRenderTargetProperties(
-        (HWND)hwnd, D2D1::SizeU(w ? w : 1, h ? h : 1), D2D1_PRESENT_OPTIONS_NONE);
+        (HWND)hwnd, D2D1::SizeU(w ? w : 1, h ? h : 1), D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS);
     ID2D1HwndRenderTarget *t = nullptr;
     if (FAILED(factory->factory->CreateHwndRenderTarget(&props, &hp, &t))) return nullptr;
     CD2DTarget *r = new CD2DTarget();

@@ -6,6 +6,7 @@
     "NSButton",
     "NSButtonCell",
     "NSCell",
+    "NSClipView",
     "NSColor",
     "NSControl",
     "NSEvent",
@@ -15,6 +16,8 @@
     "NSMenuItem",
     "NSResponder",
     "NSScreen",
+    "NSScrollView",
+    "NSScroller",
     "NSTextField",
     "NSTextFieldCell",
     "NSView",
@@ -227,7 +230,9 @@
     "NSWindowDelegate.window(_:willResizeForVersionBrowserWithMaxPreferredSize:maxAllowedSize:)": "return maxPreferredFrameSize",
     "NSWindowDelegate.window(_:willEncodeRestorableState:)": "",
     "NSWindowDelegate.window(_:didDecodeRestorableState:)": "",
-    "NSWindowDelegate.previewRepresentableActivityItems(for:)": "return nil"
+    "NSWindowDelegate.previewRepresentableActivityItems(for:)": "return nil",
+    "NSMenuItemValidation.validateMenuItem(_:)": "return true",
+    "NSUserInterfaceValidations.validateUserInterfaceItem(_:)": "return true"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",

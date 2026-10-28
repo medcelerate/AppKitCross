@@ -66,20 +66,6 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         return nil
     }
 
-    /// Resolves the target that validates/handles `item`'s action (nil target walks the
-    /// responder chain from the key window's first responder, then NSApp and its delegate).
-    @MainActor private func _validator(for item: NSMenuItem) -> (any NSMenuItemValidation)? {
-        if let t = item.target {
-            return t as? NSMenuItemValidation
-        }
-        var r: NSResponder? = NSApplication.shared.keyWindow?.firstResponder
-        while let cur = r {
-            if let v = cur as? NSMenuItemValidation { return v }
-            r = cur.nextResponder
-        }
-        if let v = NSApplication.shared as NSMenuItemValidation? { _ = v }
-        return NSApplication.shared.delegate as? NSMenuItemValidation
-    }
 
     open var identifier: NSUserInterfaceItemIdentifier? {
         get { _identifier }
@@ -323,11 +309,13 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
             guard _autoenablesItems else { return }
             for item in _items where !item.isSeparatorItem && !item.hasSubmenu {
                 guard let action = item.action else { continue }
-                if let v = _validator(for: item) {
-                    item.isEnabled = v.validateMenuItem(item)
-                } else if item.target == nil {
-                    // Nobody in the chain validates: enabled if someone can perform it.
-                    item.isEnabled = NSApplication.shared._target(forAction: action) != nil
+                // AppKit: find the object that would receive the action; the item is enabled
+                // when there is one, unless that object implements validateMenuItem and says no.
+                let target: AnyObject? = item.target ?? NSApplication.shared._target(forAction: action)
+                if let t = target, ActionRegistry.canPerform(action, on: t) {
+                    item.isEnabled = (t as? NSMenuItemValidation)?.validateMenuItem(item) ?? true
+                } else {
+                    item.isEnabled = false
                 }
             }
         }

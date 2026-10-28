@@ -94,6 +94,7 @@ final class HostWindow: PlatformWindow {
     /// Last rendered content, for tests. Premultiplied BGRA, `backingScaleFactor` scaled.
     #if canImport(CoreGraphics)
     private(set) var lastImage: CGImage?
+    private var surface: CGContext?     // retained between paints, like the Direct2D target
     #endif
     private(set) var paintCount = 0
 
@@ -162,12 +163,18 @@ final class HostWindow: PlatformWindow {
         #if canImport(CoreGraphics)
         let scale = backingScaleFactor
         let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return }
-        // CGContext bitmaps are already bottom-left origin; only the scale is needed.
-        ctx.scaleBy(x: scale, y: scale)
+        if surface == nil || surface!.width != w || surface!.height != h {
+            guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return }
+            // CGContext bitmaps are already bottom-left origin; only the scale is needed.
+            ctx.scaleBy(x: scale, y: scale)
+            surface = ctx
+        }
+        guard let ctx = surface else { return }
+        ctx.saveGState()
         owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
+        ctx.restoreGState()
         lastImage = ctx.makeImage()
         #else
         _ = rect

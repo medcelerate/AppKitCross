@@ -27,7 +27,9 @@ final class Win32MenuBar {
             DestroyMenu(old)
             builtBars[key] = nil
         }
-        guard let spec else { DrawMenuBar(hwnd); return }
+        var before = RECT()
+        GetClientRect(hwnd, &before)
+        guard let spec else { DrawMenuBar(hwnd); restoreClientSize(hwnd, before); return }
         let bar = CreateMenu()
         for item in spec.items where !item.isHidden {
             append(item, to: bar)
@@ -36,7 +38,20 @@ final class Win32MenuBar {
             builtBars[key] = bar
             SetMenu(hwnd, bar)
             DrawMenuBar(hwnd)
+            restoreClientSize(hwnd, before)
         }
+    }
+
+    /// SetMenu takes the bar out of the client area; grow the frame so the content keeps
+    /// its size (AppKit's content rect never includes the menu bar).
+    private func restoreClientSize(_ hwnd: HWND, _ before: RECT) {
+        var after = RECT()
+        GetClientRect(hwnd, &after)
+        let delta = (before.bottom - before.top) - (after.bottom - after.top)
+        guard delta != 0 else { return }
+        var frame = RECT()
+        GetWindowRect(hwnd, &frame)
+        SetWindowPos(hwnd, nil, 0, 0, frame.right - frame.left, frame.bottom - frame.top + delta, UINT(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
     }
 
     func windowDestroyed(_ hwnd: HWND) {

@@ -23,6 +23,6 @@ public protocol NSUserInterfaceValidations {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSUserInterfaceValidations {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuserinterfacevalidations/validateuserinterfaceitem(_:)
-    @MainActor public func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool { return false }
+    @MainActor public func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool { return true }
 }
 

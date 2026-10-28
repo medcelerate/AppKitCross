@@ -555,3 +555,92 @@ final class MenuTests: XCTestCase {
         XCTAssertEqual(main.index(of: file), 0)
     }
 }
+
+@MainActor
+final class ScrollViewTests: XCTestCase {
+    func testClipViewScrollsAndConstrains() {
+        let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        sv.hasVerticalScroller = true
+        sv.hasHorizontalScroller = true
+        let doc = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
+        sv.documentView = doc
+        XCTAssertTrue(sv.contentView.documentView === doc)
+        // Both scrollers needed: the clip shrinks by the scroller width on each side.
+        let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+        XCTAssertEqual(sv.contentSize, NSSize(width: 100 - w, height: 100 - w))
+        XCTAssertEqual(sv.verticalScroller?.isHidden, false)
+        // A non-flipped document starts at its origin, i.e. showing its bottom (the AppKit gotcha).
+        XCTAssertEqual(sv.documentVisibleRect.minY, 0)
+        XCTAssertEqual(sv.verticalScroller?.doubleValue, 1)
+        sv.contentView.scroll(to: NSPoint(x: 50, y: 100))
+        XCTAssertEqual(sv.documentVisibleRect.origin, NSPoint(x: 50, y: 100))
+        let clipHeight = 100 - w
+        XCTAssertEqual(sv.verticalScroller!.doubleValue, Double((400 - (100 + clipHeight)) / (400 - clipHeight)), accuracy: 0.001)
+        // Constrained: cannot scroll past the document.
+        sv.contentView.scroll(to: NSPoint(x: 1000, y: -1000))
+        XCTAssertEqual(sv.documentVisibleRect.maxX, 300)
+        XCTAssertEqual(sv.documentVisibleRect.minY, 0)
+        // Small document: scrollers hide and the clip takes the full size.
+        doc.frame = NSRect(x: 0, y: 0, width: 50, height: 50)
+        XCTAssertEqual(sv.verticalScroller?.isHidden, true)
+        XCTAssertEqual(sv.contentSize, NSSize(width: 100, height: 100))
+    }
+
+    func testScrollWheelAndKnobDrag() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        let sv = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        sv.hasVerticalScroller = true
+        final class Doc: NSView { override var isFlipped: Bool { true } }
+        let doc = Doc(frame: NSRect(x: 0, y: 0, width: 200, height: 1000))
+        sv.documentView = doc
+        w.contentView!.addSubview(sv)
+        w.makeKeyAndOrderFront(nil)
+        XCTAssertEqual(sv.documentVisibleRect.minY, 0, "flipped documents start at the top")
+        let wheel = NSEvent._scrollEvent(location: NSPoint(x: 50, y: 50), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: 0, deltaY: -3, precise: false)
+        NSApp.sendEvent(wheel)
+        XCTAssertEqual(sv.documentVisibleRect.minY, 30, "three lines down at the default 10 pt line scroll")
+        // Drag the knob to the bottom.
+        let scroller = sv.verticalScroller!
+        let knob = scroller.rect(for: .knob)
+        let start = scroller.convert(NSPoint(x: knob.midX, y: knob.midY), to: nil)
+        let down = NSEvent.mouseEvent(with: .leftMouseDown, location: start, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+        NSApp.sendEvent(down)
+        XCTAssertEqual(scroller.hitPart, .knob)
+        let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: start.x, y: -500), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 1)!
+        NSApp.sendEvent(drag)
+        XCTAssertEqual(scroller.doubleValue, 1)
+        XCTAssertEqual(sv.documentVisibleRect.maxY, 1000, accuracy: 0.5)
+        w.close()
+    }
+
+    #if canImport(CoreGraphics)
+    func testPartialRedrawKeepsSiblings() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        w.backgroundColor = .white
+        let canvas = ColorView(frame: NSRect(x: 0, y: 0, width: 100, height: 100), color: .white)
+        w.contentView = canvas
+        let a = ColorView(frame: NSRect(x: 10, y: 10, width: 30, height: 30), color: .red)
+        let b = ColorView(frame: NSRect(x: 60, y: 60, width: 30, height: 30), color: .blue)
+        canvas.addSubview(a); canvas.addSubview(b)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        a.drawnRects.removeAll(); b.drawnRects.removeAll(); canvas.drawnRects.removeAll()
+        // Invalidate only b: the canvas repaints just that area, a is untouched and stays red.
+        b.needsDisplay = true
+        w.displayIfNeeded()
+        XCTAssertEqual(a.drawnRects.count, 0)
+        XCTAssertEqual(b.drawnRects.count, 1)
+        XCTAssertEqual(canvas.drawnRects.first, NSRect(x: 60, y: 60, width: 30, height: 30))
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        guard let image = platform?.lastImage else { return XCTFail("no image") }
+        let data = image.dataProvider!.data! as Data
+        func px(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8) {
+            let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
+            return (data[i + 2], data[i + 1], data[i])
+        }
+        let red = px(25, 25); XCTAssertGreaterThan(red.0, 200); XCTAssertLessThan(red.2, 60)
+        let blue = px(75, 75); XCTAssertGreaterThan(blue.2, 200); XCTAssertLessThan(blue.0, 60)
+        w.close()
+    }
+    #endif
+}

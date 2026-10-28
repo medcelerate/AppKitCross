@@ -58,17 +58,21 @@ import CoreText
 
     // MARK: Coordinate math (own bounds <-> superview coordinates)
 
+    /// Whether this view's orientation differs from its superview's (the window's content
+    /// space is y-up). Only then does the frame mapping flip.
+    internal var _flipsRelativeToSuperview: Bool { isFlipped != (_superview?.isFlipped ?? false) }
+
     internal func _toSuperview(_ p: NSPoint) -> NSPoint {
         let b = bounds
         let x = p.x - b.minX + _frame.minX
-        let y = isFlipped ? _frame.minY + (b.maxY - p.y) : p.y - b.minY + _frame.minY
+        let y = _flipsRelativeToSuperview ? _frame.minY + (b.maxY - p.y) : p.y - b.minY + _frame.minY
         return NSPoint(x: x, y: y)
     }
 
     internal func _fromSuperview(_ p: NSPoint) -> NSPoint {
         let b = bounds
         let x = p.x - _frame.minX + b.minX
-        let y = isFlipped ? b.maxY - (p.y - _frame.minY) : p.y - _frame.minY + b.minY
+        let y = _flipsRelativeToSuperview ? b.maxY - (p.y - _frame.minY) : p.y - _frame.minY + b.minY
         return NSPoint(x: x, y: y)
     }
 
@@ -103,15 +107,17 @@ import CoreText
         guard _frame.intersects(dirtyRect) else { return }
         ctx.saveGState()
         ctx.translateBy(x: _frame.minX, y: _frame.minY)
-        if isFlipped {
+        if _flipsRelativeToSuperview {
             ctx.translateBy(x: 0, y: _frame.height)
             ctx.scaleBy(x: 1, y: -1)
         }
         let b = bounds
         ctx.translateBy(x: -b.minX, y: -b.minY)
-        if wantsDefaultClipping { ctx.clip(to: b) }
-        if _alphaValue < 1 { ctx.setAlpha(_alphaValue) }
         let localDirty = _convertRect(dirtyRect, _fromSuperview).intersection(b)
+        // Drawing is confined to the dirty region, as in AppKit: siblings outside it keep
+        // their pixels.
+        ctx.clip(to: wantsDefaultClipping ? localDirty : _convertRect(dirtyRect, _fromSuperview))
+        if _alphaValue < 1 { ctx.setAlpha(_alphaValue) }
         let gc = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc

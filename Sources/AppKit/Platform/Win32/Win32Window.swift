@@ -87,10 +87,12 @@ final class Win32Window: PlatformWindow {
         }
     }
 
+    private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+
     func frameRect(forContentRect contentRect: NSRect) -> NSRect {
         let (style, ex) = Win32Backend.styles(for: _styleMask)
         var r = RECT(left: 0, top: 0, right: Int32((contentRect.width * scale).rounded()), bottom: Int32((contentRect.height * scale).rounded()))
-        _ = AdjustWindowRectExForDpi(&r, style, false, ex, dpi)
+        _ = AdjustWindowRectExForDpi(&r, style, hasMenuBar, ex, dpi)
         let leftInset = CGFloat(-r.left) / scale
         let bottomInset = CGFloat(r.bottom) / scale - contentRect.height
         return NSRect(x: contentRect.minX - leftInset, y: contentRect.minY - bottomInset,
@@ -100,7 +102,7 @@ final class Win32Window: PlatformWindow {
     func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
         let (style, ex) = Win32Backend.styles(for: _styleMask)
         var r = RECT(left: 0, top: 0, right: 100, bottom: 100)
-        _ = AdjustWindowRectExForDpi(&r, style, false, ex, dpi)
+        _ = AdjustWindowRectExForDpi(&r, style, hasMenuBar, ex, dpi)
         let leftInset = CGFloat(-r.left) / scale, rightInset = CGFloat(r.right - 100) / scale
         let topInset = CGFloat(-r.top) / scale, bottomInset = CGFloat(r.bottom - 100) / scale
         return NSRect(x: frameRect.minX + leftInset, y: frameRect.minY + bottomInset,
@@ -308,7 +310,7 @@ final class Win32Window: PlatformWindow {
                 let r = suggested.pointee
                 let (style, ex) = Win32Backend.styles(for: _styleMask)
                 var client = RECT(left: 0, top: 0, right: Int32((pointSize.width * scale).rounded()), bottom: Int32((pointSize.height * scale).rounded()))
-                _ = AdjustWindowRectExForDpi(&client, style, false, ex, dpi)
+                _ = AdjustWindowRectExForDpi(&client, style, hasMenuBar, ex, dpi)
                 SetWindowPos(hwnd, nil, r.left, r.top, client.right - client.left, client.bottom - client.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
             }
             owner?.platformWindowDidChangeBackingScaleFactor(scale)

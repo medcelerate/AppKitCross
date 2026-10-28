@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 19 |
-| Types generated | 519 |
+| Types handwritten | 22 |
+| Types generated | 516 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10204 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 739 |
+| Members unimplemented-calls | 748 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -109,7 +109,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |
 | NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |
 | NSClickGestureRecognizer | class | generated | 3 | 0 | 0 |  |
-| NSClipView | class | generated | 15 | 0 | 0 |  |
+| NSClipView | class | handwritten | 15 | 0 | 0 | 2 |
 | NSCloudSharingServiceDelegate | protocol | generated | 1 | 3 | 0 |  |
 | NSCloudSharingValidation | protocol | generated | 0 | 1 | 0 |  |
 | NSCollectionElementCategory | enum | generated | 4 | 0 | 0 |  |
@@ -357,8 +357,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSavePanel | class | generated | 24 | 4 | 0 |  |
 | NSScreen | class | handwritten | 30 | 0 | 0 | 19 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
-| NSScrollView | class | generated | 61 | 0 | 2 |  |
-| NSScroller | class | generated | 42 | 0 | 6 |  |
+| NSScrollView | class | handwritten | 61 | 0 | 2 | 4 |
+| NSScroller | class | handwritten | 42 | 0 | 6 | 3 |
 | NSScrubber | class | generated | 35 | 0 | 2 |  |
 | NSScrubberArrangedView | class | generated | 3 | 0 | 0 |  |
 | NSScrubberDataSource | protocol | generated | 2 | 0 | 0 |  |

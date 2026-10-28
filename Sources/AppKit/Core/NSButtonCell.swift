@@ -85,7 +85,7 @@ import CoreText
     @MainActor open override var cellSize: NSSize {
         var s = stringValue.isEmpty ? NSSize(width: 0, height: _effectiveFont.ascender - _effectiveFont.descender) : stringValue.size(withAttributes: _textAttributes)
         if _isSwitchLike {
-            s.width += _indicatorSize + 6
+            s.width += _indicatorSize + 10
             s.height = max(s.height, _indicatorSize) + 4
         } else {
             s.width += 28

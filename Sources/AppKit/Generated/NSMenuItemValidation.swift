@@ -23,6 +23,6 @@ public protocol NSMenuItemValidation: NSObjectProtocol {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSMenuItemValidation {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitemvalidation/validatemenuitem(_:)
-    @MainActor public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { return false }
+    @MainActor public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { return true }
 }
 

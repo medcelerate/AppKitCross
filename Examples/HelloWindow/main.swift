@@ -59,9 +59,9 @@ final class CanvasView: NSView {
         curve.stroke()
 
         // Text
-        "Hello from AppKit on Windows".draw(at: NSPoint(x: 40, y: bounds.height - 48),
+        "Hello from AppKit on Windows".draw(at: NSPoint(x: 40, y: bounds.height - 34),
                                             withAttributes: [.font: NSFont.boldSystemFont(ofSize: 22), .foregroundColor: NSColor.labelColor])
-        "Click to add dots, press c to clear. \(clicks.count) dot(s).".draw(at: NSPoint(x: 40, y: bounds.height - 72),
+        "Click to add dots, press c to clear. \(clicks.count) dot(s).".draw(at: NSPoint(x: 40, y: bounds.height - 56),
                                             withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
 
         // Click markers
@@ -81,6 +81,25 @@ final class CanvasView: NSView {
             clearDots()
         } else {
             super.keyDown(with: event)
+        }
+    }
+}
+
+/// Document view for the scroll view: 40 numbered rows, flipped so row 1 is at the top.
+final class RowsView: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        NSBezierPath.fill(dirtyRect)
+        let font = NSFont.systemFont(ofSize: 13)
+        for row in 0..<40 {
+            let y = CGFloat(row) * 24
+            guard NSRect(x: 0, y: y, width: bounds.width, height: 24).intersects(dirtyRect) else { continue }
+            if row % 2 == 1 {
+                NSColor.alternatingContentBackgroundColors[1].setFill()
+                NSBezierPath.fill(NSRect(x: 0, y: y, width: bounds.width, height: 24))
+            }
+            "Row \(row + 1)".draw(at: NSPoint(x: 8, y: y + 4), withAttributes: [.font: font, .foregroundColor: NSColor.labelColor])
         }
     }
 }
@@ -132,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         main.addItem(viewItem)
         NSApp.mainMenu = main
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         window.title = "Hello, AppKit on Windows"
@@ -143,20 +162,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
         // Milestone 2: a push button and a checkbox wired with target/action.
         let clear = NSButton(title: "Clear dots", target: self, action: Selector(("clearDots:")))
-        clear.frame.origin = NSPoint(x: canvas.bounds.maxX - clear.frame.width - 16, y: canvas.bounds.maxY - clear.frame.height - 16)
-        clear.autoresizingMask = [.minXMargin, .minYMargin]
+        clear.frame.origin = NSPoint(x: canvas.bounds.maxX - clear.frame.width - 16, y: 16)
+        clear.autoresizingMask = [.minXMargin, .maxYMargin]
         clear.keyEquivalent = "\r"
         canvas.addSubview(clear)
         let grid = NSButton(checkboxWithTitle: "Show grid", target: self, action: Selector(("toggleGrid:")))
         grid.state = .on
         grid.frame.origin = NSPoint(x: clear.frame.minX - grid.frame.width - 16, y: clear.frame.midY - grid.frame.height / 2)
-        grid.autoresizingMask = [.minXMargin, .minYMargin]
+        grid.autoresizingMask = [.minXMargin, .maxYMargin]
         canvas.addSubview(grid)
         gridCheckbox = grid
 
         // A text field and a label that echoes it (Enter or focus loss sends the action).
         let prompt = NSTextField(labelWithString: "Your name:")
-        prompt.frame.origin = NSPoint(x: 40, y: 290 - prompt.frame.height)
+        prompt.frame.origin = NSPoint(x: 40, y: canvas.bounds.height - 96)
         prompt.autoresizingMask = [.minYMargin]
         canvas.addSubview(prompt)
         let field = NSTextField(string: "")
@@ -171,6 +190,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         greeting.autoresizingMask = [.minYMargin, .width]
         canvas.addSubview(greeting)
         self.greeting = greeting
+
+        // A scroll view over a tall document with numbered rows.
+        let scroll = NSScrollView(frame: NSRect(x: canvas.bounds.maxX - 180, y: 60, width: 164, height: 200))
+        scroll.borderType = .bezelBorder
+        scroll.hasVerticalScroller = true
+        scroll.autoresizingMask = [.minXMargin, .height]
+        scroll.documentView = RowsView(frame: NSRect(x: 0, y: 0, width: 140, height: 40 * 24))
+        canvas.addSubview(scroll)
         self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)
