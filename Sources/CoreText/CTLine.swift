@@ -76,8 +76,8 @@ public final class CTRun: NSObject {
         }
         let drawn = Array(glyphs[r])
         font.engine.draw(glyphs: drawn, positions: absolute, color: color, in: ctx)
-        if let styleValue = attributes[.ctUnderlineStyle] as? NSNumber, styleValue.int32Value != 0 {
-            let style = CTUnderlineStyle(rawValue: styleValue.int32Value & 0xFF)
+        if let styleValue = _ctNumber(attributes[.ctUnderlineStyle]).map({ Int32($0) }), styleValue != 0 {
+            let style = CTUnderlineStyle(rawValue: styleValue & 0xFF)
             let thickness = max(0.5, font.engine.underlineThickness) * (style.contains(.thick) ? 2 : 1)
             let y = origin.y + positions[r.lowerBound].y + font.engine.underlinePosition - thickness / 2
             ctx.saveGState()

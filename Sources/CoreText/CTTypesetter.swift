@@ -68,8 +68,8 @@ public final class CTTypesetter: NSObject {
             let font = (attrs[.ctFont] as? CTFont) ?? CTTypesetter.defaultFont
             let units = Array(text.units[range.location..<range.location + range.length])
             let language = attrs[.ctLanguage] as? String
-            let kern = (attrs[.ctKern] as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0
-            let tracking = (attrs[.ctTracking] as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0
+            let kern = _ctNumber(attrs[.ctKern]).map { CGFloat($0) } ?? 0
+            let tracking = _ctNumber(attrs[.ctTracking]).map { CGFloat($0) } ?? 0
             for var run in CTRuntime.engine.shape(units, font: font.engine, language: language) {
                 run.range.location += range.location
                 for i in run.clusters.indices { run.clusters[i] += range.location }
@@ -171,8 +171,8 @@ public final class CTTypesetter: NSObject {
         var pen: CGFloat = 0
         for seg in segments where seg.run.range.location < end && seg.run.range.location + seg.run.range.length > range.location {
             var glyphs: [CGGlyph] = [], advances: [CGSize] = [], positions: [CGPoint] = [], indices: [Int] = [], spaces: [Bool] = []
-            let baseline = (seg.attributes[.ctBaselineOffset] as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0
-                + ((seg.attributes[.ctSuperscript] as? NSNumber).map { CGFloat($0.intValue) * seg.font.engine.size * 0.33 } ?? 0)
+            let baseline = _ctNumber(seg.attributes[.ctBaselineOffset]).map { CGFloat($0) } ?? 0
+                + (_ctNumber(seg.attributes[.ctSuperscript]).map { CGFloat(Int($0)) * seg.font.engine.size * 0.33 } ?? 0)
             for i in seg.run.glyphs.indices {
                 let c = seg.run.clusters[i]
                 guard c >= range.location, c < end else { continue }
