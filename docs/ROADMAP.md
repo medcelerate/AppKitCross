@@ -15,7 +15,7 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | API, reference device and MTKView done; D3D12 shim implementation open |
+| M7 Metal | API, reference device, MTKView and the D3D12 backend done (HLSL only; swap chain unexercised) |
 | M8 Linux | backend builds and HelloWindow renders under Xvfb (screenshot in README); test suite on Linux in progress |
 
 The macOS host build runs the full test suite (64 tests); Windows verification is done by
@@ -199,9 +199,16 @@ textures, libraries, pipeline states, drawables, descriptors, the common enums) 
 completion, library scanning (MSL or HLSL entry points), no rasterization. `Sources/MetalKit`
 has `MTKView`/`MTKViewDelegate` on AppKit's display link, presenting reference drawables
 through CoreGraphics. `Sources/CMetalD3D12` fixes the C interface of the Direct3D 12
-backend (device, queue/fence, upload-heap buffers, textures, HLSL compile, PSOs, command
-lists, HWND swap chain); its implementation is a placeholder that returns no device until
-the D3D12 pull request lands. Shaders: HLSL/DXIL first; MSL translation is open.
+backend (device, queue/fence, buffers, textures, HLSL compile, PSOs, command lists, HWND
+swap chain) and implements it: hardware adapter (WARP fallback), fence-synchronised
+command lists with resource retention, CPU-mapped buffers, default-heap textures with
+upload/readback staging, dxc (shader model 6) with a d3dcompiler 5.1 fallback, PSOs over
+one shared root signature, render passes with clears, draws, copies, and an HWND flip
+swap chain (compiled, not yet exercised by MTKView). On Windows
+`MTLCreateSystemDefaultDevice()` returns the D3D12 device unless
+`APPKITWIN_METAL_REFERENCE=1`; HelloWindow's Metal tab draws an HLSL triangle on it
+(`HelloWindow --metal`, `--metal-selftest` for offscreen checks). Shaders: HLSL/DXIL
+first; MSL translation is open.
 
 ## M8: Linux backend
 
