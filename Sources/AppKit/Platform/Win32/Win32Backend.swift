@@ -18,7 +18,10 @@ final class Win32Backend: PlatformBackend {
     private var posted: [@MainActor () -> Void] = []
     private var running = false
     private var classesRegistered = false
-    let text: any PlatformTextBackend = Win32TextBackend()
+    /// CoreText over the seam (ADR-0007). APPKITWIN_LEGACY_TEXT=1 keeps the DirectWrite
+    /// string backend (IDWriteTextLayout drawn by Direct2D) for comparison.
+    let text: any PlatformTextBackend = ProcessInfo.processInfo.environment["APPKITWIN_LEGACY_TEXT"] == "1"
+        ? Win32TextBackend() as any PlatformTextBackend : HostTextBackend()
     let image: any PlatformImageBackend = Win32ImageBackend()
     let menuBar = Win32MenuBar()
     private(set) var windows: [Win32Window] = []
