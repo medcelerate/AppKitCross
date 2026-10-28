@@ -500,7 +500,7 @@ final class TextFieldTests: XCTestCase, @unchecked Sendable {
             // Click into the field to start editing.
             let click = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 20, y: 20), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
             NSApp.sendEvent(click)
-            XCTAssertTrue(w.firstResponder === field)
+            XCTAssertTrue((w.firstResponder as? NSTextView)?.superview === field, "the window's field editor edits the field")
             for ch in "abc" { NSApp.sendEvent(key(String(ch), w)) }
             XCTAssertEqual(field.stringValue, "abc")
             NSApp.sendEvent(key("\u{7F}", w))                       // backspace

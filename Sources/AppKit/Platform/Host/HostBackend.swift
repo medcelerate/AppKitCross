@@ -229,6 +229,9 @@ final class HostWindow: PlatformWindow {
         owner?.platformWindowDispatch(event)
     }
 
+    /// Test hook: the input-method target, as a backend would fetch it.
+    func textInput() -> PlatformTextInput? { owner?.platformWindowTextInput() }
+
     /// Test hook: simulate the user closing the window.
     func userRequestedClose() {
         if owner?.platformWindowShouldClose() == true { close() }

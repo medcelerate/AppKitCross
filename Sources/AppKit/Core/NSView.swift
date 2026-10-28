@@ -1214,7 +1214,20 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scroll(_:to:)
     @MainActor open func scroll(_ clipView: NSClipView, to point: NSPoint) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scrolltovisible(_:)
-    @MainActor open func scrollToVisible(_ rect: NSRect) -> Bool { unimplemented() }
+    @MainActor open func scrollToVisible(_ rect: NSRect) -> Bool {
+        var v: NSView? = _superview
+        while let cur = v, !(cur is NSClipView) { v = cur._superview }
+        guard let clip = v as? NSClipView else { return false }
+        let target = convert(rect, to: clip)
+        var origin = clip.bounds.origin
+        let visible = clip.bounds
+        if target.minX < visible.minX { origin.x = target.minX } else if target.maxX > visible.maxX { origin.x += target.maxX - visible.maxX }
+        if target.minY < visible.minY { origin.y = target.minY } else if target.maxY > visible.maxY { origin.y += target.maxY - visible.maxY }
+        guard origin != clip.bounds.origin else { return false }
+        clip.scroll(to: origin)
+        (clip.superview as? NSScrollView)?.reflectScrolledClipView(clip)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setboundsorigin(_:)
     @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) {
         guard newOrigin != _boundsOrigin else { return }

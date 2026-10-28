@@ -100,6 +100,8 @@ public protocol PlatformWindowOwner: AnyObject {
     var platformWantsMenuBar: Bool { get }
     /// Whether a point (content coordinates) drags the window (caption) or is content.
     func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion
+    /// The active text input target for input methods (IME composition), or nil.
+    func platformWindowTextInput() -> PlatformTextInput?
     /// The native frame changed (size and/or origin). `frame` is in screen coordinates.
     func platformWindowDidChangeFrame(_ frame: NSRect)
     func platformWindowShouldClose() -> Bool
@@ -155,3 +157,18 @@ public struct PlatformWindowChrome: Equatable, Sendable {
 }
 
 public enum PlatformWindowHitRegion: Sendable { case client, caption }
+
+/// What an input method needs from the focused text view: composition (marked text)
+/// updates, committed text, and where to put its candidate window.
+public struct PlatformTextInput {
+    public var hasMarkedText: @MainActor () -> Bool
+    /// Composition string and the selected range inside it.
+    public var setMarkedText: @MainActor (String, NSRange) -> Void
+    public var unmarkText: @MainActor () -> Void
+    public var insertText: @MainActor (String) -> Void
+    /// The caret or composition rectangle in window content coordinates (points, bottom-left).
+    public var markedRect: @MainActor () -> NSRect?
+    public init(hasMarkedText: @escaping @MainActor () -> Bool, setMarkedText: @escaping @MainActor (String, NSRange) -> Void, unmarkText: @escaping @MainActor () -> Void, insertText: @escaping @MainActor (String) -> Void, markedRect: @escaping @MainActor () -> NSRect?) {
+        self.hasMarkedText = hasMarkedText; self.setMarkedText = setMarkedText; self.unmarkText = unmarkText; self.insertText = insertText; self.markedRect = markedRect
+    }
+}

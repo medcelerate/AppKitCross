@@ -15,7 +15,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield
-@MainActor open class NSTextField: NSControl, NSUserInterfaceValidations, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent {
+@MainActor open class NSTextField: NSControl, NSTextDelegate, NSUserInterfaceValidations, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent {
     // MARK: Storage
     private weak var _delegate: (any NSTextFieldDelegate)?
     private var _maximumNumberOfLines = 1
@@ -28,10 +28,10 @@ import CoreText
     private var _allowsCharacterPickerTouchBarItem = true
     private var _contentType: NSTextContentType? = nil
 
-    // Inline editing state (no field editor yet: the field edits its own string).
-    private var _isEditing = false
-    private var _selection = NSRange(location: 0, length: 0)   // UTF-16 offsets into stringValue
+    // Editing happens in the window's field editor (an NSTextView) placed over the cell's text rect.
+    private var _editor: NSTextView? = nil
     private var _editedSinceBegin = false
+    private var _handingOffToEditor = false
 
     internal var _fieldCell: NSTextFieldCell? { _cell as? NSTextFieldCell }
 
@@ -39,195 +39,107 @@ import CoreText
         if isEnabled && (isEditable || isSelectable) { addCursorRect(bounds, cursor: .iBeam) }
     }
 
-    /// True while editing: Return commits the field before key equivalents run.
-    internal var _consumesReturnKey: Bool { _isEditing && isEditable }
-
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSTextFieldCell(textCell: "") }
 
 
-    // MARK: Editing helpers
+    // MARK: Field editor
 
-    private var _utf16: [UInt16] { Array(stringValue.utf16) }
+    /// The field editor while this field is being edited.
+    public var currentEditor: NSText? { _editor }
 
-    private func _setString(_ units: [UInt16]) {
-        stringValue = String(decoding: units, as: UTF16.self)
-        _editedSinceBegin = true
-        textDidChange(Notification(name: NSControl.textDidChangeNotification, object: self))
+    private func _editorFrame() -> NSRect {
+        guard let cell = _fieldCell else { return bounds }
+        return cell._textRect(forBounds: bounds)
     }
 
-    private func _replaceSelection(with text: String) {
-        var units = _utf16
-        let r = _clampedSelection
-        units.replaceSubrange(r.location..<(r.location + r.length), with: Array(text.utf16))
-        _selection = NSRange(location: r.location + text.utf16.count, length: 0)
-        _setString(units)
-    }
-
-    private var _clampedSelection: NSRange {
-        let n = _utf16.count
-        let loc = min(max(0, _selection.location), n)
-        return NSRange(location: loc, length: min(max(0, _selection.length), n - loc))
-    }
-
-    /// Caret x offset (points, from the text rect's left edge) for a UTF-16 offset.
-    private func _xOffset(for offset: Int) -> CGFloat {
-        guard let cell = _fieldCell else { return 0 }
-        let prefix = String(decoding: _utf16.prefix(offset), as: UTF16.self)
-        return prefix.isEmpty ? 0 : prefix.size(withAttributes: cell._attributes).width
-    }
-
-    private func _offset(forX x: CGFloat) -> Int {
-        let units = _utf16
-        var best = 0
-        var bestDistance = CGFloat.infinity
-        for i in 0...units.count {
-            let d = abs(_xOffset(for: i) - x)
-            if d < bestDistance { bestDistance = d; best = i }
-        }
-        return best
-    }
-
-    private func _textRect() -> NSRect { _fieldCell?._textRect(forBounds: bounds) ?? bounds }
-
-    private func _endEditing(sendAction: Bool) {
-        guard _isEditing else { return }
-        _isEditing = false
-        textDidEndEditing(Notification(name: NSControl.textDidEndEditingNotification, object: self))
-        if sendAction { _fireAction() }
+    /// Starts an editing session: configures the window's field editor over the text
+    /// rect, makes it first responder and (with an event) hands the click to it.
+    @discardableResult
+    private func _beginEditing(with event: NSEvent? = nil) -> Bool {
+        guard let w = window, isEnabled, isEditable || isSelectable else { return false }
+        if _editor != nil { return true }
+        guard let editor = w.fieldEditor(true, for: self) as? NSTextView else { return false }
+        if let cell = _fieldCell { cell._hidesText = true }
+        editor.string = stringValue
+        editor.font = font
+        editor.textColor = textColor
+        editor.drawsBackground = false
+        editor.alignment = alignment
+        editor.isEditable = isEditable
+        editor.isSelectable = isEditable || isSelectable
+        editor.isFieldEditor = true
+        editor.delegate = self
+        editor.frame = _editorFrame()
+        editor.autoresizingMask = [.width, .height]
+        _editor = editor
+        _editedSinceBegin = false
+        addSubview(editor)
+        _handingOffToEditor = true
+        let became = w.makeFirstResponder(editor)
+        _handingOffToEditor = false
+        guard became else { _detachEditor(); return false }
+        if let e = event { editor.mouseDown(with: e) } else { editor.selectAll(nil) }
         needsDisplay = true
+        return true
+    }
+
+    private func _detachEditor() {
+        guard let editor = _editor else { return }
+        editor.delegate = nil
+        editor.removeFromSuperview()
+        _editor = nil
+        if let cell = _fieldCell { cell._hidesText = false }
+        needsDisplay = true
+    }
+
+    /// The editor reported the end of a session: take the text and send the action.
+    /// Return keeps the field editing with everything selected, as AppKit does; Tab moves
+    /// focus; anything else detaches the editor.
+    private func _finishEditing(movement: NSTextMovement) {
+        guard let editor = _editor else { return }
+        stringValue = editor.string
+        if movement == .return {
+            _fireAction()
+            _editedSinceBegin = false
+            if _editor === editor {          // the action may have ended editing itself
+                editor.selectAll(nil)
+                editor._beginEditingIfNeeded()
+            }
+            return
+        }
+        let edited = _editedSinceBegin
+        _detachEditor()
+        if edited && movement != .cancel { _fireAction() }
+        switch movement {
+        case .tab: window?.selectKeyView(following: self)
+        case .backtab: window?.selectKeyView(preceding: self)
+        default: if let w = window, w.firstResponder === editor { _ = w.makeFirstResponder(nil) }
+        }
     }
 
     @MainActor open override func becomeFirstResponder() -> Bool {
         guard isEditable || isSelectable else { return false }
-        if isEditable && !_isEditing {
-            _isEditing = true
-            _editedSinceBegin = false
-            textDidBeginEditing(Notification(name: NSControl.textDidBeginEditingNotification, object: self))
-        }
-        needsDisplay = true
-        return true
+        return _beginEditing()
     }
 
     @MainActor open override func resignFirstResponder() -> Bool {
-        _endEditing(sendAction: _editedSinceBegin)
-        needsDisplay = true
-        return true
+        // The window moves first-responder status to the editor during the handoff.
+        _handingOffToEditor || _editor == nil
     }
 
     @MainActor open override func mouseDown(with event: NSEvent) {
         guard isEnabled, isEditable || isSelectable else { super.mouseDown(with: event); return }
-        if window?.firstResponder !== self { _ = window?.makeFirstResponder(self) }
-        let p = convert(event.locationInWindow, from: nil)
-        let offset = _offset(forX: p.x - _textRect().minX)
-        _selection = event.clickCount >= 2 ? NSRange(location: 0, length: _utf16.count) : NSRange(location: offset, length: 0)
-        needsDisplay = true
-    }
-
-    @MainActor open override func mouseDragged(with event: NSEvent) {
-        guard window?.firstResponder === self else { return }
-        let p = convert(event.locationInWindow, from: nil)
-        let offset = _offset(forX: p.x - _textRect().minX)
-        let anchor = _selection.length == 0 ? _selection.location : _selection.location
-        _selection = NSRange(location: min(anchor, offset), length: abs(offset - anchor))
-        needsDisplay = true
-    }
-
-    @MainActor open override func keyDown(with event: NSEvent) {
-        guard _isEditing, isEditable else { super.keyDown(with: event); return }
-        let chars = event.charactersIgnoringModifiers ?? ""
-        let flags = event.modifierFlags
-        let n = _utf16.count
-        let sel = _clampedSelection
-        switch chars {
-        case "\r", "\u{3}":
-            // Ending editing sends the action (resignFirstResponder); Enter always sends it.
-            _editedSinceBegin = true
-            _ = window?.makeFirstResponder(nil)
-            return
-        case "\t":
-            _ = window?.makeFirstResponder(nil)
-            return
-        case "\u{1B}":
-            _selection = NSRange(location: n, length: 0)
-            needsDisplay = true
-            return
-        case "\u{7F}", "\u{8}":            // backspace
-            if sel.length > 0 { _replaceSelection(with: "") }
-            else if sel.location > 0 { _selection = NSRange(location: sel.location - 1, length: 1); _replaceSelection(with: "") }
-            needsDisplay = true
-            return
-        case "\u{F728}":                   // forward delete
-            if sel.length > 0 { _replaceSelection(with: "") }
-            else if sel.location < n { _selection = NSRange(location: sel.location, length: 1); _replaceSelection(with: "") }
-            needsDisplay = true
-            return
-        case "\u{F702}":                   // left
-            let target = max(0, (sel.length > 0 && !flags.contains(.shift)) ? sel.location : sel.location - 1)
-            _selection = flags.contains(.shift) ? NSRange(location: max(0, sel.location - 1), length: sel.length + (sel.location > 0 ? 1 : 0)) : NSRange(location: target, length: 0)
-            needsDisplay = true
-            return
-        case "\u{F703}":                   // right
-            if flags.contains(.shift) { _selection = NSRange(location: sel.location, length: min(n - sel.location, sel.length + 1)) }
-            else { _selection = NSRange(location: min(n, sel.length > 0 ? sel.location + sel.length : sel.location + 1), length: 0) }
-            needsDisplay = true
-            return
-        case "\u{F729}", "\u{F700}":      // home / up
-            _selection = NSRange(location: 0, length: 0); needsDisplay = true; return
-        case "\u{F72B}", "\u{F701}":      // end / down
-            _selection = NSRange(location: n, length: 0); needsDisplay = true; return
-        default:
-            break
-        }
-        if flags.contains(.command) || flags.contains(.control) {
-            switch chars.lowercased() {
-            case "a":
-                _selection = NSRange(location: 0, length: n)
-                needsDisplay = true
-                return
-            case "c", "x":
-                if sel.length > 0 {
-                    let text = String(decoding: _utf16[sel.location..<(sel.location + sel.length)], as: UTF16.self)
-                    _ = NSPasteboard.general.clearContents()
-                    _ = NSPasteboard.general.setString(text, forType: .string)
-                    if chars.lowercased() == "x" { _replaceSelection(with: "") }
-                }
-                needsDisplay = true
-                return
-            case "v":
-                if let text = NSPasteboard.general.string(forType: .string) {
-                    _replaceSelection(with: text.replacingOccurrences(of: "\r\n", with: " ").replacingOccurrences(of: "\n", with: " "))
-                }
-                needsDisplay = true
-                return
-            default: break
-            }
-        }
-        if flags.contains(.command) || flags.contains(.control) { super.keyDown(with: event); return }
-        guard let text = event.characters, !text.isEmpty, text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && ($0.value < 0xF700 || $0.value > 0xF8FF) }) else {
-            super.keyDown(with: event)
-            return
-        }
-        _replaceSelection(with: text)
-        needsDisplay = true
+        if let e = _editor { e.mouseDown(with: event); return }
+        _beginEditing(with: event)
     }
 
     @MainActor open override func draw(_ dirtyRect: NSRect) {
         _cell?.draw(withFrame: _cellFrame, in: self)
-        guard _isEditing, window?.firstResponder === self, let cell = _fieldCell else { return }
-        let rect = cell._textRect(forBounds: bounds)
-        let font = cell._effectiveFont
-        let lineHeight = font.ascender - font.descender
-        let top = isFlipped ? rect.midY - lineHeight / 2 : rect.midY + lineHeight / 2
-        let sel = _clampedSelection
-        if sel.length > 0 {
-            let x0 = rect.minX + _xOffset(for: sel.location), x1 = rect.minX + _xOffset(for: sel.location + sel.length)
-            NSColor.selectedTextBackgroundColor.setFill()
-            NSBezierPath.fill(NSRect(x: x0, y: isFlipped ? top : top - lineHeight, width: x1 - x0, height: lineHeight))
-            cell.drawInterior(withFrame: bounds, in: self)
-        }
-        let cx = rect.minX + _xOffset(for: sel.location + (sel.length > 0 ? sel.length : 0))
-        (textColor ?? .textColor).setFill()
-        NSBezierPath.fill(NSRect(x: cx.rounded(), y: isFlipped ? top : top - lineHeight, width: 1, height: lineHeight))
+    }
+
+    @MainActor open override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        _editor?.frame = _editorFrame()
     }
 
     @MainActor open override var intrinsicContentSize: NSSize {
@@ -409,9 +321,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/selecttext(_:)
     @MainActor open func selectText(_ sender: Any?) {
         guard isEditable || isSelectable else { return }
-        _ = window?.makeFirstResponder(self)
-        _selection = NSRange(location: 0, length: _utf16.count)
-        needsDisplay = true
+        if _editor == nil { _ = window?.makeFirstResponder(self) }
+        _editor?.selectAll(nil)
     }
     // SKIPPED (pending type NSTextSuggestionsDelegate): @MainActor var suggestionsDelegate: (any NSTextSuggestionsDelegate)? { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/textcolor
@@ -426,11 +337,19 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/textdidchange(_:)
     @MainActor open func textDidChange(_ notification: Notification) {
+        if let e = _editor, (notification.object as? NSTextView) === e {
+            _editedSinceBegin = true
+            _cell?.stringValue = e.string      // keep the model current without redrawing the editor's text
+        }
         NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)
         _delegate?.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/textdidendediting(_:)
     @MainActor open func textDidEndEditing(_ notification: Notification) {
+        if let e = _editor, (notification.object as? NSTextView) === e {
+            let raw = notification.userInfo?["NSTextMovement"] as? Int ?? NSTextMovement.other.rawValue
+            _finishEditing(movement: NSTextMovement(rawValue: raw) ?? .other)
+        }
         NotificationCenter.default.post(name: NSControl.textDidEndEditingNotification, object: self)
         _delegate?.controlTextDidEndEditing(Notification(name: NSControl.textDidEndEditingNotification, object: self))
     }

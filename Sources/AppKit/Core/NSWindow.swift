@@ -50,6 +50,7 @@ import CoreText
     private var _titleVisibility: NSWindow.TitleVisibility = .visible
     private var _titlebarAppearsTransparent = false
     private var _appearance: NSAppearance? = nil
+    private var _fieldEditor: NSTextView? = nil
     /// Backdrop requested by an NSVisualEffectView blending behind the window.
     internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { _updateChrome() } }
     private weak var _windowController: NSWindowController?
@@ -133,6 +134,21 @@ import CoreText
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/effectiveappearance
     @MainActor public var effectiveAppearance: NSAppearance { _appearance ?? NSApplication.shared.effectiveAppearance }
+
+    /// Input methods talk to the first responder when it accepts text input.
+    public func platformWindowTextInput() -> PlatformTextInput? {
+        guard let client = _firstResponder as? NSTextInputClient, let view = client as? NSView else { return nil }
+        return PlatformTextInput(
+            hasMarkedText: { client.hasMarkedText() },
+            setMarkedText: { text, selected in client.setMarkedText(text, selectedRange: selected, replacementRange: NSRange(location: NSNotFound, length: 0)) },
+            unmarkText: { client.unmarkText() },
+            insertText: { text in client.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) },
+            markedRect: { [weak view, weak self] in
+                guard let view, let self else { return nil }
+                if let tv = view as? NSTextView { return tv._inputMethodRect }
+                return self.convertFromScreen(client.firstRect(forCharacterRange: client.selectedRange(), actualRange: nil))
+            })
+    }
 
     /// The chrome the backend should show for the current properties.
     internal var _chrome: PlatformWindowChrome {
@@ -662,13 +678,23 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablesnapshotrestoration()
     @MainActor open func enableSnapshotRestoration() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endediting(for:)
-    @MainActor open func endEditing(for object: Any?) { unimplemented() }
+    @MainActor open func endEditing(for object: Any?) {
+        guard let e = _fieldEditor, e.superview != nil, firstResponder === e else { return }
+        _ = makeFirstResponder(nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:)
     @MainActor open func endSheet(_ sheetWindow: NSWindow) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:returncode:)
     @MainActor open func endSheet(_ sheetWindow: NSWindow, returnCode: NSApplication.ModalResponse) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/fieldeditor(_:for:)
-    @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? { unimplemented() }
+    @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        if let e = _fieldEditor { return e }
+        guard createFlag else { return nil }
+        let e = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))
+        e.isFieldEditor = true
+        _fieldEditor = e
+        return e
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/firstresponder
     @MainActor open var firstResponder: NSResponder? { _firstResponder ?? self }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/flush()
@@ -1052,16 +1078,36 @@ import CoreText
         return all.max { $0.frame.intersection(f).area < $1.frame.intersection(f).area } ?? all.first
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectkeyview(following:)
-    @MainActor open func selectKeyView(following view: NSView) { unimplemented() }
+    @MainActor open func selectKeyView(following view: NSView) { _selectKeyView(forward: true, from: view) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectkeyview(preceding:)
-    @MainActor open func selectKeyView(preceding view: NSView) { unimplemented() }
+    @MainActor open func selectKeyView(preceding view: NSView) { _selectKeyView(forward: false, from: view) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectnextkeyview(_:)
-    @MainActor open func selectNextKeyView(_ sender: Any?) { unimplemented() }
+    @MainActor open func selectNextKeyView(_ sender: Any?) { _selectKeyView(forward: true, from: nil) }
+
+    /// Moves focus through the views that accept first responder, in hierarchy order
+    /// (`nextKeyView` chains are not wired yet).
+    private func _selectKeyView(forward: Bool, from start: NSView?) {
+        guard let content = _contentView else { return }
+        var views: [NSView] = []
+        func visit(_ v: NSView) {
+            if !v.isHidden && v.acceptsFirstResponder && !(v is NSText) { views.append(v) }
+            for s in v.subviews { visit(s) }
+        }
+        visit(content)
+        guard !views.isEmpty else { return }
+        var current: NSView? = start ?? (firstResponder as? NSView)
+        if let t = current as? NSText, let owner = t.superview { current = owner }
+        var index = current.flatMap { c in views.firstIndex { $0 === c } } ?? (forward ? -1 : views.count)
+        for _ in 0..<views.count {
+            index = (index + (forward ? 1 : -1) + views.count) % views.count
+            if views[index] !== current, makeFirstResponder(views[index]) { return }
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectnexttab(_:)
     @available(macOS 10.12, *)
     @MainActor open func selectNextTab(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectpreviouskeyview(_:)
-    @MainActor open func selectPreviousKeyView(_ sender: Any?) { unimplemented() }
+    @MainActor open func selectPreviousKeyView(_ sender: Any?) { _selectKeyView(forward: false, from: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectprevioustab(_:)
     @available(macOS 10.12, *)
     @MainActor open func selectPreviousTab(_ sender: Any?) { unimplemented() }
@@ -1090,9 +1136,9 @@ import CoreText
             _dispatchMouse(event, to: _contentView?.hitTest(event.locationInWindow) ?? self)
         case .keyDown:
             // An editing text field commits on Return before the default button sees it.
-            if let field = firstResponder as? NSTextField, field._consumesReturnKey, event.charactersIgnoringModifiers == "\r",
+            if let editor = firstResponder as? NSTextView, editor._consumesReturnKey, event.charactersIgnoringModifiers == "\r",
                event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-                field.keyDown(with: event)
+                editor.keyDown(with: event)
                 _ = _contentView?.performKeyEquivalent(with: event)
                 return
             }

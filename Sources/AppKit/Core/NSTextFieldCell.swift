@@ -75,7 +75,11 @@ import CoreText
         drawInterior(withFrame: cellFrame, in: controlView)
     }
 
+    /// True while the field editor shows the text.
+    internal var _hidesText = false
+
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        if _hidesText { return }
         let rect = _textRect(forBounds: cellFrame)
         let flipped = controlView.isFlipped
         if stringValue.isEmpty {
