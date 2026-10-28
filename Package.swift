@@ -20,7 +20,10 @@ targets += [
         linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("windowscodecs"), .linkedLibrary("ole32"), .linkedLibrary("shlwapi"), .linkedLibrary("oleaut32"), .linkedLibrary("shell32"),
                          // Milestone 3: DXGI flip-model swap chain presentation (d3d11 device, dxgi
                          // factory/swap chain, dxguid for the DXGI debug GUIDs).
-                         .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid")]
+                         .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
+                         // Milestone 3b: DirectComposition presentation of translucent windows and
+                         // the DWM frame/backdrop attributes used by Win32Window.
+                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
     ),
     .target(
         name: "CoreGraphics",

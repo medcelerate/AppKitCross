@@ -137,7 +137,16 @@ final class Win32Backend: PlatformBackend {
         return (style, ex)
     }
 
+    /// Whether windows with this style mask draw their content over the whole window
+    /// (Milestone 3b): `fullSizeContentView`, or borderless. Such windows handle
+    /// WM_NCCALCSIZE so the client area is the window rect, and their frame equals their
+    /// content rect, as on macOS.
+    static func usesCustomFrame(_ mask: NSWindow.StyleMask) -> Bool {
+        mask.contains(.fullSizeContentView) || !mask.contains(.titled)
+    }
+
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect {
+        if Win32Backend.usesCustomFrame(styleMask) { return contentRect }
         let (style, ex) = Win32Backend.styles(for: styleMask)
         let dpi = GetDpiForSystem()
         let scale = CGFloat(dpi) / 96
@@ -151,6 +160,7 @@ final class Win32Backend: PlatformBackend {
     }
 
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect {
+        if Win32Backend.usesCustomFrame(styleMask) { return frameRect }
         let (style, ex) = Win32Backend.styles(for: styleMask)
         let dpi = GetDpiForSystem()
         let scale = CGFloat(dpi) / 96
