@@ -608,11 +608,11 @@ final class Win32Window: PlatformWindow {
         case WM_SETFOCUS:
             isKey = true
             owner?.platformWindowDidBecomeKey()
-            return 0
+            return nil      // DefWindowProc activates the input method context for the window
         case WM_KILLFOCUS:
             isKey = false
             owner?.platformWindowDidResignKey()
-            return 0
+            return nil      // ... and deactivates it
         case WM_LBUTTONDOWN, WM_LBUTTONDBLCLK:
             if let hwnd { SetCapture(hwnd) }
             pressedButtons |= 1
