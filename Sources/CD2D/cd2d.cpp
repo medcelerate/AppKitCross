@@ -319,6 +319,8 @@ void cd2d_target_set_transform(CD2DTarget *target, const CD2DMatrix *m) {
     target->target->SetTransform(D2D1::Matrix3x2F(m->m11, m->m12, m->m21, m->m22, m->dx + target->originX, m->dy + target->originY));
 }
 
+void *cd2d_target_render_target(CD2DTarget *target) { return target ? target->target : nullptr; }
+
 void cd2d_target_set_antialias(CD2DTarget *target, bool aa) {
     if (target && target->target)
         target->target->SetAntialiasMode(aa ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE : D2D1_ANTIALIAS_MODE_ALIASED);

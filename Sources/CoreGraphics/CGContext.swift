@@ -147,6 +147,11 @@ public final class CGContext {
     public func setFillColor(_ color: CGColor) { state.fill = color }
     /// The current fill colour (CoreText draws glyphs with it when a run carries no colour).
     public var _fillColor: CGColor { state.fill }
+    /// The current global alpha (setAlpha), applied by CoreText's DirectWrite glyph drawing.
+    public var _alpha: CGFloat { state.alpha }
+    /// The CD2DTarget* this context draws into, with the CTM already applied to it, for
+    /// DirectWrite's DrawGlyphRun in the CoreText engine.
+    public var _d2dTarget: OpaquePointer { target }
     /// Text drawing state (CoreText's CTLineDraw/CTRunDraw read and advance these).
     public var textPosition: CGPoint = .zero
     public var textMatrix: CGAffineTransform = .identity

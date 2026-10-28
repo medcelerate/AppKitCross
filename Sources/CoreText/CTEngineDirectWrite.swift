@@ -1,5 +1,6 @@
-// Windows font engine over the CDirectWrite shim. Glyphs draw as filled outlines through
-// CGContext (so clipping and the CTM apply); DrawGlyphRun can replace that later.
+// Windows font engine over the CDirectWrite shim. Glyphs draw with DirectWrite's
+// DrawGlyphRun on the context's Direct2D target (its own antialiasing and pixel snapping,
+// under the context's CTM and clip); filled outlines through CGContext are the fallback.
 
 #if os(Windows)
 import Foundation
@@ -189,6 +190,15 @@ final class CTDirectWriteFont: CTEngineFont {
     }
 
     func draw(glyphs: [CGGlyph], positions: [CGPoint], color: CGColor, in ctx: CGContext) {
+        guard !glyphs.isEmpty else { return }
+        let c = color.components
+        let (r, g, b, a): (Float, Float, Float, Float) = c.count >= 4
+            ? (Float(c[0]), Float(c[1]), Float(c[2]), Float(c[3] * ctx._alpha))
+            : (Float(c.first ?? 0), Float(c.first ?? 0), Float(c.first ?? 0), Float((c.count >= 2 ? c[1] : 1) * ctx._alpha))
+        var xy: [Float] = []
+        xy.reserveCapacity(glyphs.count * 2)
+        for p in positions.prefix(glyphs.count) { xy.append(Float(p.x)); xy.append(Float(p.y)) }
+        if cdw_draw_glyphs(ctx._d2dTarget, handle, glyphs, xy, UInt32(glyphs.count), r, g, b, a) { return }
         ctx.saveGState()
         ctx.setFillColor(color)
         for (i, g) in glyphs.enumerated() {

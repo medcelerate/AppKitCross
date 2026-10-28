@@ -71,6 +71,8 @@ int32_t cd2d_debug_report_live_objects(void);
 void cd2d_target_clear(CD2DTarget *target, float r, float g, float b, float a);
 void cd2d_target_set_transform(CD2DTarget *target, const CD2DMatrix *m);
 void cd2d_target_set_antialias(CD2DTarget *target, bool antialias);
+/// The ID2D1RenderTarget* behind `target` (for sibling shims such as CDirectWrite), or NULL.
+void *cd2d_target_render_target(CD2DTarget *target);
 
 CD2DBrush *cd2d_brush_create(CD2DTarget *target, float r, float g, float b, float a);
 void cd2d_brush_set_color(CD2DBrush *brush, float r, float g, float b, float a);
