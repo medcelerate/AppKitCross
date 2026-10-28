@@ -5,6 +5,10 @@ import AppKit
 import Metal
 import MetalKit
 
+/// `HelloWindow --no-layer-backing` keeps the windows' views unbacked (the Milestone 1-8
+/// drawing path); otherwise their content views are layer-backed (Milestone 9).
+let layerBacked = !CommandLine.arguments.contains("--no-layer-backing")
+
 final class CanvasView: NSView {
     private var clicks: [NSPoint] = []
     var showsGrid = true { didSet { needsDisplay = true } }
@@ -220,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let canvas = CanvasView(frame: window.contentView!.bounds)
         canvas.autoresizingMask = [.width, .height]
         window.contentView = canvas
+        // Milestone 9: a layer-backed content view makes every view a layer, so the window
+        // hands its tree to DirectComposition (APPKITWIN_SOFTWARE_LAYERS=1 keeps the
+        // software compositor; `--no-layer-backing` leaves the views unbacked).
+        if layerBacked { canvas.wantsLayer = true }
 
         // Milestone 2: a push button and a checkbox wired with target/action.
         let clear = NSButton(title: "Clear dots", target: self, action: Selector(("clearDots:")))
@@ -308,6 +316,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         ring.fillColor = nil
         ring.strokeColor = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
         ring.lineWidth = 3
+        // Bounds around the stroked path: a hosted layer rasterises only its bounds (the
+        // software compositor happens to draw the path wherever it falls).
+        ring.bounds = CGRect(x: -12, y: -12, width: 24, height: 24)
         ring.position = CGPoint(x: 20, y: 18)
         let grow = CABasicAnimation(keyPath: "transform.scale")
         grow.fromValue = 0.6
@@ -409,6 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
+        if layerBacked { window.contentView?.wantsLayer = true }
         let wc = NSWindowController(window: window)
         layoutWindowController = wc
         window.center()
