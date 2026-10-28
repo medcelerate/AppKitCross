@@ -11,7 +11,7 @@ are concrete and testable.
 | M1 Window and drawing | done, verified on Windows |
 | M2 Controls and text | done, verified on Windows (field editor/IME deferred) |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
-| M3b Frameless glass window | AppKit side done; Win32 side in progress on `m3b-frameless-glass` |
+| M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
 | M4 Core Animation | done, verified on Windows (software compositor; DirectComposition open) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
