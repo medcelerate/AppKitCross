@@ -4,13 +4,14 @@
 import Foundation
 import WinSDK
 import CoreGraphics
+import CD2D
 
 @MainActor
 final class Win32Window: PlatformWindow {
     private unowned let backend: Win32Backend
     private weak var owner: PlatformWindowOwner?
     private(set) var hwnd: HWND?
-    private var renderTarget: UnsafeMutablePointer<ID2D1HwndRenderTarget>?
+    private var renderTarget: OpaquePointer?        // CD2DTarget*
     private var _styleMask: NSWindow.StyleMask
     private var _title = ""
     private(set) var isKey = false
@@ -163,31 +164,19 @@ final class Win32Window: PlatformWindow {
 
     // MARK: Painting
 
-    private func ensureRenderTarget() -> UnsafeMutablePointer<ID2D1HwndRenderTarget>? {
+    private func ensureRenderTarget() -> OpaquePointer? {
         if let rt = renderTarget { return rt }
         guard let hwnd, let factory = backend.d2dFactory else { return nil }
         var client = RECT()
         GetClientRect(hwnd, &client)
-        var props = D2D1_RENDER_TARGET_PROPERTIES()
-        props.type = D2D1_RENDER_TARGET_TYPE_DEFAULT
-        props.pixelFormat = D2D1_PIXEL_FORMAT(format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED)
-        props.dpiX = Float(dpi)
-        props.dpiY = Float(dpi)
-        props.usage = D2D1_RENDER_TARGET_USAGE_NONE
-        props.minLevel = D2D1_FEATURE_LEVEL_DEFAULT
-        var hwndProps = D2D1_HWND_RENDER_TARGET_PROPERTIES()
-        hwndProps.hwnd = hwnd
-        hwndProps.pixelSize = D2D1_SIZE_U(width: UInt32(max(1, client.right - client.left)), height: UInt32(max(1, client.bottom - client.top)))
-        hwndProps.presentOptions = D2D1_PRESENT_OPTIONS_NONE
-        var rt: UnsafeMutablePointer<ID2D1HwndRenderTarget>?
-        let hr = factory.pointee.lpVtbl.pointee.CreateHwndRenderTarget(factory, &props, &hwndProps, &rt)
-        guard hr >= 0, let rt else { return nil }
+        let rt = cd2d_target_create_hwnd(factory, UnsafeMutableRawPointer(hwnd),
+                                         UInt32(max(1, client.right - client.left)), UInt32(max(1, client.bottom - client.top)), Float(dpi))
         renderTarget = rt
         return rt
     }
 
     private func discardRenderTarget() {
-        if let rt = renderTarget { _ = rt.pointee.lpVtbl.pointee.Release(rt) }
+        cd2d_target_release(renderTarget)
         renderTarget = nil
     }
 
@@ -202,15 +191,15 @@ final class Win32Window: PlatformWindow {
                            y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
                            width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
                            height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
-        rt.pointee.lpVtbl.pointee.BeginDraw(rt)
+        cd2d_target_begin_draw(rt)
         // Flip: CoreGraphics is bottom-left in points; Direct2D is top-left in DIPs.
         let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
-        let ctx = CGContext(renderTarget: UnsafeMutableRawPointer(rt), factory: UnsafeMutableRawPointer(factory),
-                            baseTransform: flip, width: Int(size.width * scale), height: Int(size.height * scale))
-        owner?.platformWindowDraw(into: ctx, dirtyRect: dirty.isEmpty ? NSRect(origin: .zero, size: size) : dirty)
-        withExtendedLifetime(ctx) {}
-        let hr = rt.pointee.lpVtbl.pointee.EndDraw(rt, nil, nil)
-        if hr == D2DERR_RECREATE_TARGET { discardRenderTarget() }
+        do {
+            let ctx = CGContext(target: rt, factory: factory, baseTransform: flip,
+                                width: Int(size.width * scale), height: Int(size.height * scale))
+            owner?.platformWindowDraw(into: ctx, dirtyRect: dirty.isEmpty ? NSRect(origin: .zero, size: size) : dirty)
+        }
+        if !cd2d_target_end_draw(rt) { discardRenderTarget() }
     }
 
     // MARK: Input
@@ -266,8 +255,7 @@ final class Win32Window: PlatformWindow {
             return 1
         case WM_SIZE:
             if let rt = renderTarget {
-                var size = D2D1_SIZE_U(width: UInt32(lParam & 0xFFFF), height: UInt32((lParam >> 16) & 0xFFFF))
-                _ = rt.pointee.lpVtbl.pointee.Resize(rt, &size)
+                cd2d_target_resize(rt, UInt32(lParam & 0xFFFF), UInt32((lParam >> 16) & 0xFFFF))
             }
             owner?.platformWindowDidChangeFrame(frame)
             return 0
@@ -276,7 +264,7 @@ final class Win32Window: PlatformWindow {
             return 0
         case WM_DPICHANGED:
             dpi = UINT(wParam & 0xFFFF)
-            if let rt = renderTarget { rt.pointee.lpVtbl.pointee.SetDpi(rt, Float(dpi), Float(dpi)) }
+            if let rt = renderTarget { cd2d_target_set_dpi(rt, Float(dpi)) }
             if let suggested = UnsafePointer<RECT>(bitPattern: Int(lParam)), let hwnd {
                 let r = suggested.pointee
                 SetWindowPos(hwnd, nil, r.left, r.top, r.right - r.left, r.bottom - r.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))

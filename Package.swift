@@ -13,14 +13,20 @@ var appKitExclude: [String] = []
 // DirectWrite and DirectComposition headers are C++-only; they arrive with C++ interop in
 // Milestone 2/4. Milestone 1 needs only Direct2D, which `WinSDK` exposes as C.
 targets += [
+    // extern "C" shim over the Direct2D C++ COM interfaces (d2d1.h has no C vtables).
+    .target(
+        name: "CD2D",
+        path: "Sources/CD2D",
+        linkerSettings: [.linkedLibrary("d2d1")]
+    ),
     .target(
         name: "CoreGraphics",
-        dependencies: [],
+        dependencies: ["CD2D"],
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
-appKitDependencies += ["CoreGraphics"]
+appKitDependencies += ["CoreGraphics", "CD2D"]
 appKitExclude += ["Platform/Host"]
 #else
 appKitExclude += ["Platform/Win32"]
@@ -55,5 +61,6 @@ let package = Package(
     products: [
         .library(name: "AppKit", targets: ["AppKit"]),
     ],
-    targets: targets
+    targets: targets,
+    cxxLanguageStandard: .cxx17
 )

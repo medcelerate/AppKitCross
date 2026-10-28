@@ -1,13 +1,13 @@
-// CGContext over a Direct2D render target.
+// CGContext over a Direct2D render target, reached through the CD2D shim.
 //
 // The context mirrors CoreGraphics' state model (CTM, colors, line state, clip, alpha,
 // current path) and translates each drawing call into Direct2D geometry and brush calls.
-// Coordinates handed to Direct2D are in DIPs; callers set the DPI on the render target so
+// Coordinates handed to Direct2D are in DIPs; the window sets the render target's DPI so
 // one DIP equals one AppKit point.
 
 import Foundation
 #if os(Windows)
-import WinSDK
+import CD2D
 
 public final class CGContext {
     // MARK: Graphics state
@@ -25,45 +25,44 @@ public final class CGContext {
         var antialias = true
         var blend: CGBlendMode = .normal
         var interpolation: CGInterpolationQuality = .default
-        var clipPushes = 0         // Direct2D axis-aligned clips / layers pushed in this state
+        var clipPushes = 0         // clips pushed while this state was current
         var clipBox = CGRect.infinite
     }
+    private enum ClipKind { case rect, path }
 
     private var state = State()
     private var stack: [State] = []
-    private var path = CGMutablePath()
+    private var clipKinds: [ClipKind] = []
+    private var currentPath = CGMutablePath()
 
-    private let target: UnsafeMutablePointer<ID2D1RenderTarget>
-    private let factory: UnsafeMutablePointer<ID2D1Factory>
-    private var fillBrush: UnsafeMutablePointer<ID2D1SolidColorBrush>?
-    private var strokeBrush: UnsafeMutablePointer<ID2D1SolidColorBrush>?
-    /// Transform that maps CoreGraphics user space to the target: applied after the CTM.
+    private let target: OpaquePointer          // CD2DTarget*
+    private let factory: OpaquePointer         // CD2DFactory*
+    private let fillBrush: OpaquePointer?
+    private let strokeBrush: OpaquePointer?
+    /// Applied after the CTM; typically the y flip that makes the context bottom-left based.
     private let baseTransform: CGAffineTransform
 
     public private(set) var width: Int
     public private(set) var height: Int
 
-    /// Wraps a Direct2D render target. `baseTransform` typically flips the y axis so that
-    /// the context is bottom-left based like CoreGraphics. The target must be inside
-    /// BeginDraw/EndDraw for the lifetime of the context.
-    public init(renderTarget: UnsafeMutableRawPointer, factory: UnsafeMutableRawPointer,
-                baseTransform: CGAffineTransform, width: Int, height: Int) {
-        self.target = renderTarget.assumingMemoryBound(to: ID2D1RenderTarget.self)
-        self.factory = factory.assumingMemoryBound(to: ID2D1Factory.self)
+    /// Wraps a CD2D render target that is between begin_draw and end_draw for the
+    /// lifetime of the context.
+    public init(target: OpaquePointer, factory: OpaquePointer, baseTransform: CGAffineTransform, width: Int, height: Int) {
+        self.target = target
+        self.factory = factory
         self.baseTransform = baseTransform
         self.width = width
         self.height = height
+        fillBrush = cd2d_brush_create(target, 0, 0, 0, 1)
+        strokeBrush = cd2d_brush_create(target, 0, 0, 0, 1)
         applyTransform()
-        var color = d2dColor(0, 0, 0, 1)
-        _ = target.pointee.lpVtbl.pointee.CreateSolidColorBrush(target, &color, nil, &fillBrush)
-        _ = target.pointee.lpVtbl.pointee.CreateSolidColorBrush(target, &color, nil, &strokeBrush)
     }
 
     deinit {
-        while stack.count > 0 { restoreGState() }
+        while !stack.isEmpty { restoreGState() }
         popClips(state.clipPushes)
-        if let b = fillBrush { _ = b.pointee.lpVtbl.pointee.Release(b) }
-        if let b = strokeBrush { _ = b.pointee.lpVtbl.pointee.Release(b) }
+        cd2d_brush_release(fillBrush)
+        cd2d_brush_release(strokeBrush)
     }
 
     // MARK: State
@@ -78,7 +77,7 @@ public final class CGContext {
         popClips(state.clipPushes)
         state = saved
         applyTransform()
-        _ = target.pointee.lpVtbl.pointee.SetAntialiasMode(target, state.antialias ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE : D2D1_ANTIALIAS_MODE_ALIASED)
+        cd2d_target_set_antialias(target, state.antialias)
     }
 
     public var ctm: CGAffineTransform { state.ctm }
@@ -88,8 +87,9 @@ public final class CGContext {
     public func concatenate(_ t: CGAffineTransform) { state.ctm = t.concatenating(state.ctm); applyTransform() }
 
     private func applyTransform() {
-        var m = d2dMatrix(state.ctm.concatenating(baseTransform))
-        target.pointee.lpVtbl.pointee.SetTransform(target, &m)
+        let t = state.ctm.concatenating(baseTransform)
+        var m = CD2DMatrix(m11: Float(t.a), m12: Float(t.b), m21: Float(t.c), m22: Float(t.d), dx: Float(t.tx), dy: Float(t.ty))
+        cd2d_target_set_transform(target, &m)
     }
 
     public func setFillColor(_ color: CGColor) { state.fill = color }
@@ -113,78 +113,75 @@ public final class CGContext {
     }
     public func setShouldAntialias(_ on: Bool) {
         state.antialias = on
-        _ = target.pointee.lpVtbl.pointee.SetAntialiasMode(target, on ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE : D2D1_ANTIALIAS_MODE_ALIASED)
+        cd2d_target_set_antialias(target, on)
     }
     public func setShouldSmoothFonts(_ on: Bool) { }
     public func setAllowsAntialiasing(_ on: Bool) { }
 
     // MARK: Path construction
 
-    public func beginPath() { path = CGMutablePath() }
-    public func move(to p: CGPoint) { path.move(to: p) }
-    public func addLine(to p: CGPoint) { path.addLine(to: p) }
-    public func addLines(between points: [CGPoint]) { path.addLines(between: points) }
-    public func addCurve(to end: CGPoint, control1: CGPoint, control2: CGPoint) { path.addCurve(to: end, control1: control1, control2: control2) }
-    public func addQuadCurve(to end: CGPoint, control: CGPoint) { path.addQuadCurve(to: end, control: control) }
-    public func addRect(_ rect: CGRect) { path.addRect(rect) }
-    public func addRects(_ rects: [CGRect]) { path.addRects(rects) }
-    public func addEllipse(in rect: CGRect) { path.addEllipse(in: rect) }
+    public func beginPath() { currentPath = CGMutablePath() }
+    public func move(to p: CGPoint) { currentPath.move(to: p) }
+    public func addLine(to p: CGPoint) { currentPath.addLine(to: p) }
+    public func addLines(between points: [CGPoint]) { currentPath.addLines(between: points) }
+    public func addCurve(to end: CGPoint, control1: CGPoint, control2: CGPoint) { currentPath.addCurve(to: end, control1: control1, control2: control2) }
+    public func addQuadCurve(to end: CGPoint, control: CGPoint) { currentPath.addQuadCurve(to: end, control: control) }
+    public func addRect(_ rect: CGRect) { currentPath.addRect(rect) }
+    public func addRects(_ rects: [CGRect]) { currentPath.addRects(rects) }
+    public func addEllipse(in rect: CGRect) { currentPath.addEllipse(in: rect) }
     public func addArc(center: CGPoint, radius: CGFloat, startAngle: CGFloat, endAngle: CGFloat, clockwise: Bool) {
-        path.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: clockwise)
+        currentPath.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: clockwise)
     }
-    public func addPath(_ p: CGPath) { path.addPath(p) }
-    public func closePath() { path.closeSubpath() }
-    public var isPathEmpty: Bool { path.isEmpty }
-    public var currentPointOfPath: CGPoint { path.currentPoint }
-    public var boundingBoxOfPath: CGRect { path.boundingBoxOfPath }
-    public var path: CGPath? { self.path.copy() }
+    public func addPath(_ p: CGPath) { currentPath.addPath(p) }
+    public func closePath() { currentPath.closeSubpath() }
+    public var isPathEmpty: Bool { currentPath.isEmpty }
+    public var currentPointOfPath: CGPoint { currentPath.currentPoint }
+    public var boundingBoxOfPath: CGRect { currentPath.boundingBoxOfPath }
+    public var path: CGPath? { currentPath.copy() }
 
     // MARK: Painting
 
     public func fillPath(using rule: CGPathFillRule = .winding) {
-        guard let geometry = makeGeometry(path, rule: rule) else { path = CGMutablePath(); return }
-        defer { _ = geometry.pointee.lpVtbl.pointee.Release(geometry) }
-        let brush = configure(fillBrush, color: state.fill)
-        target.pointee.lpVtbl.pointee.FillGeometry(target, geometry.withMemoryRebound(to: ID2D1Geometry.self, capacity: 1) { $0 }, brush, nil)
-        path = CGMutablePath()
+        defer { currentPath = CGMutablePath() }
+        guard let geometry = makeGeometry(currentPath, rule: rule) else { return }
+        defer { cd2d_path_release(geometry) }
+        cd2d_target_fill_path(target, geometry, configure(fillBrush, color: state.fill))
     }
 
     public func strokePath() {
-        guard let geometry = makeGeometry(path, rule: .winding) else { path = CGMutablePath(); return }
-        defer { _ = geometry.pointee.lpVtbl.pointee.Release(geometry) }
-        let brush = configure(strokeBrush, color: state.stroke)
+        defer { currentPath = CGMutablePath() }
+        guard let geometry = makeGeometry(currentPath, rule: .winding) else { return }
+        defer { cd2d_path_release(geometry) }
         let style = makeStrokeStyle()
-        defer { if let s = style { _ = s.pointee.lpVtbl.pointee.Release(s) } }
-        target.pointee.lpVtbl.pointee.DrawGeometry(target, geometry.withMemoryRebound(to: ID2D1Geometry.self, capacity: 1) { $0 }, brush, Float(state.lineWidth), style)
-        path = CGMutablePath()
+        defer { cd2d_stroke_style_release(style) }
+        cd2d_target_stroke_path(target, geometry, configure(strokeBrush, color: state.stroke), Float(state.lineWidth), style)
     }
 
     public func drawPath(using mode: CGPathDrawingMode) {
-        let saved = path.copy() as? CGMutablePath ?? CGMutablePath()
+        let saved = currentPath.mutableCopy() ?? CGMutablePath()
         switch mode {
         case .fill: fillPath(using: .winding)
         case .eoFill: fillPath(using: .evenOdd)
         case .stroke: strokePath()
         case .fillStroke, .eoFillStroke:
             fillPath(using: mode == .eoFillStroke ? .evenOdd : .winding)
-            path = saved
+            currentPath = saved
             strokePath()
         }
     }
 
     public func fill(_ rect: CGRect) {
-        var r = d2dRect(rect.standardized)
-        let brush = configure(fillBrush, color: state.fill)
-        target.pointee.lpVtbl.pointee.FillRectangle(target, &r, brush)
+        let r = rect.standardized
+        cd2d_target_fill_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY), configure(fillBrush, color: state.fill))
     }
     public func fill(_ rects: [CGRect]) { for r in rects { fill(r) } }
 
     public func stroke(_ rect: CGRect) {
-        var r = d2dRect(rect.standardized)
-        let brush = configure(strokeBrush, color: state.stroke)
+        let r = rect.standardized
         let style = makeStrokeStyle()
-        defer { if let s = style { _ = s.pointee.lpVtbl.pointee.Release(s) } }
-        target.pointee.lpVtbl.pointee.DrawRectangle(target, &r, brush, Float(state.lineWidth), style)
+        defer { cd2d_stroke_style_release(style) }
+        cd2d_target_stroke_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY),
+                                configure(strokeBrush, color: state.stroke), Float(state.lineWidth), style)
     }
     public func stroke(_ rect: CGRect, width: CGFloat) {
         let w = state.lineWidth
@@ -212,11 +209,11 @@ public final class CGContext {
     // MARK: Clipping
 
     public func clip(to rect: CGRect) {
-        var r = d2dRect(rect.standardized)
-        target.pointee.lpVtbl.pointee.PushAxisAlignedClip(target, &r, state.antialias ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE : D2D1_ANTIALIAS_MODE_ALIASED)
+        let r = rect.standardized
+        cd2d_target_push_clip_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY), state.antialias)
+        clipKinds.append(.rect)
         state.clipPushes += 1
-        state.clipBox = state.clipBox.intersection(rect.standardized)
-        clipKinds.append(.axisAligned)
+        state.clipBox = state.clipBox.intersection(r)
     }
     public func clip(to rects: [CGRect]) {
         guard let first = rects.first else { return }
@@ -224,37 +221,23 @@ public final class CGContext {
     }
 
     public func clip(using rule: CGPathFillRule = .winding) {
-        guard let geometry = makeGeometry(path, rule: rule) else { path = CGMutablePath(); return }
-        defer { _ = geometry.pointee.lpVtbl.pointee.Release(geometry) }
-        var layer: UnsafeMutablePointer<ID2D1Layer>?
-        guard target.pointee.lpVtbl.pointee.CreateLayer(target, nil, &layer) >= 0, let layer else { path = CGMutablePath(); return }
-        var params = D2D1_LAYER_PARAMETERS()
-        params.contentBounds = D2D1_RECT_F(left: -.infinity, top: -.infinity, right: .infinity, bottom: .infinity)
-        params.geometricMask = geometry.withMemoryRebound(to: ID2D1Geometry.self, capacity: 1) { $0 }
-        params.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE
-        params.maskTransform = d2dMatrix(.identity)
-        params.opacity = 1
-        params.opacityBrush = nil
-        params.layerOptions = D2D1_LAYER_OPTIONS_NONE
-        target.pointee.lpVtbl.pointee.PushLayer(target, &params, layer)
-        _ = layer.pointee.lpVtbl.pointee.Release(layer)
+        defer { currentPath = CGMutablePath() }
+        guard let geometry = makeGeometry(currentPath, rule: rule) else { return }
+        cd2d_target_push_clip_path(target, geometry)
+        cd2d_path_release(geometry)      // the layer keeps the geometry alive
+        clipKinds.append(.path)
         state.clipPushes += 1
-        state.clipBox = state.clipBox.intersection(path.boundingBoxOfPath)
-        clipKinds.append(.layer)
-        path = CGMutablePath()
+        state.clipBox = state.clipBox.intersection(currentPath.boundingBoxOfPath)
     }
 
     public var clipBoundingBox: CGRect { state.clipBox }
-
-    private enum ClipKind { case axisAligned, layer }
-    private var clipKinds: [ClipKind] = []
 
     private func popClips(_ n: Int) {
         for _ in 0..<n {
             guard let kind = clipKinds.popLast() else { break }
             switch kind {
-            case .axisAligned: target.pointee.lpVtbl.pointee.PopAxisAlignedClip(target)
-            case .layer: target.pointee.lpVtbl.pointee.PopLayer(target)
+            case .rect: cd2d_target_pop_clip_rect(target)
+            case .path: cd2d_target_pop_clip_path(target)
             }
         }
     }
@@ -266,65 +249,31 @@ public final class CGContext {
 
     // MARK: Direct2D plumbing
 
-    private func configure(_ brush: UnsafeMutablePointer<ID2D1SolidColorBrush>?, color: CGColor) -> UnsafeMutablePointer<ID2D1Brush>? {
-        guard let brush else { return nil }
+    private func configure(_ brush: OpaquePointer?, color: CGColor) -> OpaquePointer? {
         let (r, g, b, a) = color.rgba
-        var c = d2dColor(r, g, b, a * state.alpha)
-        brush.pointee.lpVtbl.pointee.SetColor(brush, &c)
-        return brush.withMemoryRebound(to: ID2D1Brush.self, capacity: 1) { $0 }
+        cd2d_brush_set_color(brush, Float(r), Float(g), Float(b), Float(a * state.alpha))
+        return brush
     }
 
-    private func makeStrokeStyle() -> UnsafeMutablePointer<ID2D1StrokeStyle>? {
-        var props = D2D1_STROKE_STYLE_PROPERTIES()
-        switch state.lineCap {
-        case .butt: props.startCap = D2D1_CAP_STYLE_FLAT; props.endCap = D2D1_CAP_STYLE_FLAT; props.dashCap = D2D1_CAP_STYLE_FLAT
-        case .round: props.startCap = D2D1_CAP_STYLE_ROUND; props.endCap = D2D1_CAP_STYLE_ROUND; props.dashCap = D2D1_CAP_STYLE_ROUND
-        case .square: props.startCap = D2D1_CAP_STYLE_SQUARE; props.endCap = D2D1_CAP_STYLE_SQUARE; props.dashCap = D2D1_CAP_STYLE_SQUARE
-        }
-        switch state.lineJoin {
-        case .miter: props.lineJoin = D2D1_LINE_JOIN_MITER_OR_BEVEL
-        case .round: props.lineJoin = D2D1_LINE_JOIN_ROUND
-        case .bevel: props.lineJoin = D2D1_LINE_JOIN_BEVEL
-        }
-        props.miterLimit = Float(state.miterLimit)
-        props.dashStyle = state.dashLengths.isEmpty ? D2D1_DASH_STYLE_SOLID : D2D1_DASH_STYLE_CUSTOM
+    private func makeStrokeStyle() -> OpaquePointer? {
+        let cap: Int32 = state.lineCap == .round ? Int32(CD2D_CAP_ROUND) : state.lineCap == .square ? Int32(CD2D_CAP_SQUARE) : Int32(CD2D_CAP_FLAT)
+        let join: Int32 = state.lineJoin == .round ? Int32(CD2D_JOIN_ROUND) : state.lineJoin == .bevel ? Int32(CD2D_JOIN_BEVEL) : Int32(CD2D_JOIN_MITER)
         // Direct2D dash lengths are multiples of the stroke width.
         let w = max(state.lineWidth, 0.0001)
-        props.dashOffset = Float(state.dashPhase / w)
-        var style: UnsafeMutablePointer<ID2D1StrokeStyle>?
-        if state.dashLengths.isEmpty {
-            _ = factory.pointee.lpVtbl.pointee.CreateStrokeStyle(factory, &props, nil, 0, &style)
-        } else {
-            let dashes = state.dashLengths.map { Float($0 / w) }
-            dashes.withUnsafeBufferPointer { buf in
-                _ = factory.pointee.lpVtbl.pointee.CreateStrokeStyle(factory, &props, buf.baseAddress, UInt32(buf.count), &style)
-            }
+        let dashes = state.dashLengths.map { Float($0 / w) }
+        return dashes.withUnsafeBufferPointer { buf in
+            cd2d_stroke_style_create(factory, cap, join, Float(state.miterLimit), buf.baseAddress, UInt32(buf.count), Float(state.dashPhase / w))
         }
-        return style
     }
 
-    private func makeGeometry(_ p: CGPath, rule: CGPathFillRule) -> UnsafeMutablePointer<ID2D1PathGeometry>? {
-        guard !p.isEmpty else { return nil }
-        var geometry: UnsafeMutablePointer<ID2D1PathGeometry>?
-        guard factory.pointee.lpVtbl.pointee.CreatePathGeometry(factory, &geometry) >= 0, let geometry else { return nil }
-        var sink: UnsafeMutablePointer<ID2D1GeometrySink>?
-        guard geometry.pointee.lpVtbl.pointee.Open(geometry, &sink) >= 0, let sink else {
-            _ = geometry.pointee.lpVtbl.pointee.Release(geometry)
-            return nil
-        }
-        sink.pointee.lpVtbl.pointee.SetFillMode(sink, rule == .evenOdd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING)
+    private func makeGeometry(_ p: CGPath, rule: CGPathFillRule) -> OpaquePointer? {
+        guard !p.isEmpty, let geometry = cd2d_path_create(factory, rule == .evenOdd) else { return nil }
         var figureOpen = false
         var figureStart = CGPoint.zero
         var last = CGPoint.zero
-        func endFigure(closed: Bool) {
-            if figureOpen {
-                sink.pointee.lpVtbl.pointee.EndFigure(sink, closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN)
-                figureOpen = false
-            }
-        }
         func ensureFigure() {
             if !figureOpen {
-                sink.pointee.lpVtbl.pointee.BeginFigure(sink, d2dPoint(last), D2D1_FIGURE_BEGIN_FILLED)
+                cd2d_path_begin_figure(geometry, Float(last.x), Float(last.y))
                 figureOpen = true
                 figureStart = last
             }
@@ -332,33 +281,30 @@ public final class CGContext {
         for e in p.elements {
             switch e {
             case let .move(pt):
-                endFigure(closed: false)
-                last = pt
-                sink.pointee.lpVtbl.pointee.BeginFigure(sink, d2dPoint(pt), D2D1_FIGURE_BEGIN_FILLED)
+                if figureOpen { cd2d_path_end_figure(geometry, false) }
+                cd2d_path_begin_figure(geometry, Float(pt.x), Float(pt.y))
                 figureOpen = true
                 figureStart = pt
+                last = pt
             case let .line(pt):
                 ensureFigure()
-                sink.pointee.lpVtbl.pointee.AddLine(sink, d2dPoint(pt))
+                cd2d_path_add_line(geometry, Float(pt.x), Float(pt.y))
                 last = pt
             case let .quad(c, pt):
                 ensureFigure()
-                var seg = D2D1_QUADRATIC_BEZIER_SEGMENT(point1: d2dPoint(c), point2: d2dPoint(pt))
-                sink.pointee.lpVtbl.pointee.AddQuadraticBezier(sink, &seg)
+                cd2d_path_add_quad(geometry, Float(c.x), Float(c.y), Float(pt.x), Float(pt.y))
                 last = pt
             case let .curve(c1, c2, pt):
                 ensureFigure()
-                var seg = D2D1_BEZIER_SEGMENT(point1: d2dPoint(c1), point2: d2dPoint(c2), point3: d2dPoint(pt))
-                sink.pointee.lpVtbl.pointee.AddBezier(sink, &seg)
+                cd2d_path_add_bezier(geometry, Float(c1.x), Float(c1.y), Float(c2.x), Float(c2.y), Float(pt.x), Float(pt.y))
                 last = pt
             case .close:
-                endFigure(closed: true)
+                if figureOpen { cd2d_path_end_figure(geometry, true); figureOpen = false }
                 last = figureStart
             }
         }
-        endFigure(closed: false)
-        _ = sink.pointee.lpVtbl.pointee.Close(sink)
-        _ = sink.pointee.lpVtbl.pointee.Release(sink)
+        if figureOpen { cd2d_path_end_figure(geometry, false) }
+        cd2d_path_close(geometry)
         return geometry
     }
 }

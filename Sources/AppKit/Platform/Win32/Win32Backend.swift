@@ -4,6 +4,7 @@
 import Foundation
 import WinSDK
 import CoreGraphics
+import CD2D
 
 @MainActor
 final class Win32Backend: PlatformBackend {
@@ -12,7 +13,7 @@ final class Win32Backend: PlatformBackend {
     static let postMessage = UINT(WM_APP) + 1
 
     let hInstance: HINSTANCE? = GetModuleHandleW(nil)
-    private(set) var d2dFactory: UnsafeMutablePointer<ID2D1Factory>?
+    private(set) var d2dFactory: OpaquePointer?     // CD2DFactory*
     private var messageWindow: HWND?
     private var posted: [@MainActor () -> Void] = []
     private var running = false
@@ -22,10 +23,7 @@ final class Win32Backend: PlatformBackend {
         // Per-monitor v2 DPI awareness; the manifest can set this too, in which case the
         // call simply fails and we keep the manifest's choice.
         _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-        var iid = IID.d2d1FactoryForBackend
-        var raw: UnsafeMutableRawPointer?
-        let hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &iid, nil, &raw)
-        if hr >= 0, let raw { d2dFactory = raw.assumingMemoryBound(to: ID2D1Factory.self) }
+        d2dFactory = cd2d_factory_create()
         registerClasses()
         createMessageWindow()
     }
@@ -228,11 +226,5 @@ final class Win32Backend: PlatformBackend {
         }
         return DefWindowProcW(hwnd, msg, wParam, lParam)
     }
-}
-
-extension IID {
-    /// {06152247-6f50-465a-9245-118bfd3b6041}
-    static let d2d1FactoryForBackend = IID(Data1: 0x0615_2247, Data2: 0x6f50, Data3: 0x465a,
-                                           Data4: (0x92, 0x45, 0x11, 0x8b, 0xfd, 0x3b, 0x60, 0x41))
 }
 #endif

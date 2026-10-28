@@ -28,5 +28,7 @@ which is why it owns presentation rather than drawing.
   so DirectWrite (Milestone 2) and DirectComposition (Milestone 4) will be reached
   through Swift's C++ interoperability (`-cxx-interoperability-mode=default`) rather than
   C module maps. Milestone 1 needs only Direct2D.
-- Direct2D is COM. Swift calls COM through the C vtables (`lpVtbl`), wrapped once in
-  `CoreGraphics/COM.swift`.
+- Direct2D is COM, and unlike D3D11/DXGI its C headers carry no vtables (verified on the
+  first Windows build, 2026-10-28: every `ID2D1*` is an incomplete type in C mode). Swift
+  therefore talks to a small C++ target, `Sources/CD2D`, that exposes `extern "C"`
+  functions over opaque handles. DirectWrite and DirectComposition will join that shim.
