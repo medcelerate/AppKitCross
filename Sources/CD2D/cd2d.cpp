@@ -16,6 +16,8 @@
 #include <shobjidl.h>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <algorithm>
 #include <cstring>
 #include <cstdio>
 
@@ -39,6 +41,9 @@ struct CD2DTarget {
     D2D1_ALPHA_MODE alphaMode = D2D1_ALPHA_MODE_IGNORE;   // of the swap-chain back buffer
     float dpi = 96;
     bool lost = false;                            // device removed/reset: end_draw reports it
+    // Composition surface targets (Milestone 9): BeginDraw hands out a region of a larger
+    // atlas, so every transform the caller sets is shifted by this origin (DIPs).
+    float originX = 0, originY = 0;
 };
 struct CD2DBrush { ID2D1SolidColorBrush *brush = nullptr; };
 struct CD2DStrokeStyle { ID2D1StrokeStyle *style = nullptr; };
@@ -311,7 +316,7 @@ void cd2d_target_clear(CD2DTarget *target, float r, float g, float b, float a) {
 
 void cd2d_target_set_transform(CD2DTarget *target, const CD2DMatrix *m) {
     if (!target || !target->target || !m) return;
-    target->target->SetTransform(D2D1::Matrix3x2F(m->m11, m->m12, m->m21, m->m22, m->dx, m->dy));
+    target->target->SetTransform(D2D1::Matrix3x2F(m->m11, m->m12, m->m21, m->m22, m->dx + target->originX, m->dy + target->originY));
 }
 
 void cd2d_target_set_antialias(CD2DTarget *target, bool aa) {
@@ -812,6 +817,292 @@ void cd2d_text_layout_release(CD2DTextLayout *layout) {
 void cd2d_target_draw_text_layout(CD2DTarget *t, CD2DTextLayout *layout, float x, float y, CD2DBrush *b) {
     if (t && t->target && layout && layout->layout && b && b->brush)
         t->target->DrawTextLayout(D2D1::Point2F(x, y), layout->layout, b->brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+}
+
+}  // extern "C"
+
+// ---------------------------------------------------------------- DirectComposition tree (M9)
+
+struct CD2DCompVisual {
+    IDCompositionVisual *visual = nullptr;         // the v1 interface carries everything but opacity
+    IDCompositionVisual3 *visual3 = nullptr;       // SetOpacity (Windows 8.1+); null → effect group
+    IDCompositionEffectGroup *effect = nullptr;
+    IDCompositionRectangleClip *clip = nullptr;
+    IDCompositionSurface *surface = nullptr;
+    uint32_t surfaceWidth = 0, surfaceHeight = 0;
+    bool seen = false;                             // ensured in the current update
+    std::vector<int64_t> children, newChildren;    // ids, back to front
+};
+
+struct CD2DCompTree {
+    CD2DTarget *target = nullptr;                  // not owned; outlives the tree
+    IDCompositionDevice *device = nullptr;
+    IDCompositionVisual *root = nullptr;           // container under the swap-chain visual
+    std::vector<int64_t> rootChildren, newRootChildren;
+    std::unordered_map<int64_t, CD2DCompVisual *> visuals;
+    bool updating = false;
+    // Surface drawing: one device context on the target's D2D device, retargeted at the
+    // surface being drawn; `surfaceTarget` is the handle Swift wraps in a CGContext.
+    ID2D1DeviceContext *dc = nullptr;
+    ID2D1Bitmap1 *surfaceBitmap = nullptr;
+    IDXGISurface *surfaceDxgi = nullptr;
+    CD2DTarget surfaceTarget;
+    int64_t drawing = 0;                           // id of the surface between begin/end draw
+};
+
+static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
+    if (!tree) return nullptr;
+    auto it = tree->visuals.find(id);
+    return it == tree->visuals.end() ? nullptr : it->second;
+}
+
+static void compDestroyVisual(CD2DCompVisual *v) {
+    if (v->visual) {
+        v->visual->RemoveAllVisuals();
+        v->visual->SetContent(nullptr);
+        v->visual->SetClip(static_cast<IDCompositionClip *>(nullptr));
+        v->visual->SetEffect(nullptr);
+    }
+    safeRelease(v->surface);
+    safeRelease(v->clip);
+    safeRelease(v->effect);
+    safeRelease(v->visual3);
+    safeRelease(v->visual);
+    delete v;
+}
+
+/// Re-adds `children` under `parent` in order (each above the previous one).
+static void compPlaceChildren(CD2DCompTree *tree, IDCompositionVisual *parent, const std::vector<int64_t> &children) {
+    IDCompositionVisual *previous = nullptr;
+    for (int64_t id : children) {
+        CD2DCompVisual *c = compVisual(tree, id);
+        if (!c || !c->visual) continue;
+        parent->AddVisual(c->visual, TRUE, previous);
+        previous = c->visual;
+    }
+}
+
+extern "C" {
+
+CD2DCompTree *cd2d_comp_tree_create(CD2DTarget *target) {
+    if (!target || !target->dcompDevice || !target->dcompVisual || !target->d2dDevice) return nullptr;
+    CD2DCompTree *t = new CD2DCompTree();
+    t->target = target;
+    t->device = target->dcompDevice;
+    t->device->AddRef();
+    bool ok = false;
+    do {
+        if (FAILED(t->device->CreateVisual(&t->root))) break;
+        if (FAILED(target->dcompVisual->AddVisual(t->root, TRUE, nullptr))) break;
+        if (FAILED(target->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &t->dc))) break;
+        // Match the window target: grayscale text on premultiplied surfaces.
+        t->dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        t->surfaceTarget.target = t->dc;
+        t->surfaceTarget.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+        ok = true;
+    } while (false);
+    if (!ok) { cd2d_comp_tree_release(t); return nullptr; }
+    return t;
+}
+
+void cd2d_comp_tree_release(CD2DCompTree *tree) {
+    if (!tree) return;
+    if (tree->drawing) cd2d_comp_tree_surface_end_draw(tree, tree->drawing);
+    for (auto &entry : tree->visuals) compDestroyVisual(entry.second);
+    tree->visuals.clear();
+    if (tree->root) {
+        tree->root->RemoveAllVisuals();
+        if (tree->target && tree->target->dcompVisual) tree->target->dcompVisual->RemoveVisual(tree->root);
+    }
+    if (tree->device) tree->device->Commit();
+    safeRelease(tree->root);
+    tree->surfaceTarget.target = nullptr;
+    safeRelease(tree->dc);
+    safeRelease(tree->device);
+    delete tree;
+}
+
+void cd2d_comp_tree_begin_update(CD2DCompTree *tree) {
+    if (!tree) return;
+    tree->updating = true;
+    tree->newRootChildren.clear();
+    for (auto &entry : tree->visuals) { entry.second->seen = false; entry.second->newChildren.clear(); }
+}
+
+bool cd2d_comp_tree_ensure_visual(CD2DCompTree *tree, int64_t id, int64_t parentId) {
+    if (!tree || !tree->root || id == 0) return false;
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v) {
+        v = new CD2DCompVisual();
+        if (FAILED(tree->device->CreateVisual(&v->visual))) { delete v; return false; }
+        v->visual->QueryInterface(__uuidof(IDCompositionVisual3), reinterpret_cast<void **>(&v->visual3));
+        // Surfaces land at fractional pixel offsets under animating transforms: filter them
+        // and soften their edges, as the software compositor's bitmap draw does.
+        v->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+        v->visual->SetBorderMode(DCOMPOSITION_BORDER_MODE_SOFT);
+        tree->visuals[id] = v;
+    }
+    v->seen = true;
+    if (parentId == 0) {
+        tree->newRootChildren.push_back(id);
+    } else {
+        CD2DCompVisual *p = compVisual(tree, parentId);
+        if (!p || !p->seen) return false;
+        p->newChildren.push_back(id);
+    }
+    return true;
+}
+
+void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, float m12, float m21, float m22, float dx, float dy) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (v && v->visual) v->visual->SetTransform(D2D1::Matrix3x2F(m11, m12, m21, m22, dx, dy));
+}
+
+void cd2d_comp_tree_set_opacity(CD2DCompTree *tree, int64_t id, float opacity) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->visual) return;
+    if (opacity < 0) opacity = 0;
+    if (opacity > 1) opacity = 1;
+    if (v->visual3) { v->visual3->SetOpacity(opacity); return; }
+    if (!v->effect) {
+        if (FAILED(tree->device->CreateEffectGroup(&v->effect))) return;
+        v->visual->SetEffect(v->effect);
+    }
+    v->effect->SetOpacity(opacity);
+}
+
+void cd2d_comp_tree_set_clip(CD2DCompTree *tree, int64_t id, bool enabled, float left, float top, float right, float bottom,
+                             float rtl, float rtr, float rbl, float rbr) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->visual) return;
+    if (!enabled) {
+        if (v->clip) { v->visual->SetClip(static_cast<IDCompositionClip *>(nullptr)); safeRelease(v->clip); }
+        return;
+    }
+    if (!v->clip) {
+        if (FAILED(tree->device->CreateRectangleClip(&v->clip))) return;
+        v->visual->SetClip(v->clip);
+    }
+    v->clip->SetLeft(left); v->clip->SetTop(top); v->clip->SetRight(right); v->clip->SetBottom(bottom);
+    v->clip->SetTopLeftRadiusX(rtl); v->clip->SetTopLeftRadiusY(rtl);
+    v->clip->SetTopRightRadiusX(rtr); v->clip->SetTopRightRadiusY(rtr);
+    v->clip->SetBottomLeftRadiusX(rbl); v->clip->SetBottomLeftRadiusY(rbl);
+    v->clip->SetBottomRightRadiusX(rbr); v->clip->SetBottomRightRadiusY(rbr);
+}
+
+CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, uint32_t w, uint32_t h, float dpi) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->visual || !tree->dc || tree->drawing) return nullptr;
+    if (!w) w = 1;
+    if (!h) h = 1;
+    if (v->surface && (v->surfaceWidth != w || v->surfaceHeight != h)) {
+        v->visual->SetContent(nullptr);
+        safeRelease(v->surface);
+    }
+    if (!v->surface) {
+        if (FAILED(tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface))) return nullptr;
+        v->surfaceWidth = w; v->surfaceHeight = h;
+        v->visual->SetContent(v->surface);
+    }
+    POINT offset = {};
+    if (FAILED(v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset))) {
+        tree->surfaceDxgi = nullptr;
+        return nullptr;
+    }
+    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
+    if (FAILED(tree->dc->CreateBitmapFromDxgiSurface(tree->surfaceDxgi, &props, &tree->surfaceBitmap))) {
+        safeRelease(tree->surfaceDxgi);
+        v->surface->EndDraw();
+        return nullptr;
+    }
+    tree->drawing = id;
+    tree->dc->SetTarget(tree->surfaceBitmap);
+    tree->dc->SetDpi(dpi, dpi);
+    tree->dc->BeginDraw();
+    // The region is a rectangle of an atlas: keep every drawing call (and the clear) inside
+    // it. The clip is pushed in DIPs under the identity transform; the origin shifts every
+    // transform the caller sets afterwards.
+    float scale = dpi / 96.0f;
+    float ox = offset.x / scale, oy = offset.y / scale;
+    tree->surfaceTarget.dpi = dpi;
+    tree->surfaceTarget.originX = ox;
+    tree->surfaceTarget.originY = oy;
+    tree->dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    tree->dc->PushAxisAlignedClip(D2D1::RectF(ox, oy, ox + w / scale, oy + h / scale), D2D1_ANTIALIAS_MODE_ALIASED);
+    tree->dc->Clear(D2D1::ColorF(0, 0, 0, 0));
+    return &tree->surfaceTarget;
+}
+
+void cd2d_comp_tree_surface_end_draw(CD2DCompTree *tree, int64_t id) {
+    if (!tree || !tree->drawing || tree->drawing != id) return;
+    CD2DCompVisual *v = compVisual(tree, id);
+    tree->dc->PopAxisAlignedClip();
+    tree->dc->EndDraw();
+    tree->dc->SetTarget(nullptr);
+    safeRelease(tree->surfaceBitmap);
+    safeRelease(tree->surfaceDxgi);
+    if (v && v->surface) v->surface->EndDraw();
+    tree->surfaceTarget.originX = tree->surfaceTarget.originY = 0;
+    tree->drawing = 0;
+}
+
+void cd2d_comp_tree_remove_surface(CD2DCompTree *tree, int64_t id) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->surface || tree->drawing == id) return;
+    v->visual->SetContent(nullptr);
+    safeRelease(v->surface);
+    v->surfaceWidth = v->surfaceHeight = 0;
+}
+
+void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v) return;
+    if (tree->drawing == id) cd2d_comp_tree_surface_end_draw(tree, id);
+    // Detach from whichever parent lists it.
+    for (auto &entry : tree->visuals) {
+        auto &c = entry.second->children;
+        auto it = std::find(c.begin(), c.end(), id);
+        if (it != c.end()) { c.erase(it); entry.second->visual->RemoveVisual(v->visual); break; }
+    }
+    auto rit = std::find(tree->rootChildren.begin(), tree->rootChildren.end(), id);
+    if (rit != tree->rootChildren.end()) { tree->rootChildren.erase(rit); tree->root->RemoveVisual(v->visual); }
+    tree->visuals.erase(id);
+    compDestroyVisual(v);
+    if (!tree->updating) tree->device->Commit();
+}
+
+void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
+    if (!tree || !tree->updating) return;
+    if (tree->drawing) cd2d_comp_tree_surface_end_draw(tree, tree->drawing);
+    // 1. Visuals the update did not ensure go away.
+    std::vector<int64_t> dead;
+    for (auto &entry : tree->visuals) if (!entry.second->seen) dead.push_back(entry.first);
+    for (int64_t id : dead) {
+        CD2DCompVisual *v = tree->visuals[id];
+        tree->visuals.erase(id);
+        compDestroyVisual(v);       // RemoveAllVisuals drops its (possibly reparented) children
+    }
+    // 2. Parents whose child list changed detach everything first (a visual cannot be added
+    //    under a new parent while the old one still holds it), then re-add in order.
+    bool rootDirty = tree->rootChildren != tree->newRootChildren;
+    if (rootDirty) tree->root->RemoveAllVisuals();
+    for (auto &entry : tree->visuals) {
+        CD2DCompVisual *v = entry.second;
+        if (v->children != v->newChildren) v->visual->RemoveAllVisuals();
+    }
+    if (rootDirty) { compPlaceChildren(tree, tree->root, tree->newRootChildren); tree->rootChildren = tree->newRootChildren; }
+    for (auto &entry : tree->visuals) {
+        CD2DCompVisual *v = entry.second;
+        if (v->children != v->newChildren) { compPlaceChildren(tree, v->visual, v->newChildren); v->children = v->newChildren; }
+    }
+    tree->updating = false;
+    tree->device->Commit();
+}
+
+uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
+    return tree ? (uint32_t)tree->visuals.size() : 0;
 }
 
 }  // extern "C"
