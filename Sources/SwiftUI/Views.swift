@@ -1,0 +1,1092 @@
+// Primitive views: Text, Font, Color, Image, Button, TextField, Toggle, Slider, Divider,
+// ScrollView, List, Label, shapes.
+
+import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
+// MARK: Font
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/font
+public struct Font: Hashable, Sendable {
+    public enum Weight: Hashable, Sendable { case ultraLight, thin, light, regular, medium, semibold, bold, heavy, black }
+    public enum Design: Hashable, Sendable { case `default`, serif, rounded, monospaced }
+    public enum TextStyle: Hashable, CaseIterable, Sendable { case largeTitle, title, title2, title3, headline, subheadline, body, callout, footnote, caption, caption2 }
+
+    enum Base: Hashable { case system(CGFloat, Design), custom(String, CGFloat), style(TextStyle, Design) }
+    let base: Base
+    var weight: Weight? = nil
+    var isItalic = false
+    var monospacedDigits = false
+
+    public static let largeTitle = Font(base: .style(.largeTitle, .default))
+    public static let title = Font(base: .style(.title, .default))
+    public static let title2 = Font(base: .style(.title2, .default))
+    public static let title3 = Font(base: .style(.title3, .default))
+    public static let headline = Font(base: .style(.headline, .default))
+    public static let subheadline = Font(base: .style(.subheadline, .default))
+    public static let body = Font(base: .style(.body, .default))
+    public static let callout = Font(base: .style(.callout, .default))
+    public static let footnote = Font(base: .style(.footnote, .default))
+    public static let caption = Font(base: .style(.caption, .default))
+    public static let caption2 = Font(base: .style(.caption2, .default))
+
+    public static func system(size: CGFloat, weight: Weight = .regular, design: Design = .default) -> Font {
+        var f = Font(base: .system(size, design)); f.weight = weight; return f
+    }
+    public static func system(_ style: TextStyle, design: Design = .default) -> Font { Font(base: .style(style, design)) }
+    public static func system(_ style: TextStyle, design: Design? = nil, weight: Weight? = nil) -> Font {
+        var f = Font(base: .style(style, design ?? .default)); f.weight = weight; return f
+    }
+    public static func custom(_ name: String, size: CGFloat) -> Font { Font(base: .custom(name, size)) }
+    public static func custom(_ name: String, fixedSize: CGFloat) -> Font { Font(base: .custom(name, fixedSize)) }
+
+    public func weight(_ weight: Weight) -> Font { var f = self; f.weight = weight; return f }
+    public func bold() -> Font { weight(.bold) }
+    public func italic() -> Font { var f = self; f.isItalic = true; return f }
+    public func monospacedDigit() -> Font { var f = self; f.monospacedDigits = true; return f }
+    public func monospaced() -> Font {
+        switch base {
+        case .system(let s, _): return Font(base: .system(s, .monospaced), weight: weight, isItalic: isItalic)
+        case .style(let st, _): return Font(base: .style(st, .monospaced), weight: weight, isItalic: isItalic)
+        case .custom: return self
+        }
+    }
+
+    static func pointSize(_ style: TextStyle) -> CGFloat {
+        switch style {
+        case .largeTitle: return 26
+        case .title: return 22
+        case .title2: return 17
+        case .title3: return 15
+        case .headline: return 13
+        case .subheadline: return 11
+        case .body: return 13
+        case .callout: return 12
+        case .footnote: return 10
+        case .caption: return 10
+        case .caption2: return 10
+        }
+    }
+
+    static func nsWeight(_ w: Weight) -> NSFont.Weight {
+        switch w {
+        case .ultraLight: return .ultraLight
+        case .thin: return .thin
+        case .light: return .light
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        case .heavy: return .heavy
+        case .black: return .black
+        }
+    }
+
+    @MainActor public var nsFont: NSFont {
+        var w = weight
+        let size: CGFloat
+        let design: Design
+        switch base {
+        case .system(let s, let d): size = s; design = d
+        case .style(let st, let d):
+            size = Font.pointSize(st); design = d
+            if st == .headline, w == nil { w = .semibold }
+        case .custom(let name, let s):
+            let f = NSFont(name: name, size: s) ?? NSFont.systemFont(ofSize: s)
+            return isItalic ? (NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)) : f
+        }
+        var f: NSFont = design == .monospaced ? (NSFont.monospacedSystemFont(ofSize: size, weight: Font.nsWeight(w ?? .regular))) : NSFont.systemFont(ofSize: size, weight: Font.nsWeight(w ?? .regular))
+        if isItalic { f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask) }
+        return f
+    }
+}
+
+// MARK: Color
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/color
+public struct Color: Hashable, Sendable, View, _PrimitiveView {
+    public typealias Body = Never
+    public enum RGBColorSpace: Hashable, Sendable { case sRGB, sRGBLinear, displayP3 }
+    enum Storage: Hashable { case rgb(Double, Double, Double, Double), named(String), ns(String, Double, Double, Double, Double) }
+    let storage: Storage
+    var opacityMultiplier: Double = 1
+
+    public init(_ colorSpace: RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) { storage = .rgb(red, green, blue, opacity) }
+    public init(_ colorSpace: RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) { storage = .rgb(white, white, white, opacity) }
+    public init(red: Double, green: Double, blue: Double) { storage = .rgb(red, green, blue, 1) }
+    public init(hue: Double, saturation: Double, brightness: Double, opacity: Double = 1) {
+        let c = NSColor(hue: hue, saturation: saturation, brightness: brightness, alpha: opacity)
+        storage = .rgb(Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent), opacity)
+    }
+    public init(_ name: String, bundle: Bundle? = nil) { storage = .named(name) }
+    @MainActor public init(nsColor: NSColor) {
+        let c = nsColor.usingColorSpace(.sRGB) ?? nsColor
+        storage = .ns("", Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent), Double(c.alphaComponent))
+    }
+    init(named: String) { storage = .named(named) }
+
+    public static let clear = Color(named: "clear")
+    public static let black = Color(named: "black")
+    public static let white = Color(named: "white")
+    public static let gray = Color(named: "gray")
+    public static let red = Color(named: "red")
+    public static let green = Color(named: "green")
+    public static let blue = Color(named: "blue")
+    public static let orange = Color(named: "orange")
+    public static let yellow = Color(named: "yellow")
+    public static let pink = Color(named: "pink")
+    public static let purple = Color(named: "purple")
+    public static let primary = Color(named: "primary")
+    public static let secondary = Color(named: "secondary")
+    public static let accentColor = Color(named: "accent")
+    public static let mint = Color(red: 0, green: 0.78, blue: 0.75)
+    public static let teal = Color(red: 0.35, green: 0.68, blue: 0.75)
+    public static let cyan = Color(red: 0.33, green: 0.75, blue: 0.9)
+    public static let indigo = Color(red: 0.35, green: 0.34, blue: 0.84)
+    public static let brown = Color(red: 0.64, green: 0.52, blue: 0.37)
+
+    public func opacity(_ opacity: Double) -> Color { var c = self; c.opacityMultiplier *= opacity; return c }
+
+    @MainActor public var nsColor: NSColor {
+        let base: NSColor
+        switch storage {
+        case .rgb(let r, let g, let b, let a): base = NSColor(red: r, green: g, blue: b, alpha: a)
+        case .ns(_, let r, let g, let b, let a): base = NSColor(red: r, green: g, blue: b, alpha: a)
+        case .named(let n):
+            switch n {
+            case "clear": base = .clear
+            case "black": base = .black
+            case "white": base = .white
+            case "gray": base = NSColor(red: 0.56, green: 0.56, blue: 0.58, alpha: 1)
+            case "red": base = NSColor(red: 1, green: 0.23, blue: 0.19, alpha: 1)
+            case "green": base = NSColor(red: 0.16, green: 0.78, blue: 0.25, alpha: 1)
+            case "blue": base = NSColor(red: 0, green: 0.48, blue: 1, alpha: 1)
+            case "orange": base = NSColor(red: 1, green: 0.58, blue: 0, alpha: 1)
+            case "yellow": base = NSColor(red: 1, green: 0.8, blue: 0, alpha: 1)
+            case "pink": base = NSColor(red: 1, green: 0.18, blue: 0.33, alpha: 1)
+            case "purple": base = NSColor(red: 0.69, green: 0.32, blue: 0.87, alpha: 1)
+            case "primary": base = .labelColor
+            case "secondary": base = .secondaryLabelColor
+            case "accent": base = .controlAccentColor
+            default: base = NSColor(named: n) ?? .labelColor
+            }
+        }
+        return opacityMultiplier == 1 ? base : base.withAlphaComponent(base.alphaComponent * CGFloat(opacityMultiplier))
+    }
+
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, stroke: nil, lineWidth: 0, isColorFill: true) }
+}
+
+extension Color: ShapeStyle {}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle
+public protocol ShapeStyle {}
+
+// MARK: Text
+
+/// Measures and draws through the text system (storage, layout manager, container).
+@MainActor
+final class _TextView: NSView {
+    let storage = NSTextStorage()
+    let layoutManager = NSLayoutManager()
+    let container = NSTextContainer(size: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+    override var isFlipped: Bool { true }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+        container.lineFragmentPadding = 0
+    }
+    required init?(coder: NSCoder) { nil }
+    override var acceptsFirstResponder: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode) {
+        if !storage.isEqual(to: text) { storage.setAttributedString(text) }
+        container.maximumNumberOfLines = lineLimit ?? 0
+        container.lineBreakMode = lineLimit == 1 ? truncation : .byWordWrapping
+        let style = NSMutableParagraphStyle()
+        switch alignment {
+        case .leading: style.alignment = .left
+        case .center: style.alignment = .center
+        case .trailing: style.alignment = .right
+        }
+        storage.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: storage.length))
+    }
+
+    func size(for width: CGFloat?) -> CGSize {
+        container.size = NSSize(width: width ?? CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let used = layoutManager.usedRect(for: container)
+        return CGSize(width: used.width.rounded(.up), height: used.height.rounded(.up))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        container.size = NSSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
+        let range = layoutManager.glyphRange(for: container)
+        layoutManager.drawGlyphs(forGlyphRange: range, at: .zero)
+    }
+}
+
+@MainActor
+final class _TextPrimitive: _Primitive {
+    var text: Text
+    let view = _TextView(frame: .zero)
+    init(text: Text) { self.text = text }
+    override var nsView: NSView? { view }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _TextPrimitive { text = o.text; refresh() }
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); refresh() }
+    private func refresh() {
+        guard let node else { return }
+        let env = node.environment
+        view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail)
+        view.needsDisplay = true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        refresh()
+        var s = view.size(for: proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
+        if let w = proposal.width, w.isFinite, w > 0, s.width > w, node.environment.lineLimit == 1 { s.width = w }
+        return s
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {}
+    override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/text
+public struct Text: View, _PrimitiveView, Equatable {
+    public typealias Body = Never
+    public enum TruncationMode: Hashable, Sendable { case head, tail, middle }
+    public enum Case: Hashable, Sendable { case uppercase, lowercase }
+
+    struct Run: Equatable {
+        var string: String
+        var font: Font? = nil
+        var color: Color? = nil
+        var bold = false
+        var italic = false
+        var underline = false
+        var strikethrough = false
+        var kerning: CGFloat = 0
+        var baselineOffset: CGFloat = 0
+    }
+    var runs: [Run]
+
+    public init(verbatim content: String) { runs = [Run(string: content)] }
+    public init<S: StringProtocol>(_ content: S) { runs = [Run(string: String(content))] }
+    public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.key)] }
+    public init(_ attributed: AttributedString) { runs = [Run(string: String(attributed.characters))] }
+    public init(_ date: Date, style: DateStyle) {
+        let f = DateFormatter()
+        switch style {
+        case .time: f.timeStyle = .short
+        case .date: f.dateStyle = .medium
+        case .relative, .offset, .timer: f.timeStyle = .short
+        }
+        runs = [Run(string: f.string(from: date))]
+    }
+    public enum DateStyle: Sendable { case time, date, relative, offset, timer }
+
+    private func mapRuns(_ f: (inout Run) -> Void) -> Text { var t = self; for i in t.runs.indices { f(&t.runs[i]) }; return t }
+    public func font(_ font: Font?) -> Text { mapRuns { $0.font = font ?? $0.font } }
+    public func foregroundColor(_ color: Color?) -> Text { mapRuns { $0.color = color } }
+    public func foregroundStyle(_ color: Color) -> Text { mapRuns { $0.color = color } }
+    public func bold() -> Text { mapRuns { $0.bold = true } }
+    public func italic() -> Text { mapRuns { $0.italic = true } }
+    public func underline(_ active: Bool = true, color: Color? = nil) -> Text { mapRuns { $0.underline = active } }
+    public func strikethrough(_ active: Bool = true, color: Color? = nil) -> Text { mapRuns { $0.strikethrough = active } }
+    public func kerning(_ kerning: CGFloat) -> Text { mapRuns { $0.kerning = kerning } }
+    public func baselineOffset(_ offset: CGFloat) -> Text { mapRuns { $0.baselineOffset = offset } }
+    public func fontWeight(_ weight: Font.Weight?) -> Text { mapRuns { if let w = weight { $0.font = ($0.font ?? .body).weight(w) } } }
+    public func textCase(_ c: Case?) -> Text {
+        mapRuns { if c == .uppercase { $0.string = $0.string.uppercased() } else if c == .lowercase { $0.string = $0.string.lowercased() } }
+    }
+    public static func + (lhs: Text, rhs: Text) -> Text { var t = lhs; t.runs += rhs.runs; return t }
+
+    @MainActor func _attributed(_ env: EnvironmentValues) -> NSAttributedString {
+        let out = NSMutableAttributedString(string: "")
+        let baseFont = env.font ?? .body
+        let baseColor = env.foregroundColor
+        for r in runs {
+            var font = r.font ?? baseFont
+            if r.bold { font = font.bold() }
+            if r.italic { font = font.italic() }
+            var attrs: [NSAttributedString.Key: Any] = [.font: font.nsFont]
+            let color = r.color ?? baseColor
+            attrs[.foregroundColor] = color?.nsColor ?? (env.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor)
+            if r.underline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+            if r.strikethrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+            if r.kerning != 0 { attrs[.kern] = r.kerning }
+            if r.baselineOffset != 0 { attrs[.baselineOffset] = r.baselineOffset }
+            out.append(NSAttributedString(string: r.string, attributes: attrs))
+        }
+        return out
+    }
+
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextPrimitive(text: self) }
+}
+
+extension Text {
+    /// The plain string (tests and labels).
+    public var _string: String { runs.map(\.string).joined() }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey
+public struct LocalizedStringKey: ExpressibleByStringLiteral, ExpressibleByStringInterpolation, Equatable, Sendable {
+    let key: String
+    public init(_ value: String) { key = value }
+    public init(stringLiteral value: String) { key = value }
+    public init(stringInterpolation: DefaultStringInterpolation) { key = String(describing: stringInterpolation) }
+}
+
+// MARK: Shapes
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/path
+public struct Path: Equatable, @unchecked Sendable {
+    public private(set) var cgPath: CGPath
+    public init() { cgPath = CGMutablePath() }
+    public init(_ path: CGPath) { cgPath = path }
+    public init(_ rect: CGRect) { cgPath = CGPath(rect: rect, transform: nil) }
+    public init(roundedRect rect: CGRect, cornerRadius: CGFloat, style: RoundedCornerStyle = .circular) {
+        cgPath = CGPath(roundedRect: rect, cornerWidth: min(cornerRadius, rect.width / 2), cornerHeight: min(cornerRadius, rect.height / 2), transform: nil)
+    }
+    public init(ellipseIn rect: CGRect) { cgPath = CGPath(ellipseIn: rect, transform: nil) }
+    public init(_ callback: (inout Path) -> Void) { self.init(); callback(&self) }
+    private var mutable: CGMutablePath {
+        let m = CGMutablePath()
+        m.addPath(cgPath)
+        return m
+    }
+    public var isEmpty: Bool { cgPath.isEmpty }
+    public var boundingRect: CGRect { cgPath.boundingBox }
+    public mutating func move(to p: CGPoint) { let m = mutable; m.move(to: p); cgPath = m }
+    public mutating func addLine(to p: CGPoint) { let m = mutable; m.addLine(to: p); cgPath = m }
+    public mutating func addQuadCurve(to p: CGPoint, control: CGPoint) { let m = mutable; m.addQuadCurve(to: p, control: control); cgPath = m }
+    public mutating func addCurve(to p: CGPoint, control1: CGPoint, control2: CGPoint) { let m = mutable; m.addCurve(to: p, control1: control1, control2: control2); cgPath = m }
+    public mutating func closeSubpath() { let m = mutable; m.closeSubpath(); cgPath = m }
+    public mutating func addRect(_ rect: CGRect) { let m = mutable; m.addRect(rect); cgPath = m }
+    public mutating func addEllipse(in rect: CGRect) { let m = mutable; m.addEllipse(in: rect); cgPath = m }
+    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
+        let m = mutable; m.addRoundedRect(in: rect, cornerWidth: cornerSize.width, cornerHeight: cornerSize.height); cgPath = m
+    }
+    public mutating func addPath(_ path: Path) { let m = mutable; m.addPath(path.cgPath); cgPath = m }
+    public mutating func addLines(_ lines: [CGPoint]) { let m = mutable; m.addLines(between: lines); cgPath = m }
+    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool) {
+        let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise); cgPath = m
+    }
+    public static func == (a: Path, b: Path) -> Bool { a.cgPath == b.cgPath }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/angle
+public struct Angle: Hashable, Comparable, Sendable {
+    public var radians: Double
+    public var degrees: Double { get { radians * 180 / .pi } set { radians = newValue * .pi / 180 } }
+    public init() { radians = 0 }
+    public init(radians: Double) { self.radians = radians }
+    public init(degrees: Double) { radians = degrees * .pi / 180 }
+    public static func radians(_ r: Double) -> Angle { Angle(radians: r) }
+    public static func degrees(_ d: Double) -> Angle { Angle(degrees: d) }
+    public static let zero = Angle()
+    public static func < (a: Angle, b: Angle) -> Bool { a.radians < b.radians }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/roundedcornerstyle
+public enum RoundedCornerStyle: Hashable, Sendable { case circular, continuous }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape
+public protocol Shape: View {
+    func path(in rect: CGRect) -> Path
+}
+
+extension Shape {
+    public var body: some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(_:style:)
+    public func fill(_ color: Color, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: color, stroke: nil, lineWidth: 0) }
+    public func fill() -> some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:)
+    public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth) }
+    public func stroke(_ color: Color, style: StrokeStyle) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: style.lineWidth) }
+    public func stroke(lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: .primary, lineWidth: lineWidth) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/strokeborder(_:linewidth:antialiased:)
+    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1, antialiased: Bool = true) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth, inset: true) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/fillstyle
+public struct FillStyle: Equatable, Sendable {
+    public var isEOFilled: Bool
+    public var isAntialiased: Bool
+    public init(eoFill: Bool = false, antialiased: Bool = true) { isEOFilled = eoFill; isAntialiased = antialiased }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/strokestyle
+public struct StrokeStyle: Equatable, Sendable {
+    public var lineWidth: CGFloat
+    public var lineCap: CGLineCap
+    public var lineJoin: CGLineJoin
+    public var miterLimit: CGFloat
+    public var dash: [CGFloat]
+    public var dashPhase: CGFloat
+    public init(lineWidth: CGFloat = 1, lineCap: CGLineCap = .butt, lineJoin: CGLineJoin = .miter, miterLimit: CGFloat = 10, dash: [CGFloat] = [], dashPhase: CGFloat = 0) {
+        self.lineWidth = lineWidth; self.lineCap = lineCap; self.lineJoin = lineJoin; self.miterLimit = miterLimit; self.dash = dash; self.dashPhase = dashPhase
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/anyshape
+public struct AnyShape: Shape, @unchecked Sendable {
+    let pathBuilder: (CGRect) -> Path
+    public init<S: Shape>(_ shape: S) { pathBuilder = { shape.path(in: $0) } }
+    public func path(in rect: CGRect) -> Path { pathBuilder(rect) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/rectangle
+public struct Rectangle: Shape, Sendable {
+    public init() {}
+    public func path(in rect: CGRect) -> Path { Path(rect) }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/roundedrectangle
+public struct RoundedRectangle: Shape, Sendable {
+    public var cornerSize: CGSize
+    public var style: RoundedCornerStyle
+    public init(cornerRadius: CGFloat, style: RoundedCornerStyle = .circular) { cornerSize = CGSize(width: cornerRadius, height: cornerRadius); self.style = style }
+    public init(cornerSize: CGSize, style: RoundedCornerStyle = .circular) { self.cornerSize = cornerSize; self.style = style }
+    public func path(in rect: CGRect) -> Path { Path(roundedRect: rect, cornerRadius: cornerSize.width, style: style) }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/circle
+public struct Circle: Shape, Sendable {
+    public init() {}
+    public func path(in rect: CGRect) -> Path {
+        let d = min(rect.width, rect.height)
+        return Path(ellipseIn: CGRect(x: rect.midX - d / 2, y: rect.midY - d / 2, width: d, height: d))
+    }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/ellipse
+public struct Ellipse: Shape, Sendable {
+    public init() {}
+    public func path(in rect: CGRect) -> Path { Path(ellipseIn: rect) }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/capsule
+public struct Capsule: Shape, Sendable {
+    public var style: RoundedCornerStyle
+    public init(style: RoundedCornerStyle = .circular) { self.style = style }
+    public func path(in rect: CGRect) -> Path { Path(roundedRect: rect, cornerRadius: min(rect.width, rect.height) / 2, style: style) }
+}
+
+@MainActor
+final class _ShapeDrawingView: NSView {
+    var draw: ((CGContext, CGRect) -> Void)?
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) { if let ctx = NSGraphicsContext.current?.cgContext { draw?(ctx, bounds) } }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+@MainActor
+final class _ShapeViewPrimitive: _Primitive {
+    var shape: AnyShape
+    var fill: Color?
+    var stroke: Color?
+    var lineWidth: CGFloat
+    var inset = false
+    let isColorFill: Bool
+    let view = _ShapeDrawingView(frame: .zero)
+
+    init(shape: AnyShape, fill: Color?, stroke: Color?, lineWidth: CGFloat, inset: Bool = false, isColorFill: Bool = false) {
+        self.shape = shape; self.fill = fill; self.stroke = stroke; self.lineWidth = lineWidth; self.inset = inset; self.isColorFill = isColorFill
+        super.init()
+    }
+    override var nsView: NSView? { view }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _ShapeViewPrimitive else { return }
+        shape = o.shape; fill = o.fill; stroke = o.stroke; lineWidth = o.lineWidth; inset = o.inset
+        install()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); install() }
+    private func install() {
+        let fill = fill, stroke = stroke, lineWidth = lineWidth, shape = shape, inset = inset
+        let env = node?.environment ?? EnvironmentValues()
+        view.draw = { ctx, bounds in
+            let rect = inset ? bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2) : bounds
+            if let f = fill {
+                let c = f.storage == .named("primary") ? (env.foregroundColor ?? f) : f
+                ctx.setFillColor(c.nsColor.cgColor)
+                ctx.addPath(shape.path(in: rect).cgPath)
+                ctx.fillPath()
+            }
+            if let s = stroke, lineWidth > 0 {
+                let c = s.storage == .named("primary") ? (env.foregroundColor ?? s) : s
+                ctx.setStrokeColor(c.nsColor.cgColor)
+                ctx.setLineWidth(lineWidth)
+                ctx.addPath(shape.path(in: rect).cgPath)
+                ctx.strokePath()
+            }
+        }
+        view.needsDisplay = true
+    }
+    /// Shapes and colours take whatever is proposed; unspecified dimensions use 10 points.
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        CGSize(width: proposal.width.map { $0.isFinite ? $0 : 10 } ?? 10, height: proposal.height.map { $0.isFinite ? $0 : 10 } ?? 10)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {}
+    override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+}
+
+struct _ShapeView: View, _PrimitiveView {
+    typealias Body = Never
+    let shape: AnyShape
+    let fill: Color?
+    let stroke: Color?
+    let lineWidth: CGFloat
+    var inset = false
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, stroke: stroke, lineWidth: lineWidth, inset: inset) }
+}
+
+// MARK: Divider
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/divider
+public struct Divider: View, _PrimitiveView {
+    public typealias Body = Never
+    public init() {}
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _DividerPrimitive() }
+}
+
+@MainActor
+final class _DividerPrimitive: _Primitive {
+    let view = _ShapeDrawingView(frame: .zero)
+    override var nsView: NSView? { view }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        view.draw = { ctx, b in ctx.setFillColor(NSColor.separatorColor.cgColor); ctx.fill(b) }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        if node.stackAxis == .horizontal { return CGSize(width: 1, height: proposal.height.map { $0.isFinite ? $0 : 10 } ?? 10) }
+        return CGSize(width: proposal.width.map { $0.isFinite ? $0 : 10 } ?? 10, height: 1)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {}
+}
+
+// MARK: Controls backed by AppKit
+
+/// A primitive that owns one AppKit control sized by its intrinsic size.
+@MainActor
+class _ControlPrimitive<Control: NSView>: _Primitive {
+    let control: Control
+    init(control: Control) { self.control = control }
+    override var nsView: NSView? { control }
+    var intrinsicSize: CGSize { let s = control.intrinsicContentSize; return CGSize(width: s.width == NSView.noIntrinsicMetric ? 100 : s.width, height: s.height == NSView.noIntrinsicMetric ? 22 : s.height) }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { intrinsicSize }
+    override func place(node: _ViewNode, in rect: CGRect) {}
+}
+
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/button
+public struct Button<Label: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let action: () -> Void
+    let label: Label
+    let role: ButtonRole?
+    public init(action: @escaping () -> Void, @ViewBuilder label: () -> Label) {
+        self.action = action; self.label = label(); role = nil
+    }
+    public init(role: ButtonRole?, action: @escaping () -> Void, @ViewBuilder label: () -> Label) {
+        self.action = action; self.label = label(); self.role = role
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        if let text = label as? Text { return _ButtonPrimitive(title: text._string, action: action) }
+        return _CustomButtonPrimitive(action: action, content: _ViewBox(label))
+    }
+}
+
+extension Button where Label == Text {
+    public init(_ title: String, action: @escaping () -> Void) { self.init(action: action) { Text(title) } }
+    public init(_ titleKey: LocalizedStringKey, action: @escaping () -> Void) { self.init(action: action) { Text(titleKey) } }
+    public init(_ title: String, role: ButtonRole?, action: @escaping () -> Void) { self.init(role: role, action: action) { Text(title) } }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/buttonrole
+public struct ButtonRole: Equatable, Sendable {
+    public static let destructive = ButtonRole()
+    public static let cancel = ButtonRole()
+}
+
+@MainActor
+final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
+    var action: () -> Void
+    init(title: String, action: @escaping () -> Void) {
+        self.action = action
+        let b = NSButton(frame: .zero)
+        b.title = title
+        b.bezelStyle = .rounded
+        super.init(control: b)
+        b.target = b
+        b.action = Selector(("swiftUIButtonAction:"))
+        b.setActionHandler(for: Selector(("swiftUIButtonAction:"))) { [weak self] _ in self?.action() }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _ButtonPrimitive else { return }
+        action = o.action
+        if control.title != o.control.title { control.title = o.control.title }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        guard let node else { return }
+        control.isEnabled = node.environment.isEnabled
+        if let f = node.environment.font { control.font = f.nsFont }
+        switch node.environment.buttonStyle {
+        case .plain, .borderless, .link: control.isBordered = false
+        default: control.isBordered = true
+        }
+        if let (key, mods) = node.environment._keyShortcut {
+            control.keyEquivalent = String(key.character)
+            var m: NSEvent.ModifierFlags = []
+            if mods.contains(.command) { m.insert(.command) }
+            if mods.contains(.shift) { m.insert(.shift) }
+            if mods.contains(.option) { m.insert(.option) }
+            if mods.contains(.control) { m.insert(.control) }
+            control.keyEquivalentModifierMask = key.character == "\r" ? [] : m
+        }
+        control.sizeToFit()
+    }
+    override var intrinsicSize: CGSize { control.sizeToFit(); return CGSize(width: max(control.frame.width, 20), height: max(control.frame.height, 20)) }
+}
+
+/// A button with custom content: a tap-handling container around the label.
+@MainActor
+final class _CustomButtonPrimitive: _Primitive {
+    var action: () -> Void
+    let view = _ContainerView(frame: .zero)
+    init(action: @escaping () -> Void, content: _AnyViewBox) {
+        self.action = action
+        super.init()
+        children = [content]
+    }
+    override var nsView: NSView? { view }
+    override func update(from other: _Primitive) { super.update(from: other); if let o = other as? _CustomButtonPrimitive { action = o.action } }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        view.mouseDownHandler = { [weak self] _ in self?.action(); return true }
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield
+public struct TextField<Label: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let placeholder: String
+    let text: Binding<String>
+    let onCommit: () -> Void
+    public init(_ title: String, text: Binding<String>) where Label == Text {
+        placeholder = title; self.text = text; onCommit = {}
+    }
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>) where Label == Text {
+        placeholder = titleKey.key; self.text = text; onCommit = {}
+    }
+    public init(_ title: String, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
+        placeholder = title; self.text = text; self.onCommit = onCommit
+    }
+    public init(_ title: String, text: Binding<String>, prompt: Text?) where Label == Text {
+        placeholder = prompt?._string ?? title; self.text = text; onCommit = {}
+    }
+    public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
+        placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit) }
+}
+
+@MainActor
+final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
+    var text: Binding<String>
+    var onCommit: () -> Void
+    var placeholder: String
+    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void) {
+        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
+        f.placeholderString = placeholder
+        f.stringValue = text.wrappedValue
+        super.init(control: f)
+        f.target = f
+        f.action = Selector(("swiftUIFieldAction:"))
+        f.setActionHandler(for: Selector(("swiftUIFieldAction:"))) { [weak self] _ in self?.onCommit() }
+        f.setActionHandler(for: Selector(("swiftUIFieldChanged:"))) { [weak self] _ in self?.changed() }
+        NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: f, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.changed() }
+        }
+    }
+    private func changed() {
+        let v = control.stringValue
+        if text.wrappedValue != v { text.wrappedValue = v }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _TextFieldPrimitive else { return }
+        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        guard let node else { return }
+        if control.stringValue != text.wrappedValue, control.currentEditor == nil { control.stringValue = text.wrappedValue }
+        if control.placeholderString != placeholder { control.placeholderString = placeholder }
+        control.isEnabled = node.environment.isEnabled
+        if let f = node.environment.font { control.font = f.nsFont }
+        switch node.environment.textFieldStyle {
+        case .plain: control.isBezeled = false; control.drawsBackground = false
+        default: control.isBezeled = true; control.drawsBackground = true
+        }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let h = control.intrinsicContentSize.height
+        let w = proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160
+        return CGSize(width: max(w, 20), height: h == NSView.noIntrinsicMetric ? 22 : h)
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/toggle
+public struct Toggle<Label: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let isOn: Binding<Bool>
+    let label: Label
+    public init(isOn: Binding<Bool>, @ViewBuilder label: () -> Label) { self.isOn = isOn; self.label = label() }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TogglePrimitive(title: (label as? Text)?._string ?? "", isOn: isOn) }
+}
+
+extension Toggle where Label == Text {
+    public init(_ title: String, isOn: Binding<Bool>) { self.init(isOn: isOn) { Text(title) } }
+    public init(_ titleKey: LocalizedStringKey, isOn: Binding<Bool>) { self.init(isOn: isOn) { Text(titleKey) } }
+}
+
+@MainActor
+final class _TogglePrimitive: _ControlPrimitive<NSButton> {
+    var isOn: Binding<Bool>
+    init(title: String, isOn: Binding<Bool>) {
+        self.isOn = isOn
+        let b = NSButton(frame: .zero)
+        b.setButtonType(.switch)
+        b.title = title
+        b.state = isOn.wrappedValue ? .on : .off
+        super.init(control: b)
+        b.target = b
+        b.action = Selector(("swiftUIToggleAction:"))
+        b.setActionHandler(for: Selector(("swiftUIToggleAction:"))) { [weak self] _ in
+            guard let self else { return }
+            let v = self.control.state == .on
+            if self.isOn.wrappedValue != v { self.isOn.wrappedValue = v }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _TogglePrimitive else { return }
+        isOn = o.isOn
+        if control.title != o.control.title { control.title = o.control.title }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        let want: NSControl.StateValue = isOn.wrappedValue ? .on : .off
+        if control.state != want { control.state = want }
+        control.isEnabled = node?.environment.isEnabled ?? true
+        control.sizeToFit()
+    }
+    override var intrinsicSize: CGSize { control.sizeToFit(); return CGSize(width: max(control.frame.width, 18), height: max(control.frame.height, 18)) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider
+public struct Slider<Label: View, ValueLabel: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let step: Double?
+    let onEditingChanged: (Bool) -> Void
+    public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where Label == EmptyView, ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound)
+        self.step = step.map { Double($0) }
+        self.onEditingChanged = onEditingChanged
+    }
+    public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }, @ViewBuilder label: () -> Label) where ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound)
+        self.step = step.map { Double($0) }
+        self.onEditingChanged = onEditingChanged
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range) }
+}
+
+@MainActor
+final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
+    var value: Binding<Double>
+    init(value: Binding<Double>, range: ClosedRange<Double>) {
+        self.value = value
+        let s = NSSlider(frame: NSRect(x: 0, y: 0, width: 120, height: 20))
+        s.minValue = range.lowerBound
+        s.maxValue = range.upperBound
+        s.doubleValue = value.wrappedValue
+        super.init(control: s)
+        s.target = s
+        s.action = Selector(("swiftUISliderAction:"))
+        s.setActionHandler(for: Selector(("swiftUISliderAction:"))) { [weak self] _ in
+            guard let self else { return }
+            if self.value.wrappedValue != self.control.doubleValue { self.value.wrappedValue = self.control.doubleValue }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _SliderPrimitive else { return }
+        value = o.value
+        control.minValue = o.control.minValue; control.maxValue = o.control.maxValue
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        if control.doubleValue != value.wrappedValue { control.doubleValue = value.wrappedValue }
+        control.isEnabled = node?.environment.isEnabled ?? true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        CGSize(width: max(20, proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160), height: 20)
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/image
+public struct Image: View, _PrimitiveView, Equatable {
+    public typealias Body = Never
+    public enum ResizingMode: Hashable, Sendable { case tile, stretch }
+    let image: NSImage?
+    let name: String
+    var resizable = false
+    public init(_ name: String, bundle: Bundle? = nil) { self.name = name; image = NSImage(named: name) }
+    public init(systemName: String) { name = systemName; image = nil }
+    public init(nsImage: NSImage) { name = ""; image = nsImage }
+    public init(decorative name: String, bundle: Bundle? = nil) { self.init(name, bundle: bundle) }
+    public func resizable(capInsets: EdgeInsets = EdgeInsets(), resizingMode: ResizingMode = .stretch) -> Image { var i = self; i.resizable = true; return i }
+    public func renderingMode(_ mode: TemplateRenderingMode?) -> Image { self }
+    public func interpolation(_ interpolation: Interpolation) -> Image { self }
+    public enum TemplateRenderingMode: Hashable, Sendable { case template, original }
+    public enum Interpolation: Hashable, Sendable { case none, low, medium, high }
+    public static func == (a: Image, b: Image) -> Bool { a.name == b.name && a.image === b.image && a.resizable == b.resizable }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ImagePrimitive(image: self) }
+}
+
+@MainActor
+final class _ImagePrimitive: _ControlPrimitive<NSImageView> {
+    var image: Image
+    init(image: Image) {
+        self.image = image
+        let v = NSImageView(frame: .zero)
+        v.image = image.image
+        super.init(control: v)
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _ImagePrimitive else { return }
+        image = o.image
+        control.image = image.image
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let natural = image.image?.size ?? CGSize(width: 16, height: 16)
+        guard image.resizable else { return natural }
+        return CGSize(width: proposal.width.map { $0.isFinite ? $0 : natural.width } ?? natural.width, height: proposal.height.map { $0.isFinite ? $0 : natural.height } ?? natural.height)
+    }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/aspectratio(_:contentmode:)
+    public func aspectRatio(_ ratio: CGFloat? = nil, contentMode: ContentMode) -> some View { self }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/scaledtofit()
+    public func scaledToFit() -> some View { self }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/scaledtofill()
+    public func scaledToFill() -> some View { self }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/contentmode
+public enum ContentMode: Hashable, CaseIterable, Sendable { case fit, fill }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/label
+public struct Label<Title: View, Icon: View>: View {
+    let title: Title
+    let icon: Icon
+    public init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) { self.title = title(); self.icon = icon() }
+    public var body: some View { HStack(spacing: 4) { icon; title } }
+}
+
+extension Label where Title == Text, Icon == Image {
+    public init(_ title: String, systemImage: String) { self.init(title: { Text(title) }, icon: { Image(systemName: systemImage) }) }
+    public init(_ title: String, image: String) { self.init(title: { Text(title) }, icon: { Image(image) }) }
+}
+
+// MARK: ScrollView and List
+
+@MainActor
+final class _ScrollPrimitive: _Primitive {
+    let scroll = NSScrollView(frame: .zero)
+    let document = _ContainerView(frame: .zero)
+    var axes: Axis.Set
+    var showsIndicators: Bool
+    init(axes: Axis.Set, showsIndicators: Bool, content: _AnyViewBox) {
+        self.axes = axes
+        self.showsIndicators = showsIndicators
+        super.init()
+        children = [content]
+        scroll.documentView = document
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = axes.contains(.vertical) && showsIndicators
+        scroll.hasHorizontalScroller = axes.contains(.horizontal) && showsIndicators
+    }
+    override var nsView: NSView? { scroll }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _ScrollPrimitive { axes = o.axes; showsIndicators = o.showsIndicators }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let content = node.children.first?.sizeThatFits(ProposedViewSize(width: axes.contains(.horizontal) ? nil : proposal.width, height: axes.contains(.vertical) ? nil : proposal.height)) ?? .zero
+        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : content.width } ?? content.width) : content.width,
+                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : content.height } ?? content.height) : content.height)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {
+        let inner = scroll.contentSize == .zero ? rect.size : scroll.contentSize
+        let proposal = ProposedViewSize(width: axes.contains(.horizontal) ? nil : inner.width, height: axes.contains(.vertical) ? nil : inner.height)
+        guard let content = node.children.first else { return }
+        let s = content.sizeThatFits(proposal)
+        let size = CGSize(width: max(s.width, axes.contains(.horizontal) ? 0 : inner.width), height: max(s.height, axes.contains(.vertical) ? 0 : inner.height))
+        // Children are laid out relative to the document view, whose frame is at the scroll origin.
+        content.place(in: CGRect(origin: rect.origin, size: size))
+        document.frame = NSRect(origin: .zero, size: size)
+    }
+    override func didSyncBackingViews(node: _ViewNode) {
+        // Content backing views belong in the document, not in the scroll view itself.
+        for c in node.children { c.syncBackingViews(in: document, containerFrame: node.frame) }
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/scrollview
+public struct ScrollView<Content: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    public var axes: Axis.Set
+    public var showsIndicators: Bool
+    let content: Content
+    public init(_ axes: Axis.Set = .vertical, showsIndicators: Bool = true, @ViewBuilder content: () -> Content) {
+        self.axes = axes; self.showsIndicators = showsIndicators; self.content = content()
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ScrollPrimitive(axes: axes, showsIndicators: showsIndicators, content: _ViewBox(content)) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/list
+public struct List<SelectionValue: Hashable, Content: View>: View {
+    let content: Content
+    public init(@ViewBuilder content: () -> Content) where SelectionValue == Never { self.content = content() }
+    public init(selection: Binding<SelectionValue?>?, @ViewBuilder content: () -> Content) { self.content = content() }
+    public init(selection: Binding<Set<SelectionValue>>?, @ViewBuilder content: () -> Content) { self.content = content() }
+    public var body: some View {
+        ScrollView {
+            _ListRows(content: content)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+extension List where SelectionValue == Never {
+    public init<Data: RandomAccessCollection, RowContent: View>(_ data: Data, @ViewBuilder rowContent: @escaping (Data.Element) -> RowContent) where Content == ForEach<Data, Data.Element.ID, RowContent>, Data.Element: Identifiable {
+        content = ForEach(data, content: rowContent)
+    }
+    public init<Data: RandomAccessCollection, ID: Hashable, RowContent: View>(_ data: Data, id: KeyPath<Data.Element, ID>, @ViewBuilder rowContent: @escaping (Data.Element) -> RowContent) where Content == ForEach<Data, ID, RowContent> {
+        content = ForEach(data, id: id, content: rowContent)
+    }
+}
+
+/// Rows stacked with padding and separators.
+struct _ListRows<Content: View>: View, _PrimitiveView {
+    typealias Body = Never
+    let content: Content
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ListRowsPrimitive(content: _ViewBox(content)) }
+}
+
+@MainActor
+final class _ListRowsPrimitive: _Primitive {
+    let view = _ShapeDrawingView(frame: .zero)
+    private var rowFrames: [CGRect] = []
+    let rowInset: CGFloat = 10
+    let rowSpacing: CGFloat = 0
+    init(content: _AnyViewBox) {
+        super.init()
+        children = [content]
+    }
+    override var nsView: NSView? { view }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        view.draw = { [weak self] ctx, _ in
+            guard let self else { return }
+            ctx.setFillColor(NSColor.separatorColor.cgColor)
+            for f in self.rowFrames.dropLast() { ctx.fill(CGRect(x: f.minX, y: f.maxY, width: f.width, height: 1)) }
+        }
+    }
+    private func rows(_ node: _ViewNode) -> [_ViewNode] { node.children.flatMap(\.layoutLeaves) }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        var height: CGFloat = 0
+        var width: CGFloat = 0
+        for r in rows(node) {
+            let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - 2 * rowInset) }, height: nil))
+            height += s.height + 2 * 6 + 1
+            width = max(width, s.width + 2 * rowInset)
+        }
+        return CGSize(width: proposal.width.map { $0.isFinite ? max($0, width) : width } ?? width, height: height)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {
+        var y = rect.minY
+        rowFrames = []
+        for r in rows(node) {
+            let s = r.sizeThatFits(ProposedViewSize(width: rect.width - 2 * rowInset, height: nil))
+            let rowHeight = s.height + 12
+            r.place(in: CGRect(x: rect.minX + rowInset, y: y + 6, width: rect.width - 2 * rowInset, height: s.height).integralIfNeeded)
+            rowFrames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: rowHeight))
+            y += rowHeight + 1
+        }
+        view.needsDisplay = true
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/section
+public struct Section<Parent: View, Content: View, Footer: View>: View {
+    let header: Parent
+    let content: Content
+    let footer: Footer
+    public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent, @ViewBuilder footer: () -> Footer) {
+        self.header = header(); self.content = content(); self.footer = footer()
+    }
+    public var body: some View { Group { header; content; footer } }
+}
+extension Section where Parent == Text, Footer == EmptyView {
+    public init(_ title: String, @ViewBuilder content: () -> Content) { self.init(content: content, header: { Text(title).font(.headline) }, footer: { EmptyView() }) }
+}
+extension Section where Parent == EmptyView, Footer == EmptyView {
+    public init(@ViewBuilder content: () -> Content) { self.init(content: content, header: { EmptyView() }, footer: { EmptyView() }) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/form
+public struct Form<Content: View>: View {
+    let content: Content
+    public init(@ViewBuilder content: () -> Content) { self.content = content() }
+    public var body: some View { VStack(alignment: .leading, spacing: 10) { content }.padding() }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressview
+public struct ProgressView<Label: View, CurrentValueLabel: View>: View {
+    let value: Double?
+    let total: Double
+    let label: Label?
+    public init() where Label == EmptyView, CurrentValueLabel == EmptyView { value = nil; total = 1; label = nil }
+    public init<V: BinaryFloatingPoint>(value: V?, total: V = 1) where Label == EmptyView, CurrentValueLabel == EmptyView {
+        self.value = value.map { Double($0) }; self.total = Double(total); label = nil
+    }
+    public init(_ title: String) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(title) }
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let label { label }
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.3)).frame(height: 6)
+                RoundedRectangle(cornerRadius: 3).fill(Color.accentColor).frame(width: max(0, 160 * CGFloat((value ?? 0) / max(total, 0.0001))), height: 6)
+            }.frame(width: 160)
+        }
+    }
+}

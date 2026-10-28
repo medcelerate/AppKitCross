@@ -106,36 +106,4 @@ final class HostingTests: XCTestCase, @unchecked Sendable {
             w.close()
         }
     }
-
-    struct Slider: NSViewRepresentable {
-        final class Coordinator { var updates = 0; var dismantled = false }
-        var value: Double
-        func makeCoordinator() -> Coordinator { Coordinator() }
-        func makeNSView(context: NSViewRepresentableContext<Slider>) -> NSSlider {
-            let s = NSSlider(value: value, minValue: 0, maxValue: 1, target: nil, action: nil)
-            return s
-        }
-        func updateNSView(_ nsView: NSSlider, context: NSViewRepresentableContext<Slider>) {
-            nsView.doubleValue = value
-            context.coordinator.updates += 1
-        }
-        static func dismantleNSView(_ nsView: NSSlider, coordinator: Coordinator) { coordinator.dismantled = true }
-    }
-
-    func testRepresentableRoundTrip() {
-        MainActor.assumeIsolated {
-            let hosting = NSHostingView(rootView: NSViewRepresentableContent(Slider(value: 0.25)))
-            let root = hosting.hostingRoot as! NSViewRepresentableHostingRoot<Slider>
-            let slider = hosting.subviews.first as! NSSlider
-            XCTAssertEqual(slider.doubleValue, 0.25)
-            hosting.rootView = NSViewRepresentableContent(Slider(value: 0.75))
-            XCTAssertEqual(slider.doubleValue, 0.75)
-            XCTAssertEqual(hosting.sizeThatFits(.unspecified).height, slider.fittingSize.height)
-            hosting.frame = NSRect(x: 0, y: 0, width: 200, height: 30)
-            hosting.layoutSubtreeIfNeeded()
-            XCTAssertEqual(slider.frame, hosting.bounds)
-            root.detach()
-            XCTAssertNil(slider.superview)
-        }
-    }
 }

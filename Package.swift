@@ -45,6 +45,7 @@ targets += [
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine"]
 #elseif os(Linux)
 // Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib or Wayland for windows (Milestone 8).
 targets += [
@@ -76,9 +77,11 @@ targets += [
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine"]
 #else
 appKitExclude += ["Platform/Win32", "Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = []
+let swiftUIDependencies: [Target.Dependency] = ["AppKit"]
 #endif
 
 // QuartzCore is ours on every platform: the CALayer tree, animations and the software
@@ -109,6 +112,8 @@ targets += [
 ]
 
 targets += [
+    // SwiftUI over this AppKit (ADR-0010), on every platform.
+    .target(name: "SwiftUI", dependencies: swiftUIDependencies, path: "Sources/SwiftUI", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(
         name: "AppKit",
         dependencies: appKitDependencies,
@@ -127,7 +132,7 @@ targets += [
     ),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit", "Metal", "MetalKit"],
+        dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"],
         path: "Tests/AppKitTests"
     ),
 ]
@@ -139,6 +144,7 @@ let package = Package(
         .library(name: "AppKit", targets: ["AppKit"]),
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
+        .library(name: "SwiftUI", targets: ["SwiftUI"]),
     ],
     targets: targets,
     cxxLanguageStandard: .cxx17
