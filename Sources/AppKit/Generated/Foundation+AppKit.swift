@@ -100,6 +100,66 @@ extension CocoaError {
     static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
 }
 
+extension CocoaError.Code {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailederror
+    static public var ServiceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfounderror
+    static public var ServiceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddataerror
+    static public var ServiceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionaryerror
+    static public var ServiceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneouserror
+    static public var ServiceMiscellaneousError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedouterror
+    static public var ServiceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigurederror
+    static public var SharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttypeerror
+    static public var TextReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttypeerror
+    static public var TextWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/fontassetdownloaderror
+    @available(macOS 10.13, *)
+    static public var fontAssetDownloadError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailed
+    static public var serviceApplicationLaunchFailed: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailederror
+    static public var serviceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfound
+    static public var serviceApplicationNotFound: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfounderror
+    static public var serviceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddata
+    static public var serviceInvalidPasteboardData: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddataerror
+    static public var serviceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionary
+    static public var serviceMalformedServiceDictionary: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionaryerror
+    static public var serviceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneous
+    static public var serviceMiscellaneous: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneouserror
+    static public var serviceMiscellaneousError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedout
+    static public var serviceRequestTimedOut: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedouterror
+    static public var serviceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigured
+    static public var sharingServiceNotConfigured: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigurederror
+    static public var sharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttype
+    static public var textReadInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttypeerror
+    static public var textReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttype
+    static public var textWriteInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttypeerror
+    static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+}
+
 extension FileManager {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/filemanager/init(authorization:)
     @available(macOS 10.14, *)
@@ -349,8 +409,6 @@ extension NSAttributedString {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/textlayoutsectionkey/range
         static public var range: NSAttributedString.TextLayoutSectionKey { NSAttributedString.TextLayoutSectionKey(rawValue: "NSTextLayoutSectionRange") }
     }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/boundingrect(with:options:)
-    public func boundingRect(with size: NSSize, options: NSString.DrawingOptions = []) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/boundingrect(with:options:context:)
     @available(macOS 10.11, *)
     public func boundingRect(with size: CGSize, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) -> CGRect { unimplemented() }
@@ -365,12 +423,6 @@ extension NSAttributedString {
     public func docFormat(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> Data? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/doubleclick(at:)
     public func doubleClick(at location: Int) -> NSRange { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(at:)
-    public func draw(at point: CGPoint) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(in:)
-    public func draw(in rect: CGRect) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(with:options:)
-    public func draw(with rect: NSRect, options: NSString.DrawingOptions = []) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(with:options:context:)
     @available(macOS 10.11, *)
     public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) { unimplemented() }
@@ -430,14 +482,146 @@ extension NSAttributedString {
     // SKIPPED (Foundation.FileWrapper not in corelibs): func rtfdFileWrapper(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> FileWrapper?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rulerattributes(in:)
     public func rulerAttributes(in range: NSRange) -> [NSAttributedString.Key : Any] { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/size()
-    public func size() -> CGSize { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/texttypes
     class public var textTypes: [String] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/textunfilteredtypes
     class public var textUnfilteredTypes: [String] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/url(at:effectiverange:)
     public func url(at location: Int, effectiveRange: NSRangePointer) -> URL? { unimplemented() }
+}
+
+extension NSAttributedString.Key {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityalignment
+    @available(macOS 10.12, *)
+    static public var accessibilityAlignment: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXATextAlignmentValue") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityannotationtextattribute
+    @available(macOS 10.13, *)
+    static public var accessibilityAnnotationTextAttribute: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXAnnotation") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityattachment
+    static public var accessibilityAttachment: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXAttachment") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityautocorrected
+    static public var accessibilityAutocorrected: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXAutocorrected") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitybackgroundcolor
+    static public var accessibilityBackgroundColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXBackgroundColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitycustomtext
+    @available(macOS 10.13, *)
+    static public var accessibilityCustomText: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXCustom") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityfont
+    static public var accessibilityFont: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXFont") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityfontboldattribute
+    @available(macOS 26.0, *)
+    static public var accessibilityFontBoldAttribute: NSAttributedString.Key { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityfontitalicattribute
+    @available(macOS 26.0, *)
+    static public var accessibilityFontItalicAttribute: NSAttributedString.Key { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityforegroundcolor
+    static public var accessibilityForegroundColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXForegroundColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitylanguage
+    @available(macOS 10.13, *)
+    static public var accessibilityLanguage: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXLanguage") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitylink
+    static public var accessibilityLink: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXLink") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitylistitemindex
+    @available(macOS 10.11, *)
+    static public var accessibilityListItemIndex: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXListItemIndex") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitylistitemlevel
+    @available(macOS 10.11, *)
+    static public var accessibilityListItemLevel: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXListItemLevel") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitylistitemprefix
+    @available(macOS 10.11, *)
+    static public var accessibilityListItemPrefix: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXListItemPrefix") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitymarkedmisspelled
+    static public var accessibilityMarkedMisspelled: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXMarkedMisspelled") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitymisspelled
+    static public var accessibilityMisspelled: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXMisspelled") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityshadow
+    static public var accessibilityShadow: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXShadow") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitystrikethrough
+    static public var accessibilityStrikethrough: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXStrikethrough") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitystrikethroughcolor
+    static public var accessibilityStrikethroughColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXStrikethroughColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilitysuperscript
+    static public var accessibilitySuperscript: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXSuperscript") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityunderline
+    static public var accessibilityUnderline: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXUnderline") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/accessibilityunderlinecolor
+    static public var accessibilityUnderlineColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "AXUnderlineColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/adaptiveimageglyph
+    @available(macOS 15.0, *)
+    static public var adaptiveImageGlyph: NSAttributedString.Key { NSAttributedString.Key(rawValue: "CTAdaptiveImageProvider") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/attachment
+    static public var attachment: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSAttachment") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/backgroundcolor
+    static public var backgroundColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSBackgroundColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/baselineoffset
+    static public var baselineOffset: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSBaselineOffset") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/charactershapeattributename
+    static public var characterShapeAttributeName: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSCharacterShape") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/cursor
+    static public var cursor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSCursor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/expansion
+    static public var expansion: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSExpansion") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/font
+    static public var font: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSFont") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/foregroundcolor
+    static public var foregroundColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/glyphinfo
+    static public var glyphInfo: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSGlyphInfo") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/kern
+    static public var kern: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSKern") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/ligature
+    static public var ligature: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSLigature") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/link
+    static public var link: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSLink") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/markedclausesegment
+    static public var markedClauseSegment: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSMarkedClauseSegment") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/obliqueness
+    static public var obliqueness: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSObliqueness") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/paragraphstyle
+    static public var paragraphStyle: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSParagraphStyle") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/shadow
+    static public var shadow: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSShadow") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/spellingstate
+    static public var spellingState: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSSpellingState") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/strikethroughcolor
+    static public var strikethroughColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSStrikethroughColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/strikethroughstyle
+    static public var strikethroughStyle: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSStrikethrough") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/strokecolor
+    static public var strokeColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSStrokeColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/strokewidth
+    static public var strokeWidth: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSStrokeWidth") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/superscript
+    static public var superscript: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSSuperScript") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/textalternatives
+    static public var textAlternatives: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSTextAlternatives") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/texteffect
+    @available(macOS 10.10, *)
+    static public var textEffect: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSTextEffect") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/texthighlightcolorscheme
+    @available(macOS 15.0, *)
+    static public var textHighlightColorScheme: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSTextHighlightColorScheme") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/texthighlightstyle
+    @available(macOS 15.0, *)
+    static public var textHighlightStyle: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSTextHighlightStyle") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/tooltip
+    static public var toolTip: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSToolTip") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/tracking
+    @available(macOS 11.0, *)
+    static public var tracking: NSAttributedString.Key { NSAttributedString.Key(rawValue: "CTTracking") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/underlinecolor
+    static public var underlineColor: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSUnderlineColor") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/underlinestyle
+    static public var underlineStyle: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSUnderline") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/usesscreenfontsdocumentattribute
+    static public var usesScreenFontsDocumentAttribute: NSAttributedString.Key { NSAttributedString.Key(rawValue: "UsesScreenFonts") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/verticalglyphform
+    static public var verticalGlyphForm: NSAttributedString.Key { NSAttributedString.Key(rawValue: "CTVerticalForms") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/writingdirection
+    static public var writingDirection: NSAttributedString.Key { NSAttributedString.Key(rawValue: "NSWritingDirection") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/key/writingtoolsexclusion
+    @available(macOS 15.2, *)
+    static public var writingToolsExclusion: NSAttributedString.Key { NSAttributedString.Key(rawValue: "WTWritingToolsPreserved") }
 }
 
 extension NSExceptionName {
@@ -562,6 +746,27 @@ extension NSMutableAttributedString {
     public func updateAttachments(fromPath path: String) { unimplemented() }
 }
 
+extension NSNotification.Name {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/nsapplicationprotecteddatadidbecomeavailable
+    @available(macOS 12.0, *)
+    static public var NSApplicationProtectedDataDidBecomeAvailable: NSNotification.Name { NSNotification.Name(rawValue: "NSApplicationProtectedDataDidBecomeAvailableNotification") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/nsapplicationprotecteddatawillbecomeunavailable
+    @available(macOS 12.0, *)
+    static public var NSApplicationProtectedDataWillBecomeUnavailable: NSNotification.Name { NSNotification.Name(rawValue: "NSApplicationProtectedDataWillBecomeUnavailableNotification") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/nsapplicationshouldbeginsuppressinghighdynamicrangecontent
+    @available(macOS 26.0, *)
+    static public var NSApplicationShouldBeginSuppressingHighDynamicRangeContent: NSNotification.Name { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/nsapplicationshouldendsuppressinghighdynamicrangecontent
+    @available(macOS 26.0, *)
+    static public var NSApplicationShouldEndSuppressingHighDynamicRangeContent: NSNotification.Name { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/nsspellcheckerdidchangeautomaticinlineprediction
+    @available(macOS 14.0, *)
+    static public var NSSpellCheckerDidChangeAutomaticInlinePrediction: NSNotification.Name { NSNotification.Name(rawValue: "NSSpellCheckerDidChangeAutomaticInlinePredictionNotification") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotification/name/unsupportedattributeaddednotification
+    @available(macOS 12.0, *)
+    static public var unsupportedAttributeAddedNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextContentStorageUnsupportedAttributeAddedNotification") }
+}
+
 extension NSSet {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsset/enumerateindexpaths(options:using:)
     @available(macOS 10.11, *)
@@ -596,24 +801,14 @@ extension NSString {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/useslinefragmentorigin
         static public var usesLineFragmentOrigin: NSString.DrawingOptions { unimplemented() }
     }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/boundingrect(with:options:attributes:)
-    public func boundingRect(with size: NSSize, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/boundingrect(with:options:attributes:context:)
     @available(macOS 10.11, *)
     public func boundingRect(with size: CGSize, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil, context: NSStringDrawingContext?) -> CGRect { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(at:withattributes:)
-    public func draw(at point: CGPoint, withAttributes attrs: [NSAttributedString.Key : Any]? = nil) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(in:withattributes:)
-    public func draw(in rect: CGRect, withAttributes attrs: [NSAttributedString.Key : Any]? = nil) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(with:options:attributes:)
-    public func draw(with rect: NSRect, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(with:options:attributes:context:)
     @available(macOS 10.11, *)
     public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil, context: NSStringDrawingContext?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/init(pasteboardpropertylist:oftype:)
     public convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/size(withattributes:)
-    public func size(withAttributes attrs: [NSAttributedString.Key : Any]? = nil) -> CGSize { unimplemented() }
 }
 
 extension NSURL {
@@ -621,6 +816,13 @@ extension NSURL {
     public convenience init?(fromPasteboard pasteBoard: NSPasteboard) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsurl/write(to:)
     public func write(to pasteBoard: NSPasteboard) { unimplemented() }
+}
+
+extension RunLoop.Mode {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/runloop/mode/eventtracking
+    static public var eventTracking: RunLoop.Mode { RunLoop.Mode(rawValue: "NSEventTrackingRunLoopMode") }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/runloop/mode/modalpanel
+    static public var modalPanel: RunLoop.Mode { RunLoop.Mode(rawValue: "NSModalPanelRunLoopMode") }
 }
 
 extension URLResourceValues {
@@ -644,6 +846,7 @@ extension URLResourceValues {
 //   CoreFoundation.CGRect (3 members)
 //   CoreImage.CIColor (1 members)
 //   CoreImage.CIImage (3 members)
+//   CoreText.AttributedString.AdaptiveImageGlyph (1 members)
 //   DeveloperToolsSupport.Preview (2 members)
 //   Foundation.AttributeDynamicLookup (1 members)
 //   Foundation.AttributeScopes (2 members)

@@ -17,7 +17,7 @@ targets += [
     .target(
         name: "CD2D",
         path: "Sources/CD2D",
-        linkerSettings: [.linkedLibrary("d2d1")]
+        linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite")]
     ),
     .target(
         name: "CoreGraphics",

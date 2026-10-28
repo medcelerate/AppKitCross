@@ -1354,7 +1354,12 @@ class Generator:
                     groups[(ext.get("extendedModule", "?"), owner)].append(s)
                 continue
             if len(s["pathComponents"]) > 2:
-                continue   # member of a nested type: emitted with that type
+                # Member of a nested type: emitted with that type if AppKit declares it,
+                # otherwise (Foundation's own nested type, e.g. NSAttributedString.Key) extended here.
+                owner_declared_here = any(x["pathComponents"] == list(owner) and x["kind"]["identifier"] in
+                                          ("swift.class", "swift.struct", "swift.enum") for x in self.inv.foreign_ext.values())
+                if owner_declared_here:
+                    continue
             # Skip members whose owner is itself a nested type we don't have (e.g. AttributeScopes.AppKitAttributes.*)
             groups[(ext.get("extendedModule", "?"), owner)].append(s)
         lines = self.file_header("AppKit extensions on Foundation types")

@@ -248,3 +248,62 @@ final class Milestone1Tests: XCTestCase {
     }
     #endif
 }
+
+@MainActor
+final class TextDrawingTests: XCTestCase {
+    func testFontsAndMeasurement() {
+        let f = NSFont.systemFont(ofSize: 13)
+        XCTAssertEqual(f.pointSize, 13)
+        XCTAssertGreaterThan(f.ascender, 0)
+        XCTAssertLessThan(f.descender, 0)
+        XCTAssertGreaterThan(f.capHeight, 0)
+        let bold = NSFont.boldSystemFont(ofSize: 20)
+        XCTAssertEqual(bold.pointSize, 20)
+        XCTAssertNil(NSFont(name: "NoSuchFontFamily-Xyz", size: 12))
+        let size = "Hello, world".size(withAttributes: [.font: f])
+        XCTAssertGreaterThan(size.width, 40)
+        XCTAssertGreaterThan(size.height, 10)
+        let two = "a\nb".size(withAttributes: [.font: f])
+        XCTAssertGreaterThan(two.height, size.height * 1.5)
+        XCTAssertEqual(f.withSize(30).pointSize, 30)
+    }
+
+    #if canImport(CoreGraphics)
+    func testTextDrawsPixelsInBothOrientations() {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        w.backgroundColor = .white
+        final class TextView: NSView {
+            var flip = false
+            override var isFlipped: Bool { flip }
+            override func draw(_ dirtyRect: NSRect) {
+                "Wg".draw(at: NSPoint(x: 10, y: 10), withAttributes: [.font: NSFont.boldSystemFont(ofSize: 40), .foregroundColor: NSColor.black])
+            }
+        }
+        let plain = TextView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        let flipped = TextView(frame: NSRect(x: 100, y: 0, width: 100, height: 100))
+        flipped.flip = true
+        w.contentView!.addSubview(plain)
+        w.contentView!.addSubview(flipped)
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        let platform = Mirror(reflecting: w).descendant("_platform") as? HostWindow
+        guard let image = platform?.lastImage else { return XCTFail("no image") }
+        let data = image.dataProvider!.data! as Data
+        func dark(x: Int, y: Int) -> Bool {   // AppKit coords in points
+            let row = image.height - 1 - y * 2, i = row * image.bytesPerRow + x * 2 * 4
+            return data[i] < 128 && data[i + 1] < 128 && data[i + 2] < 128
+        }
+        func anyDark(_ xs: Range<Int>, _ ys: Range<Int>) -> Bool {
+            for x in xs { for y in ys where dark(x: x, y: y) { return true } }
+            return false
+        }
+        // Non-flipped: text box bottom-left at (10,10), glyphs occupy roughly y 10...50.
+        XCTAssertTrue(anyDark(10..<60, 12..<50), "text missing in non-flipped view")
+        XCTAssertFalse(anyDark(10..<60, 60..<100), "text leaked above its box in non-flipped view")
+        // Flipped: box top-left at (10,10) from the top, so glyphs are near the top: AppKit y 50...90.
+        XCTAssertTrue(anyDark(110..<160, 52..<88), "text missing in flipped view")
+        XCTAssertFalse(anyDark(110..<160, 0..<40), "text at the wrong end of the flipped view")
+        w.close()
+    }
+    #endif
+}

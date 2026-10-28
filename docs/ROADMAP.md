@@ -72,6 +72,15 @@ implicit animations, `CATransaction`, `CADisplayLink`, layer-backed `NSView`
 `NSHostingSizingOptions`. At this point a SwiftUI implementation can be developed
 against this AppKit.
 
+## M3b: Frameless and translucent windows (after M3)
+
+Requested test target: a borderless (or `.fullSizeContentView` + transparent title bar)
+`NSWindow` with an `NSVisualEffectView`-style "liquid glass" backdrop. On Windows 11 that
+maps to `WM_NCCALCSIZE` custom non-client handling (keeping DWM shadow/snap/resize),
+`DwmExtendFrameIntoClientArea`, `DWMWA_SYSTEMBACKDROP_TYPE` (acrylic/mica) and
+`DWMWA_WINDOW_CORNER_PREFERENCE`, with a premultiplied-alpha swap chain so the backdrop
+shows through. Depends on M3's DXGI/DirectComposition presentation.
+
 ## M7: Metal translation layer (separate track)
 
 Only needed for `MTKView`/`CAMetalLayer` and apps that use Metal directly. Options to

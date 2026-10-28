@@ -22,6 +22,8 @@ open class NSGraphicsContext: NSObject {
     private var _imageInterpolation: NSImageInterpolation = .default
     private var _patternPhase = NSPoint.zero
     private var _shouldAntialias = true
+    /// Font selected with `NSFont.set()`; used by string drawing when no font attribute is given.
+    internal var _font: NSFont? = nil
 
     // Drawing happens on the main thread; AppKit's "current context" is per thread and
     // this port only draws from the main actor.

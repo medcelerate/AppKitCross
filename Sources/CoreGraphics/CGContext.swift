@@ -242,6 +242,19 @@ public final class CGContext {
         }
     }
 
+    // MARK: Text (DirectWrite layouts created by the AppKit text backend)
+
+    /// Draws a CD2D text layout with its top-left corner at `topLeft` in user space.
+    /// DirectWrite lays text out y-down; in a y-up (non-flipped) user space the local axis
+    /// is flipped around the origin so glyphs render upright.
+    public func drawTextLayout(_ layout: OpaquePointer, topLeft: CGPoint, flipped: Bool, color: CGColor) {
+        saveGState()
+        translateBy(x: topLeft.x, y: topLeft.y)
+        if !flipped { scaleBy(x: 1, y: -1) }
+        cd2d_target_draw_text_layout(target, layout, 0, 0, configure(fillBrush, color: color))
+        restoreGState()
+    }
+
     // MARK: Flush
 
     public func flush() { }

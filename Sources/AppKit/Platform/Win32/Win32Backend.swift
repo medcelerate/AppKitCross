@@ -18,6 +18,7 @@ final class Win32Backend: PlatformBackend {
     private var posted: [@MainActor () -> Void] = []
     private var running = false
     private var classesRegistered = false
+    let text: any PlatformTextBackend = Win32TextBackend()
 
     init() {
         // Per-monitor v2 DPI awareness; the manifest can set this too, in which case the

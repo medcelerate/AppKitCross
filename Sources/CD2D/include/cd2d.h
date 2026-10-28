@@ -66,6 +66,21 @@ void cd2d_target_pop_clip_rect(CD2DTarget *target);
 void cd2d_target_push_clip_path(CD2DTarget *target, CD2DPath *path);
 void cd2d_target_pop_clip_path(CD2DTarget *target);
 
+// DirectWrite
+typedef struct CD2DTextFormat CD2DTextFormat;
+typedef struct CD2DTextLayout CD2DTextLayout;
+
+/// `family` is a NUL-terminated UTF-16 family name; `weight` 100-950; size in DIPs.
+CD2DTextFormat *cd2d_text_format_create(const uint16_t *family, float size, int32_t weight, bool italic);
+void cd2d_text_format_release(CD2DTextFormat *format);
+/// Font metrics scaled to the format's size (ascent/descent positive).
+bool cd2d_text_format_metrics(CD2DTextFormat *format, float *ascent, float *descent, float *lineGap, float *capHeight, float *xHeight);
+CD2DTextLayout *cd2d_text_layout_create(CD2DTextFormat *format, const uint16_t *text, uint32_t length, float maxWidth, float maxHeight, bool wrap);
+void cd2d_text_layout_metrics(CD2DTextLayout *layout, float *width, float *height, float *baseline);
+void cd2d_text_layout_release(CD2DTextLayout *layout);
+/// Draws with the layout's top-left at (x, y) in the target's current transform.
+void cd2d_target_draw_text_layout(CD2DTarget *target, CD2DTextLayout *layout, float x, float y, CD2DBrush *brush);
+
 #ifdef __cplusplus
 }
 #endif

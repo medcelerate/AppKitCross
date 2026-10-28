@@ -38,6 +38,8 @@ public protocol PlatformBackend: AnyObject {
     func beep()
     /// Mouse location in AppKit screen coordinates.
     var mouseLocation: NSPoint { get }
+    /// Text measurement and drawing.
+    var text: any PlatformTextBackend { get }
     /// Frame/content conversion for a window that does not exist yet.
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect

@@ -50,6 +50,12 @@ final class CanvasView: NSView {
         NSColor.systemGreen.setStroke()
         curve.stroke()
 
+        // Text
+        "Hello from AppKit on Windows".draw(at: NSPoint(x: 40, y: bounds.height - 48),
+                                            withAttributes: [.font: NSFont.boldSystemFont(ofSize: 22), .foregroundColor: NSColor.labelColor])
+        "Click to add dots, press c to clear. \(clicks.count) dot(s).".draw(at: NSPoint(x: 40, y: bounds.height - 72),
+                                            withAttributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.secondaryLabelColor])
+
         // Click markers
         NSColor.systemRed.setFill()
         for p in clicks {

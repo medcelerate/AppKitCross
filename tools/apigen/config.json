@@ -1,14 +1,15 @@
 {
   "handwritten": [
     "NSApplication",
-    "NSWindow",
-    "NSView",
-    "NSResponder",
-    "NSEvent",
-    "NSScreen",
+    "NSBezierPath",
     "NSColor",
+    "NSEvent",
+    "NSFont",
     "NSGraphicsContext",
-    "NSBezierPath"
+    "NSResponder",
+    "NSScreen",
+    "NSView",
+    "NSWindow"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",
@@ -25,7 +26,17 @@
     "NSApp",
     "NSApplicationDelegate.main()",
     "NSApplicationMain",
-    "NSApplicationMain(_:_:)"
+    "NSApplicationMain(_:_:)",
+    "NSAttributedString.boundingRect(with:options:)",
+    "NSAttributedString.draw(at:)",
+    "NSAttributedString.draw(in:)",
+    "NSAttributedString.draw(with:options:)",
+    "NSAttributedString.size()",
+    "NSString.boundingRect(with:options:attributes:)",
+    "NSString.draw(at:withAttributes:)",
+    "NSString.draw(in:withAttributes:)",
+    "NSString.draw(with:options:attributes:)",
+    "NSString.size(withAttributes:)"
   ],
   "coreGraphicsTypes": [
     "CGFloat",

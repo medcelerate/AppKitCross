@@ -18,6 +18,11 @@ final class HostBackend: PlatformBackend {
     private var pending: [@MainActor () -> Void] = []
     var mouseLocation: NSPoint = .zero
     var beepCount = 0
+    #if canImport(CoreText) && canImport(CoreGraphics)
+    let text: any PlatformTextBackend = HostTextBackend()
+    #else
+    let text: any PlatformTextBackend = NoTextBackend()
+    #endif
 
     func makeWindow(owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) -> PlatformWindow {
         HostWindow(owner: owner, contentRect: contentRect, styleMask: styleMask, backend: self)
@@ -167,4 +172,12 @@ final class HostWindow: PlatformWindow {
     func userRequestedClose() {
         if owner?.platformWindowShouldClose() == true { close() }
     }
+}
+
+/// Used on hosts without CoreText (Linux dev builds): text has no size and draws nothing.
+@MainActor
+final class NoTextBackend: PlatformTextBackend {
+    func makeFont(family: String?, size: CGFloat, weight: CGFloat, italic: Bool, monospaced: Bool) -> PlatformFontHandle? { nil }
+    func measure(_ text: String, font: PlatformFontHandle, maxWidth: CGFloat?) -> CGSize { .zero }
+    func draw(_ text: String, font: PlatformFontHandle, color: CGColor, topLeft: CGPoint, maxWidth: CGFloat?, flipped: Bool, in context: CGContext) {}
 }
