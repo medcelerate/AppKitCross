@@ -82,6 +82,13 @@ prerequisite for SwiftUI.
 New `Platform/Linux` (Wayland/X11 + Vulkan + Skia or Cairo for `CGContext`). The core
 and the SwiftUI layer should need no changes; that is the test of the architecture.
 
+## Reference projects
+
+- [SwiftOpenUI](https://github.com/codelynx/swiftopenui) (MIT): a SwiftUI reimplementation
+  with a stable Win32 + Direct2D + DirectWrite backend in Swift (`BackendWin32`, `CWin32`).
+  Reference for COM-from-Swift idioms and DirectWrite access (M1/M2), and a candidate
+  SwiftUI core to host on this AppKit once the M6 seam exists. It bypasses AppKit entirely.
+
 ## Explicit non-goals
 
 - Loading nibs, storyboards or `NSKeyedArchiver` archives produced on macOS.
