@@ -23,8 +23,9 @@ with title and standard frame, Direct2D drawing of the sample (grid, rounded rec
 dashed curve), mouse clicks dispatched to the view in AppKit coordinates, key events,
 programmatic resize with clean repaint, close through `NSWindow.close()` with app
 termination. The core is covered by `Tests/AppKitTests` on the macOS host backend.
-Not yet done for M1: text drawing (`NSFont`, `NSString.draw`), live-resize (WM_SIZING)
-verification, DPI-change verification across monitors.
+Live drag-resize is verified too. Not yet done for M1: text drawing (`NSFont`,
+`NSString.draw`, DirectWrite through the CD2D shim) and DPI-change verification across
+monitors.
 
 - `NSApplication` run loop over the Win32 message loop; `NSApp`, `NSApplicationMain`
   equivalents; `applicationDidFinishLaunching`, `applicationShouldTerminate`,
