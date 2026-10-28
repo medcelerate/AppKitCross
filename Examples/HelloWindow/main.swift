@@ -457,6 +457,21 @@ enum MetalSelfTest {
     SamplerState imageSampler;
     float4 sampledFragment(VSOut i) : SV_Target { return image.Sample(imageSampler, i.color.xy); }
     """
+    /// The triangle in Metal Shading Language, translated to HLSL by the device (ADR-0006).
+    static let mslShaders = """
+    #include <metal_stdlib>
+    using namespace metal;
+    struct Frame { float4 tint; };
+    struct VSIn { float2 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
+    struct VSOut { float4 position [[position]]; float4 color; };
+    vertex VSOut mslVertex(VSIn v [[stage_in]], constant Frame& frame [[buffer(0)]]) {
+        VSOut o;
+        o.position = float4(v.position, 0, 1);
+        o.color = v.color * frame.tint;
+        return o;
+    }
+    fragment half4 mslFragment(VSOut i [[stage_in]]) { return half4(i.color); }
+    """
     struct Vertex { var x: Float, y: Float, r: Float, g: Float, b: Float, a: Float }
 
     static func render(_ queue: any MTLCommandQueue, _ pass: MTLRenderPassDescriptor, _ pipeline: any MTLRenderPipelineState, _ vertices: any MTLBuffer, tint: inout [Float], texture: (any MTLTexture)? = nil, sampler: (any MTLSamplerState)? = nil) -> Bool {
@@ -563,6 +578,25 @@ enum MetalSelfTest {
                 cb.waitUntilCompleted()
                 check(pixel(copy, 1, 1) == [255, 0, 0, 255] && (!device.supportsRasterization || pixel(copy, 32, 40) == [0, 255, 0, 255]), "texture copy carries the frame: \(pixel(copy, 1, 1)) \(pixel(copy, 32, 40))")
             }
+
+            // The same triangle from MSL: the library translates it to HLSL (ADR-0006).
+            do {
+                let mslLibrary = try device.makeLibrary(source: mslShaders, options: nil)
+                check(Set(mslLibrary.functionNames) == ["mslVertex", "mslFragment"], "MSL library lists its entry points: \(mslLibrary.functionNames)")
+                let md = MTLRenderPipelineDescriptor()
+                md.vertexFunction = mslLibrary.makeFunction(name: "mslVertex")
+                md.fragmentFunction = mslLibrary.makeFunction(name: "mslFragment")
+                md.colorAttachments[0].pixelFormat = .bgra8Unorm
+                md.vertexDescriptor = vd
+                let mslPipeline = try device.makeRenderPipelineState(descriptor: md)
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = target
+                pass.colorAttachments[0].loadAction = .clear
+                pass.colorAttachments[0].clearColor = MTLClearColorMake(1, 0, 0, 1)
+                var halfTint: [Float] = [1, 0.5, 1, 1]
+                check(render(queue, pass, mslPipeline, vertices, tint: &halfTint), "MSL render command buffer completes")
+                if device.supportsRasterization { check(pixel(target, 32, 32) == [0, 128, 0, 255] || pixel(target, 32, 32) == [0, 127, 0, 255], "MSL triangle is tinted half green: \(pixel(target, 32, 32))") }
+            } catch { check(false, "MSL triangle pipeline: \(error)") }
 
             if device.supportsRasterization {
                 // Sampling: every vertex carries uv (0.75, 0.75) in its colour, so the whole
@@ -735,6 +769,10 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     private var vertices: (any MTLBuffer)?
     private let logsPixels = CommandLine.arguments.contains("--metal-log")
 
+    /// With `--metal-msl` the same triangle ships as Metal Shading Language and goes
+    /// through the MSL → HLSL translator (ADR-0006).
+    static let usesMSL = CommandLine.arguments.contains("--metal-msl")
+
     /// Constants at buffer 0 (`b0`), vertices at buffer 1 with attributes 0 and 1.
     static let shaderSource = """
     cbuffer Frame { float2 scale; float angle; float padding; };
@@ -749,6 +787,24 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
         return o;
     }
     float4 triangleFragment(VSOut i) : SV_Target { return i.color; }
+    """
+
+    /// The same shader in MSL: `constant Frame&` at `[[buffer(0)]]`, `[[stage_in]]` vertices.
+    static let mslShaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+    struct Frame { float2 scale; float angle; float padding; };
+    struct VertexIn { float2 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
+    struct VertexOut { float4 position [[position]]; float4 color; };
+    vertex VertexOut triangleVertex(VertexIn v [[stage_in]], constant Frame& frame [[buffer(0)]]) {
+        float s = sin(frame.angle), c = cos(frame.angle);
+        float2 p = float2(v.position.x * c - v.position.y * s, v.position.x * s + v.position.y * c) * frame.scale;
+        VertexOut o;
+        o.position = float4(p, 0, 1);
+        o.color = v.color;
+        return o;
+    }
+    fragment float4 triangleFragment(VertexOut i [[stage_in]]) { return i.color; }
     """
 
     struct Vertex { var x: Float, y: Float, r: Float, g: Float, b: Float, a: Float }
@@ -784,8 +840,9 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
         vertices = triangle.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }
         do {
             let options = MTLCompileOptions()
-            options.shaderLanguage = .hlsl
-            let library = try device.makeLibrary(source: MetalDemoViewController.shaderSource, options: options)
+            options.shaderLanguage = Self.usesMSL ? .metal : .hlsl
+            let library = try device.makeLibrary(source: Self.usesMSL ? MetalDemoViewController.mslShaderSource : MetalDemoViewController.shaderSource, options: options)
+            if Self.usesMSL { label.stringValue += " (MSL)" }
             let desc = MTLRenderPipelineDescriptor()
             desc.label = "triangle"
             desc.vertexFunction = library.makeFunction(name: "triangleVertex")

@@ -15,7 +15,7 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; HLSL only, swap-chain presentation unexercised) |
+| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised) |
 | M8 Linux | done for X11: HelloWindow renders under Xvfb (screenshot in README), 71/71 tests pass in the `swift:6.2-noble` container (Wayland open) |
 
 The macOS host build and the Linux container run the full test suite (71 tests); Windows verification is done by
@@ -236,7 +236,15 @@ swap chain (compiled, not yet exercised by MTKView). On Windows
 `MTLCreateSystemDefaultDevice()` returns the D3D12 device unless
 `APPKITWIN_METAL_REFERENCE=1`; HelloWindow's Metal tab draws an HLSL triangle on it
 (`HelloWindow --metal`, `--metal-selftest` for offscreen checks). Shaders: HLSL/DXIL
-first; MSL translation is open.
+first. MSL (2026-10-28, ADR-0006): `MSLTranslator` translates the practical Metal Shading
+Language subset to HLSL at the source level (stage attributes → semantics, buffers /
+textures / samplers → the shim's register layout, `constexpr sampler`s bound by the device,
+column-major matrices with `mul`, intrinsic renames, `half` → `float`, kernels with
+`[numthreads]`), with line-numbered diagnostics for the rest; `makeLibrary(source:)`
+detects the dialect on every device so MSL function names work unchanged. Covered by
+`MSLTranslatorTests` on macOS; `HelloWindow --metal-msl` draws the triangle from MSL and
+`--metal-selftest` renders an MSL pipeline. Open on the shim: pointer-style buffer
+arguments (`StructuredBuffer` tables in `space1`) and compute dispatch.
 
 ## M8: Linux backend
 

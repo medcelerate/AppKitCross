@@ -74,14 +74,11 @@ public final class MTLD3D12Device: MTLDevice, @unchecked Sendable {
     public func makeDepthStencilState(descriptor: MTLDepthStencilDescriptor) -> (any MTLDepthStencilState)? { MTLD3D12DepthStencilState(device: self, descriptor: descriptor) }
     public func makeDefaultLibrary() -> (any MTLLibrary)? { nil }
 
-    /// HLSL source: functions are compiled lazily per entry point when a pipeline uses them.
+    /// HLSL is compiled lazily per entry point when a pipeline uses it; MSL is translated
+    /// to HLSL first (ADR-0006), keeping the MSL function names.
     public func makeLibrary(source: String, options: MTLCompileOptions?) throws -> any MTLLibrary {
-        let language = options?.shaderLanguage ?? .metal
-        guard language == .hlsl else {
-            throw MTLLibraryError(code: .unsupported, message: "Metal Shading Language is not compiled on Windows yet; pass HLSL with MTLCompileOptions.shaderLanguage = .hlsl (ADR-0004)")
-        }
-        let functions = MTLReferenceLibrary.scanFunctions(in: source, language: .hlsl)
-        return MTLD3D12Library(device: self, source: source, functions: functions)
+        let (functions, translation) = try MTLReferenceLibrary.prepare(source: source, options: options)
+        return MTLD3D12Library(device: self, source: translation?.hlsl ?? source, functions: functions, translation: translation)
     }
 
     public func makeLibrary(data: Data) throws -> any MTLLibrary {
@@ -90,6 +87,9 @@ public final class MTLD3D12Device: MTLDevice, @unchecked Sendable {
 
     public func makeRenderPipelineState(descriptor: MTLRenderPipelineDescriptor) throws -> any MTLRenderPipelineState {
         guard let vf = descriptor.vertexFunction as? MTLD3D12Function else { throw MTLLibraryError(code: .functionNotFound, message: "render pipeline needs a D3D12 vertex function") }
+        for f in [vf, descriptor.fragmentFunction as? MTLD3D12Function].compactMap({ $0 }) where f.translated?.usesBufferTables == true {
+            throw MTLLibraryError(code: .unsupported, message: "'\(f.name)' takes pointer-style buffer arguments (StructuredBuffer in register space1), which the D3D12 shim's root signature does not bind yet; pass `constant T&` references (ADR-0006)")
+        }
         let vs = try vf.compiled(profile: "vs_6_0")
         var ps: OpaquePointer? = nil
         if let ff = descriptor.fragmentFunction as? MTLD3D12Function { ps = try ff.compiled(profile: "ps_6_0") }
@@ -444,10 +444,16 @@ public final class MTLD3D12Function: MTLFunction {
     public let name: String
     private let source: String?
     private let blob: Data?
+    /// The HLSL entry point: the MSL name unless it collided with an HLSL keyword.
+    let entryPoint: String
+    /// Translation details when the library came from MSL.
+    let translated: MSLTranslation.Function?
     private var compiledHandles: [String: OpaquePointer] = [:]
 
-    init(device: any MTLDevice, name: String, type: MTLFunctionType, source: String?, blob: Data?) {
+    init(device: any MTLDevice, name: String, type: MTLFunctionType, source: String?, blob: Data?, translated: MSLTranslation.Function? = nil) {
         self.device = device; self.name = name; functionType = type; self.source = source; self.blob = blob
+        self.translated = translated
+        entryPoint = translated?.entryPoint ?? name
     }
 
     deinit { for (_, h) in compiledHandles { cm_shader_release(h) } }
@@ -461,7 +467,7 @@ public final class MTLD3D12Function: MTLFunction {
         } else if let source {
             let utf8 = Array(source.utf8)
             h = utf8.withUnsafeBufferPointer { buf in
-                buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { cm_shader_compile_hlsl($0, UInt32(buf.count), name, profile, &error, 4096) }
+                buf.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buf.count) { cm_shader_compile_hlsl($0, UInt32(buf.count), entryPoint, profile, &error, 4096) }
             }
         }
         guard let h else { throw MTLLibraryError(code: .compileFailure, message: String(cString: error)) }
@@ -476,21 +482,25 @@ public final class MTLD3D12Library: MTLLibrary {
     private let source: String?
     private let blobs: [String: (Data, MTLFunctionType)]
     private let functions: [(String, MTLFunctionType)]
+    /// The MSL → HLSL translation when the source was MSL.
+    public let translation: MSLTranslation?
+    /// The HLSL that is compiled: the source itself, or the translation of MSL.
+    public var hlslSource: String? { source }
     public var functionNames: [String] { functions.map(\.0) }
 
-    init(device: any MTLDevice, source: String, functions: [(String, MTLFunctionType)]) {
-        self.device = device; self.source = source; self.functions = functions; blobs = [:]
+    init(device: any MTLDevice, source: String, functions: [(String, MTLFunctionType)], translation: MSLTranslation? = nil) {
+        self.device = device; self.source = source; self.functions = functions; blobs = [:]; self.translation = translation
     }
 
     /// A library of precompiled DXIL/DXBC entry points keyed by function name.
     public init(device: any MTLDevice, blobs: [String: (Data, MTLFunctionType)]) {
-        self.device = device; source = nil; self.blobs = blobs
+        self.device = device; source = nil; self.blobs = blobs; translation = nil
         functions = blobs.map { ($0.key, $0.value.1) }
     }
 
     public func makeFunction(name: String) -> (any MTLFunction)? {
         guard let f = functions.first(where: { $0.0 == name }) else { return nil }
-        return MTLD3D12Function(device: device, name: name, type: f.1, source: source, blob: blobs[name]?.0)
+        return MTLD3D12Function(device: device, name: name, type: f.1, source: source, blob: blobs[name]?.0, translated: translation?.function(named: name))
     }
 }
 
@@ -499,6 +509,8 @@ final class MTLD3D12RenderPipelineState: MTLRenderPipelineState {
     let device: any MTLDevice
     let handle: OpaquePointer
     let vertexStrides: [Int: Int]
+    /// `constexpr sampler`s of translated MSL functions, bound when the pipeline is set.
+    let constexprSamplers: [(pixelStage: Bool, slot: Int, filter: UInt32, addressU: UInt32, addressV: UInt32)]
     init(device: any MTLDevice, handle: OpaquePointer, descriptor: MTLRenderPipelineDescriptor) {
         self.device = device
         self.handle = handle
@@ -506,6 +518,14 @@ final class MTLD3D12RenderPipelineState: MTLRenderPipelineState {
         var strides: [Int: Int] = [:]
         if let vd = descriptor.vertexDescriptor { for i in vd.layouts.indices { strides[i] = vd.layouts[i].stride } }
         vertexStrides = strides
+        var samplers: [(pixelStage: Bool, slot: Int, filter: UInt32, addressU: UInt32, addressV: UInt32)] = []
+        for (pixel, function) in [(false, descriptor.vertexFunction), (true, descriptor.fragmentFunction)] {
+            guard let f = function as? MTLD3D12Function, let translated = f.translated else { continue }
+            for s in translated.constexprSamplers {
+                samplers.append((pixel, s.slot, MTLD3D12.filter(s.minFilter, s.magFilter, s.mipFilter), MTLD3D12.address(s.sAddressMode), MTLD3D12.address(s.tAddressMode)))
+            }
+        }
+        constexprSamplers = samplers
     }
     deinit { cm_pipeline_release(handle) }
 }
@@ -617,6 +637,9 @@ final class MTLD3D12RenderCommandEncoder: MTLD3D12Encoder, MTLRenderCommandEncod
         guard let p = pipelineState as? MTLD3D12RenderPipelineState else { return }
         pipeline = p
         buffer.record { cm_commandlist_set_pipeline($0, p.handle) }
+        for s in p.constexprSamplers {
+            buffer.record { cm_commandlist_set_sampler($0, s.pixelStage, UInt32(s.slot), s.filter, s.addressU, s.addressV) }
+        }
     }
     func setViewport(_ v: MTLViewport) { buffer.record { cm_commandlist_set_viewport($0, Float(v.originX), Float(v.originY), Float(v.width), Float(v.height), Float(v.znear), Float(v.zfar)) } }
     func setScissorRect(_ r: MTLScissorRect) { buffer.record { cm_commandlist_set_scissor($0, Int32(r.x), Int32(r.y), Int32(r.width), Int32(r.height)) } }

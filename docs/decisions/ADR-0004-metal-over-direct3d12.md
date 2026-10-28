@@ -18,9 +18,9 @@ libraries, drawables) as protocols, exactly as Apple's. Devices come from a back
 
 Shaders: `MTLLibrary` accepts HLSL source and precompiled DXIL/DXBC on Windows
 (`device.makeLibrary(source:)` compiles HLSL with `D3DCompile`; entry points are
-`MTLFunction` names). Metal Shading Language is not compiled on Windows yet; a future
-MSL frontend (or a DXIL-from-MSL translator) can plug into the same `MTLLibrary` factory
-without API changes. `MTLCompileOptions.languageVersion` is accepted and ignored.
+`MTLFunction` names). Metal Shading Language is translated to HLSL at the source level
+before compiling (ADR-0006), through the same `MTLLibrary` factory.
+`MTLCompileOptions.languageVersion` is accepted and ignored.
 
 `MetalKit` provides `MTKView` and `MTKViewDelegate` over AppKit's `NSView` and the
 Core Animation display link; it draws reference-device drawables through CoreGraphics.
