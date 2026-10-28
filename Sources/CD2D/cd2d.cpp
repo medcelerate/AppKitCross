@@ -432,7 +432,10 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
             if (!ext.empty()) { if (!pattern.empty()) pattern += L";"; pattern += L"*." + ext; }
             start = end + 1;
         }
-        specs.push_back(L"Supported files");
+        std::wstring label = L"Supported files (";
+        for (size_t i = 0; i < pattern.size(); i++) label += pattern[i] == L';' ? L", " : std::wstring(1, pattern[i]);
+        label += L")";
+        specs.push_back(label);
         specs.push_back(pattern);
         filters.push_back({ specs[0].c_str(), specs[1].c_str() });
         if (o->allowsOtherTypes) {

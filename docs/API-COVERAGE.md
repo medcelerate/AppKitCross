@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 36 |
-| Types generated | 502 |
+| Types handwritten | 37 |
+| Types generated | 501 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10205 |
@@ -78,7 +78,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAnimatablePropertyContainer | protocol | generated | 4 | 0 | 0 |  |
 | NSAnimatablePropertyKey | typealias | generated | 1 | 0 | 0 |  |
 | NSAnimation | class | generated | 30 | 0 | 3 |  |
-| NSAnimationContext | class | generated | 9 | 0 | 0 |  |
+| NSAnimationContext | class | handwritten | 9 | 0 | 0 | 0 |
 | NSAnimationDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSAnimationEffect | enum | generated | 3 | 0 | 0 |  |
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |

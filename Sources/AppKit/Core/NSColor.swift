@@ -120,7 +120,16 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(catalogname:colorname:)
     public init?(catalogName listName: NSColorList.Name, colorName: NSColor.Name) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(cgcolor:)
-    public init?(cgColor: CGColor) { unimplemented() }
+    public convenience init?(cgColor: CGColor) {
+        #if os(Windows)
+        let (r, g, b, a) = cgColor.rgba
+        #else
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let comps = (cgColor.converted(to: space, intent: .defaultIntent, options: nil) ?? cgColor).components ?? [0, 0, 0, 1]
+        let (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = comps.count >= 4 ? (comps[0], comps[1], comps[2], comps[3]) : comps.count == 2 ? (comps[0], comps[0], comps[0], comps[1]) : (0, 0, 0, 1)
+        #endif
+        self.init(red: r, green: g, blue: b, alpha: a)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(coder:)
     public required init?(coder: NSCoder) {
         storage = .rgb(0, 0, 0, 1)

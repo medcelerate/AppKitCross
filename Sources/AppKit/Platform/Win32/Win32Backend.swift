@@ -181,6 +181,22 @@ final class Win32Backend: PlatformBackend {
         PostQuitMessage(0)
     }
 
+    private var frameCallback: (@MainActor () -> Void)?
+    private static let frameTimerID: UINT_PTR = 1
+
+    /// One-shot WM_TIMER on the message window (~16 ms; USER_TIMER_MINIMUM applies).
+    func scheduleFrame(_ callback: @escaping @MainActor () -> Void) {
+        frameCallback = callback
+        if let hwnd = messageWindow { SetTimer(hwnd, Win32Backend.frameTimerID, 16, nil) }
+    }
+
+    fileprivate func fireFrame() {
+        if let hwnd = messageWindow { KillTimer(hwnd, Win32Backend.frameTimerID) }
+        let cb = frameCallback
+        frameCallback = nil
+        cb?()
+    }
+
     func post(_ block: @escaping @MainActor () -> Void) {
         posted.append(block)
         if let hwnd = messageWindow { PostMessageW(hwnd, Win32Backend.postMessage, 0, 0) }
@@ -344,12 +360,16 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
-        if msg == Win32Backend.postMessage {
+        if msg == Win32Backend.postMessage || msg == UINT(WM_TIMER) {
             let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0)
             if ptr != 0 {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr)
                 let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
-                MainActor.assumeIsolated { backend.drainPosted() }
+                if msg == UINT(WM_TIMER) {
+                    MainActor.assumeIsolated { backend.fireFrame() }
+                } else {
+                    MainActor.assumeIsolated { backend.drainPosted() }
+                }
             }
             return 0
         }

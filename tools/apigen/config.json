@@ -35,7 +35,8 @@
     "NSTextField",
     "NSTextFieldCell",
     "NSView",
-    "NSWindow"
+    "NSWindow",
+    "NSAnimationContext"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",

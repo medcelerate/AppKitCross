@@ -262,6 +262,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         slider.numberOfTickMarks = 5
         slider.autoresizingMask = [.maxYMargin]
         canvas.addSubview(slider)
+
+        // Core Animation: a layer-backed badge with a pulsing ring, a gradient and a text
+        // layer; the ring animates without any view redraw code.
+        let pulse = NSView(frame: NSRect(x: 280, y: 12, width: 90, height: 36))
+        pulse.wantsLayer = true
+        pulse.autoresizingMask = [.maxYMargin]
+        let gradient = CAGradientLayer()
+        gradient.anchorPoint = .zero
+        gradient.frame = pulse.bounds
+        gradient.colors = [CGColor(srgbRed: 0.15, green: 0.35, blue: 0.9, alpha: 1), CGColor(srgbRed: 0.5, green: 0.2, blue: 0.8, alpha: 1)]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        gradient.cornerRadius = 8
+        gradient.masksToBounds = true
+        pulse.layer!.addSublayer(gradient)
+        let ring = CAShapeLayer()
+        ring.path = CGPath(ellipseIn: CGRect(x: -10, y: -10, width: 20, height: 20), transform: nil)
+        ring.fillColor = nil
+        ring.strokeColor = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        ring.lineWidth = 3
+        ring.position = CGPoint(x: 20, y: 18)
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 0.6
+        grow.toValue = 1.2
+        grow.duration = 0.9
+        grow.autoreverses = true
+        grow.repeatCount = .infinity
+        grow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        ring.add(grow, forKey: "pulse")
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0.3
+        fade.duration = 0.9
+        fade.autoreverses = true
+        fade.repeatCount = .infinity
+        ring.add(fade, forKey: "fade")
+        pulse.layer!.addSublayer(ring)
+        let label = CATextLayer()
+        label.anchorPoint = .zero
+        label.frame = CGRect(x: 38, y: 8, width: 50, height: 20)
+        label.string = "CA"
+        label.fontSize = 15
+        label.foregroundColor = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        pulse.layer!.addSublayer(label)
+        canvas.addSubview(pulse)
         self.canvas = canvas
         window.center()
         window.makeKeyAndOrderFront(nil)

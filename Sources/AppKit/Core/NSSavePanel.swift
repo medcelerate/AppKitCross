@@ -43,7 +43,7 @@ import CoreText
     @MainActor internal func _options() -> PlatformFileDialogOptions {
         var o = PlatformFileDialogOptions()
         o.isSave = !(self is NSOpenPanel)
-        o.title = _title
+        o.title = title.isEmpty ? nil : title
         o.prompt = _prompt
         o.message = _message
         o.directory = _directoryURL

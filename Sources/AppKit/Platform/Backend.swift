@@ -35,6 +35,8 @@ public protocol PlatformBackend: AnyObject {
     func stop()
     /// Executes `block` on the event loop as soon as possible.
     func post(_ block: @escaping @MainActor () -> Void)
+    /// Calls `callback` once, about one display frame from now (Core Animation's frame clock).
+    func scheduleFrame(_ callback: @escaping @MainActor () -> Void)
     func beep()
     /// Mouse location in AppKit screen coordinates.
     var mouseLocation: NSPoint { get }

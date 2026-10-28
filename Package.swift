@@ -25,19 +25,27 @@ targets += [
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
-    // Placeholder CALayer family until Milestone 4 (DirectComposition).
+]
+appKitDependencies += ["CoreGraphics", "CD2D"]
+appKitExclude += ["Platform/Host"]
+let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
+#else
+appKitExclude += ["Platform/Win32"]
+let quartzCoreDependencies: [Target.Dependency] = []
+#endif
+
+// QuartzCore is ours on every platform: the CALayer tree, animations and the software
+// compositor are pure Swift over CGContext, so the macOS test run exercises them too
+// (the module shadows Apple's QuartzCore inside this package only).
+targets += [
     .target(
         name: "QuartzCore",
-        dependencies: ["CoreGraphics"],
+        dependencies: quartzCoreDependencies,
         path: "Sources/QuartzCore",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
 ]
-appKitDependencies += ["CoreGraphics", "CD2D", "QuartzCore"]
-appKitExclude += ["Platform/Host"]
-#else
-appKitExclude += ["Platform/Win32"]
-#endif
+appKitDependencies += ["QuartzCore"]
 
 targets += [
     .target(

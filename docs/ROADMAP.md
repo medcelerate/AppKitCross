@@ -74,6 +74,24 @@ device; D2D draws through `D3D11On12`. Per-monitor-v2 DPI, HDR surfaces, vsync a
 implicit animations, `CATransaction`, `CADisplayLink`, layer-backed `NSView`
 (`wantsLayer`, `updateLayer`). This is what SwiftUI's rendering needs.
 
+Status (2026-10-28): the QuartzCore module is real and cross-platform (pure Swift over
+CGContext, so the macOS test run covers it): `CALayer` tree with geometry, transforms
+(`CATransform3D`), flipped geometry, masks, corner radius, borders, contents images,
+shadows (offset only, no blur), hit testing and coordinate conversion; `CAShapeLayer`,
+`CAGradientLayer` (banded), `CATextLayer` (drawn by AppKit's string drawing),
+`CATransformLayer`, `CAScrollLayer`, `CAReplicatorLayer`, `CAConstraintLayoutManager`;
+`CATransaction` with completion blocks; explicit and implicit animations (`CABasicAnimation`,
+`CAKeyframeAnimation`, `CASpringAnimation`, `CAAnimationGroup`, `CATransition` as a fade)
+with timing functions and fill modes; `CADisplayLink`. Presentation is a software
+compositor: the layer tree is rendered into the window's CGContext on each frame; the
+frame clock is a one-shot timer from the platform backend (`scheduleFrame`, WM_TIMER on
+Windows). AppKit: `wantsLayer` makes the subtree layer-backed (views draw through
+`CALayerDelegate`), `layer =` hosts a foreign tree, `animator()` plus `NSAnimationContext`
+animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Not done:
+DirectComposition visuals (the compositor stays in-process until M3's DXGI presentation
+settles), group opacity (opacity applies per primitive), blurred shadows, `mask` alpha
+masks (shape masks clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation (M7).
+
 ## M5: Auto Layout and view controllers
 
 `NSLayoutConstraint`, `NSLayoutAnchor`, `NSStackView` (Cassowary solver),

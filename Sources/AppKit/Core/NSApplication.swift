@@ -18,6 +18,7 @@ import CoreText
 @MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization {
     @MainActor public override init() {
         super.init()
+        _CoreAnimationHost.installIfNeeded()
         if NSApplication._shared == nil { NSApplication._shared = self }
     }
 

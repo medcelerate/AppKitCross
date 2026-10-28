@@ -74,7 +74,10 @@ the core only ever sees AppKit coordinates.
    the view tree calling `draw(_:)` with clip/transform set per view.
 4. Backend ends the frame and presents.
 
-Layer-backed views (`wantsLayer`) are Milestone 4 and use the `CALayer` tree instead.
+Layer-backed views (`wantsLayer`) render through the `CALayer` tree: the root layer of a
+layer-backed subtree composites itself into the window context, and each view draws its
+content from its layer's delegate callback (`QuartzCore` is our own module on every
+platform; see `Sources/QuartzCore`).
 
 ## Objective-C runtime dependence
 

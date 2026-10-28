@@ -70,7 +70,11 @@ open class NSScreen: NSObject {
     open var deviceDescription: [NSDeviceDescriptionKey : Any] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/displaylink(target:selector:)
     @available(macOS 14.0, *)
-    open func displayLink(target: Any, selector: Selector) -> CADisplayLink { unimplemented() }
+    @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink {
+        _CoreAnimationHost.installIfNeeded()
+        let t = target as AnyObject
+        return CADisplayLink { link in _ = ActionRegistry.perform(selector, on: t, with: link) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/displayupdategranularity
     @available(macOS 12.0, *)
     open var displayUpdateGranularity: TimeInterval { unimplemented() }

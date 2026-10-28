@@ -47,6 +47,13 @@ final class HostBackend: PlatformBackend {
         pending.append(block)
     }
 
+    /// Frames come from a one-shot timer on the main run loop (which `run()` services).
+    /// Tests drive `CARuntime.tick()` directly instead.
+    func scheduleFrame(_ callback: @escaping @MainActor () -> Void) {
+        let t = Timer(timeInterval: 1.0 / 60.0, repeats: false) { _ in MainActor.assumeIsolated { callback() } }
+        RunLoop.main.add(t, forMode: .default)
+    }
+
     /// Runs queued blocks. Tests call this instead of `run()`.
     func drain() {
         while !pending.isEmpty {

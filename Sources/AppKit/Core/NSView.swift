@@ -29,6 +29,11 @@ import CoreText
     private var _autoresizingMask: NSView.AutoresizingMask = []
     private var _autoresizesSubviews = true
     private var _wantsLayer = false
+    private var _layer: CALayer? = nil
+    private var _layerIsHosted = false          // set through `layer =`: the view hosts a foreign layer tree
+    private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
+    private var _canDrawSubviewsIntoLayer = false
+    private var _animatorPending = false
     private var _alphaValue: CGFloat = 1
     private var _needsLayout = false
     private var _translatesAutoresizingMaskIntoConstraints = true
@@ -59,6 +64,85 @@ import CoreText
 
     open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(_frame)>" } }
 
+    // MARK: Layer backing
+
+    /// Gives the view a backing layer (AppKit makes the whole subtree layer-backed).
+    internal func _becomeLayerBacked() {
+        _CoreAnimationHost.installIfNeeded()
+        _wantsLayer = true
+        if _layer == nil {
+            let l = makeBackingLayer()
+            _layer = l
+            _configureBackingLayer(l)
+        }
+        _attachLayerToSuperview()
+        for s in _subviews { s._becomeLayerBacked() }
+    }
+
+    private func _configureBackingLayer(_ l: CALayer) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        l.delegate = self
+        l.anchorPoint = .zero
+        l.isGeometryFlipped = isFlipped
+        _syncLayerGeometry()
+        l.isHidden = _isHidden
+        l.opacity = Float(_alphaValue)
+        l.masksToBounds = _clipsToBounds
+        l.contentsScale = _window?.backingScaleFactor ?? 1
+        CATransaction.commit()
+    }
+
+    /// Mirrors frame/bounds into the backing layer without animating.
+    private func _syncLayerGeometry() {
+        guard let l = _layer, !_layerIsHosted else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        l.bounds = bounds
+        l.position = _frame.origin
+        CATransaction.commit()
+    }
+
+    /// Puts the backing layer into the superview's layer (or makes it a root this view hosts).
+    private func _attachLayerToSuperview() {
+        guard let l = _layer else { return }
+        if let sup = _superview, let sl = sup._layer, !sup._layerIsHosted {
+            if l.superlayer !== sl {
+                var i = 0
+                for v in sup._subviews {
+                    if v === self { break }
+                    if let vl = v._layer, vl.superlayer === sl { i += 1 }
+                }
+                sl.insertSublayer(l, at: UInt32(min(i, sl.sublayers?.count ?? 0)))
+            }
+            l.host = nil
+        } else {
+            if l.superlayer != nil { l.removeFromSuperlayer() }
+            l.host = self
+        }
+    }
+
+    /// True when this view's layer is the root of a layer tree (its superview is not layer-backed).
+    private var _isLayerRoot: Bool { _layer != nil && (_superview?._layer == nil || _superview?._layerIsHosted == true) }
+
+    /// Takes the one-shot `animator()` flag.
+    private func _takeAnimator() -> Bool {
+        let a = _animatorPending
+        _animatorPending = false
+        return a
+    }
+
+    /// Runs an explicit animation on the backing layer for a change made through `animator()`.
+    private func _animateLayer(_ key: String, from: Any?, to: Any?) {
+        guard let l = _layer, !_layerIsHosted else { return }
+        let a = CABasicAnimation(keyPath: key)
+        a.fromValue = from
+        a.toValue = to
+        a.duration = NSAnimationContext.current.duration
+        a.timingFunction = NSAnimationContext.current.timingFunction
+        l.add(a, forKey: key)
+    }
+
     // MARK: Window propagation
 
     internal func _setWindow(_ window: NSWindow?) {
@@ -66,6 +150,7 @@ import CoreText
         viewWillMove(toWindow: window)
         for s in _subviews { s._setWindow(window) }
         _window = window
+        if let l = _layer, let w = window { l.contentsScale = w.backingScaleFactor }
         viewDidMoveToWindow()
     }
 
@@ -118,6 +203,17 @@ import CoreText
     internal func _displayHierarchy(in ctx: CGContext, dirtyRect: NSRect) {
         guard !_isHidden, _alphaValue > 0 else { return }
         guard _frame.intersects(dirtyRect) else { return }
+        if let l = _layer, _isLayerRoot {
+            // Layer-backed subtree: Core Animation composites it (each view draws through
+            // its layer's delegate callback).
+            layoutSubtreeIfNeeded()
+            ctx.saveGState()
+            ctx.clip(to: dirtyRect)
+            l._compose(into: ctx, parentFlipped: _superview?.isFlipped ?? false, alpha: 1, time: CARuntime.now(), dirty: dirtyRect)
+            ctx.restoreGState()
+            _clearNeedsDisplay()
+            return
+        }
         ctx.saveGState()
         ctx.translateBy(x: _frame.minX, y: _frame.minY)
         if _flipsRelativeToSuperview {
@@ -144,12 +240,26 @@ import CoreText
         _needsDisplay = false
     }
 
+    private func _clearNeedsDisplay() {
+        _needsDisplay = false
+        for s in _subviews { s._clearNeedsDisplay() }
+    }
+
     private func _invalidate(_ rect: NSRect) {
         _needsDisplay = true
+        if !_layerIsHosted { _layer?._markNeedsDisplayQuietly() }
         if let w = _window {
             w._viewNeedsDisplay(self, rect: rect)
         }
     }
+    /// The animator proxy. The next `frame`/`alphaValue` change on a layer-backed view
+    /// animates over `NSAnimationContext.current.duration`; other views change at once.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimatablepropertycontainer/animator()
+    @MainActor public func animator() -> Self {
+        _animatorPending = _layer != nil
+        return self
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/init(coder:)
     public required init?(coder: NSCoder) {
         _frame = .zero
@@ -202,6 +312,7 @@ import CoreText
         view._superview = self
         view.nextResponder = self
         view._setWindow(_window)
+        if _layer != nil && !_layerIsHosted { view._becomeLayerBacked() } else if view._layer != nil { view._attachLayerToSuperview() }
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
@@ -242,7 +353,18 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alphavalue
     @MainActor open var alphaValue: CGFloat {
         get { _alphaValue }
-        set { _alphaValue = newValue; setNeedsDisplay(bounds) }
+        set {
+            let animate = _takeAnimator()
+            let old = _alphaValue
+            _alphaValue = newValue
+            if let l = _layer, !_layerIsHosted {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                l.opacity = Float(newValue)
+                CATransaction.commit()
+                if animate { _animateLayer("opacity", from: CGFloat(old), to: newValue) }
+            }
+            setNeedsDisplay(bounds)
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ancestorshared(with:)
     @MainActor open func ancestorShared(with view: NSView) -> NSView? {
@@ -306,8 +428,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candrawsubviewsintolayer
     @MainActor open var canDrawSubviewsIntoLayer: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _canDrawSubviewsIntoLayer }
+        set { _canDrawSubviewsIntoLayer = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candidatelisttouchbaritem
     @available(macOS 10.12, *)
@@ -416,7 +538,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displaylink(target:selector:)
     @available(macOS 14.0, *)
-    @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink { unimplemented() }
+    @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink {
+        _CoreAnimationHost.installIfNeeded()
+        let t = target as AnyObject
+        return CADisplayLink { link in _ = ActionRegistry.perform(selector, on: t, with: link) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/dragfile(_:from:slideback:event:)
     @MainActor open func dragFile(_ filename: String, from rect: NSRect, slideBack flag: Bool, event: NSEvent) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/dragpromisedfiles(oftypes:from:source:slideback:event:)
@@ -544,6 +670,11 @@ import CoreText
         set {
             guard newValue != _isHidden else { return }
             _isHidden = newValue
+            if let l = _layer, !_layerIsHosted {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                l.isHidden = newValue
+                CATransaction.commit()
+            }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
         }
@@ -582,13 +713,31 @@ import CoreText
     @MainActor open var lastBaselineOffsetFromBottom: CGFloat { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layer
     @MainActor open var layer: CALayer? {
-        get { nil }
-        set { unimplemented() }
+        get { _layer }
+        set {
+            // Layer-hosting: the view shows `newValue`'s tree and does not draw itself.
+            if let old = _layer, old !== newValue {
+                old.delegate = nil
+                old.removeFromSuperlayer()
+                old.host = nil
+            }
+            _layer = newValue
+            _layerIsHosted = newValue != nil
+            if let l = newValue {
+                _CoreAnimationHost.installIfNeeded()
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                l.contentsScale = _window?.backingScaleFactor ?? 1
+                CATransaction.commit()
+                l.removeFromSuperlayer()
+                l.host = self
+            }
+            setNeedsDisplay(bounds)
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layercontentsplacement
     @MainActor open var layerContentsPlacement: NSView.LayerContentsPlacement {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _layerContentsPlacement }
+        set { _layerContentsPlacement = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layercontentsredrawpolicy
     @MainActor open var layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy {
@@ -631,7 +780,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocusifcandraw(in:)
     @MainActor open func lockFocusIfCanDraw(in context: NSGraphicsContext) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/makebackinglayer()
-    @MainActor open func makeBackingLayer() -> CALayer { unimplemented() }
+    @MainActor open func makeBackingLayer() -> CALayer { CALayer() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/menu(for:)
     @MainActor open func menu(for event: NSEvent) -> NSMenu? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/mousedowncanmovewindow
@@ -765,6 +914,7 @@ import CoreText
         nextResponder = nil
         if let w = _window, w.firstResponder === self { _ = w.makeFirstResponder(nil) }
         _setWindow(nil)
+        if let l = _layer { l.removeFromSuperlayer(); l.host = self }
         viewDidMoveToSuperview()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removegesturerecognizer(_:)
@@ -873,6 +1023,7 @@ import CoreText
     @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) {
         guard newOrigin != _boundsOrigin else { return }
         _boundsOrigin = newOrigin
+        _syncLayerGeometry()
         setNeedsDisplay(bounds)
         if _postsBoundsChangedNotifications {
             NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
@@ -883,6 +1034,7 @@ import CoreText
         // Bounds scaling (bounds.size != frame.size) is recorded but not yet applied as a
         // drawing transform.
         _boundsSize = newSize == _frame.size ? nil : newSize
+        _syncLayerGeometry()
         setNeedsDisplay(bounds)
         if _postsBoundsChangedNotifications {
             NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
@@ -894,9 +1046,12 @@ import CoreText
     @MainActor open func setContentHuggingPriority(_ priority: NSLayoutConstraint.Priority, for orientation: NSLayoutConstraint.Orientation) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframeorigin(_:)
     @MainActor open func setFrameOrigin(_ newOrigin: NSPoint) {
+        let animate = _takeAnimator()
         guard newOrigin != _frame.origin else { return }
         let old = _frame
         _frame.origin = newOrigin
+        _syncLayerGeometry()
+        if animate { _animateLayer("position", from: old.origin, to: newOrigin) }
         _superview?.setNeedsDisplay(old.union(_frame))
         if _postsFrameChangedNotifications {
             NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
@@ -904,10 +1059,14 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframesize(_:)
     @MainActor open func setFrameSize(_ newSize: NSSize) {
+        let animate = _takeAnimator()
         guard newSize != _frame.size else { return }
         let old = _frame
+        let oldBounds = bounds
         _frame.size = newSize
         _cursorRectsValid = false
+        _syncLayerGeometry()
+        if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
         _superview?.setNeedsDisplay(old.union(_frame))
         setNeedsDisplay(bounds)
@@ -1039,7 +1198,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantslayer
     @MainActor open var wantsLayer: Bool {
         get { _wantsLayer }
-        set { _wantsLayer = newValue }   // Layer backing arrives with the QuartzCore port (Milestone 4).
+        set {
+            if newValue && _layer == nil && !_layerIsHosted {
+                _becomeLayerBacked()
+                setNeedsDisplay(bounds)
+            } else {
+                _wantsLayer = newValue   // AppKit keeps the layer once created; turning this off is a no-op.
+            }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsrestingtouches
     @MainActor open var wantsRestingTouches: Bool {
@@ -1078,4 +1244,48 @@ import CoreText
     open func isAccessibilityFocused() -> Bool { unimplemented() }
     // Requirement of NSAccessibilityElementProtocol
     open func accessibilityIdentifier() -> String { unimplemented() }
+}
+
+
+// MARK: - Core Animation delegate and host
+
+extension NSView: CALayerDelegate, CALayerHost {
+    /// The backing layer asks the view to draw; `ctx` is in the view's bounds space.
+    public func draw(_ layer: CALayer, in ctx: CGContext) {
+        guard layer === _layer, !_layerIsHosted else { return }
+        let gc = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
+        let previous = NSGraphicsContext.current
+        NSGraphicsContext.current = gc
+        viewWillDraw()
+        let b = bounds
+        if wantsDefaultClipping { ctx.clip(to: b) }
+        _dirtyRect = b
+        if wantsUpdateLayer { updateLayer() } else { draw(b) }
+        _dirtyRect = nil
+        NSGraphicsContext.current = previous
+        _needsDisplay = false
+    }
+
+    public func display(_ layer: CALayer) {
+        layer._displayDefault()
+    }
+
+    public func layoutSublayers(of layer: CALayer) {
+        if layer === _layer { layoutSubtreeIfNeeded() }
+    }
+
+    /// AppKit suppresses implicit animations on backing layers unless the current
+    /// NSAnimationContext allows them.
+    public func action(for layer: CALayer, forKey event: String) -> (any CAAction)? {
+        NSAnimationContext.current.allowsImplicitAnimation ? nil : NSNull()
+    }
+
+    public func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?) {
+        guard root === _layer else { return }
+        if let r = rect, let sup = _superview {
+            sup.setNeedsDisplay(r.intersection(_frame))
+        } else {
+            setNeedsDisplay(bounds)
+        }
+    }
 }

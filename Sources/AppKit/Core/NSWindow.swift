@@ -546,7 +546,11 @@ import CoreText
     @MainActor open func displayIfNeeded() { _platform?.displayIfNeeded() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/displaylink(target:selector:)
     @available(macOS 14.0, *)
-    @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink { unimplemented() }
+    @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink {
+        _CoreAnimationHost.installIfNeeded()
+        let t = target as AnyObject
+        return CADisplayLink { link in _ = ActionRegistry.perform(selector, on: t, with: link) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/displayswhenscreenprofilechanges
     @MainActor open var displaysWhenScreenProfileChanges: Bool {
         get { _displaysWhenScreenProfileChanges }
