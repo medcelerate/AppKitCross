@@ -272,6 +272,10 @@ public enum MTLDeviceRegistry {
     public static func defaultDevice() -> (any MTLDevice)? {
         if let c = cached { return c }
         for m in makers { if let d = m() { cached = d; return d } }
+        #if os(Windows)
+        // The D3D12 backend, when its shim is built (APPKITWIN_METAL_REFERENCE=1 skips it).
+        if ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] != "1", let d = MTLD3D12Device() { cached = d; return d }
+        #endif
         let r = MTLReferenceDevice()
         cached = r
         return r
