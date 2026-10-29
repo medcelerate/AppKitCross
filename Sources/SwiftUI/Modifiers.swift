@@ -44,6 +44,12 @@ final class _DecorationPrimitive: _Primitive {
         var tapCount = 1
         var hover: ((Bool) -> Void)? = nil
         var helpText: String? = nil
+        // Animatable geometry and the transition used on insertion/removal.
+        var offset = CGSize.zero
+        var scale = CGSize(width: 1, height: 1)
+        var rotation = Angle.zero
+        var anchor = UnitPoint.center
+        var transition: AnyTransition? = nil
     }
     var style: Style
     /// Children: [background?, content, overlay?]; these flags say which are present.
@@ -68,6 +74,7 @@ final class _DecorationPrimitive: _Primitive {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _DecorationPrimitive else { return }
+        retargetAnimations(to: o.style)
         style = o.style
         hasBackground = o.hasBackground
         hasOverlay = o.hasOverlay
@@ -78,7 +85,73 @@ final class _DecorationPrimitive: _Primitive {
 
     override func attach(to node: _ViewNode) {
         super.attach(to: node)
+        node.transition = style.transition
+        node.presentation.opacity = style.opacity
+        node.presentation.offset = style.offset
+        node.presentation.scale = style.scale
+        node.presentation.rotation = CGFloat(style.rotation.radians)
         apply()
+    }
+
+    /// Animates the properties that changed under the pass's animation; otherwise the
+    /// presentation jumps to the new model values.
+    private func retargetAnimations(to new: Style) {
+        guard let node else { return }
+        node.transition = new.transition
+        let anim = node.effectiveAnimation
+        func running(_ p: _Presentation.Property) -> Bool { node.runningAnimations.contains { $0.property == p } }
+        if new.opacity != style.opacity || running(.opacity) {
+            if let anim, new.opacity != style.opacity { node.animate(.opacity, from: [node.presentation.opacity], to: [new.opacity], with: anim) }
+            else if !running(.opacity) { node.presentation.opacity = new.opacity }
+        } else { node.presentation.opacity = new.opacity }
+        if new.offset != style.offset {
+            if let anim { node.animate(.offset, from: [node.presentation.offset.width, node.presentation.offset.height], to: [new.offset.width, new.offset.height], with: anim) }
+            else { node.presentation.offset = new.offset }
+        } else if !running(.offset) { node.presentation.offset = new.offset }
+        if new.scale != style.scale {
+            if let anim { node.animate(.scale, from: [node.presentation.scale.width, node.presentation.scale.height], to: [new.scale.width, new.scale.height], with: anim) }
+            else { node.presentation.scale = new.scale }
+        } else if !running(.scale) { node.presentation.scale = new.scale }
+        if new.rotation != style.rotation {
+            if let anim { node.animate(.rotation, from: [node.presentation.rotation], to: [CGFloat(new.rotation.radians)], with: anim) }
+            else { node.presentation.rotation = CGFloat(new.rotation.radians) }
+        } else if !running(.rotation) { node.presentation.rotation = CGFloat(new.rotation.radians) }
+    }
+
+    /// Applies the node's presentation (animated values and transition state) to the view.
+    private func applyPresentation() {
+        guard let node else { return }
+        let p = node.presentation
+        let t = min(1, max(0, p.transition))
+        let spec = style.transition.map { node.isExiting ? $0.removal : $0.insertion } ?? .identity
+        let size = view.bounds.size
+        var edgeOffset = CGSize.zero
+        switch spec.edge {
+        case .leading: edgeOffset.width = -size.width
+        case .trailing: edgeOffset.width = size.width
+        case .top: edgeOffset.height = -size.height
+        case .bottom: edgeOffset.height = size.height
+        case nil: break
+        }
+        let opacity = p.opacity * (spec.opacity + (1 - spec.opacity) * t)
+        let scale = CGSize(width: p.scale.width * (spec.scale + (1 - spec.scale) * t), height: p.scale.height * (spec.scale + (1 - spec.scale) * t))
+        let offset = CGSize(width: p.offset.width + (spec.offset.width + edgeOffset.width) * (1 - t), height: p.offset.height + (spec.offset.height + edgeOffset.height) * (1 - t))
+        let anchor = t < 1 && spec.scale != 1 ? spec.scaleAnchor : style.anchor
+        let ax = size.width * anchor.x, ay = size.height * anchor.y
+        var transform = CGAffineTransform(translationX: -ax, y: -ay)
+            .concatenating(CGAffineTransform(scaleX: scale.width, y: scale.height))
+            .concatenating(CGAffineTransform(rotationAngle: p.rotation))
+            .concatenating(CGAffineTransform(translationX: ax + offset.width, y: ay + offset.height))
+        if abs(transform.a - 1) < 1e-9, abs(transform.d - 1) < 1e-9, abs(transform.b) < 1e-9, abs(transform.c) < 1e-9, abs(transform.tx) < 1e-9, abs(transform.ty) < 1e-9 { transform = .identity }
+        if view.alphaValue != opacity { view.alphaValue = opacity }
+        if transform != .identity || view.layer != nil {
+            if view.layer == nil { view.wantsLayer = true }
+            if let l = view.layer, l.affineTransform() != transform {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                l.setAffineTransform(transform)
+                CATransaction.commit()
+            }
+        }
     }
 
     private func apply() {
@@ -143,6 +216,7 @@ final class _DecorationPrimitive: _Primitive {
     }
 
     override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+    override func didSyncBackingViews(node: _ViewNode) { applyPresentation() }
 }
 
 struct _Decorated<Content: View>: View, _PrimitiveView {

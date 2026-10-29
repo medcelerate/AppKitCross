@@ -78,6 +78,16 @@ public final class _ViewNode {
     var onAppear: [() -> Void] = []
     var onDisappear: [() -> Void] = []
     private var appeared = false
+    // Animation state (Animation.swift drives it): interpolated presentation, running
+    // animations, exit transitions and the implicit animation of an `.animation` scope.
+    var presentation = _Presentation()
+    var runningAnimations: [_RunningAnimation] = []
+    var implicitAnimation: Animation? = nil
+    var transition: AnyTransition? = nil
+    var insertedThisPass = false
+    var hasLaidOut = false
+    var isExiting = false
+    var exiting: [_ViewNode] = []
 
     nonisolated init(box: _AnyViewBox, parent: _ViewNode?, root: _ViewRoot?) {
         self.box = box
@@ -110,8 +120,65 @@ public final class _ViewNode {
     /// Marks the body stale; the host lays out again at the next display cycle.
     public func setNeedsUpdate() {
         needsUpdate = true
+        root?.noteTransaction(Transaction._current)
         root?.scheduleUpdate()
     }
+
+    /// The animation in effect for changes found in this pass: the transaction's, else the
+    /// nearest enclosing `.animation(_:value:)` scope whose value changed.
+    var effectiveAnimation: Animation? {
+        if let a = root?.transactionAnimation { return a }
+        var n: _ViewNode? = self
+        while let node = n {
+            if let a = node.implicitAnimation { return a }
+            n = node.parent
+        }
+        return nil
+    }
+
+    /// Starts (or retargets) an animation of one presentation property.
+    func animate(_ property: _Presentation.Property, from: [CGFloat], to: [CGFloat], with animation: Animation) {
+        runningAnimations.removeAll { $0.property == property }
+        runningAnimations.append(_RunningAnimation(property: property, from: from, to: to, animation: animation, start: CARuntime.now()))
+        presentation.set(property, from)          // shown at the start value until the first frame
+        root?.animationsDidStart()
+    }
+
+    /// Advances running animations to `now`; true while any is still running.
+    func advanceAnimations(now: CFTimeInterval) -> Bool {
+        guard !runningAnimations.isEmpty else { return false }
+        var remaining: [_RunningAnimation] = []
+        for a in runningAnimations {
+            let elapsed = now - a.start
+            let p = a.animation.progress(at: elapsed)
+            presentation.set(a.property, a.from.indices.map { a.from[$0] + (a.to[$0] - a.from[$0]) * CGFloat(p) })
+            if a.animation.totalDuration.isFinite, elapsed >= a.animation.totalDuration {
+                presentation.set(a.property, a.to)
+                if a.property == .transition, presentation.transition <= 0, isExiting { finishExit() }
+            } else {
+                remaining.append(a)
+            }
+        }
+        runningAnimations = remaining
+        primitive?.didSyncBackingViews(node: self)
+        return !runningAnimations.isEmpty
+    }
+
+    /// Begins the removal transition; the node leaves the tree when it ends.
+    func beginExit(with animation: Animation) {
+        isExiting = true
+        parent?.exiting.append(self)
+        animate(.transition, from: [presentation.transition], to: [0], with: animation)
+    }
+
+    private func finishExit() {
+        let p = parent
+        p?.exiting.removeAll { $0 === self }
+        remove()
+    }
+
+    /// The frame currently shown (interpolated while a frame animation runs).
+    var presentedFrame: CGRect { presentation.frame ?? frame }
 
     // MARK: Update
 
@@ -170,12 +237,20 @@ public final class _ViewNode {
             } else {
                 node = _ViewNode(box: b, parent: self, root: root)
                 node.isAttached = isAttached
+                node.insertedThisPass = true
+                root?.noteInserted(node)
             }
             node.parent = self
             node.update(box: b, environment: env, force: force || match == nil)
             next.append(node)
         }
-        for o in old where o !== _placeholder { o.remove() }
+        for o in old where o !== _placeholder {
+            if let t = o.transition, let anim = o.effectiveAnimation, t.removal != .identity, !o.isExiting {
+                o.beginExit(with: anim)
+            } else {
+                o.remove()
+            }
+        }
         children = next
     }
 
@@ -221,7 +296,14 @@ public final class _ViewNode {
     }
 
     public func place(in rect: CGRect) {
+        if hasLaidOut, primitive?.nsView != nil, rect != frame, let anim = effectiveAnimation {
+            let from = presentedFrame
+            animate(.frame, from: [from.minX, from.minY, from.width, from.height], to: [rect.minX, rect.minY, rect.width, rect.height], with: anim)
+        } else if runningAnimations.contains(where: { $0.property == .frame }) == false {
+            presentation.frame = nil
+        }
         frame = rect
+        hasLaidOut = true
         if let p = primitive, !p.isLayoutTransparent {
             p.place(node: self, in: rect)
         } else {
@@ -240,6 +322,7 @@ public final class _ViewNode {
     func collectBackingViews(into out: inout [NSView]) {
         if let v = primitive?.nsView { out.append(v); return }
         for c in children { c.collectBackingViews(into: &out) }
+        for e in exiting { e.collectBackingViews(into: &out) }
     }
 
     /// Puts backing views under their backing ancestors in tree order and sets their frames.
@@ -254,16 +337,19 @@ public final class _ViewNode {
         syncFrames(containerFrame: containerFrame)
     }
 
-    private func syncFrames(containerFrame: CGRect) {
+    func syncFrames(containerFrame: CGRect) {
         if let v = primitive?.nsView {
-            let f = CGRect(x: frame.minX - containerFrame.minX, y: frame.minY - containerFrame.minY, width: frame.width, height: frame.height)
+            let pf = presentedFrame
+            let f = CGRect(x: pf.minX - containerFrame.minX, y: pf.minY - containerFrame.minY, width: pf.width, height: pf.height)
             if v.frame != f { v.frame = f }
             // Children of a backing view live inside it.
-            for c in children { c.syncBackingViews(in: v, containerFrame: frame) }
+            for c in children { c.syncBackingViews(in: v, containerFrame: pf) }
+            for e in exiting { e.syncBackingViews(in: v, containerFrame: pf) }
             primitive?.didSyncBackingViews(node: self)
             return
         }
         for c in children { c.syncFrames(containerFrame: containerFrame) }
+        for e in exiting { e.syncFrames(containerFrame: containerFrame) }
     }
 }
 
@@ -369,6 +455,12 @@ public final class _ViewRoot: NSHostingRoot {
     private var rootEnvironment = EnvironmentValues()
     private var updateScheduled = false
     private var contentChanged = true
+    /// The animation of the transaction that caused the pending update, if any.
+    public private(set) var transactionAnimation: Animation?
+    private var implicitScopes: [_ViewNode] = []
+    private var insertedNodes: [_ViewNode] = []
+    private var animating: [_ViewNode] = []
+    private var displayLink: CADisplayLink?
 
     init<V: View>(content: V) { contentBox = _ViewBox(content) }
 
@@ -411,6 +503,40 @@ public final class _ViewRoot: NSHostingRoot {
         scheduleUpdate()
     }
 
+    func noteTransaction(_ t: Transaction?) {
+        if let a = t?.animation, !(t?.disablesAnimations ?? false) { transactionAnimation = a }
+    }
+    func noteImplicitAnimation(_ node: _ViewNode) { implicitScopes.append(node) }
+    func noteInserted(_ node: _ViewNode) { insertedNodes.append(node) }
+
+    func animationsDidStart() {
+        guard displayLink == nil, let host else { return }
+        let link = host.makeDisplayLink { [weak self] _ in self?.advanceAnimations() }
+        link.add(to: .main, forMode: .default)
+        displayLink = link
+    }
+
+    /// One animation frame: advances every running animation and redraws.
+    public func advanceAnimations() {
+        let now = CARuntime.now()
+        var still = false
+        func visit(_ n: _ViewNode) {
+            if n.advanceAnimations(now: now) { still = true }
+            for c in n.children { visit(c) }
+            for e in n.exiting { visit(e) }
+        }
+        if let r = rootNode { visit(r) }
+        if let r = rootNode, let host { r.syncBackingViews(in: host.hostView, containerFrame: .zero) }
+        host?.setNeedsDisplay(in: nil)
+        if !still {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+    }
+
+    /// True while any node animates (tests).
+    public var isAnimating: Bool { displayLink != nil }
+
     func scheduleUpdate() {
         guard !updateScheduled, let host else { return }
         updateScheduled = true
@@ -439,6 +565,19 @@ public final class _ViewRoot: NSHostingRoot {
         guard let node = rootNode, let host else { return }
         node.place(in: bounds)
         node.syncBackingViews(in: host.hostView, containerFrame: .zero)
+        // Insertion transitions start once the new nodes have a frame.
+        for n in insertedNodes where n.isAttached {
+            if let t = n.transition, t.insertion != .identity, let anim = n.effectiveAnimation {
+                n.presentation.transition = 0
+                n.animate(.transition, from: [0], to: [1], with: anim)
+                n.primitive?.didSyncBackingViews(node: n)
+            }
+            n.insertedThisPass = false
+        }
+        insertedNodes = []
+        for s in implicitScopes { s.implicitAnimation = nil }
+        implicitScopes = []
+        transactionAnimation = nil
         updateScheduled = false
     }
 
@@ -455,4 +594,37 @@ public final class _ViewRoot: NSHostingRoot {
         }
         return rootNode.flatMap(visit)
     }
+}
+
+
+// MARK: Presentation
+
+/// The values a node is currently shown with (its model values while nothing animates).
+public struct _Presentation {
+    public enum Property: Equatable { case frame, opacity, offset, scale, rotation, transition }
+    public var frame: CGRect? = nil
+    public var opacity: CGFloat = 1
+    public var offset = CGSize.zero
+    public var scale = CGSize(width: 1, height: 1)
+    public var rotation: CGFloat = 0           // radians
+    public var transition: CGFloat = 1         // 1 = fully present, 0 = removed state
+
+    mutating func set(_ p: Property, _ v: [CGFloat]) {
+        switch p {
+        case .frame: if v.count == 4 { frame = CGRect(x: v[0], y: v[1], width: v[2], height: v[3]) }
+        case .opacity: opacity = v[0]
+        case .offset: if v.count == 2 { offset = CGSize(width: v[0], height: v[1]) }
+        case .scale: if v.count == 2 { scale = CGSize(width: v[0], height: v[1]) }
+        case .rotation: rotation = v[0]
+        case .transition: transition = v[0]
+        }
+    }
+}
+
+struct _RunningAnimation {
+    let property: _Presentation.Property
+    let from: [CGFloat]
+    let to: [CGFloat]
+    let animation: Animation
+    let start: CFTimeInterval
 }

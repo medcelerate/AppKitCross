@@ -58,8 +58,13 @@ Shape:
 
 - Apps written against SwiftUI's common surface compile and run on Windows and Linux
   with native AppKit-backed controls.
-- Not in this version: animations (`withAnimation` runs its body without interpolation),
-  gestures beyond tap and hover, `NavigationStack`/`NavigationSplitView`,
+- Animations (second version): `withAnimation`, `.animation(_:value:)`, transitions on
+  insertion and removal, animated layout changes of backed views and the animatable
+  `opacity`, `offset`, `scaleEffect` and `rotationEffect` modifiers are interpolated by the
+  runtime on the host's display link (cubic Bézier curves and damped springs); not a
+  transaction per node as Apple does, so overlapping animations on one property retarget
+  from the current value rather than blend.
+- Not in this version: gestures beyond tap and hover, `NavigationStack`/`NavigationSplitView`,
   `List` selection and swipe actions, `Table`, `Form` styling, `Picker` menus,
   `Menu`/`commands`, `TabView`, sheets and alerts, `@AppStorage`, `@FocusState`,
   `GeometryReader` (planned next), `Canvas`, `TimelineView`, drag and drop.

@@ -945,12 +945,20 @@ struct SwiftUIDemo: View {
                 Button("Greet") { count += 1 }
             }
             Text(name.isEmpty ? "Type a name and press Greet." : "Hello, \(name)! (\(count) greetings)")
-            Toggle("Enabled", isOn: $enabled)
-            HStack {
-                Slider(value: $amount, in: 0...1).disabled(!enabled)
-                Text(String(format: "%.0f%%", amount * 100)).frame(width: 44, alignment: .trailing)
+            Group {
+                Toggle("Enabled", isOn: $enabled.animation(.easeInOut(duration: 0.3)))
+                HStack {
+                    Slider(value: $amount, in: 0...1).disabled(!enabled)
+                    Text(String(format: "%.0f%%", amount * 100)).frame(width: 44, alignment: .trailing)
+                }
+                // The bar animates its width with the slider and fades with the toggle.
+                RoundedRectangle(cornerRadius: 8).fill(Color.accentColor).opacity(enabled ? 1 : 0.3)
+                    .frame(width: 240 * CGFloat(amount) + 20, height: 20)
+                    .animation(.easeOut(duration: 0.25), value: amount)
+                if !enabled {
+                    Text("Disabled").foregroundColor(.secondary).transition(.move(edge: .leading).combined(with: .opacity))
+                }
             }
-            RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(enabled ? 1 : 0.3)).frame(width: 240 * CGFloat(amount) + 20, height: 20)
             Divider()
             HStack {
                 Text("Items").font(.headline)

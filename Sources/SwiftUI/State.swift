@@ -110,6 +110,17 @@ extension Binding {
     }
 }
 
+extension Binding {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/binding/animation(_:)
+    public func animation(_ animation: Animation? = .default) -> Binding<Value> {
+        Binding(get: getter, set: { v in withAnimation(animation) { self.setter(v) } })
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/binding/transaction(_:)
+    public func transaction(_ transaction: Transaction) -> Binding<Value> {
+        Binding(get: getter, set: { v in withTransaction(transaction) { self.setter(v) } })
+    }
+}
+
 extension Binding: Identifiable where Value: Identifiable {
     public var id: Value.ID { wrappedValue.id }
 }

@@ -1,0 +1,164 @@
+// SwiftUI animations: timing curves, withAnimation/.animation transactions, animated
+// layout, animatable modifiers and transitions, driven by a fake clock through CARuntime.
+
+import XCTest
+@testable import AppKit
+@testable import SwiftUI
+import QuartzCore
+
+@MainActor
+private func host<V: View>(_ view: V, width: CGFloat = 300, height: CGFloat = 200) -> (NSWindow, NSHostingView<V>) {
+    let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+    let h = NSHostingView(rootView: view)
+    h.frame = NSRect(x: 0, y: 0, width: width, height: height)
+    w.contentView!.addSubview(h)
+    w.makeKeyAndOrderFront(nil)
+    h.layoutSubtreeIfNeeded()
+    return (w, h)
+}
+
+@MainActor
+private func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allViews) }
+
+final class SwiftUIAnimationTests: XCTestCase, @unchecked Sendable {
+    func testCurves() {
+        XCTAssertEqual(Animation.linear(duration: 1).progress(at: 0.25), 0.25, accuracy: 1e-9)
+        XCTAssertEqual(Animation.easeInOut(duration: 1).progress(at: 0.5), 0.5, accuracy: 0.01)
+        XCTAssertLessThan(Animation.easeIn(duration: 1).progress(at: 0.25), 0.25)
+        XCTAssertGreaterThan(Animation.easeOut(duration: 1).progress(at: 0.25), 0.25)
+        XCTAssertEqual(Animation.default.progress(at: 10), 1)
+        XCTAssertEqual(Animation.default.delay(1).progress(at: 0.5), 0)
+        let spring = Animation.spring(response: 0.5, dampingFraction: 0.5)
+        XCTAssertGreaterThan(spring.progress(at: 0.35), 1, "an under-damped spring overshoots")
+        XCTAssertEqual(spring.progress(at: spring.totalDuration), 1, accuracy: 0.01)
+        let rep = Animation.linear(duration: 1).repeatCount(2, autoreverses: true)
+        XCTAssertEqual(rep.progress(at: 1.5), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(rep.totalDuration, 2)
+    }
+
+    struct Mover: View {
+        @State var moved = false
+        var body: some View {
+            HStack(spacing: 0) {
+                if moved { Spacer() }
+                Color.red.frame(width: 50, height: 50).id("box")
+                if !moved { Spacer() }
+            }
+            .frame(width: 300)
+            .onTapGesture { withAnimation(.linear(duration: 1)) { moved.toggle() } }
+        }
+    }
+
+    func testWithAnimationInterpolatesLayout() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 100
+            let saved = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = saved }
+            let (w, h) = host(Mover(), width: 300, height: 100)
+            let box = allViews(h).compactMap { $0 as? _ShapeDrawingView }.first!
+            XCTAssertEqual(box.frame.minX, 0, accuracy: 0.5)
+            let root = h.hostingRoot as! _ViewRoot
+            let mover = root.firstNode { $0.viewType == Mover.self }!
+            // Toggle inside withAnimation.
+            withAnimation(.linear(duration: 1)) { (mover.box.value as! Mover).moved = true }
+            h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(root.isAnimating)
+            XCTAssertEqual(box.frame.minX, 0, accuracy: 0.5, "starts where it was")
+            clock = 100.5
+            CARuntime.tick()
+            XCTAssertEqual(box.frame.minX, 125, accuracy: 1, "halfway at t = 0.5")
+            clock = 101.1
+            CARuntime.tick()
+            XCTAssertEqual(box.frame.minX, 250, accuracy: 0.5)
+            XCTAssertFalse(root.isAnimating)
+            w.close()
+        }
+    }
+
+    struct Fader: View {
+        @State var dim = false
+        var body: some View {
+            Color.blue.frame(width: 40, height: 40).opacity(dim ? 0.2 : 1).offset(x: dim ? 100 : 0).scaleEffect(dim ? 0.5 : 1)
+                .animation(.linear(duration: 2), value: dim)
+        }
+    }
+
+    func testAnimationModifierDrivesProperties() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 50
+            let saved = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = saved }
+            let (w, h) = host(Fader(), width: 200, height: 100)
+            let containers = allViews(h).compactMap { $0 as? _ContainerView }
+            XCTAssertEqual(containers.count, 3)
+            let root = h.hostingRoot as! _ViewRoot
+            let fader = root.firstNode { $0.viewType == Fader.self }!
+            (fader.box.value as! Fader).dim = true     // no withAnimation: the .animation scope animates it
+            h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(root.isAnimating)
+            clock = 51
+            CARuntime.tick()
+            let opacityView = containers.first { $0.alphaValue < 0.99 }
+            XCTAssertNotNil(opacityView)
+            XCTAssertEqual(opacityView!.alphaValue, 0.6, accuracy: 0.05, "halfway between 1 and 0.2")
+            // Wrappers nest outermost first: scaleEffect, offset, opacity.
+            let offsetView = containers.first { ($0.layer?.affineTransform().tx ?? 0) > 1 && abs(($0.layer?.affineTransform().a ?? 1) - 1) < 1e-6 }
+            XCTAssertNotNil(offsetView)
+            XCTAssertEqual(offsetView!.layer!.affineTransform().tx, 50, accuracy: 2)
+            let scaled = containers.first { ($0.layer?.affineTransform().a ?? 1) < 0.99 }
+            XCTAssertEqual(scaled?.layer?.affineTransform().a ?? 0, 0.75, accuracy: 0.05)
+            clock = 53
+            CARuntime.tick()
+            XCTAssertEqual(opacityView!.alphaValue, 0.2, accuracy: 0.01)
+            XCTAssertEqual(offsetView!.layer!.affineTransform().tx, 100, accuracy: 0.5)
+            XCTAssertFalse(root.isAnimating)
+            w.close()
+        }
+    }
+
+    struct Appearing: View {
+        @State var shown = false
+        var body: some View {
+            VStack {
+                if shown { Text("Hello").transition(.opacity) }
+                Text("Base")
+            }
+        }
+    }
+
+    func testTransitionsOnInsertionAndRemoval() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 10
+            let saved = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = saved }
+            let (w, h) = host(Appearing())
+            let root = h.hostingRoot as! _ViewRoot
+            let node = root.firstNode { $0.viewType == Appearing.self }!
+            withAnimation(.linear(duration: 1)) { (node.box.value as! Appearing).shown = true }
+            h.layoutSubtreeIfNeeded()
+            let container = allViews(h).compactMap { $0 as? _ContainerView }.first!
+            XCTAssertEqual(container.alphaValue, 0, accuracy: 0.01, "fades in from transparent")
+            clock = 10.5
+            CARuntime.tick()
+            XCTAssertEqual(container.alphaValue, 0.5, accuracy: 0.05)
+            clock = 11.1
+            CARuntime.tick()
+            XCTAssertEqual(container.alphaValue, 1, accuracy: 0.01)
+            // Removal keeps the view until the fade-out ends.
+            withAnimation(.linear(duration: 1)) { (node.box.value as! Appearing).shown = false }
+            h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(allViews(h).contains(container), "still in the hierarchy while fading out")
+            clock = 11.6
+            CARuntime.tick()
+            XCTAssertEqual(container.alphaValue, 0.5, accuracy: 0.05)
+            clock = 12.2
+            CARuntime.tick()
+            XCTAssertFalse(allViews(h).contains(container), "gone after the transition")
+            XCTAssertFalse(root.isAnimating)
+            w.close()
+        }
+    }
+}
