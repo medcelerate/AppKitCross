@@ -276,4 +276,33 @@ final class LayerAnimationLifetimeTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(CARuntime.hasPendingWork, "a closed window's animations stop driving frames")
         }
     }
+
+    /// The HelloWindow badge: animations added to a layer before it joins its tree are
+    /// gated by that tree's window too, and a tree nothing hosts drives no frames.
+    func testAnimationsAddedBeforeAttachFollowTheTreeTheyJoin() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 200
+            let savedNow = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = savedNow }
+            let ring = CAShapeLayer()
+            let pulse = CABasicAnimation(keyPath: "transform.scale")
+            pulse.fromValue = 0.6; pulse.toValue = 1.2; pulse.duration = 0.9; pulse.repeatCount = .infinity
+            ring.add(pulse, forKey: "pulse")
+            clock = 201; CARuntime.tick()
+            XCTAssertFalse(CARuntime.hasPendingWork, "a layer nothing hosts does not request frames")
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
+            let v = NSView(frame: NSRect(x: 10, y: 10, width: 60, height: 40))
+            v.wantsLayer = true
+            w.contentView!.addSubview(v)
+            w.makeKeyAndOrderFront(nil)
+            v.layer!.addSublayer(ring)
+            XCTAssertTrue(CARuntime.hasPendingWork, "joining a shown tree starts the frames")
+            clock = 202; CARuntime.tick()
+            XCTAssertTrue(CARuntime.hasPendingWork)
+            w.close()
+            clock = 203; CARuntime.tick()
+            XCTAssertFalse(CARuntime.hasPendingWork, "closing the window stops them, although the animation predates the attach")
+        }
+    }
 }

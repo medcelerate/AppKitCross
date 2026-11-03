@@ -249,23 +249,27 @@ final class WaylandBackend: PlatformBackend {
     /// `blocking` it waits for the next event or deadline.
     func pump(blocking: Bool) {
         drainPosted()
+        let nextTimer = PlatformMainQueue.service()
         while wl_display_prepare_read(display) != 0 { wl_display_dispatch_pending(display) }
         wl_display_flush(display)
         var fds = [pollfd(fd: wl_display_get_fd(display), events: Int16(POLLIN), revents: 0),
-                   pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0)]
+                   pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
+                   pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
         var timeout: Int32 = blocking ? -1 : 0
         if blocking {
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
             }
+            if let t = nextTimer { let ms = Int32(min(Double(Int32.max), t * 1000)); timeout = timeout < 0 ? ms : min(timeout, ms) }
             if !posted.isEmpty || windows.contains(where: { $0.needsPaint }) { timeout = 0 }
         }
-        _ = poll(&fds, 2, timeout)
+        _ = poll(&fds, 3, timeout)
         if fds[0].revents & Int16(POLLIN) != 0 { wl_display_read_events(display) } else { wl_display_cancel_read(display) }
         if fds[1].revents != 0 {
             var buf = [UInt8](repeating: 0, count: 64)
             _ = read(wakePipe[0], &buf, 64)
         }
+        if fds[2].revents != 0 { PlatformMainQueue.service() }
         wl_display_dispatch_pending(display)
         if wl_display_get_error(display) != 0 {
             FileHandle.standardError.write(Data("AppKitWin: Wayland display error \(wl_display_get_error(display)); stopping\n".utf8))

@@ -86,19 +86,23 @@ final class LinuxBackend: PlatformBackend {
     /// it waits for the next event or deadline.
     func pump(blocking: Bool) {
         drainPosted()
+        let nextTimer = PlatformMainQueue.service()
         if blocking && XPending(display) == 0 {
             var fds = [pollfd(fd: XConnectionNumber(display), events: Int16(POLLIN), revents: 0),
-                       pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0)]
+                       pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
+                       pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
             var timeout: Int32 = -1
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
             }
+            if let t = nextTimer { let ms = Int32(min(Double(Int32.max), t * 1000)); timeout = timeout < 0 ? ms : min(timeout, ms) }
             if windows.contains(where: { $0.needsPaint }) { timeout = 0 }
-            _ = poll(&fds, 2, timeout)
+            _ = poll(&fds, 3, timeout)
             if fds[1].revents != 0 {
                 var buf = [UInt8](repeating: 0, count: 64)
                 _ = read(wakePipe[0], &buf, 64)
             }
+            if fds[2].revents != 0 { PlatformMainQueue.service() }
         }
         while XPending(display) > 0 {
             var event = XEvent()
