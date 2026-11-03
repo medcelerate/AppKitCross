@@ -145,6 +145,11 @@ public enum CARuntime {
         requester()
     }
 
+    /// What keeps frames going, for tracing: animating layer roots and running display links.
+    public static var _pendingWorkDescription: String {
+        "roots \(animatingRoots.filter { $0.value != nil }.count) links \(displayLinks.filter { ($0.value?.isRunning) == true }.count)"
+    }
+
     /// True while any layer tree animates or a display link runs.
     public static var hasPendingWork: Bool {
         animatingRoots.contains { $0.value != nil } || displayLinks.contains { ($0.value?.isRunning) == true }
