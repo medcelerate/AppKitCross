@@ -73,7 +73,7 @@ import CoreGraphics
             guard r.intersects(dirtyRect) else { continue }
             c.headerCell.isHighlighted = i == _pressedColumn
             c.headerCell.draw(withFrame: r, in: self)
-            if let sort, let key = c.sortDescriptorPrototype?.key, key == sort.key {
+            if let sort, let identity = c.sortDescriptorPrototype?._sortIdentity, identity == sort._sortIdentity {
                 c.headerCell.drawSortIndicator(withFrame: r, in: self, ascending: sort.ascending, priority: 0)
             }
         }

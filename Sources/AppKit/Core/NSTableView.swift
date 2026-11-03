@@ -252,10 +252,10 @@ import CoreGraphics
     internal func _headerClicked(column: Int) {
         guard _tableColumns.indices.contains(column) else { return }
         let c = _tableColumns[column]
-        if let proto = c.sortDescriptorPrototype, let key = proto.key {
+        if let proto = c.sortDescriptorPrototype, let identity = proto._sortIdentity {
             var ascending = proto.ascending
-            if let first = _sortDescriptors.first, first.key == key { ascending = !first.ascending }
-            sortDescriptors = [NSSortDescriptor(key: key, ascending: ascending)] + _sortDescriptors.filter { $0.key != key }
+            if let first = _sortDescriptors.first, first._sortIdentity == identity { ascending = !first.ascending }
+            sortDescriptors = [proto._with(ascending: ascending)] + _sortDescriptors.filter { $0._sortIdentity != identity }
             highlightedTableColumn = c
         }
         _clickedColumn = column

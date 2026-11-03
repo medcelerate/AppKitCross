@@ -861,11 +861,16 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
         filter.action = Selector(("filterChanged:"))
         filter.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(filter)
-        for (id, title, width, key) in [("name", "Planet", 140.0, "name"), ("moons", "Moons", 70.0, "moons"), ("kind", "Kind", 80.0, "kind")] {
+        let columns: [(String, String, CGFloat, NSSortDescriptor)] = [
+            ("name", "Planet", 140, sortDescriptor(key: "name", keyPath: \Planet.name)),
+            ("moons", "Moons", 70, sortDescriptor(key: "moons", keyPath: \Planet.moons)),
+            ("kind", "Kind", 80, sortDescriptor(key: "kind", keyPath: \Planet.kind)),
+        ]
+        for (id, title, width, prototype) in columns {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             c.title = title
             c.width = width
-            c.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
+            c.sortDescriptorPrototype = prototype
             table.addTableColumn(c)
         }
         table.dataSource = self
@@ -918,14 +923,29 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
         rows = kind == "All" ? all : all.filter { $0.kind == kind }
         if let d = table.sortDescriptors.first {
             rows.sort { a, b in
-                switch d.key {
-                case "moons": return d.ascending ? a.moons < b.moons : a.moons > b.moons
-                case "kind": return d.ascending ? a.kind < b.kind : a.kind > b.kind
-                default: return d.ascending ? a.name < b.name : a.name > b.name
-                }
+                if sorts(d, by: "moons", keyPath: \Planet.moons) { return d.ascending ? a.moons < b.moons : a.moons > b.moons }
+                if sorts(d, by: "kind", keyPath: \Planet.kind) { return d.ascending ? a.kind < b.kind : a.kind > b.kind }
+                return d.ascending ? a.name < b.name : a.name > b.name
             }
         }
         table.reloadData()
+    }
+
+    // Apple's Foundation sorts by key-value coding keys; swift-corelibs-foundation only by
+    // key paths (its `key` is unavailable). The table compares descriptors either way.
+    private func sortDescriptor<V>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
+        #if canImport(Darwin)
+        return NSSortDescriptor(key: key, ascending: true)
+        #else
+        return NSSortDescriptor(keyPath: keyPath, ascending: true)
+        #endif
+    }
+    private func sorts<V>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
+        #if canImport(Darwin)
+        return d.key == key
+        #else
+        return d.keyPath == keyPath
+        #endif
     }
 
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {

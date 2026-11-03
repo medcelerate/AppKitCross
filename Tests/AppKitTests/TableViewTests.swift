@@ -5,6 +5,24 @@
 import XCTest
 @testable import AppKit
 
+private struct Planet { let name: String; let moons: Int }
+
+/// A sort descriptor both Foundations accept: a key on Apple's, a key path on corelibs.
+private func sortDescriptor<V>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
+    #if canImport(Darwin)
+    return NSSortDescriptor(key: key, ascending: true)
+    #else
+    return NSSortDescriptor(keyPath: keyPath, ascending: true)
+    #endif
+}
+private func sorts<V>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
+    #if canImport(Darwin)
+    return d.key == key
+    #else
+    return d.keyPath == keyPath
+    #endif
+}
+
 @MainActor
 private final class Planets: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     var rows = [("Mercury", 0), ("Venus", 0), ("Earth", 1), ("Mars", 2), ("Jupiter", 95), ("Saturn", 146), ("Uranus", 28), ("Neptune", 16)]
@@ -20,7 +38,7 @@ private final class Planets: NSObject, NSTableViewDataSource, NSTableViewDelegat
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
         sortChanges.append(tableView.sortDescriptors)
         if let d = tableView.sortDescriptors.first {
-            if d.key == "name" { rows.sort { d.ascending ? $0.0 < $1.0 : $0.0 > $1.0 } }
+            if sorts(d, by: "name", keyPath: \Planet.name) { rows.sort { d.ascending ? $0.0 < $1.0 : $0.0 > $1.0 } }
             else { rows.sort { d.ascending ? $0.1 < $1.1 : $0.1 > $1.1 } }
         }
         tableView.reloadData()
@@ -39,11 +57,11 @@ private func makeTable(rows: Planets, in window: NSWindow) -> (NSTableView, NSSc
     let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
     name.title = "Planet"
     name.width = 120
-    name.sortDescriptorPrototype = NSSortDescriptor(key: "name", ascending: true)
+    name.sortDescriptorPrototype = sortDescriptor(key: "name", keyPath: \Planet.name)
     let moons = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("moons"))
     moons.title = "Moons"
     moons.width = 60
-    moons.sortDescriptorPrototype = NSSortDescriptor(key: "moons", ascending: true)
+    moons.sortDescriptorPrototype = sortDescriptor(key: "moons", keyPath: \Planet.moons)
     table.addTableColumn(name)
     table.addTableColumn(moons)
     table.dataSource = rows
@@ -177,7 +195,7 @@ final class TableViewTests: XCTestCase, @unchecked Sendable {
             let up = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 0)!
             w.sendEvent(down); w.sendEvent(up)
             XCTAssertEqual(rows.sortChanges.count, 1)
-            XCTAssertEqual(table.sortDescriptors.first?.key, "moons")
+            XCTAssertTrue(sorts(table.sortDescriptors.first!, by: "moons", keyPath: \Planet.moons))
             XCTAssertEqual(table.sortDescriptors.first?.ascending, true)
             XCTAssertEqual(rows.rows.first?.0, "Mercury")
             w.sendEvent(down); w.sendEvent(up)
