@@ -214,7 +214,9 @@ final class Win32Backend: PlatformBackend {
         }
         fireFrameIfDue()
         // Blocks queued on the main queue from other threads, and RunLoop timers.
+        let serviceStart = GetTickCount64()
         let nextTimer = PlatformMainQueue.service()
+        serviceMs += GetTickCount64() - serviceStart
         var timeout: DWORD
         if let deadline = frameDeadline {
             let now = GetTickCount64()
@@ -227,9 +229,9 @@ final class Win32Backend: PlatformBackend {
         if NSView._traceInvalidation {
             let now = GetTickCount64()
             if now - pumpTraceStart >= 1000 {
-                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms") (frame deadline \(frameDeadline.map { "\(Int64($0) - Int64(now)) ms" } ?? "none"), timer \(nextTimer.map { "\($0) s" } ?? "none")); wakes: queue \(wakesQueue) input \(wakesInput) timeout \(wakesTimeout)")
+                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms") (frame deadline \(frameDeadline.map { "\(Int64($0) - Int64(now)) ms" } ?? "none"), timer \(nextTimer.map { "\($0) s" } ?? "none")); wakes: queue \(wakesQueue) input \(wakesInput) timeout \(wakesTimeout); service \(serviceMs) ms")
                 pumpIterations = 0
-                wakesQueue = 0; wakesInput = 0; wakesTimeout = 0
+                wakesQueue = 0; wakesInput = 0; wakesTimeout = 0; serviceMs = 0
                 pumpTraceStart = now
             }
         }
@@ -246,6 +248,7 @@ final class Win32Backend: PlatformBackend {
         return true
     }
     private var wakesQueue = 0, wakesInput = 0, wakesTimeout = 0
+    private var serviceMs: UInt64 = 0
     private var pumpIterations = 0
     private var pumpTraceStart: UInt64 = GetTickCount64()
 
