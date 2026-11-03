@@ -216,7 +216,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         MainActor.assumeIsolated {
             NotificationCenter.default.post(name: NSMenu.willSendActionNotification, object: self, userInfo: ["MenuItem": item])
             if let action = item.action {
-                _ = NSApplication.shared.sendAction(action, to: item.target, from: item)
+                let handled = NSApplication.shared.sendAction(action, to: item.target, from: item)
+                if NSView._traceInvalidation {
+                    NSView._trace("menu action '\(item.title)' \(action) target \(item.target.map { "\(type(of: $0))" } ?? "nil (first responder \(NSApplication.shared.keyWindow?.firstResponder.map { "\(type(of: $0))" } ?? "none"))") handled \(handled)")
+                }
             }
             NotificationCenter.default.post(name: NSMenu.didSendActionNotification, object: self, userInfo: ["MenuItem": item])
         }
