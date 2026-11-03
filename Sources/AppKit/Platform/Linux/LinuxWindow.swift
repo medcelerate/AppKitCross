@@ -166,6 +166,39 @@ final class LinuxWindow: PlatformWindow {
 
     func orderBack() { XLowerWindow(backend.display, xid) }
 
+    private var minimized = false
+    private var maximized = false
+    func miniaturize() {
+        guard isVisible else { return }
+        XIconifyWindow(backend.display, xid, backend.screen)
+        XFlush(backend.display)
+        minimized = true
+    }
+    func deminiaturize() {
+        guard minimized else { return }
+        XMapWindow(backend.display, xid)
+        XFlush(backend.display)
+        minimized = false
+    }
+    /// Toggles _NET_WM_STATE_MAXIMIZED_{HORZ,VERT} through the window manager (EWMH).
+    func zoom() {
+        let action = maximized ? 0 : 1   // _NET_WM_STATE_REMOVE / _NET_WM_STATE_ADD
+        var ev = XEvent()
+        ev.xclient.type = ClientMessage
+        ev.xclient.window = xid
+        ev.xclient.message_type = backend.atom("_NET_WM_STATE")
+        ev.xclient.format = 32
+        ev.xclient.data.l.0 = action
+        ev.xclient.data.l.1 = Int(backend.atom("_NET_WM_STATE_MAXIMIZED_HORZ"))
+        ev.xclient.data.l.2 = Int(backend.atom("_NET_WM_STATE_MAXIMIZED_VERT"))
+        ev.xclient.data.l.3 = 1
+        XSendEvent(backend.display, backend.root, 0, SubstructureRedirectMask | SubstructureNotifyMask, &ev)
+        XFlush(backend.display)
+        maximized.toggle()
+    }
+    var isMiniaturized: Bool { minimized }
+    var isZoomed: Bool { maximized }
+
     func close() {
         guard !destroying else { return }
         destroying = true
