@@ -80,6 +80,16 @@ bar:
 
 ![HelloWindow on Linux under a headless sway](images/hellowindow-linux-wayland.png)
 
+## Threading
+
+`NSApplication`, `NSWindow`, `NSView` and the other main-actor types are `@MainActor`, as in
+Apple's SDK; `NSImage`, `NSColor`, `NSFont`, `NSBezierPath` and the text storage classes are
+not. On Windows and Linux the backend owns the event loop: each pump waits on the main
+dispatch queue's wake handle with its window events and drains the queue through
+libdispatch's run-loop hook (`Platform/MainQueue.swift`), and steps the main `RunLoop` for
+its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threads and
+`Timer` behave as on macOS. The headless host backend runs the main run loop directly.
+
 ## Runtime switches
 
 | Variable | Effect |

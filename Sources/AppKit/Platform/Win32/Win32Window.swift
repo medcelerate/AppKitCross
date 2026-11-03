@@ -590,12 +590,22 @@ final class Win32Window: PlatformWindow {
     /// switched by hand; it changes nothing outside the process.
     private func activateTestInputMethodIfRequested() {
         guard let hwnd, let id = ProcessInfo.processInfo.environment["APPKITWIN_IME_LAYOUT"], !id.isEmpty else { return }
-        let layout = id.withCString(encodedAs: UTF16.self) { LoadKeyboardLayoutW($0, UINT(KLF_ACTIVATE)) }
+        let layout = id.withCString(encodedAs: UTF16.self) { LoadKeyboardLayoutW($0, 0) }
+        let loadError = GetLastError()
+        // Activate for the whole process (every thread), then ask the window to switch its
+        // input language the way the language bar would.
+        let activated = layout.flatMap { ActivateKeyboardLayout($0, UINT(KLF_SETFORPROCESS)) }
+        if let layout { PostMessageW(hwnd, UINT(WM_INPUTLANGCHANGEREQUEST), 0, LPARAM(Int(bitPattern: layout)) ) }
+        let current = GetKeyboardLayout(0)
+        if NSView._traceInvalidation {
+            NSView._trace("ime layout '\(id)': loaded \(layout.map { String(Int(bitPattern: $0), radix: 16) } ?? "nil") (error \(loadError)), previous \(activated.map { String(Int(bitPattern: $0), radix: 16) } ?? "nil"), thread now \(String(Int(bitPattern: current), radix: 16))")
+        }
         guard layout != nil, let himc = ImmGetContext(hwnd) else { return }
         defer { _ = ImmReleaseContext(hwnd, himc) }
-        _ = ImmSetOpenStatus(himc, true)
+        let opened = ImmSetOpenStatus(himc, true)
         // Native (kana) input, full-width characters: the Hiragana mode of Microsoft IME.
-        _ = ImmSetConversionStatus(himc, DWORD(IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE), DWORD(IME_SMODE_PHRASEPREDICT))
+        let mode = ImmSetConversionStatus(himc, DWORD(IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE), DWORD(IME_SMODE_PHRASEPREDICT))
+        if NSView._traceInvalidation { NSView._trace("ime open \(opened) conversion \(mode) status \(ImmGetOpenStatus(himc))") }
     }
 
     /// The composition string of one kind (`GCS_COMPSTR`, `GCS_RESULTSTR`) as text.

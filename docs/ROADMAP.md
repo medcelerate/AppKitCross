@@ -9,7 +9,7 @@ are concrete and testable.
 |---|---|
 | M0 Foundation | done |
 | M1 Window and drawing | done, verified on Windows |
-| M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session; menu pop-ups (`NSMenu.popUp`, `popUpContextMenu`, `NSView.menu` on right click) and `NSPopUpButton` drawn by the package in non-activating windows; drag and drop within the application (`beginDraggingSession`, `registerForDraggedTypes`, the NSDraggingDestination messages, a drag image window; ADR-0011), drags to and from other applications pending per platform |
+| M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session; menu pop-ups (`NSMenu.popUp`, `popUpContextMenu`, `NSView.menu` on right click) and `NSPopUpButton` drawn by the package in non-activating windows; drag and drop within the application (`beginDraggingSession`, `registerForDraggedTypes`, the NSDraggingDestination messages, a drag image window; ADR-0011), drags to and from other applications pending per platform; the Win32, X11 and Wayland event pumps service the main dispatch queue and RunLoop timers (DispatchQueue.main, @MainActor hops, Timer) |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
 | M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |

@@ -213,14 +213,22 @@ final class Win32Backend: PlatformBackend {
             fireFrameIfDue()
         }
         fireFrameIfDue()
-        let timeout: DWORD
+        // Blocks queued on the main queue from other threads, and RunLoop timers.
+        let nextTimer = PlatformMainQueue.service()
+        var timeout: DWORD
         if let deadline = frameDeadline {
             let now = GetTickCount64()
             timeout = deadline > now ? DWORD(min(deadline - now, 1000)) : 0
         } else {
             timeout = INFINITE
         }
-        _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        if let t = nextTimer { timeout = min(timeout, DWORD(min(t * 1000, 60_000))) }
+        if var handle = PlatformMainQueue.handle {
+            let r = MsgWaitForMultipleObjectsEx(1, &handle, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+            if r == WAIT_OBJECT_0 { PlatformMainQueue.service() }
+        } else {
+            _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        }
         return true
     }
 
