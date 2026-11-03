@@ -438,6 +438,8 @@ final class Win32Window: PlatformWindow {
     /// `APPKITWIN_SOFTWARE_LAYERS=1` declines every scene, so the window composites its
     /// layer tree in software (to compare against the DirectComposition tree).
     private static let softwareLayers = ProcessInfo.processInfo.environment["APPKITWIN_SOFTWARE_LAYERS"] == "1"
+    /// `APPKITWIN_TRACE_SCENE=1` (with APPKITWIN_TRACE) logs every scene node on each commit.
+    private static let traceScene = ProcessInfo.processInfo.environment["APPKITWIN_TRACE_SCENE"] == "1"
     private var compositionTree: OpaquePointer?       // CD2DCompTree*, built on `renderTarget`
     /// The last scene committed; non-nil while hosting. Kept so the tree can be rebuilt on a
     /// new target (device loss, chrome change) or at a new DPI without a new commit.
@@ -505,6 +507,9 @@ final class Win32Window: PlatformWindow {
                 return false
             }
             let t = node.transform
+            if NSView._traceInvalidation, Win32Window.traceScene {
+                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) clip \(node.clipsToBounds) content \(node.content != nil) \(node.name ?? "")")
+            }
             cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(t.tx * s), Float(t.ty * s))
             cd2d_comp_tree_set_opacity(tree, id, node.opacity)
             if node.clipsToBounds {

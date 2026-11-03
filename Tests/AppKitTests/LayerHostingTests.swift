@@ -3,6 +3,7 @@
 
 import XCTest
 @testable import AppKit
+@testable import SwiftUI
 #if canImport(QuartzCore)
 import QuartzCore
 #endif
@@ -244,6 +245,45 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The same for a layer in a flipped (view-backed) hierarchy, where the extent's top
+    /// is its minimum y.
+    func testShadowsSurviveFlatteningInFlippedLayers() {
+        MainActor.assumeIsolated {
+            final class FlippedView: NSView { override var isFlipped: Bool { true } }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+            w.backgroundColor = .white
+            let container = FlippedView(frame: NSRect(x: 0, y: 0, width: 200, height: 150))
+            w.contentView!.addSubview(container)
+            w.contentView!.wantsLayer = true
+            let card = CALayer()
+            card.isGeometryFlipped = true                                    // a view-backed card: y down
+            card.frame = CGRect(x: 40, y: 20, width: 120, height: 40)       // 20 from the top of the flipped container
+            card.backgroundColor = CGColor(gray: 1, alpha: 1)
+            card.cornerRadius = 6
+            card.shadowColor = CGColor(gray: 0, alpha: 1)
+            card.shadowOpacity = 0.6
+            card.shadowRadius = 4
+            card.shadowOffset = CGSize(width: 0, height: 3)
+            container.layer!.addSublayer(card)
+            w.makeKeyAndOrderFront(nil)
+            let host = hostWindow(w)
+            w.display()
+            let software = _pixels(host.lastImage!)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            let hosted = _pixels(host.lastImage!)
+            _assertSimilar(hosted, software, "hosted flipped shadow matches the software one", strongShare: 40)
+            // The shadow darkens below the card (window y up: the card spans 90...130, so below is y < 90) and not far above it.
+            let image = host.lastImage!
+            func pixel(_ data: Data, _ x: Int, _ y: Int) -> UInt8 { let row = image.height - 1 - y * 2; return data[row * image.bytesPerRow + x * 2 * 4 + 2] }
+            XCTAssertNotNil(host.hostedScene, "the window hosts its layers natively")
+            XCTAssertLessThan(pixel(hosted, 100, 84), 230, "shadow below the card on the hosted path")
+            XCTAssertGreaterThan(pixel(hosted, 100, 145), 250, "nothing drawn near the top of the window")
+            w.close()
+        }
+    }
+
     /// A shadow reaches outside the layer's bounds: the flattened node a host gets must
     /// cover it, placed so the layer itself stays where it was.
     func testShadowsSurviveFlattening() {
@@ -329,6 +369,52 @@ final class LayerAnimationLifetimeTests: XCTestCase, @unchecked Sendable {
             w.close()
             clock = 203; CARuntime.tick()
             XCTAssertFalse(CARuntime.hasPendingWork, "closing the window stops them, although the animation predates the attach")
+        }
+    }
+}
+
+final class HostedSwiftUIShadowTests: XCTestCase, @unchecked Sendable {
+    /// A SwiftUI card with a blurred shadow, hosted natively, composites like the software path.
+    func testHostedCardMatchesSoftware() {
+        MainActor.assumeIsolated {
+            struct Card: View {
+                @State var name = ""
+                var body: some View {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Heading").font(.title)
+                        HStack { TextField("Your name", text: $name); Button("Greet") {} }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white))
+                            .shadow(color: Color(.sRGB, white: 0, opacity: 0.35), radius: 6, x: 0, y: 3)
+                        Text("Below the card")
+                    }.padding(12)
+                }
+            }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            w.backgroundColor = .white
+            let h = NSHostingView(rootView: Card())
+            h.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+            w.contentView = h
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            let host = Mirror(reflecting: w).descendant("_platform") as! HostWindow
+            w.display()
+            let software = _pixels(host.lastImage!)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            XCTAssertNotNil(host.hostedScene)
+            let hosted = _pixels(host.lastImage!)
+            let image = host.lastImage!
+            var strong = 0
+            var rows: Set<Int> = []
+            for i in stride(from: 0, to: hosted.count, by: 4) {
+                var d = 0
+                for c in 0..<4 { d = max(d, abs(Int(hosted[i + c]) - Int(software[i + c]))) }
+                if d > 48 { strong += 1; rows.insert((i / 4) / image.width) }
+            }
+            XCTAssertLessThan(strong, image.width * image.height / 40, "hosted and software renders agree; differing rows (top row 0): \(rows.sorted().prefix(20))")
+            w.close()
         }
     }
 }
