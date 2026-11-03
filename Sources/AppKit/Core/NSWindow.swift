@@ -358,8 +358,8 @@ import CoreText
         guard name != _lastScreenName else { return }
         let first = _lastScreenName == nil
         _lastScreenName = name
+        guard !first else { return }        // the first sighting, at creation, before a title exists
         if NSView._traceInvalidation { NSView._trace("screen \'\(_title)\' \(name) scale \(s.backingScaleFactor)") }
-        guard !first else { return }
         post(NSWindow.didChangeScreenNotification)
         delegate?.windowDidChangeScreen(Notification(name: NSWindow.didChangeScreenNotification, object: self))
     }

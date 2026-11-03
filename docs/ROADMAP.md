@@ -117,6 +117,13 @@ carries each monitor's effective DPI and `NSWindow.screen` is the monitor the HW
 (`HostWindow.setBackingScaleFactor`): point size kept, `lastImage` and a drawn rect's
 pixel extent doubled, text ink doubled, a hosted layer scene rebuilt at the new scale,
 `viewDidChangeBackingProperties` on every view, `window.screen` following the move.
+Verified on Windows 11 with a 150% primary and a 100% secondary monitor: HelloWindow
+dragged 100% → 150% → 100% → 150% keeps its point size, text is crisp on both, nothing
+is clipped, a resize on 150% repaints cleanly, the Glass window's backdrop, corners and
+buttons are sharp at 150%, and the Metal tab renders at native resolution (the trace
+shows `screen … scale 1.5` then `backing scale … 1.5` on each move; `NSWindow` posts
+`didChangeScreenNotification` on such moves). Not exercised: dragging the Glass window
+itself across monitors.
 Known limitation: screen frames are converted to points at each monitor's own scale, so
 with mixed scales the point-space screen layout can overlap (window frames round-trip
 exactly; only `NSScreen.frame` of secondary monitors is affected). Open: D3D12 +
