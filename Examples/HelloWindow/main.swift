@@ -933,14 +933,14 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
 
     // Apple's Foundation sorts by key-value coding keys; swift-corelibs-foundation only by
     // key paths (its `key` is unavailable). The table compares descriptors either way.
-    private func sortDescriptor<V>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
+    private func sortDescriptor<V: Comparable>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
         #if canImport(Darwin)
         return NSSortDescriptor(key: key, ascending: true)
         #else
         return NSSortDescriptor(keyPath: keyPath, ascending: true)
         #endif
     }
-    private func sorts<V>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
+    private func sorts<V: Comparable>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
         #if canImport(Darwin)
         return d.key == key
         #else

@@ -8,14 +8,14 @@ import XCTest
 private struct Planet { let name: String; let moons: Int }
 
 /// A sort descriptor both Foundations accept: a key on Apple's, a key path on corelibs.
-private func sortDescriptor<V>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
+private func sortDescriptor<V: Comparable>(key: String, keyPath: KeyPath<Planet, V>) -> NSSortDescriptor {
     #if canImport(Darwin)
     return NSSortDescriptor(key: key, ascending: true)
     #else
     return NSSortDescriptor(keyPath: keyPath, ascending: true)
     #endif
 }
-private func sorts<V>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
+private func sorts<V: Comparable>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Planet, V>) -> Bool {
     #if canImport(Darwin)
     return d.key == key
     #else
