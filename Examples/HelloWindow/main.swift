@@ -930,6 +930,91 @@ final class DemoModel: ObservableObject {
 }
 
 struct SwiftUIDemo: View {
+    @State private var tab = "controls"
+    var body: some View {
+        TabView(selection: $tab) {
+            ControlsDemo().tabItem { Text("Controls") }.tag("controls")
+            NavigationDemo().tabItem { Text("Navigation") }.tag("navigation")
+            PresentationDemo().tabItem { Text("Presentation") }.tag("presentation")
+        }
+        .padding(12)
+        .frame(minWidth: 420, minHeight: 360)
+    }
+}
+
+enum Fruit: String, CaseIterable, Hashable { case apple, pear, plum }
+
+struct NavigationDemo: View {
+    @State private var path: [Int] = []
+    var body: some View {
+        NavigationStack(path: $path) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Pick a detail page:").foregroundColor(.secondary)
+                ForEach(1...3, id: \.self) { n in NavigationLink("Detail \(n)", value: n) }
+                NavigationLink("An inline destination", destination: Text("Pushed without a value").padding())
+                Spacer()
+                Text("Path depth: \(path.count)").font(.caption)
+            }
+            .padding(12)
+            .navigationTitle("Navigation")
+            .navigationDestination(for: Int.self) { n in
+                VStack(spacing: 10) {
+                    Text("Detail \(n)").font(.title2)
+                    if n < 3 { NavigationLink("Deeper: Detail \(n + 1)", value: n + 1) }
+                    Spacer()
+                }
+                .padding(12)
+                .navigationTitle("Detail \(n)")
+            }
+        }
+    }
+}
+
+struct PresentationDemo: View {
+    @State private var fruit = Fruit.pear
+    @State private var showSheet = false
+    @State private var showAlert = false
+    @State private var lastAnswer = "none"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("Fruit", selection: $fruit) {
+                ForEach(Fruit.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            }
+            Picker("As radio buttons", selection: $fruit) {
+                ForEach(Fruit.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+            }.pickerStyle(.radioGroup)
+            Text("Selected: \(fruit.rawValue)")
+            HStack {
+                Button("Show sheet") { showSheet = true }
+                Button("Ask") { showAlert = true }
+                Text("Last answer: \(lastAnswer)").foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .sheet(isPresented: $showSheet) { SheetDemo(fruit: fruit) }
+        .alert("Eat the \(fruit.rawValue)?", isPresented: $showAlert) {
+            Button("Eat", role: .destructive) { lastAnswer = "eat" }
+            Button("Keep", role: .cancel) { lastAnswer = "keep" }
+        } message: { Text("This cannot be undone.") }
+    }
+}
+
+struct SheetDemo: View {
+    let fruit: Fruit
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("A sheet about the \(fruit.rawValue)").font(.headline)
+            Text("It is attached to the demo window and closes with the button or its close box.").foregroundColor(.secondary)
+            Button("Done") { dismiss() }
+        }
+        .padding(20)
+        .frame(width: 320)
+    }
+}
+
+struct ControlsDemo: View {
     @State private var name = ""
     @State private var count = 0
     @State private var enabled = true
@@ -974,7 +1059,6 @@ struct SwiftUIDemo: View {
                 }
             }.frame(height: 120)
         }
-        .padding(16)
-        .frame(minWidth: 360)
+        .padding(4)
     }
 }

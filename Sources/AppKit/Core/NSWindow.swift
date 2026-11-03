@@ -415,7 +415,24 @@ import CoreText
         set { _aspectRatio = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/attachedsheet
-    @MainActor open var attachedSheet: NSWindow? { unimplemented() }
+    @MainActor open var attachedSheet: NSWindow? { _sheets.last }
+    // Sheets: shown as windows parked at the top centre of their parent (no slide-down
+    // animation and the parent stays interactive), ended with endSheet(_:returnCode:).
+    private var _sheets: [NSWindow] = []
+    private var _sheetCompletions: [ObjectIdentifier: (NSApplication.ModalResponse) -> Void] = [:]
+    private weak var _sheetParent: NSWindow?
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/beginsheet(_:completionhandler:)
+    @MainActor open func beginSheet(_ sheetWindow: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
+        guard !_sheets.contains(where: { $0 === sheetWindow }) else { return }
+        _sheets.append(sheetWindow)
+        sheetWindow._sheetParent = self
+        if let h = handler { _sheetCompletions[ObjectIdentifier(sheetWindow)] = h }
+        let parent = frame
+        let size = sheetWindow.frame.size
+        sheetWindow.setFrameOrigin(NSPoint(x: parent.midX - size.width / 2, y: parent.maxY - size.height - NSWindow._titleBarBandHeight))
+        sheetWindow.makeKeyAndOrderFront(nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculatescontentborderthickness(for:)
     @MainActor open func autorecalculatesContentBorderThickness(for edge: NSRectEdge) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculateskeyviewloop
@@ -464,7 +481,9 @@ import CoreText
     @available(macOS 15.0, *)
     @MainActor open func beginDraggingSession(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/beginsheet(_:)
-    @MainActor open func beginSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse { unimplemented() }
+    @MainActor open func beginSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse {
+        await withCheckedContinuation { c in beginSheet(sheetWindow) { c.resume(returning: $0) } }
+    }
     // DUPLICATE: @MainActor open func beginSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/cacheimage(in:)
     @MainActor open func cacheImage(in rect: NSRect) { unimplemented() }
@@ -741,9 +760,17 @@ import CoreText
         _ = makeFirstResponder(nil)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:)
-    @MainActor open func endSheet(_ sheetWindow: NSWindow) { unimplemented() }
+    @MainActor open func endSheet(_ sheetWindow: NSWindow) { endSheet(sheetWindow, returnCode: .OK) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:returncode:)
-    @MainActor open func endSheet(_ sheetWindow: NSWindow, returnCode: NSApplication.ModalResponse) { unimplemented() }
+    @MainActor open func endSheet(_ sheetWindow: NSWindow, returnCode: NSApplication.ModalResponse) {
+        guard let i = _sheets.firstIndex(where: { $0 === sheetWindow }) else { return }
+        _sheets.remove(at: i)
+        sheetWindow._sheetParent = nil
+        sheetWindow.orderOut(nil)
+        let completion = _sheetCompletions.removeValue(forKey: ObjectIdentifier(sheetWindow))
+        makeKeyAndOrderFront(nil)
+        completion?(returnCode)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/fieldeditor(_:for:)
     @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
         if let e = _fieldEditor { return e }
@@ -878,7 +905,7 @@ import CoreText
         set { _isRestorable = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/issheet
-    @MainActor open var isSheet: Bool { unimplemented() }
+    @MainActor open var isSheet: Bool { _sheetParent != nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isvisible
     @MainActor open var isVisible: Bool { _platform?.isVisible ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iszoomable
@@ -1261,9 +1288,9 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sheetparent
-    @MainActor open var sheetParent: NSWindow? { unimplemented() }
+    @MainActor open var sheetParent: NSWindow? { _sheetParent }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sheets
-    @MainActor open var sheets: [NSWindow] { unimplemented() }
+    @MainActor open var sheets: [NSWindow] { _sheets }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/showsresizeindicator
     @MainActor open var showsResizeIndicator: Bool {
         get { unimplemented() }

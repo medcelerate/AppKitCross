@@ -64,6 +64,14 @@ Shape:
   runtime on the host's display link (cubic Bézier curves and damped springs); not a
   transaction per node as Apple does, so overlapping animations on one property retarget
   from the current value rather than blend.
+- Navigation (third version): `NavigationStack` keeps its pages in an observable state
+  object passed down the environment; `NavigationLink` pushes a destination or a value
+  that `navigationDestination(for:)` resolves; a `[T]`/`NavigationPath` binding is kept
+  in sync; pages animate with a push transition. `TabView`, `Picker` and alerts read their
+  items (`tabItem`, `tag`, `Button`s) by inspecting the view boxes at runtime; the
+  segmented and radio-group pickers are built from AppKit buttons (menu style falls back to
+  segmented until a popup button exists); sheets are `NSWindow.beginSheet` windows hosting
+  the content with `dismiss` in the environment; alerts are `NSAlert`s shown as sheets.
 - Not in this version: gestures beyond tap and hover, `NavigationStack`/`NavigationSplitView`,
   `List` selection and swipe actions, `Table`, `Form` styling, `Picker` menus,
   `Menu`/`commands`, `TabView`, sheets and alerts, `@AppStorage`, `@FocusState`,

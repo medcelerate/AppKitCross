@@ -537,7 +537,10 @@ public final class _ViewRoot: NSHostingRoot {
     /// True while any node animates (tests).
     public var isAnimating: Bool { displayLink != nil }
 
+    private var dirty = false
+
     func scheduleUpdate() {
+        dirty = true
         guard !updateScheduled, let host else { return }
         updateScheduled = true
         host.setNeedsLayout()
@@ -548,6 +551,7 @@ public final class _ViewRoot: NSHostingRoot {
     /// Re-evaluates stale bodies and reconciles the tree.
     public func updateIfNeeded() {
         updateScheduled = false
+        dirty = false
         guard let node = rootNode else { return }
         node.update(box: contentChanged ? contentBox : nil, environment: rootEnvironment, force: contentChanged)
         contentChanged = false
@@ -564,6 +568,14 @@ public final class _ViewRoot: NSHostingRoot {
         updateIfNeeded()
         guard let node = rootNode, let host else { return }
         node.place(in: bounds)
+        // Bodies may feed state back during a pass (a page setting its navigation title):
+        // settle such updates now rather than a display cycle later.
+        var passes = 0
+        while dirty && passes < 4 {
+            passes += 1
+            updateIfNeeded()
+            node.place(in: bounds)
+        }
         node.syncBackingViews(in: host.hostView, containerFrame: .zero)
         // Insertion transitions start once the new nodes have a frame.
         for n in insertedNodes where n.isAttached {

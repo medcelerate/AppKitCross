@@ -404,14 +404,10 @@ struct _OnChange<Content: View, V: Equatable>: View, _PrimitiveView {
 // MARK: No-op compatibility modifiers
 
 extension View {
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/navigationtitle(_:)-43srq
-    public func navigationTitle(_ title: String) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilitylabel(_:)-1d7jv
     public func accessibilityLabel(_ label: String) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityhidden(_:)
     public func accessibilityHidden(_ hidden: Bool) -> some View { self }
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/tag(_:)
-    public func tag<V: Hashable>(_ tag: V) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/buttonstyle(_:)-7qx1
     public func buttonStyle<S: PrimitiveButtonStyle>(_ style: S) -> some View { environment(\.buttonStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textfieldstyle(_:)
