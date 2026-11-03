@@ -14,6 +14,7 @@ enum _CoreAnimationHost {
         guard !installed else { return }
         installed = true
         CARuntime.frameRequester = {
+            if NSView._traceInvalidation { NSView._trace("frame requested: \(CARuntime._pendingWorkDescription)") }
             Platform.backend.scheduleFrame {
                 CARuntime.tick()
                 for w in NSApplication.shared.windows { w._commitLayerSceneIfNeeded() }

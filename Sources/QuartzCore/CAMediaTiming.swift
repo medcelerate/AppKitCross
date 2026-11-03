@@ -145,6 +145,11 @@ public enum CARuntime {
         requester()
     }
 
+    /// What keeps frames going, for tracing: animating layer roots and running display links.
+    public static var _pendingWorkDescription: String {
+        "roots \(animatingRoots.filter { $0.value != nil }.count) links \(displayLinks.filter { ($0.value?.isRunning) == true }.count)"
+    }
+
     /// True while any layer tree animates or a display link runs.
     public static var hasPendingWork: Bool {
         animatingRoots.contains { $0.value != nil } || displayLinks.contains { ($0.value?.isRunning) == true }
@@ -162,6 +167,13 @@ public enum CARuntime {
         requestFrame()
     }
 
+    /// A layer registered as an animating root joined a tree: the tree's root takes over.
+    static func moveAnimating(from layer: CALayer, to root: CALayer) {
+        guard layer !== root else { return }
+        animatingRoots.removeAll { $0.value === layer || $0.value == nil }
+        noteAnimating(root: root)
+    }
+
     /// One animation frame: fire display links, then invalidate every layer tree whose
     /// animations are still running (their hosts redraw them). Requests another frame when
     /// work remains. Hosts call this from the timer `frameRequester` set up.
@@ -173,8 +185,9 @@ public enum CARuntime {
         var remaining: [CAWeak<CALayer>] = []
         for box in animatingRoots {
             guard let root = box.value else { continue }
-            // Off-screen trees keep their animations but stop costing frames.
-            if let h = root.host, !h.layerHostIsOnScreen(root) { continue }
+            // Off-screen trees, and trees nothing hosts, keep their animations but stop
+            // costing frames; they resume when hosted and shown again.
+            guard let h = root.host, h.layerHostIsOnScreen(root) else { continue }
             let still = root._advanceAnimations(now: t)
             root._invalidateHost(nil)
             if still { remaining.append(box) }

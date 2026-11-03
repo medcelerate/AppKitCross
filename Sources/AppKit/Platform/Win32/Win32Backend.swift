@@ -213,16 +213,36 @@ final class Win32Backend: PlatformBackend {
             fireFrameIfDue()
         }
         fireFrameIfDue()
-        let timeout: DWORD
+        // Blocks queued on the main queue from other threads, and RunLoop timers.
+        let nextTimer = PlatformMainQueue.service()
+        var timeout: DWORD
         if let deadline = frameDeadline {
             let now = GetTickCount64()
             timeout = deadline > now ? DWORD(min(deadline - now, 1000)) : 0
         } else {
             timeout = INFINITE
         }
-        _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        if let t = nextTimer { timeout = min(timeout, DWORD(min(t * 1000, 60_000))) }
+        pumpIterations += 1
+        if NSView._traceInvalidation {
+            let now = GetTickCount64()
+            if now - pumpTraceStart >= 1000 {
+                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms")")
+                pumpIterations = 0
+                pumpTraceStart = now
+            }
+        }
+        if let handle = PlatformMainQueue.handle {
+            var handles: [HANDLE?] = [handle]
+            let r = MsgWaitForMultipleObjectsEx(1, &handles, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+            if r == WAIT_OBJECT_0 { PlatformMainQueue.service() }
+        } else {
+            _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        }
         return true
     }
+    private var pumpIterations = 0
+    private var pumpTraceStart: UInt64 = GetTickCount64()
 
     private var frameCallback: (@MainActor () -> Void)?
     private var frameDeadline: UInt64?          // GetTickCount64 milliseconds
