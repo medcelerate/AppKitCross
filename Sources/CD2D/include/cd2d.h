@@ -159,6 +159,9 @@ void cd2d_comp_tree_begin_update(CD2DCompTree *tree);
 bool cd2d_comp_tree_ensure_visual(CD2DCompTree *tree, int64_t id, int64_t parentId);
 /// Local → parent space, as a 3x2 matrix (row-vector convention: x' = x*m11 + y*m21 + dx).
 void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, float m12, float m21, float m22, float dx, float dy);
+/// A full 4x4 local → parent matrix (16 floats, row-major, row-vector convention, applied
+/// after the 2D transform through the visual's effect group, with perspective). NULL removes it.
+void cd2d_comp_tree_set_transform3d(CD2DCompTree *tree, int64_t id, const float *m);
 /// 0..1, applied to the visual's content and subtree (IDCompositionVisual3::SetOpacity, or an
 /// effect group where Visual3 is unavailable).
 void cd2d_comp_tree_set_opacity(CD2DCompTree *tree, int64_t id, float opacity);

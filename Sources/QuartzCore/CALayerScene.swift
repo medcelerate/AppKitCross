@@ -30,6 +30,10 @@ public struct _CALayerSceneNode {
     public var id: Int
     public var parent: Int?
     public var transform: CGAffineTransform
+    /// The full local → parent-local matrix when it is not affine (a 3D rotation, a
+    /// perspective sublayerTransform). `transform` then holds the affine approximation for
+    /// hosts without 3D compositing; a host that has it applies this instead.
+    public var transform3D: CATransform3D? = nil
     public var size: CGSize
     public var opacity: Float
     /// Clips content and children to the node's rect, rounded by `cornerRadius` on `maskedCorners`.
@@ -91,22 +95,35 @@ extension CALayer {
     private var _needsFlattening: Bool {
         if _mask != nil { return true }
         if _shadowOpacity > 0 && _shadowColor != nil { return true }
-        if !_sublayerTransform.isIdentity { return true }
         return false
     }
 
-    /// The local (points, y-down, origin top-left) → parent-local transform of a presentation.
-    static func _nodeTransform(_ p: CALayer, parentFlipped: Bool, parentBounds: CGRect) -> CGAffineTransform {
+    /// The local (points, y-down, origin top-left) → parent-local transform of a presentation,
+    /// including the parent's sublayerTransform (applied about the parent's anchor point, as
+    /// the software compositor does). Affine inputs give an affine result exactly.
+    /// With `affineOnly`, the 3D factors contribute their affine parts, as the software
+    /// compositor draws them: the approximation a 2D-only host shows.
+    static func _nodeTransform(_ p: CALayer, parentFlipped: Bool, parentBounds: CGRect,
+                               parentSublayerTransform: CATransform3D, parentAnchor: CGPoint, affineOnly: Bool = false) -> CATransform3D {
+        func m3(_ m: CGAffineTransform) -> CATransform3D { CATransform3DMakeAffineTransform(m) }
+        func factor(_ t: CATransform3D) -> CATransform3D { affineOnly ? m3(t.affineTransform) : t }
         // Oriented bounds space of `p` → parent's oriented bounds space (as `_compose` sets up).
         let ax = p._bounds.minX + p._anchorPoint.x * p._bounds.width
         let ay = p._bounds.minY + p._anchorPoint.y * p._bounds.height
-        var m = CGAffineTransform.identity
+        var m = CATransform3DIdentity
         if p._isGeometryFlipped != parentFlipped {
-            m = CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: 0, y: p._bounds.minY + p._bounds.maxY))
+            m = m3(CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: 0, y: p._bounds.minY + p._bounds.maxY)))
         }
-        m = m.concatenating(CGAffineTransform(translationX: -ax, y: -ay))
-            .concatenating(p._transform.affineTransform)
-            .concatenating(CGAffineTransform(translationX: p._position.x, y: p._position.y))
+        m = m.concatenating(m3(CGAffineTransform(translationX: -ax, y: -ay)))
+            .concatenating(factor(p._transform))
+            .concatenating(m3(CGAffineTransform(translationX: p._position.x, y: p._position.y)))
+        if !parentSublayerTransform.isIdentity {
+            let px = parentBounds.minX + parentAnchor.x * parentBounds.width
+            let py = parentBounds.minY + parentAnchor.y * parentBounds.height
+            m = m.concatenating(m3(CGAffineTransform(translationX: -px, y: -py)))
+                .concatenating(factor(parentSublayerTransform))
+                .concatenating(m3(CGAffineTransform(translationX: px, y: py)))
+        }
         // Local y-down → oriented bounds space of `p`.
         let toSelf: CGAffineTransform = p._isGeometryFlipped
             ? CGAffineTransform(translationX: p._bounds.minX, y: p._bounds.minY)
@@ -115,7 +132,7 @@ extension CALayer {
         let fromParent: CGAffineTransform = parentFlipped
             ? CGAffineTransform(translationX: -parentBounds.minX, y: -parentBounds.minY)
             : CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: -parentBounds.minX, y: parentBounds.maxY))
-        return toSelf.concatenating(m).concatenating(fromParent)
+        return m3(toSelf).concatenating(m).concatenating(m3(fromParent))
     }
 
     /// Sets `ctx` (points, bottom-left origin, `rect.size` extent) up as this layer's
@@ -130,16 +147,22 @@ extension CALayer {
     }
 
     @MainActor
-    private func _appendNodes(to scene: inout _CALayerScene, parent: Int?, parentFlipped: Bool, parentBounds: CGRect, time: CFTimeInterval, frame: Int) {
+    private func _appendNodes(to scene: inout _CALayerScene, parent: Int?, parentFlipped: Bool, parentBounds: CGRect, time: CFTimeInterval, frame: Int,
+                              parentSublayerTransform: CATransform3D = CATransform3DIdentity, parentAnchor: CGPoint = .zero) {
         hasPresentation = true
         let p = animations.isEmpty ? self : _presentation(at: time)
         guard !p._isHidden, p._opacity > 0 else { return }
         if _needsLayout { _needsLayout = false; layoutSublayers() }
-        let transform = CALayer._nodeTransform(p, parentFlipped: parentFlipped, parentBounds: parentBounds)
+        let full = CALayer._nodeTransform(p, parentFlipped: parentFlipped, parentBounds: parentBounds,
+                                          parentSublayerTransform: parentSublayerTransform, parentAnchor: parentAnchor)
+        let transform = full.isAffine ? full.affineTransform
+            : CALayer._nodeTransform(p, parentFlipped: parentFlipped, parentBounds: parentBounds,
+                                     parentSublayerTransform: parentSublayerTransform, parentAnchor: parentAnchor, affineOnly: true).affineTransform
         let index = scene.nodes.count
         var node = _CALayerSceneNode(id: CALayer._nodeID(self, part: 0), parent: parent, transform: transform, size: p._bounds.size,
                                      opacity: p._opacity, clipsToBounds: p._masksToBounds, cornerRadius: p._cornerRadius,
                                      maskedCorners: p.maskedCorners, content: nil, name: name)
+        if !full.isAffine { node.transform3D = full }
 
         if _needsFlattening {
             // One surface for the whole subtree, drawn by the software compositor. It covers
@@ -149,6 +172,7 @@ extension CALayer {
             let b = p._bounds
             let offset = CGPoint(x: extent.minX - b.minX, y: p._isGeometryFlipped ? extent.minY - b.minY : b.maxY - extent.maxY)
             node.transform = CGAffineTransform(translationX: offset.x, y: offset.y).concatenating(transform)
+            if !full.isAffine { node.transform3D = CATransform3DMakeAffineTransform(CGAffineTransform(translationX: offset.x, y: offset.y)).concatenating(full) }
             node.size = extent.size
             let version = _subtreeAnimates ? frame : _treeVersion
             node.content = _CALayerSceneContent(version: version) { [self] ctx in
@@ -176,10 +200,12 @@ extension CALayer {
             l.element._zPosition != r.element._zPosition ? l.element._zPosition < r.element._zPosition : l.offset < r.offset
         }.map(\.element)
         for s in ordered {
-            s._appendNodes(to: &scene, parent: index, parentFlipped: p._isGeometryFlipped, parentBounds: p._bounds, time: time, frame: frame)
+            s._appendNodes(to: &scene, parent: index, parentFlipped: p._isGeometryFlipped, parentBounds: p._bounds, time: time, frame: frame,
+                           parentSublayerTransform: p._sublayerTransform, parentAnchor: p._anchorPoint)
         }
         for extra in CALayer._sceneExtraChildren?(self) ?? [] {
-            extra._appendNodes(to: &scene, parent: index, parentFlipped: p._isGeometryFlipped, parentBounds: p._bounds, time: time, frame: frame)
+            extra._appendNodes(to: &scene, parent: index, parentFlipped: p._isGeometryFlipped, parentBounds: p._bounds, time: time, frame: frame,
+                               parentSublayerTransform: p._sublayerTransform, parentAnchor: p._anchorPoint)
         }
 
         if p._borderWidth > 0, p._borderColor != nil {

@@ -130,7 +130,9 @@ implicit animations, `CATransaction`, `CADisplayLink`, layer-backed `NSView`
 
 Status (2026-10-28): the QuartzCore module is real and cross-platform (pure Swift over
 CGContext, so the macOS test run covers it): `CALayer` tree with geometry, transforms
-(`CATransform3D`), flipped geometry, masks, corner radius, borders, contents images,
+(`CATransform3D`; a 3D rotation or a perspective `sublayerTransform` reaches
+DirectComposition as a full 4x4 through the visual's effect group, while the software
+compositor draws the affine part), flipped geometry, masks, corner radius, borders, contents images,
 shadows, hit testing and coordinate conversion; `CAShapeLayer`,
 `CAGradientLayer` (banded), `CATextLayer` (drawn by AppKit's string drawing),
 `CATransformLayer`, `CAScrollLayer`, `CAReplicatorLayer`, `CAConstraintLayoutManager`;
@@ -239,8 +241,14 @@ immersive dark mode from the app theme); transparent windows present through a
 premultiplied composition swap chain under a DirectComposition visual
 (`cd2d_target_create_composition_swapchain`), cleared to transparent each frame. Not done:
 `WS_EX_NOREDIRECTIONBITMAP` (Windows only honours it at creation and the chrome arrives
-later; the backdrop shows through without it), window caption buttons, a shadow for
-non-resizable borderless windows (no DWM frame to extend).
+later; the backdrop shows through without it), a shadow for non-resizable borderless
+windows (no DWM frame to extend). Window buttons (2026-11-03): a `.fullSizeContentView`
+window draws AppKit's close/miniaturize/zoom buttons at its top-left on every platform
+(`NSWindowButtons.swift`, an overlay root above the content view, hit-tested first, grey
+when the window is not key, glyphs on hover); `standardWindowButton(_:)` returns them,
+`NSWindow` handles `performClose:`/`performMiniaturize:`/`performZoom:` from menus and the
+buttons, and `miniaturize`/`deminiaturize`/`zoom` reach the platform (`ShowWindow`,
+`XIconifyWindow`/`_NET_WM_STATE`, `xdg_toplevel_set_minimized`/`set_maximized`).
 
 ## M7: Metal translation layer (separate track)
 

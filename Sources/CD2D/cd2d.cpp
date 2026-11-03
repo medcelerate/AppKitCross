@@ -10,6 +10,7 @@
 #include <dxgi1_3.h>
 #include <dxgidebug.h>
 #include <dcomp.h>
+#include <d3d9types.h>
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
@@ -889,6 +890,7 @@ struct CD2DCompVisual {
     IDCompositionVisual3 *visual3 = nullptr;       // SetOpacity (Windows 8.1+); null → effect group
     IDCompositionEffectGroup *effect = nullptr;
     IDCompositionRectangleClip *clip = nullptr;
+    IDCompositionMatrixTransform3D *transform3D = nullptr;   // on the effect group while a node is 3D
     IDCompositionSurface *surface = nullptr;
     uint32_t surfaceWidth = 0, surfaceHeight = 0;
     bool seen = false;                             // ensured in the current update
@@ -926,6 +928,7 @@ static void compDestroyVisual(CD2DCompVisual *v) {
     }
     safeRelease(v->surface);
     safeRelease(v->clip);
+    safeRelease(v->transform3D);
     safeRelease(v->effect);
     safeRelease(v->visual3);
     safeRelease(v->visual);
@@ -1017,6 +1020,32 @@ bool cd2d_comp_tree_ensure_visual(CD2DCompTree *tree, int64_t id, int64_t parent
 void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, float m12, float m21, float m22, float dx, float dy) {
     CD2DCompVisual *v = compVisual(tree, id);
     if (v && v->visual) v->visual->SetTransform(D2D1::Matrix3x2F(m11, m12, m21, m22, dx, dy));
+}
+
+void cd2d_comp_tree_set_transform3d(CD2DCompTree *tree, int64_t id, const float *m) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->visual) return;
+    if (!m) {
+        if (v->transform3D) {
+            if (v->effect) v->effect->SetTransform3D(static_cast<IDCompositionTransform3D *>(nullptr));
+            safeRelease(v->transform3D);
+        }
+        return;
+    }
+    if (!v->effect) {
+        if (FAILED(tree->device->CreateEffectGroup(&v->effect))) return;
+        v->visual->SetEffect(v->effect);
+    }
+    if (!v->transform3D) {
+        if (FAILED(tree->device->CreateMatrixTransform3D(&v->transform3D))) return;
+        v->effect->SetTransform3D(v->transform3D);
+    }
+    D3DMATRIX mat;
+    mat._11 = m[0];  mat._12 = m[1];  mat._13 = m[2];  mat._14 = m[3];
+    mat._21 = m[4];  mat._22 = m[5];  mat._23 = m[6];  mat._24 = m[7];
+    mat._31 = m[8];  mat._32 = m[9];  mat._33 = m[10]; mat._34 = m[11];
+    mat._41 = m[12]; mat._42 = m[13]; mat._43 = m[14]; mat._44 = m[15];
+    v->transform3D->SetMatrix(mat);
 }
 
 void cd2d_comp_tree_set_opacity(CD2DCompTree *tree, int64_t id, float opacity) {

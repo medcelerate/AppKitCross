@@ -91,6 +91,12 @@ public protocol PlatformWindow: AnyObject {
     func hide()
     func makeKey()
     func orderBack()
+    /// Minimises to the taskbar/dock, restores, or toggles the maximised state.
+    func miniaturize()
+    func deminiaturize()
+    func zoom()
+    var isMiniaturized: Bool { get }
+    var isZoomed: Bool { get }
     /// Destroys the native window. The object is unusable afterwards.
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
@@ -117,6 +123,11 @@ extension PlatformBackend {
 extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
+    public func miniaturize() { }
+    public func deminiaturize() { }
+    public func zoom() { }
+    public var isMiniaturized: Bool { false }
+    public var isZoomed: Bool { false }
 }
 
 /// Implemented by `NSWindow`. Callbacks arrive on the main actor.

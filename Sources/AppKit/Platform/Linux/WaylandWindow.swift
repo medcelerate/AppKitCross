@@ -296,6 +296,28 @@ final class WaylandWindow: PlatformWindow {
 
     func orderBack() {}
 
+    private var minimized = false
+    private var maximized = false
+    func miniaturize() {
+        guard let toplevel else { return }
+        xdg_toplevel_set_minimized(toplevel)
+        wl_display_flush(backend.display)
+        minimized = true
+    }
+    func deminiaturize() {
+        // xdg-shell has no unminimize request; the compositor restores the window from its
+        // own UI. Activation requests (xdg-activation) are the closest substitute and out of scope.
+        minimized = false
+    }
+    func zoom() {
+        guard let toplevel else { return }
+        if maximized { xdg_toplevel_unset_maximized(toplevel) } else { xdg_toplevel_set_maximized(toplevel) }
+        wl_display_flush(backend.display)
+        maximized.toggle()
+    }
+    var isMiniaturized: Bool { minimized }
+    var isZoomed: Bool { maximized }
+
     func close() {
         guard !destroying else { return }
         destroying = true

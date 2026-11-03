@@ -15,7 +15,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow
-@MainActor open class NSWindow: NSResponder, NSAnimatablePropertyContainer, NSMenuItemValidation, NSUserInterfaceValidations, NSUserInterfaceItemIdentification, NSAppearanceCustomization, NSAccessibilityElementProtocol, NSAccessibilityProtocol {
+@MainActor open class NSWindow: NSResponder, NSAnimatablePropertyContainer, NSMenuItemValidation, NSUserInterfaceValidations, NSUserInterfaceItemIdentification, NSAppearanceCustomization, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSSelectorHandling {
     // MARK: Storage
     private var _platform: (any PlatformWindow)?
 
@@ -49,7 +49,71 @@ import CoreText
         guard let cv = _contentView, let root = cv.layer else { return nil }
         cv.layoutSubtreeIfNeeded()
         let content = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
-        return root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
+        var scene = root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
+        // The window buttons overlay is a second root above the content.
+        if let buttons = _windowButtons, _showsWindowButtons, let layer = buttons.layer {
+            let extra = layer._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
+            let offset = scene.nodes.count
+            for var node in extra.nodes {
+                if let p = node.parent { node.parent = p + offset }
+                scene.nodes.append(node)
+            }
+        }
+        return scene
+    }
+
+    // MARK: Standard actions (TargetAction.swift)
+
+    /// The window-level actions menus and the standard buttons send: close, minimize, zoom.
+    public func respondsToSelectorAction(_ action: Selector) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "performClose:": return _styleMask.contains(.closable)
+        case "performMiniaturize:": return _styleMask.contains(.miniaturizable)
+        case "performZoom:": return _styleMask.contains(.resizable)
+        default: return false
+        }
+    }
+    public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "performClose:": performClose(sender)
+        case "performMiniaturize:": performMiniaturize(sender)
+        case "performZoom:": performZoom(sender)
+        default: return false
+        }
+        return true
+    }
+
+    // MARK: Window buttons (NSWindowButtons.swift)
+
+    private var _windowButtons: _NSWindowButtonsView?
+    /// Content that covers the title bar shows AppKit's own close/miniaturize/zoom buttons.
+    internal var _showsWindowButtons: Bool { _styleMask.contains(.titled) && _styleMask.contains(.fullSizeContentView) }
+
+    /// Creates the overlay when first needed and keeps it placed and styled.
+    @discardableResult
+    internal func _ensureWindowButtons(create: Bool = false) -> _NSWindowButtonsView? {
+        if _windowButtons == nil, create || _showsWindowButtons {
+            let v = _NSWindowButtonsView()
+            v.nextResponder = self
+            v._setWindow(self)
+            for (kind, b) in [(NSWindow.ButtonType.closeButton, v.close), (.miniaturizeButton, v.miniaturize), (.zoomButton, v.zoom)] {
+                b.target = self
+                let selector = kind == .closeButton ? "performClose:" : kind == .miniaturizeButton ? "performMiniaturize:" : "performZoom:"
+                b.action = Selector((selector))
+            }
+            _windowButtons = v
+        }
+        if let v = _windowButtons {
+            v.layout(in: contentRect(forFrameRect: frame).size, styleMask: _styleMask, isKey: _isKey)
+            v.isHidden = !_showsWindowButtons
+        }
+        return _windowButtons
+    }
+
+    /// The view under a window point: the buttons overlay first, then the content.
+    private func _hitTest(_ point: NSPoint) -> NSView? {
+        if _showsWindowButtons, let b = _windowButtons, !b.isHidden, let hit = b.hitTest(point) { return hit }
+        return _contentView?.hitTest(point)
     }
 
     /// The hosted tree changed: a commit is coalesced into the next frame (or the next display).
@@ -159,6 +223,7 @@ import CoreText
         if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(self)
         _platform?.setNeedsDisplay(nil)
+        _ensureWindowButtons()
         _updateLayerHosting()
     }
 
@@ -227,7 +292,7 @@ import CoreText
     /// takes mouse downs is under the point.
     public func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion {
         guard let content = _contentView else { return .client }
-        let hit = content.hitTest(point)
+        let hit = _hitTest(point) ?? content.hitTest(point)
         if let v = hit, !v.mouseDownCanMoveWindow { return .client }
         if _isMovableByWindowBackground { return .caption }
         let chrome = _chrome
@@ -273,6 +338,7 @@ import CoreText
         if let cv = _contentView, cv.frame.size != cr.size {
             cv.setFrameSize(cr.size)
         }
+        _ensureWindowButtons()
         if old.size != frame.size {
             post(NSWindow.didResizeNotification)
             delegate?.windowDidResize(Notification(name: NSWindow.didResizeNotification, object: self))
@@ -340,6 +406,9 @@ import CoreText
         }
         _contentView?.layoutSubtreeIfNeeded()
         _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
+            buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
         context.restoreGState()
@@ -492,6 +561,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomekey()
     @MainActor open func becomeKey() {
+        defer { _ensureWindowButtons(); _windowButtons?.needsDisplay = true }
         guard !_isKey else { return }
         if NSView._traceInvalidation { NSView._trace("becomeKey \'\(_title)\'") }
         let app = NSApplication.shared
@@ -693,7 +763,11 @@ import CoreText
         set { _delegate = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/deminiaturize(_:)
-    @MainActor open func deminiaturize(_ sender: Any?) { unimplemented() }
+    @MainActor open func deminiaturize(_ sender: Any?) {
+        _platform?.deminiaturize()
+        post(NSWindow.didDeminiaturizeNotification)
+        delegate?.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification, object: self))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/depthlimit
     @MainActor open var depthLimit: NSWindow.Depth {
         get { unimplemented() }
@@ -903,7 +977,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isminiaturizable
     @MainActor open var isMiniaturizable: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isminiaturized
-    @MainActor open var isMiniaturized: Bool { false }
+    @MainActor open var isMiniaturized: Bool { _platform?.isMiniaturized ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismodalpanel
     @MainActor open var isModalPanel: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismovable
@@ -947,7 +1021,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iszoomable
     @MainActor open var isZoomable: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iszoomed
-    @MainActor open var isZoomed: Bool { false }
+    @MainActor open var isZoomed: Bool { _platform?.isZoomed ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/keyviewselectiondirection
     @MainActor open var keyViewSelectionDirection: NSWindow.SelectionDirection { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/layoutifneeded()
@@ -1018,7 +1092,12 @@ import CoreText
         set { _platform?.minSize = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/miniaturize(_:)
-    @MainActor open func miniaturize(_ sender: Any?) { unimplemented() }
+    @MainActor open func miniaturize(_ sender: Any?) {
+        post(NSWindow.willMiniaturizeNotification)
+        _platform?.miniaturize()
+        post(NSWindow.didMiniaturizeNotification)
+        delegate?.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification, object: self))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/miniwindowimage
     @MainActor open var miniwindowImage: NSImage? {
         get { unimplemented() }
@@ -1100,9 +1179,15 @@ import CoreText
     @available(macOS 10.11, *)
     @MainActor open func performDrag(with event: NSEvent) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performminiaturize(_:)
-    @MainActor open func performMiniaturize(_ sender: Any?) { unimplemented() }
+    @MainActor open func performMiniaturize(_ sender: Any?) {
+        guard _styleMask.contains(.miniaturizable) else { return }
+        miniaturize(sender)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performzoom(_:)
-    @MainActor open func performZoom(_ sender: Any?) { unimplemented() }
+    @MainActor open func performZoom(_ sender: Any?) {
+        guard _styleMask.contains(.resizable) else { return }
+        zoom(sender)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/postevent(_:atstart:)
     @MainActor open func postEvent(_ event: NSEvent, atStart flag: Bool) { NSApplication.shared.postEvent(event, atStart: flag) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/preferredbackinglocation
@@ -1158,6 +1243,7 @@ import CoreText
     @MainActor open func resetCursorRects() { discardCursorRects() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignkey()
     @MainActor open func resignKey() {
+        defer { _ensureWindowButtons(); _windowButtons?.needsDisplay = true }
         guard _isKey else { return }
         if NSView._traceInvalidation { NSView._trace("resignKey \'\(_title)\'") }
         _isKey = false
@@ -1245,22 +1331,23 @@ import CoreText
         switch event.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             guard !_ignoresMouseEvents else { return }
-            let hit = _contentView?.hitTest(event.locationInWindow)
+            let hit = _hitTest(event.locationInWindow)
             _mouseDownView = hit
             if let v = hit, v.acceptsFirstResponder, firstResponder !== v { _ = makeFirstResponder(v) }
             _dispatchMouse(event, to: hit ?? self)
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-            _dispatchMouse(event, to: _mouseDownView ?? _contentView?.hitTest(event.locationInWindow) ?? self)
+            _dispatchMouse(event, to: _mouseDownView ?? _hitTest(event.locationInWindow) ?? self)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            let target: NSResponder = _mouseDownView ?? _contentView?.hitTest(event.locationInWindow) ?? self
+            let target: NSResponder = _mouseDownView ?? _hitTest(event.locationInWindow) ?? self
             _mouseDownView = nil
             _dispatchMouse(event, to: target)
         case .mouseMoved:
             _updateCursor(at: event.locationInWindow)
+            _windowButtons?.updateHover(event.locationInWindow)
             guard _acceptsMouseMovedEvents else { return }
-            _dispatchMouse(event, to: _contentView?.hitTest(event.locationInWindow) ?? self)
+            _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
-            _dispatchMouse(event, to: _contentView?.hitTest(event.locationInWindow) ?? self)
+            _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .keyDown:
             // An editing text field commits on Return before the default button sees it.
             if let editor = firstResponder as? NSTextView, editor._consumesReturnKey, event.charactersIgnoringModifiers == "\r",
@@ -1345,9 +1432,25 @@ import CoreText
         set { _showsToolbarButton = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/standardwindowbutton(_:)
-    @MainActor open func standardWindowButton(_ b: NSWindow.ButtonType) -> NSButton? { unimplemented() }
+    @MainActor open func standardWindowButton(_ b: NSWindow.ButtonType) -> NSButton? {
+        guard let v = _ensureWindowButtons(create: true) else { return nil }
+        switch b {
+        case .closeButton: return v.close
+        case .miniaturizeButton: return v.miniaturize
+        case .zoomButton: return v.zoom
+        default: return nil
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/standardwindowbutton(_:for:)
-    @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? { unimplemented() }
+    @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? {
+        switch b {
+        case .closeButton, .miniaturizeButton, .zoomButton:
+            let button = _NSWindowButton(kind: b)
+            button.isEnabled = b == .closeButton ? styleMask.contains(.closable) : b == .miniaturizeButton ? styleMask.contains(.miniaturizable) : styleMask.contains(.resizable)
+            return button
+        default: return nil
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/stylemask
     @MainActor open var styleMask: NSWindow.StyleMask {
         get { _styleMask }
@@ -1496,7 +1599,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/workswhenmodal
     @MainActor open var worksWhenModal: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/zoom(_:)
-    @MainActor open func zoom(_ sender: Any?) { unimplemented() }
+    @MainActor open func zoom(_ sender: Any?) {
+        guard delegate?.windowShouldZoom(self, toFrame: screen?.visibleFrame ?? frame) ?? true else { return }
+        _platform?.zoom()
+    }
     // Requirement of NSAccessibilityElementProtocol
     open func accessibilityFrame() -> NSRect { unimplemented() }
     // Requirement of NSAccessibilityElementProtocol

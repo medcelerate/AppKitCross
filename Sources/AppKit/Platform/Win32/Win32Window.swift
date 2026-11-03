@@ -270,6 +270,11 @@ final class Win32Window: PlatformWindow {
     func hide() { if let hwnd { ShowWindow(hwnd, SW_HIDE) } }
     func makeKey() { if let hwnd { SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd) } }
     func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND(bitPattern: 1) /* HWND_BOTTOM */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }
+    func miniaturize() { if let hwnd { ShowWindow(hwnd, SW_MINIMIZE) } }
+    func deminiaturize() { if let hwnd, IsIconic(hwnd) { ShowWindow(hwnd, SW_RESTORE) } }
+    func zoom() { if let hwnd { ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE) } }
+    var isMiniaturized: Bool { hwnd.map { IsIconic($0) } ?? false }
+    var isZoomed: Bool { hwnd.map { IsZoomed($0) } ?? false }
 
     func close() {
         guard let hwnd, !destroying else { return }
@@ -535,9 +540,25 @@ final class Win32Window: PlatformWindow {
             }
             let t = node.transform
             if NSView._traceInvalidation, Win32Window.traceScene {
-                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) clip \(node.clipsToBounds) content \(node.content != nil) \(node.name ?? "")")
+                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) content \(node.content != nil) \(node.name ?? "")")
             }
-            cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(t.tx * s), Float(t.ty * s))
+            if let m = node.transform3D {
+                // The whole placement goes through the 3D effect; the 2D transform stays identity.
+                // Points → pixels: x,y rows/columns scale by s, z stays in points (x' = x*m11 + ... ;
+                // entries feeding x,y from z/w scale up, entries feeding z/w from x,y scale down).
+                cd2d_comp_tree_set_transform(tree, id, 1, 0, 0, 1, 0, 0)
+                let f = Float(s)
+                var rows: [Float] = [
+                    Float(m.m11), Float(m.m12), Float(m.m13) / f, Float(m.m14) / f,
+                    Float(m.m21), Float(m.m22), Float(m.m23) / f, Float(m.m24) / f,
+                    Float(m.m31) * f, Float(m.m32) * f, Float(m.m33), Float(m.m34),
+                    Float(m.m41) * f, Float(m.m42) * f, Float(m.m43), Float(m.m44),
+                ]
+                cd2d_comp_tree_set_transform3d(tree, id, &rows)
+            } else {
+                cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(t.tx * s), Float(t.ty * s))
+                cd2d_comp_tree_set_transform3d(tree, id, nil)
+            }
             cd2d_comp_tree_set_opacity(tree, id, node.opacity)
             if node.clipsToBounds {
                 let w = node.size.width * s, h = node.size.height * s

@@ -360,12 +360,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         fade.repeatCount = .infinity
         ring.add(fade, forKey: "fade")
         pulse.layer!.addSublayer(ring)
+        // The "CA" text spins about its vertical axis under a perspective sublayerTransform:
+        // DirectComposition renders the real 3D placement; software backends show the
+        // affine approximation (a horizontal squeeze).
+        var perspective = CATransform3DIdentity
+        perspective.m34 = -1 / 120
+        pulse.layer!.sublayerTransform = perspective
         let label = CATextLayer()
-        label.anchorPoint = .zero
-        label.frame = CGRect(x: 38, y: 8, width: 50, height: 20)
+        label.bounds = CGRect(x: 0, y: 0, width: 50, height: 20)
+        label.position = CGPoint(x: 63, y: 18)
         label.string = "CA"
         label.fontSize = 15
         label.foregroundColor = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        let spin = CABasicAnimation(keyPath: "transform.rotation.y")
+        spin.fromValue = 0
+        spin.toValue = 2 * CGFloat.pi
+        spin.duration = 3
+        spin.repeatCount = .infinity
+        label.add(spin, forKey: "spin")
         pulse.layer!.addSublayer(label)
         canvas.addSubview(pulse)
         self.canvas = canvas
@@ -473,7 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     @MainActor func showGlassWindow() {
         if let g = glassWindow { g.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 280),
-                         styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+                         styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         w.title = "Glass"
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
