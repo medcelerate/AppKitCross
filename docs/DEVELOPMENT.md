@@ -73,7 +73,8 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh -
 
 The container has no GPU: Mesa's lavapipe (`mesa-vulkan-drivers`) is the Vulkan device the
 Metal module runs on there, so the Metal tests and `HelloWindow --metal-selftest` exercise the
-Vulkan backend (ADR-0012). Without a Vulkan loader or ICD the Metal module falls back to the
+Vulkan backend (ADR-0012), and `tools/linux/run.sh` (`--wayland`) also captures HelloWindow's Metal
+tab on each window backend. Without a Vulkan loader or ICD the Metal module falls back to the
 reference device and the suite still passes; without `libvulkan-dev` the shim builds as stubs.
 HLSL and MSL shaders are compiled to SPIR-V with `glslangValidator` (`glslang-tools`) or `dxc`
 from `PATH`; SPIR-V can also be passed through `makeLibrary(data:)`.

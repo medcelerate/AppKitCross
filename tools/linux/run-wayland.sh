@@ -27,5 +27,13 @@ grim /tmp/hellowindow-linux-wayland.png
 echo "screenshot: /tmp/hellowindow-linux-wayland.png ($(stat -c %s /tmp/hellowindow-linux-wayland.png) bytes)"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
+# The Metal tab on the Vulkan device (ADR-0012), presented through the Wayland window.
+timeout 6 ./.build/debug/HelloWindow --metal --metal-log >/tmp/hellowindow-wayland-metal.log 2>&1 &
+APP=$!
+sleep 4
+grim /tmp/hellowindow-linux-wayland-metal.png
+wait $APP 2>/dev/null || true
+grep -E "^device|Vulkan|^frame" /tmp/hellowindow-wayland-metal.log | head -4
+echo "screenshot: /tmp/hellowindow-linux-wayland-metal.png ($(stat -c %s /tmp/hellowindow-linux-wayland-metal.png) bytes)"
 kill $SWAY 2>/dev/null || true
 wait $SWAY 2>/dev/null || true

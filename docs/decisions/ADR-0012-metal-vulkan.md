@@ -120,9 +120,12 @@ loader offers them.
 The container (`tools/linux/Dockerfile`) has no GPU. It installs Mesa's `lavapipe`
 (`mesa-vulkan-drivers`, a CPU Vulkan 1.3 implementation), the loader, the headers,
 `glslang-tools` and the validation layers, so the Vulkan device exists there and the
-suite exercises it. Tests render the same scene on the reference device and on the
-Vulkan device and compare pixels within a tolerance; when `MTLVulkanDevice()` is nil
-they skip with a message. The macOS host build never declares the module and the
+suite exercises it. `MetalVulkanParityTests` runs the same scene (clears in unorm, float
+and depth formats, uploads, texture and buffer copies, fills, a presented `MTKView`
+frame) on the reference device and on the Vulkan device and compares every readback
+within one level per channel; `MetalVulkanRenderTests` checks rasterization, depth,
+stencil and blending against known pixels, since the reference device does not
+rasterize. When `MTLVulkanDevice()` is nil they skip with a message. The macOS host build never declares the module and the
 tests skip there, so `swift build && swift test` stay green. The suite must also stay
 green in a container without the loader, which is the stub path above.
 
