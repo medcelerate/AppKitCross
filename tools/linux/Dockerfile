@@ -4,12 +4,17 @@
 #                                              # then runs HelloWindow under Xvfb and writes a screenshot
 #   docker run --rm appkitwin-linux bash tools/linux/run.sh --wayland
 #                                              # ... and additionally under a headless sway (Wayland)
+# The container has no GPU: Mesa's lavapipe (mesa-vulkan-drivers, a CPU Vulkan 1.3
+# implementation) backs the Metal module's Vulkan device (ADR-0012), libvulkan-dev gives the
+# shim its headers, glslang-tools compiles HLSL to SPIR-V, and vulkan-validationlayers serve
+# APPKITWIN_VULKAN_DEBUG=1.
 FROM swift:6.2-noble
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libcairo2-dev libpango1.0-dev libx11-dev \
         libwayland-dev wayland-protocols libxkbcommon-dev \
         xvfb x11-apps imagemagick fonts-dejavu-core \
         sway grim xkb-data dmz-cursor-theme \
+        libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers vulkan-tools glslang-tools \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m appkitwin
 WORKDIR /src

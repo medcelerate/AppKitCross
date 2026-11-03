@@ -15,7 +15,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Sources/CoreGraphics` (Windows and Linux only) | `CGContext`, `CGPath`, `CGColor`, `CGImage` over Direct2D or Cairo. |
 | `Sources/CoreText` (Windows and Linux only) | CoreText's API over DirectWrite or Pango/HarfBuzz (ADR-0007). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004), used on Windows unless `APPKITWIN_METAL_REFERENCE=1`. |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/UniformTypeIdentifiers`, `Sources/ImageIO` (Windows and Linux only) | `UTType` over a table generated from the macOS SDK (`tools/uttypes`); `CGImageSource`/`CGImageDestination` over WIC or Cairo (ADR-0009). |
 | `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
@@ -71,6 +71,13 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh  
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh --wayland  # the same under a headless sway
 ```
 
+The container has no GPU: Mesa's lavapipe (`mesa-vulkan-drivers`) is the Vulkan device the
+Metal module runs on there, so the Metal tests and `HelloWindow --metal-selftest` exercise the
+Vulkan backend (ADR-0012). Without a Vulkan loader or ICD the Metal module falls back to the
+reference device and the suite still passes; without `libvulkan-dev` the shim builds as stubs.
+HLSL and MSL shaders are compiled to SPIR-V with `glslangValidator` (`glslang-tools`) or `dxc`
+from `PATH`; SPIR-V can also be passed through `makeLibrary(data:)`.
+
 Two Linux window backends share the Cairo drawing, PangoCairo text and the rest of the
 platform code: Wayland (xdg-shell toplevels with wl_shm buffers, xkbcommon keyboards,
 wl_cursor themes, server-side decorations through xdg-decoration) is preferred when
@@ -96,7 +103,9 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | --- | --- |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Software compositing instead of DirectComposition on Windows. |
 | `APPKITWIN_LEGACY_TEXT=1` | The pre-CoreText text path on Windows. |
-| `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12. |
+| `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12 (Windows) or Vulkan (Linux). |
+| `APPKITWIN_VULKAN_DEBUG=1` | Enables `VK_LAYER_KHRONOS_validation` on the Vulkan device when installed, with its messages on stderr. |
+| `APPKITWIN_VULKAN_DEVICE=n` | Picks Vulkan physical device `n` instead of the best one. |
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
 | `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |

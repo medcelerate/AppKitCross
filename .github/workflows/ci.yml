@@ -47,3 +47,16 @@ jobs:
       - run: swift build
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
+
+  linux-vulkan:
+    name: Linux build and tests on lavapipe (Vulkan backend, ADR-0012)
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
+      - run: swift build
+      - name: Tests on the host backend with the validation layer
+        run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
+      - name: Metal self-test on the Vulkan device
+        run: APPKITWIN_VULKAN_DEBUG=1 .build/debug/HelloWindow --metal-selftest

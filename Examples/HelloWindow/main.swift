@@ -615,6 +615,9 @@ enum MetalSelfTest {
         #endif
         guard let device = made, let queue = device.makeCommandQueue() else { check(false, "device and queue"); return }
         print("device: \(device.name) rasterizes=\(device.supportsRasterization)")
+        #if os(Linux)
+        if !(device is MTLVulkanDevice) { print("Vulkan device unavailable: \(MTLVulkanDevice.unavailabilityReason)") }
+        #endif
 
         // Buffers and a blit copy.
         var floats: [Float] = [1, 2, 3, 4]
