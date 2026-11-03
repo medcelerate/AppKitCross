@@ -75,27 +75,36 @@ final class Win32Backend: PlatformBackend {
 
     // MARK: Displays
 
+    /// One monitor as the core sees it: its rects in points at its own effective DPI
+    /// (per-monitor-v2 awareness gives every monitor its own scale), its device name,
+    /// and whether it is the primary.
+    static func display(for hMonitor: HMONITOR?, primaryHeight: Int32) -> PlatformDisplay? {
+        guard let hMonitor else { return nil }
+        var info = MONITORINFOEXW()
+        info.cbSize = DWORD(MemoryLayout<MONITORINFOEXW>.size)
+        let ok = withUnsafeMutablePointer(to: &info) { p in
+            p.withMemoryRebound(to: MONITORINFO.self, capacity: 1) { GetMonitorInfoW(hMonitor, $0) }
+        }
+        guard ok else { return nil }
+        var dpiX: UINT = 96, dpiY: UINT = 96
+        _ = GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)
+        let scale = CGFloat(dpiX) / 96
+        let name = withUnsafePointer(to: &info.szDevice) { p -> String in
+            p.withMemoryRebound(to: WCHAR.self, capacity: 32) { String(decodingCString: $0, as: UTF16.self) }
+        }
+        return PlatformDisplay(
+            frame: appKitRect(info.rcMonitor, scale: scale, primaryHeight: primaryHeight),
+            visibleFrame: appKitRect(info.rcWork, scale: scale, primaryHeight: primaryHeight),
+            backingScaleFactor: scale, localizedName: name,
+            isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0)
+    }
+
     var displays: [PlatformDisplay] {
         var result: [PlatformDisplay] = []
         let primaryHeight = Win32Backend.primaryHeightPixels
         let callback: MONITORENUMPROC = { hMonitor, _, _, lParam in
-            var info = MONITORINFOEXW()
-            info.cbSize = DWORD(MemoryLayout<MONITORINFOEXW>.size)
-            withUnsafeMutablePointer(to: &info) { p in
-                p.withMemoryRebound(to: MONITORINFO.self, capacity: 1) { _ = GetMonitorInfoW(hMonitor, $0) }
-            }
-            var dpiX: UINT = 96, dpiY: UINT = 96
-            _ = GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY)
-            let scale = CGFloat(dpiX) / 96
             let list = Unmanaged<DisplayList>.fromOpaque(UnsafeRawPointer(bitPattern: Int(lParam))!).takeUnretainedValue()
-            let name = withUnsafePointer(to: &info.szDevice) { p -> String in
-                p.withMemoryRebound(to: WCHAR.self, capacity: 32) { String(decodingCString: $0, as: UTF16.self) }
-            }
-            list.items.append(PlatformDisplay(
-                frame: Win32Backend.appKitRect(info.rcMonitor, scale: scale, primaryHeight: list.primaryHeight),
-                visibleFrame: Win32Backend.appKitRect(info.rcWork, scale: scale, primaryHeight: list.primaryHeight),
-                backingScaleFactor: scale, localizedName: name,
-                isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0))
+            if let d = Win32Backend.display(for: hMonitor, primaryHeight: list.primaryHeight) { list.items.append(d) }
             return true
         }
         let list = DisplayList(primaryHeight: primaryHeight)

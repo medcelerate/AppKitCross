@@ -305,6 +305,8 @@ import CoreText
         }
         if let cv = _contentView { visit(cv) }
         _setLayerSceneNeedsCommit()
+        // The backing store is a new pixel size: everything is drawn again at the new scale.
+        _platform?.setNeedsDisplay(nil)
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
@@ -1178,6 +1180,9 @@ import CoreText
     @MainActor open func saveFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/screen
     @MainActor open var screen: NSScreen? {
+        // A backend that knows which monitor holds the window answers directly (its scale
+        // is the window's); otherwise the screen holding most of the frame wins.
+        if let d = _platform?.currentDisplay { return NSScreen(display: d) }
         let f = frame
         let all = NSScreen.screens
         return all.max { $0.frame.intersection(f).area < $1.frame.intersection(f).area } ?? all.first

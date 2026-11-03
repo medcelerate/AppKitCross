@@ -46,9 +46,8 @@ with title and standard frame, Direct2D drawing of the sample (grid, rounded rec
 dashed curve), mouse clicks dispatched to the view in AppKit coordinates, key events,
 programmatic resize with clean repaint, close through `NSWindow.close()` with app
 termination. The core is covered by `Tests/AppKitTests` on the macOS host backend.
-Live drag-resize is verified too. Not yet done for M1: text drawing (`NSFont`,
-`NSString.draw`, DirectWrite through the CD2D shim) and DPI-change verification across
-monitors.
+Live drag-resize is verified too. Text drawing came with M2/M9; DPI changes across
+monitors are covered under M3.
 
 - `NSApplication` run loop over the Win32 message loop; `NSApp`, `NSApplicationMain`
   equivalents; `applicationDidFinishLaunching`, `applicationShouldTerminate`,
@@ -103,9 +102,25 @@ through an `IDXGISwapChain1` (flip-sequential, 2 buffers, BGRA, vsync) with an
 fallback and the HWND target as a last resort (`APPKITWIN_LEGACY_D2D=1` forces it);
 device loss goes through the existing recreate path; `APPKITWIN_DXGI_DEBUG=1` prints
 live DXGI objects. Partial repaint (2026-11-03): swap-chain targets draw into a persistent canvas bitmap; `end_draw` blits the canvas into the back buffer and presents through `Present1` with the repainted rect as the dirty region, so a frame repaints (Direct2D work) and recomposes (DWM) only what `InvalidateRect` marked, while the blit keeps both alternating buffers whole; transparent (composition) windows repaint whole, since their cleared pixels must meet the DWM backdrop (`APPKITWIN_TRACE=1` prints `win32 paint dirty` with the rect). Text antialiasing is
-forced to grayscale on the swap chain so frames match the HWND target. Open: D3D12 +
-D3D11On12 (only needed for Metal/M7 sharing), HDR, a real monitor-DPI-change test, and
-DirectComposition hosting (M3b/M4b).
+forced to grayscale on the swap chain so frames match the HWND target. Monitor DPI
+changes (2026-11-03): a window dragged between monitors of different scale keeps its
+point size (WM_DPICHANGED sizes the frame from the point size at the new DPI, including
+the menu bar and non-client insets from `AdjustWindowRectExForDpi`), the Direct2D target
+takes the new DPI and the swap-chain canvas is resized by the WM_SIZE that follows, the
+hosted DirectComposition tree is re-placed and its surfaces re-rasterised at the new
+scale, and the core marks the whole window for repaint, sets every layer's
+`contentsScale`, posts `didChangeBackingPropertiesNotification` and sends
+`viewDidChangeBackingProperties` down the tree; a window that opens on a monitor whose
+DPI differs from the system's is sized for that monitor at creation. `NSScreen.screens`
+carries each monitor's effective DPI and `NSWindow.screen` is the monitor the HWND is on
+(`MonitorFromWindow`). `BackingScaleTests` drives this on the host backend
+(`HostWindow.setBackingScaleFactor`): point size kept, `lastImage` and a drawn rect's
+pixel extent doubled, text ink doubled, a hosted layer scene rebuilt at the new scale,
+`viewDidChangeBackingProperties` on every view, `window.screen` following the move.
+Known limitation: screen frames are converted to points at each monitor's own scale, so
+with mixed scales the point-space screen layout can overlap (window frames round-trip
+exactly; only `NSScreen.frame` of secondary monitors is affected). Open: D3D12 +
+D3D11On12 (only needed for Metal/M7 sharing), HDR, and DirectComposition hosting (M3b/M4b).
 
 ## M4: Core Animation
 
@@ -147,7 +162,8 @@ HelloWindow `--no-layer-backing` leaves views unbacked. A layer draws only withi
 bounds in both paths (as on macOS). Not done: group opacity (the software compositor
 applies opacity per primitive, DirectComposition per subtree), blurred shadows, `mask`
 alpha masks (shape masks clip to the path), `CAMetalLayer`/`CAOpenGLLayer` presentation
-(M7), a real DPI-change exercise of the hosted tree.
+(M7). A DPI change re-rasterises the hosted tree at the new scale (M3 status,
+`BackingScaleTests.testLayerBackedViewsRerasteriseAtTheNewScale`).
 
 ## M5: Auto Layout and view controllers
 
@@ -293,7 +309,10 @@ with `prepare_read`/`read_events`. Input: xkbcommon keymaps from the seat with t
 Ctrl-as-Command mapping, `charactersIgnoringModifiers` from the level-0 keysym, pointer
 motion/buttons/axis (one notch = 3 lines, batched per `wl_pointer.frame`) in content
 coordinates, double-click counting; HiDPI by taking the largest scale of the outputs the
-surface entered and `set_buffer_scale`; cursors from the wl_cursor theme
+surface entered and `set_buffer_scale` (`WaylandScaleTests` checks the rule, and
+`run-wayland.sh` moves HelloWindow to a second headless output at scale 2 and checks the
+backing-scale trace and the unchanged logical size; X11 has one scale per display from
+`Xft.dpi`, so no window ever changes scale there); cursors from the wl_cursor theme
 (`XCURSOR_THEME`/`XCURSOR_SIZE`). Selection: Wayland when `WAYLAND_DISPLAY` is set and
 the connection succeeds, else X11; `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one;
 `APPKITWIN_HOST_BACKEND=1` is unchanged. Verified in the container with

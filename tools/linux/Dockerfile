@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libcairo2-dev libpango1.0-dev libx11-dev \
         libwayland-dev wayland-protocols libxkbcommon-dev \
         xvfb x11-apps imagemagick fonts-dejavu-core \
-        sway grim xkb-data dmz-cursor-theme \
+        sway grim xkb-data dmz-cursor-theme jq \
         libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers vulkan-tools glslang-tools \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m appkitwin

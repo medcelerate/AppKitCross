@@ -36,5 +36,29 @@ grim /tmp/hellowindow-linux-wayland-metal.png
 wait $APP 2>/dev/null || true
 grep -E "^device|Vulkan|pipeline failed|^frame" /tmp/hellowindow-wayland-metal.log | head -5
 echo "screenshot: /tmp/hellowindow-linux-wayland-metal.png ($(stat -c %s /tmp/hellowindow-linux-wayland-metal.png) bytes)"
+# Monitor DPI change: a second headless output at scale 2 is added and HelloWindow is moved
+# onto it. The compositor sends wl_surface.leave/enter, WaylandWindow.outputsDidChange picks
+# the new scale, and NSWindow logs "backing scale '...' 2.0" (APPKITWIN_TRACE). The window's
+# logical size in sway's tree (points) must not change; the 2x screenshot shows it crisp.
+echo "== monitor scale change: HelloWindow moved to a 2x output"
+swaymsg create_output >/dev/null
+swaymsg output HEADLESS-2 resolution 1280x800 position 1280,0 scale 2 background '#6e3c91' solid_color >/dev/null
+APPKITWIN_TRACE=1 ./.build/debug/HelloWindow >/tmp/hellowindow-wayland-dpi.log 2>&1 &
+APP=$!
+sleep 3
+logical() { swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitWin") | "\(.rect.width)x\(.rect.height)"' | head -1; }
+BEFORE=$(logical)
+swaymsg '[app_id="AppKitWin"] move window to output HEADLESS-2' >/dev/null
+sleep 2
+AFTER=$(logical)
+grim -o HEADLESS-2 /tmp/hellowindow-linux-wayland-2x.png
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+SCALE_LINE=$(grep -E "backing scale .* 2\.0" /tmp/hellowindow-wayland-dpi.log | head -1)
+echo "logical size before: $BEFORE after: $AFTER; trace: ${SCALE_LINE:-<no backing scale line>}"
+echo "screenshot: /tmp/hellowindow-linux-wayland-2x.png ($(stat -c %s /tmp/hellowindow-linux-wayland-2x.png) bytes)"
+if [ -z "$SCALE_LINE" ] || [ "$BEFORE" != "$AFTER" ] || [ -z "$BEFORE" ]; then
+    echo "FAIL: the window did not keep its logical size or did not change scale"; cat /tmp/hellowindow-wayland-dpi.log | grep -E "backing|frame" | head; kill $SWAY; exit 1
+fi
 kill $SWAY 2>/dev/null || true
 wait $SWAY 2>/dev/null || true

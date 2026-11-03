@@ -178,9 +178,18 @@ final class WaylandWindow: PlatformWindow {
         outputsDidChange()
     }
 
-    /// Picks the largest scale of the outputs showing the surface (HiDPI via buffer scale).
+    /// The buffer scale for a surface shown on `outputs`: the largest of their scales, so
+    /// a window straddling a 1x and a 2x output is crisp on the 2x one (the compositor
+    /// downsamples it on the other). A surface no output shows keeps its scale.
+    static func scale(forOutputs outputs: [WaylandOutput], current: Int) -> Int {
+        max(1, outputs.map(\.scale).max() ?? current)
+    }
+
+    /// The surface entered or left an output, or an output's scale changed: the backing
+    /// and the shm buffers are dropped and the owner re-rasterises for the new scale, at
+    /// the same size in points (`wl_surface.set_buffer_scale` goes out with the next frame).
     func outputsDidChange() {
-        let newScale = max(1, enteredOutputs.map(\.scale).max() ?? scale)
+        let newScale = WaylandWindow.scale(forOutputs: enteredOutputs, current: scale)
         guard newScale != scale else { return }
         scale = newScale
         releaseBacking()
