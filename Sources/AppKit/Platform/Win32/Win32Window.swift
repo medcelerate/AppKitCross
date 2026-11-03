@@ -612,6 +612,15 @@ final class Win32Window: PlatformWindow {
     // MARK: Window procedure
 
     fileprivate func handle(_ msg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT? {
+        if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) {
+            // Raw mouse traffic of pop-up (menu) windows, for the cases where the tracker sees nothing.
+            switch Int32(msg) {
+            case WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_NCHITTEST, WM_NCMOUSEMOVE,
+                 WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_MOUSEACTIVATE, WM_SETCURSOR, WM_CAPTURECHANGED, WM_MOUSELEAVE, WM_ACTIVATE, WM_SHOWWINDOW, WM_WINDOWPOSCHANGED:
+                NSView._trace("win32 popup msg 0x\(String(msg, radix: 16)) wParam \(wParam) lParam \(Int(bitPattern: UInt(lParam))) owner \(owner == nil ? "nil" : "set")")
+            default: break
+            }
+        }
         switch Int32(msg) {
         case WM_PAINT:
             paint()
@@ -708,6 +717,7 @@ final class Win32Window: PlatformWindow {
             // NSWindow decides: caption when movable by background or in the title bar
             // band of content that extends into it, unless a control is under the mouse.
             let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
+            if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) { NSView._trace("win32 popup nchittest client \(pt.x),\(pt.y) -> \(region)") }
             return LRESULT(region == .caption ? HTCAPTION : HTCLIENT)
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
