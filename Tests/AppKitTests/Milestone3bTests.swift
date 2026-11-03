@@ -80,6 +80,22 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
 }
 
 final class AppearanceTests: XCTestCase, @unchecked Sendable {
+    func testWindowBackgroundFollowsTheWindowAppearance() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 60, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
+            w.makeKeyAndOrderFront(nil)
+            let host = w._platformWindow as! HostWindow
+            w.display()
+            let light = _pixels(host.lastImage!)
+            XCTAssertGreaterThan(light[1], 200, "light appearance: a light window background")
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.display()
+            let dark = _pixels(host.lastImage!)
+            XCTAssertLessThan(dark[1], 80, "dark appearance: the window fill resolves dark, like the text drawn over it")
+            w.close()
+        }
+    }
+
     func testEffectiveAppearanceInheritsAndColoursResolve() {
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)

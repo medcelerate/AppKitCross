@@ -305,12 +305,17 @@ import CoreText
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         _commitLayerSceneIfNeeded()
         context.saveGState()
+        // The background is a dynamic colour: resolve it under the window's appearance, as the
+        // views do, so a dark-themed system gets a dark window behind its light text.
+        let previousAppearance = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
         if _isOpaque {
             context.setFillColor(_backgroundColor.cgColor)
             context.fill(dirtyRect)
         }
         _contentView?.layoutSubtreeIfNeeded()
         _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
         context.restoreGState()
     }

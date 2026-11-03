@@ -1104,7 +1104,7 @@ struct ControlsDemo: View {
                 TextField("Your name", text: $name)
                 Button("Greet") { count += 1 }
             }
-            Text(name.isEmpty ? "Type a name and press Greet." : "Hello, \(name)! (\(count) greetings)")
+            Text(name.isEmpty ? "Type a name and press Greet." : "Hello, \(name)! (\(count) \(count == 1 ? "greeting" : "greetings"))")
             Group {
                 Toggle("Enabled", isOn: $enabled.animation(.easeInOut(duration: 0.3)))
                 HStack {

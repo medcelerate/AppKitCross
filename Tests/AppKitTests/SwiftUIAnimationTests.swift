@@ -162,3 +162,66 @@ final class SwiftUIAnimationTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+// MARK: Native layer hosting (the Windows DirectComposition path, via the reference compositor)
+
+final class SwiftUIHostedAnimationTests: XCTestCase, @unchecked Sendable {
+    struct Fader: View {
+        @State var dim = false
+        var body: some View {
+            VStack {
+                Toggle("Enabled", isOn: Binding(get: { !dim }, set: { dim = !$0 }).animation(.linear(duration: 2)))
+                Color.blue.frame(width: 40, height: 40).opacity(dim ? 0.2 : 1)
+                if dim { Text("Disabled").transition(.move(edge: .leading).combined(with: .opacity)) }
+            }
+        }
+    }
+
+    func testOpacityAndTransitionReachTheHostedScene() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 50
+            let saved = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = saved }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+            w.contentView!.wantsLayer = true
+            let hostWindow = w._platformWindow as! HostWindow
+            hostWindow.layerHostingEnabled = true
+            w._updateLayerHosting()
+            XCTAssertTrue(w._hostsLayersNatively)
+            let h = NSHostingView(rootView: Fader())
+            h.frame = NSRect(x: 0, y: 0, width: 200, height: 160)
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            w.display()
+            let before = hostWindow.sceneCommitCount
+            allViews(h).compactMap { $0 as? NSButton }.first?.performClick(nil)
+            h.layoutSubtreeIfNeeded()
+            let root = h.hostingRoot as! _ViewRoot
+            XCTAssertTrue(root.isAnimating)
+            clock = 51
+            CARuntime.tick()
+            w.displayIfNeeded()
+            XCTAssertGreaterThan(hostWindow.sceneCommitCount, before, "an animation frame recommits the hosted scene")
+            let faded = allViews(h).first { $0.alphaValue < 0.99 && $0.alphaValue > 0.01 }
+            XCTAssertNotNil(faded, "the bar's view carries the interpolated alpha")
+            let scene = hostWindow.hostedScene!
+            let fadedNode = scene.nodes.first { abs(CGFloat($0.opacity) - (faded?.alphaValue ?? -1)) < 0.01 }
+            XCTAssertNotNil(fadedNode, "the scene node carries the same opacity: \(scene.nodes.map(\.opacity))")
+            clock = 53
+            CARuntime.tick()
+            w.displayIfNeeded()
+            XCTAssertFalse(root.isAnimating)
+            let texts = allViews(h).compactMap { $0 as? _TextView }.map { $0.storage.string }
+            XCTAssertTrue(texts.contains("Disabled"))
+            let disabled = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Disabled" }!
+            // After the transition the text is fully present: visible in the scene at its final place.
+            var v: NSView? = disabled
+            while let view = v { XCTAssertEqual(view.alphaValue, 1, accuracy: 0.01, "\(type(of: view))"); v = view.superview }
+            let s2 = hostWindow.hostedScene!
+            XCTAssertTrue(s2.nodes.contains { $0.opacity < 0.21 && $0.opacity > 0.19 }, "the bar ends at 0.2: \(s2.nodes.map(\.opacity))")
+            w.close()
+        }
+    }
+}
