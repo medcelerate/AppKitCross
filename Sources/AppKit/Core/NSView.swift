@@ -35,6 +35,9 @@ import CoreText
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
     private var _appearance: NSAppearance? = nil
+    private var _registeredDraggedTypes: [NSPasteboard.PasteboardType] = []
+    /// What `draggingEntered` returned, for the default `draggingUpdated` (AppKit's rule).
+    internal var _lastDraggingEnteredOperation: NSDragOperation = []
     private var _constraints: [NSLayoutConstraint] = []
     private var _layoutGuides: [NSLayoutGuide] = []
     private var _anchors: [NSLayoutConstraint.Attribute: AnyObject] = [:]
@@ -572,7 +575,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindocument()
     @MainActor open func beginDocument() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)
-    @MainActor open func beginDraggingSession(with items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession { unimplemented() }
+    /// Starts a drag. Unlike AppKit this returns at once: the session tracks through the
+    /// application's event stream and reports to `source` as it goes.
+    @MainActor open func beginDraggingSession(with items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession {
+        _NSDragTracker.begin(items: items, event: event, source: source, view: self)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/beginpage(in:atplacement:)
     @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bitmapimagerepforcachingdisplay(in:)
@@ -1119,9 +1126,36 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/reflectscrolledclipview(_:)
     @MainActor open func reflectScrolledClipView(_ clipView: NSClipView) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/registerfordraggedtypes(_:)
-    @MainActor open func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) { unimplemented() }
+    @MainActor open func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) { for t in newTypes where !_registeredDraggedTypes.contains(t) { _registeredDraggedTypes.append(t) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/registereddraggedtypes
-    @MainActor open var registeredDraggedTypes: [NSPasteboard.PasteboardType] { unimplemented() }
+    @MainActor open var registeredDraggedTypes: [NSPasteboard.PasteboardType] { _registeredDraggedTypes }
+    /// Whether a drag carrying `types` may land here: a registered type matches exactly or
+    /// as a UTType the dragged type conforms to (a registered "public.text" takes UTF-8 text).
+    @MainActor internal func _acceptsDraggedTypes(_ types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard !_registeredDraggedTypes.isEmpty else { return false }
+        for t in types {
+            for r in _registeredDraggedTypes where r == t || _NSPasteboardTypeConformance.conforms(t.rawValue, to: r.rawValue) { return true }
+        }
+        return false
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/draggingentered(_:)
+    @MainActor open func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { [] }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/draggingupdated(_:)
+    @MainActor open func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { _lastDraggingEnteredOperation }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/draggingexited(_:)
+    @MainActor open func draggingExited(_ sender: (any NSDraggingInfo)?) { }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/draggingended(_:)
+    @MainActor open func draggingEnded(_ sender: any NSDraggingInfo) { }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/preparefordragoperation(_:)
+    @MainActor open func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { true }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/performdragoperation(_:)
+    @MainActor open func performDragOperation(_ sender: any NSDraggingInfo) -> Bool { false }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/concludedragoperation(_:)
+    @MainActor open func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/updatedraggingitemsfordrag(_:)
+    @MainActor open func updateDraggingItemsForDrag(_ sender: (any NSDraggingInfo)?) { }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/wantsperiodicdraggingupdates()
+    @MainActor open func wantsPeriodicDraggingUpdates() -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/releasegstate()
     @MainActor open func releaseGState() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removealltooltips()
@@ -1404,7 +1438,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/unlockfocus()
     @MainActor open func unlockFocus() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/unregisterdraggedtypes()
-    @MainActor open func unregisterDraggedTypes() { unimplemented() }
+    @MainActor open func unregisterDraggedTypes() { _registeredDraggedTypes = [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updateconstraints()
     @MainActor open func updateConstraints() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updateconstraintsforsubtreeifneeded()

@@ -1,5 +1,7 @@
 # AppKitWin
 
+[![CI](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml/badge.svg)](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml)
+
 AppKit and SwiftUI for Windows and Linux, in Swift. Code written against Apple's
 frameworks compiles unchanged and runs on native Windows APIs (Win32, Direct2D,
 DirectWrite, DirectComposition, Direct3D 12) or on Linux (X11 or Wayland, Cairo, Pango).
@@ -47,8 +49,8 @@ Animation, Metal, the text system and the SwiftUI runtime are in place and verif
 Windows 11 machine and in a Linux container; the macOS build is headless and runs the test
 suite against Apple's own frameworks as the specification.
 
-Not there yet: drag and drop, gestures beyond tap and hover, SwiftUI commands and the
-Settings scene, window caption buttons on Windows, Core Animation group opacity, shadows and masks,
+Not there yet: drags to and from other applications, gestures beyond tap and hover,
+SwiftUI commands and the Settings scene, window caption buttons on Windows, Core Animation group opacity, shadows and masks,
 right-to-left layout, Wayland decorations and clipboard, Vulkan. The full milestone table is
 in [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
 lists every type with what is implemented.
