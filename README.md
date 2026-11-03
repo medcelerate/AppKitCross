@@ -14,6 +14,77 @@ Pre-alpha. Milestone 1 ("open a window and draw into it") is in progress.
 See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
 [docs/API-COVERAGE.md](docs/API-COVERAGE.md) for the generated coverage report.
 
+## Getting started
+
+Requirements: Swift 6.2 or newer. On macOS, Xcode 16 or the swift.org toolchain (the macOS
+build is a headless host build used for type-checking and tests). On Windows 11, the
+swift.org toolchain with Visual Studio Build Tools and the Windows 10/11 SDK. On Linux,
+`swift:6.2-noble` or a 6.2 toolchain plus the Cairo, Pango, HarfBuzz, X11, Wayland and
+xkbcommon development packages (`tools/linux/Dockerfile` lists them).
+
+```bash
+git clone https://github.com/medcelerate/AppKitWin.git
+cd AppKitWin
+swift build
+swift run HelloWindow            # the AppKit sample: drawing, controls, menus, a glass window
+swift run HelloWindow --swiftui  # opens the SwiftUI demo window too
+swift test                       # on macOS; APPKITWIN_HOST_BACKEND=1 swift test on Windows and Linux
+```
+
+To use the package from your own app, add it as a dependency and import the modules by
+their Apple names; code written for macOS compiles unchanged where the port covers it:
+
+```swift
+// Package.swift
+dependencies: [.package(url: "https://github.com/medcelerate/AppKitWin.git", branch: "main")],
+targets: [.executableTarget(name: "MyApp", dependencies: [
+    .product(name: "AppKit", package: "AppKitWin"),
+    .product(name: "SwiftUI", package: "AppKitWin"),
+])]
+```
+
+```swift
+import SwiftUI
+
+@main
+struct MyApp: App {
+    var body: some Scene {
+        WindowGroup("Hello") {
+            VStack {
+                Text("Hello from SwiftUI").font(.title)
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }.padding()
+        }
+    }
+}
+```
+
+```swift
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.title = "Hello from AppKit"
+        window.contentView = NSTextField(labelWithString: "Drawn by AppKitWin")
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+    }
+}
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
+```
+
+Useful switches: `APPKITWIN_SOFTWARE_LAYERS=1` (software compositing instead of
+DirectComposition on Windows), `APPKITWIN_LEGACY_TEXT=1` (the pre-CoreText text path on
+Windows), `APPKITWIN_METAL_REFERENCE=1` (the CPU Metal device), `APPKITWIN_LINUX_BACKEND=x11|wayland`,
+`APPKITWIN_HOST_BACKEND=1` (the headless backend the tests use). Side-by-side renderings
+of the same windows on the three platforms are in [docs/comparisons.md](docs/comparisons.md).
+
 ## Layout
 
 | Path | Purpose |

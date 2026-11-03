@@ -356,6 +356,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
         // `HelloWindow --swiftui` opens the SwiftUI demo window (for scripted runs and screenshots).
         if CommandLine.arguments.contains("--swiftui") { showSwiftUIDemo() }
+        // `HelloWindow --layout` opens the Layout Demo window.
+        if CommandLine.arguments.contains("--layout") { showLayoutDemo() }
+        // `HelloWindow --screenshot <dir>` renders every open window's content into
+        // <dir>/<window>-<platform>.png (through the view hierarchy, as the window draws
+        // it) and exits. Used for docs/comparisons.md.
+        if let i = CommandLine.arguments.firstIndex(of: "--screenshot"), i + 1 < CommandLine.arguments.count {
+            writeScreenshots(to: CommandLine.arguments[i + 1])
+        }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs).
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
@@ -369,6 +377,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     var glassWindow: NSWindow?
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
+    // MARK: Screenshots for the comparison page
+
+    @MainActor func writeScreenshots(to dir: String) {
+        #if os(Windows)
+        let platform = "windows"
+        #elseif os(Linux)
+        let platform = "linux"
+        #else
+        let platform = "macos"
+        #endif
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        for w in NSApp.windows where w.isVisible {
+            guard let cv = w.contentView else { continue }
+            // The Layout Demo's Form tab is the interesting one.
+            if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = 0 }
+            w.display()
+            let name: String
+            switch w.title {
+            case "SwiftUI Demo": name = "swiftui-demo"
+            case "Layout Demo": name = "layout-demo"
+            default: name = "hellowindow"
+            }
+            guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { continue }
+            cv.cacheDisplay(in: cv.bounds, to: rep)
+            if let png = rep.representation(using: .png, properties: [:]) {
+                let path = (dir as NSString).appendingPathComponent("\(name)-\(platform).png")
+                try? png.write(to: URL(fileURLWithPath: path))
+                print("screenshot: \(path)")
+            }
+        }
+        fflush(nil)
+        NSApp.terminate(nil)
+    }
+
     // MARK: SwiftUI demo (ADR-0010)
 
     var swiftUIWindow: NSWindow?

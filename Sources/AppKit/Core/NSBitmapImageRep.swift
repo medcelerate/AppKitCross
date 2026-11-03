@@ -66,6 +66,8 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
     open func canBeCompressed(using compression: NSBitmapImageRep.TIFFCompression) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/cgimage
     open var cgImage: CGImage? { _image }
+    /// Replaces the pixels (NSView.cacheDisplay(in:to:) renders into an existing rep).
+    internal func _setImage(_ image: CGImage) { _image = image }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/colorat(x:y:)
     open func colorAt(x: Int, y: Int) -> NSColor? {
         guard let image = _image, x >= 0, y >= 0, x < image.width, y < image.height, image.bitsPerPixel == 32 else { return nil }

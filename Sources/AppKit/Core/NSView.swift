@@ -560,7 +560,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/beginpage(in:atplacement:)
     @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bitmapimagerepforcachingdisplay(in:)
-    @MainActor open func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? { unimplemented() }
+    @MainActor open func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? {
+        let scale = window?.backingScaleFactor ?? 1
+        guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale), let blank = surface.makeImage() else { return nil }
+        let rep = NSBitmapImageRep(cgImage: blank)
+        rep.size = rect.size
+        return rep
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bottomanchor
     @available(macOS 10.11, *)
     @MainActor open var bottomAnchor: NSLayoutYAxisAnchor { anchorY(.bottom) }
@@ -580,7 +586,21 @@ import CoreText
         set { _boundsRotation = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/cachedisplay(in:to:)
-    @MainActor open func cacheDisplay(in rect: NSRect, to bitmapImageRep: NSBitmapImageRep) { unimplemented() }
+    /// Renders the view and its subviews (what the window would draw) into `bitmapImageRep`.
+    @MainActor open func cacheDisplay(in rect: NSRect, to bitmapImageRep: NSBitmapImageRep) {
+        let scale = CGFloat(bitmapImageRep.pixelsWide) / max(1, rect.width)
+        guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale) else { return }
+        let ctx = surface.context
+        layoutSubtreeIfNeeded()
+        ctx.saveGState()
+        // `_displayHierarchy` expects the superview's space; move `rect` to the origin.
+        ctx.translateBy(x: -(_frame.minX + rect.minX), y: -(_frame.minY + rect.minY))
+        let previous = NSGraphicsContext.current
+        _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        NSGraphicsContext.current = previous
+        ctx.restoreGState()
+        if let image = surface.makeImage() { bitmapImageRep._setImage(image) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/canbecomekeyview
     @MainActor open var canBecomeKeyView: Bool { acceptsFirstResponder && !isHiddenOrHasHiddenAncestor }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candraw
