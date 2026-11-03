@@ -1596,6 +1596,9 @@ extension NSView: CALayerDelegate, CALayerHost {
     }
 
     public func layerHostIsOnScreen(_ root: CALayer) -> Bool { _window?.isVisible == true && !isHiddenOrHasHiddenAncestor }
+    public var _layerHostDescription: String {
+        "\(type(of: self)) in \(_window.map { "'\($0.title)' visible \($0.isVisible)" } ?? "no window")\(isHiddenOrHasHiddenAncestor ? " hidden" : "")"
+    }
 
     public func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?) {
         guard root === _layer else { return }

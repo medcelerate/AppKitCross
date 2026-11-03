@@ -34,8 +34,14 @@ enum PlatformMainQueue {
     static func service() -> TimeInterval? {
         _dispatchMainQueueCallback(nil)
         let loop = RunLoop.main
-        _ = loop.run(mode: .default, before: Date())
-        guard let next = loop.limitDate(forMode: .default) else { return nil }
+        // Stepping the run loop costs about a timer granule on Windows: do it only when a
+        // timer is due, then read the next due date.
+        guard var next = loop.limitDate(forMode: .default) else { return nil }
+        if next.timeIntervalSinceNow <= 0 {
+            _ = loop.run(mode: .default, before: Date())
+            guard let after = loop.limitDate(forMode: .default) else { return nil }
+            next = after
+        }
         let interval = next.timeIntervalSinceNow
         if NSView._traceInvalidation, interval < 1 { NSView._trace("run loop next timer in \(interval) s") }
         if interval == .infinity || interval > 86_400 { return nil }

@@ -49,10 +49,13 @@ public protocol CALayerHost: AnyObject {
     /// Whether the tree is on screen. Animations in a tree whose host is off screen (a
     /// closed or hidden window) stop driving frames until `CARuntime.resumeAnimations(of:)`.
     func layerHostIsOnScreen(_ root: CALayer) -> Bool
+    /// For tracing: what hosts the tree and whether it is on screen.
+    var _layerHostDescription: String { get }
 }
 
 extension CALayerHost {
     public func layerHostIsOnScreen(_ root: CALayer) -> Bool { true }
+    public var _layerHostDescription: String { "\(type(of: self))" }
 }
 
 public struct CAAutoresizingMask: OptionSet, Sendable {
