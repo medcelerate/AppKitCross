@@ -108,6 +108,7 @@ final class Win32Window: PlatformWindow {
     /// DWM shadow and rounded corners on a custom frame, and the swap-chain kind
     /// (composition, premultiplied) for transparent windows.
     private func applyChrome(previous: PlatformWindowChrome? = nil) {
+        if NSView._traceInvalidation { NSView._trace("win32 applyChrome") }
         guard let hwnd else { return }
 
         // Transparent windows draw into a premultiplied composition swap chain, so
@@ -197,6 +198,7 @@ final class Win32Window: PlatformWindow {
             f.size.width = min(max(f.size.width, minSize.width), maxSize.width)
             f.size.height = min(max(f.size.height, minSize.height), maxSize.height)
             let r = Win32Backend.win32Rect(f, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
+            if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) (was \(frame))") }
             SetWindowPos(hwnd, nil, r.left, r.top, r.right - r.left, r.bottom - r.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
         }
     }

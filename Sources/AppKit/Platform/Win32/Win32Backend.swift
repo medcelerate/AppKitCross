@@ -227,7 +227,7 @@ final class Win32Backend: PlatformBackend {
         if NSView._traceInvalidation {
             let now = GetTickCount64()
             if now - pumpTraceStart >= 1000 {
-                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms")")
+                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms") (frame deadline \(frameDeadline.map { "\(Int64($0) - Int64(now)) ms" } ?? "none"), timer \(nextTimer.map { "\($0) s" } ?? "none"))")
                 pumpIterations = 0
                 pumpTraceStart = now
             }

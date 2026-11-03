@@ -1265,6 +1265,7 @@ import CoreText
     @MainActor open func setDynamicDepthLimit(_ flag: Bool) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframe(_:display:)
     @MainActor open func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        if NSView._traceInvalidation { NSView._trace("setFrame \'\(_title)\' \(frameRect)") }
         var rect = frameRect
         if let d = delegate, rect.size != frame.size {
             rect.size = d.windowWillResize(self, to: rect.size)
