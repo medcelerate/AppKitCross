@@ -118,13 +118,15 @@ extension CALayer {
         return toSelf.concatenating(m).concatenating(fromParent)
     }
 
-    /// Sets `ctx` (points, bottom-left origin, `size` extent) up as this layer's oriented bounds space.
-    private func _enterBoundsSpace(_ ctx: CGContext, p: CALayer) {
+    /// Sets `ctx` (points, bottom-left origin, `rect.size` extent) up as this layer's
+    /// oriented bounds space, with `rect` (that space) filling the context.
+    private func _enterBoundsSpace(_ ctx: CGContext, p: CALayer, rect: CGRect? = nil) {
+        let r = rect ?? p._bounds
         if p._isGeometryFlipped {
-            ctx.translateBy(x: 0, y: p._bounds.height)
+            ctx.translateBy(x: 0, y: r.height)
             ctx.scaleBy(x: 1, y: -1)
         }
-        ctx.translateBy(x: -p._bounds.minX, y: -p._bounds.minY)
+        ctx.translateBy(x: -r.minX, y: -r.minY)
     }
 
     @MainActor
@@ -140,10 +142,17 @@ extension CALayer {
                                      maskedCorners: p.maskedCorners, content: nil, name: name)
 
         if _needsFlattening {
-            // One surface for the whole subtree, drawn by the software compositor.
+            // One surface for the whole subtree, drawn by the software compositor. It covers
+            // everything the raster reaches (sublayers outside the bounds, the shadow), so
+            // the node is placed at that rect's corner rather than the bounds'.
+            let extent = _flattenedExtent(presentation: p)
+            let b = p._bounds
+            let offset = CGPoint(x: extent.minX - b.minX, y: p._isGeometryFlipped ? extent.minY - b.minY : b.maxY - extent.maxY)
+            node.transform = CGAffineTransform(translationX: offset.x, y: offset.y).concatenating(transform)
+            node.size = extent.size
             let version = _subtreeAnimates ? frame : _treeVersion
             node.content = _CALayerSceneContent(version: version) { [self] ctx in
-                _enterBoundsSpace(ctx, p: p)
+                _enterBoundsSpace(ctx, p: p, rect: extent)
                 render(in: ctx)
             }
             node.clipsToBounds = false       // the compositor already applied masksToBounds

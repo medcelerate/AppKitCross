@@ -243,6 +243,30 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
             w.close()
         }
     }
+
+    /// A shadow reaches outside the layer's bounds: the flattened node a host gets must
+    /// cover it, placed so the layer itself stays where it was.
+    func testShadowsSurviveFlattening() {
+        MainActor.assumeIsolated {
+            let (w, panel, _) = makeWindow()
+            panel.masksToBounds = false
+            panel.shadowColor = CGColor(gray: 0, alpha: 1)
+            panel.shadowOpacity = 0.8
+            panel.shadowRadius = 4
+            panel.shadowOffset = CGSize(width: 0, height: -6)
+            let host = hostWindow(w)
+            w.display()
+            let software = _pixels(host.lastImage!)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            w.display()
+            let scene = host.hostedScene!
+            let node = scene.nodes.first { $0.size.width > 80 && $0.size.height > 60 && $0.parent != nil }
+            XCTAssertNotNil(node, "the panel's node grew to hold the shadow: \(scene.nodes.map(\.size))")
+            _assertSimilar(_pixels(host.lastImage!), software, "hosted shadow matches the software one")
+            w.close()
+        }
+    }
 }
 
 final class LayerAnimationLifetimeTests: XCTestCase, @unchecked Sendable {

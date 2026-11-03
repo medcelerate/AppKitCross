@@ -424,6 +424,11 @@ import CoreText
         return self
     }
 
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/identifier
+    @MainActor open var identifier: NSUserInterfaceItemIdentifier? {
+        get { _identifier }
+        set { _identifier = newValue }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/init(coder:)
     public required init?(coder: NSCoder) {
         _frame = .zero

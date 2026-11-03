@@ -9,11 +9,11 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 67 |
-| Types generated | 471 |
+| Types handwritten | 75 |
+| Types generated | 463 |
 | Types pending | 3 |
 | Types skipped | 0 |
-| Members emitted | 10212 |
+| Members emitted | 10213 |
 | Members blocked | 187 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1172 |
+| Members unimplemented-calls | 1467 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -201,11 +201,11 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDraggingContext | enum | generated | 2 | 0 | 0 |  |
 | NSDraggingDestination | protocol | generated | 9 | 0 | 0 |  |
 | NSDraggingFormation | enum | generated | 5 | 0 | 0 |  |
-| NSDraggingImageComponent | class | handwritten | 4 | 0 | 0 | 8 |
+| NSDraggingImageComponent | class | handwritten | 4 | 0 | 0 | 1 |
 | NSDraggingInfo | protocol | generated | 16 | 0 | 0 |  |
-| NSDraggingItem | class | handwritten | 8 | 0 | 1 | 9 |
+| NSDraggingItem | class | handwritten | 8 | 0 | 1 | 1 |
 | NSDraggingItemEnumerationOptions | struct | generated | 2 | 0 | 0 |  |
-| NSDraggingSession | class | handwritten | 7 | 0 | 0 | 11 |
+| NSDraggingSession | class | handwritten | 7 | 0 | 0 | 1 |
 | NSDraggingSource | protocol | generated | 5 | 0 | 0 |  |
 | NSDrawer | class | generated | 26 | 0 | 1 |  |
 | NSDrawerDelegate | protocol | generated | 7 | 0 | 0 |  |
@@ -302,7 +302,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSOpenGLView | class | generated | 10 | 0 | 0 |  |
 | NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |
 | NSOpenSavePanelDelegate | protocol | generated | 6 | 2 | 0 |  |
-| NSOutlineView | class | generated | 34 | 6 | 0 |  |
+| NSOutlineView | class | generated | 35 | 6 | 0 |  |
 | NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |
 | NSOutlineViewDelegate | protocol | generated | 39 | 0 | 0 |  |
 | NSPDFImageRep | class | generated | 5 | 0 | 0 |  |
@@ -379,8 +379,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSearchToolbarItem | class | generated | 5 | 0 | 0 |  |
 | NSSecureTextField | class | generated | 0 | 0 | 0 |  |
 | NSSecureTextFieldCell | class | generated | 1 | 0 | 0 |  |
-| NSSegmentedCell | class | generated | 27 | 0 | 0 |  |
-| NSSegmentedControl | class | generated | 54 | 0 | 3 |  |
+| NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 32 |
+| NSSegmentedControl | class | handwritten | 54 | 0 | 3 | 47 |
 | NSSeguePerforming | protocol | generated | 3 | 0 | 0 |  |
 | NSSelectionAffinity | enum | generated | 2 | 0 | 0 |  |
 | NSSelectionGranularity | enum | generated | 3 | 0 | 0 |  |
@@ -436,12 +436,12 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTabViewController | class | handwritten | 22 | 0 | 1 | 3 |
 | NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |
 | NSTabViewItem | class | handwritten | 17 | 0 | 1 | 2 |
-| NSTableCellView | class | generated | 6 | 0 | 0 |  |
-| NSTableColumn | class | generated | 19 | 0 | 1 |  |
-| NSTableHeaderCell | class | generated | 2 | 0 | 0 |  |
-| NSTableHeaderView | class | generated | 6 | 0 | 0 |  |
-| NSTableRowView | class | generated | 18 | 0 | 0 |  |
-| NSTableView | class | generated | 154 | 0 | 10 |  |
+| NSTableCellView | class | handwritten | 6 | 0 | 0 | 12 |
+| NSTableColumn | class | handwritten | 19 | 0 | 1 | 32 |
+| NSTableHeaderCell | class | handwritten | 2 | 0 | 0 | 3 |
+| NSTableHeaderView | class | handwritten | 6 | 0 | 0 | 9 |
+| NSTableRowView | class | handwritten | 18 | 0 | 0 | 32 |
+| NSTableView | class | handwritten | 154 | 0 | 10 | 157 |
 | NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |
 | NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |
 | NSTableViewDiffableDataSource | class | generated | 14 | 0 | 3 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 147 |
+| NSView | class | handwritten | 361 | 3 | 19 | 143 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |

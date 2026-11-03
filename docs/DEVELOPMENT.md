@@ -110,6 +110,7 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
 | `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |
+| `APPKITWIN_LAYOUT_TAB=table` | Opens the HelloWindow Layout Demo on that tab (form, split, table, metal); screenshots are named by tab. |
 | `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
 | `APPKITWIN_IME_LAYOUT=00000411` | Windows: activates that keyboard layout for the process and opens its IME in native mode on focus (00000411 is Japanese), for testing composition without changing the system's input settings. |
 | `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |

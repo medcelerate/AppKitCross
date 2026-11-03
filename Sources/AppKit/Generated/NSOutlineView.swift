@@ -113,5 +113,9 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
-    // INHERITED (identical redeclaration): @MainActor var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineview/userinterfacelayoutdirection
+    @MainActor open override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
 }

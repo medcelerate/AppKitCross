@@ -383,10 +383,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         if let i = CommandLine.arguments.firstIndex(of: "--screenshot"), i + 1 < CommandLine.arguments.count {
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
-        // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs).
+        // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
-            (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 2
+            (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
+        }
+        if let tab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"], let index = AppDelegate.layoutTabs.firstIndex(of: tab) {
+            showLayoutDemo()
+            (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = index
         }
     }
 
@@ -394,6 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
+    static let layoutTabs = ["form", "split", "table", "metal"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -409,15 +415,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         for w in NSApp.windows where w.isVisible {
             guard let cv = w.contentView else { continue }
-            // The Layout Demo's Form tab is the interesting one.
-            if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = 0 }
+            // The Layout Demo's Form tab is the interesting one unless APPKITWIN_LAYOUT_TAB picks another.
+            let layoutTab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"] ?? "form"
+            if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: layoutTab) ?? 0 }
             w.display()
             let name: String
             switch w.title {
             case "SwiftUI Demo":
                 let tab = ProcessInfo.processInfo.environment["APPKITWIN_DEMO_TAB"] ?? "controls"
                 name = tab == "controls" ? "swiftui-demo" : "swiftui-\(tab)"
-            case "Layout Demo": name = "layout-demo"
+            case "Layout Demo": name = layoutTab == "form" ? "layout-demo" : "layout-\(layoutTab)"
             default: name = "hellowindow"
             }
             guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { continue }
@@ -517,6 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         split.title = "Split"
         split.view.frame = NSRect(x: 0, y: 0, width: 420, height: 260)
         tabs.addChild(split)
+        tabs.addChild(TableDemoViewController())
         tabs.addChild(MetalDemoViewController())
         tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
         let window = NSWindow(contentViewController: tabs)
@@ -827,6 +835,108 @@ final class FormViewController: NSViewController, NSSelectorHandling {
 }
 
 /// A coloured pane with a centred label, for the split view.
+/// An NSTableView in a scroll view (sortable headers, multiple selection) over a
+/// segmented control that filters the rows.
+final class TableDemoViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSSelectorHandling {
+    struct Planet { let name: String; let moons: Int; let kind: String }
+    let all = [Planet(name: "Mercury", moons: 0, kind: "Rocky"), Planet(name: "Venus", moons: 0, kind: "Rocky"), Planet(name: "Earth", moons: 1, kind: "Rocky"),
+               Planet(name: "Mars", moons: 2, kind: "Rocky"), Planet(name: "Jupiter", moons: 95, kind: "Gas"), Planet(name: "Saturn", moons: 146, kind: "Gas"),
+               Planet(name: "Uranus", moons: 28, kind: "Ice"), Planet(name: "Neptune", moons: 16, kind: "Ice")]
+    var rows: [Planet] = []
+    let table = NSTableView(frame: .zero)
+    let filter = NSSegmentedControl(labels: ["All", "Rocky", "Gas", "Ice"], trackingMode: .selectOne, target: nil, action: nil)
+    let status = NSTextField(labelWithString: "Click a header to sort; Cmd and Shift extend the selection.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Table"
+        rows = all
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        filter.selectedSegment = 0
+        filter.target = self
+        filter.action = Selector(("filterChanged:"))
+        filter.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(filter)
+        for (id, title, width, key) in [("name", "Planet", 140.0, "name"), ("moons", "Moons", 70.0, "moons"), ("kind", "Kind", 80.0, "kind")] {
+            let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+            c.title = title
+            c.width = width
+            c.sortDescriptorPrototype = NSSortDescriptor(key: key, ascending: true)
+            table.addTableColumn(c)
+        }
+        table.dataSource = self
+        table.delegate = self
+        table.allowsMultipleSelection = true
+        table.usesAlternatingRowBackgroundColors = true
+        table.rowHeight = 22
+        table.target = self
+        table.action = Selector(("rowClicked:"))
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = table
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(scroll)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            filter.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            filter.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            scroll.topAnchor.constraint(equalTo: filter.bottomAnchor, constant: 10),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+    func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
+        switch tableColumn?.identifier.rawValue {
+        case "moons": return rows[row].moons
+        case "kind": return rows[row].kind
+        default: return rows[row].name
+        }
+    }
+    func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        applyFilterAndSort()
+    }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        let names = table.selectedRowIndexes.map { rows[$0].name }
+        status.stringValue = names.isEmpty ? "Nothing selected." : "Selected: " + names.joined(separator: ", ")
+    }
+
+    private func applyFilterAndSort() {
+        let kinds = ["All", "Rocky", "Gas", "Ice"]
+        let kind = kinds[max(0, filter.selectedSegment)]
+        rows = kind == "All" ? all : all.filter { $0.kind == kind }
+        if let d = table.sortDescriptors.first {
+            rows.sort { a, b in
+                switch d.key {
+                case "moons": return d.ascending ? a.moons < b.moons : a.moons > b.moons
+                case "kind": return d.ascending ? a.kind < b.kind : a.kind > b.kind
+                default: return d.ascending ? a.name < b.name : a.name > b.name
+                }
+            }
+        }
+        table.reloadData()
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "filterChanged:": applyFilterAndSort(); return true
+        case "rowClicked:": return true
+        default: return false
+        }
+    }
+}
+
 final class ColorViewController: NSViewController {
     let color: NSColor
     let text: String

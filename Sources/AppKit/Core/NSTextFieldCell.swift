@@ -25,7 +25,11 @@ import CoreText
     private var _placeholderAttributedString: NSAttributedString? = nil
     private var _allowedInputSourceLocales: [String]? = nil
 
-    internal override var _textColor: NSColor { _isEnabled ? (_textColorValue ?? .textColor) : .disabledControlTextColor }
+    internal override var _textColor: NSColor {
+        // Emphasized (a selected row in a key window): light text over the selection colour.
+        if _backgroundStyle == .emphasized, _isEnabled, _textColorValue == nil || _textColorValue == .labelColor || _textColorValue == .textColor || _textColorValue == .controlTextColor { return .alternateSelectedControlTextColor }
+        return _isEnabled ? (_textColorValue ?? .textColor) : .disabledControlTextColor
+    }
 
     /// Rect the text is laid out in (bezel inset + 2 pt padding).
     @MainActor internal func _textRect(forBounds rect: NSRect) -> NSRect {

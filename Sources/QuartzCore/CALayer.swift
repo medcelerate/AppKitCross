@@ -1053,7 +1053,7 @@ open class CALayer: NSObject, CAMediaTiming {
     }
 
     /// The rect (oriented bounds space) the layer's own content and sublayers can touch.
-    private func _subtreeExtent(presentation p: CALayer) -> CGRect {
+    func _subtreeExtent(presentation p: CALayer) -> CGRect {
         var r = p._bounds
         if p._masksToBounds { return r }
         let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
@@ -1140,6 +1140,18 @@ open class CALayer: NSObject, CAMediaTiming {
 
     /// The last shadow image, reused while the content, geometry and shadow settings hold.
     private var _shadowCache: (key: String, image: CGImage, rect: CGRect)?
+
+    /// Where a flattened raster of this layer must reach (oriented bounds space): the
+    /// subtree, plus the shadow's blur and offset.
+    func _flattenedExtent(presentation p: CALayer) -> CGRect {
+        var extent = _subtreeExtent(presentation: p)
+        if p._shadowOpacity > 0, p._shadowColor != nil {
+            let pad = 3 * max(0, p._shadowRadius) + 1
+            let shadow = (p._shadowPath?.boundingBoxOfPath ?? extent).insetBy(dx: -pad, dy: -pad).offsetBy(dx: p._shadowOffset.width, dy: p._shadowOffset.height)
+            extent = extent.union(shadow)
+        }
+        return extent.integral
+    }
 
     private func _shadowSigma(_ p: CALayer, scale: (x: CGFloat, y: CGFloat)) -> (sigma: CGFloat, pad: Int) {
         // shadowRadius is the blur's standard deviation in points, as Apple's renders it.

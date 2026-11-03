@@ -34,7 +34,7 @@ public protocol NSTableViewDataSource: NSObjectProtocol {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSTableViewDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/numberofrows(in:)
-    @MainActor public func numberOfRows(in tableView: NSTableView) -> Int { unimplementedOptionalRequirement() }
+    @MainActor public func numberOfRows(in tableView: NSTableView) -> Int { return 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:acceptdrop:row:dropoperation:)
     @MainActor public func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:draggingsession:endedat:operation:)
@@ -42,7 +42,7 @@ extension NSTableViewDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:draggingsession:willbeginat:forrowindexes:)
     @MainActor public func tableView(_ tableView: NSTableView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forRowIndexes rowIndexes: IndexSet) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:namesofpromisedfilesdroppedatdestination:fordraggedrowswith:)
-    public func tableView(_ tableView: NSTableView, namesOfPromisedFilesDroppedAtDestination dropDestination: URL, forDraggedRowsWith indexSet: IndexSet) -> [String] { unimplementedOptionalRequirement() }
+    public func tableView(_ tableView: NSTableView, namesOfPromisedFilesDroppedAtDestination dropDestination: URL, forDraggedRowsWith indexSet: IndexSet) -> [String] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:objectvaluefor:row:)
     @MainActor public func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:pasteboardwriterforrow:)
@@ -54,7 +54,7 @@ extension NSTableViewDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:updatedraggingitemsfordrag:)
     @MainActor public func tableView(_ tableView: NSTableView, updateDraggingItemsForDrag draggingInfo: any NSDraggingInfo) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:validatedrop:proposedrow:proposeddropoperation:)
-    @MainActor public func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdatasource/tableview(_:writerowswith:to:)
     public func tableView(_ tableView: NSTableView, writeRowsWith rowIndexes: IndexSet, to pboard: NSPasteboard) -> Bool { return false }
 }

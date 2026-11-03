@@ -301,6 +301,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/reflectscrolledclipview(_:)
     @MainActor open override func reflectScrolledClipView(_ cView: NSClipView) {
         guard cView === _contentView else { return }
+        if let header = _headerView, header.bounds.minX != cView.bounds.minX {
+            header.setBoundsOrigin(NSPoint(x: cView.bounds.minX, y: 0))
+            header.needsDisplay = true
+        }
         let doc = cView.documentRect
         let b = cView.bounds
         if let v = _verticalScroller {
@@ -381,6 +385,17 @@ import CoreText
         if content.isNull || content.width < 0 || content.height < 0 {
             content = NSRect(x: bounds.minX + min(inset, bounds.width / 2), y: bounds.minY + min(inset, bounds.height / 2), width: 0, height: 0)
         }
+        // A table's header sits above the content, scrolling horizontally with it.
+        let header = (_contentView.documentView as? NSTableView)?.headerView
+        if let stale = _headerView, stale !== header { stale.removeFromSuperview() }
+        _headerView = header
+        if let header {
+            if header.superview !== self { addSubview(header) }
+            let h = header.intrinsicContentSize.height
+            header.frame = NSRect(x: content.minX, y: isFlipped ? content.minY : content.maxY - h, width: content.width, height: h)
+            content.size.height = max(0, content.height - h)
+            if isFlipped { content.origin.y += h }
+        }
         let doc = _contentView.documentRect
         let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
         var showV = _hasVerticalScroller, showH = _hasHorizontalScroller
@@ -403,10 +418,14 @@ import CoreText
             h.isHidden = !showH
             h.frame = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
         }
-        if _contentView.frame != content { _contentView.frame = content }
+        if _contentView.frame != content {
+            _contentView.frame = content
+            (_contentView.documentView as? NSTableView)?._clipViewDidResize()
+        }
         reflectScrolledClipView(_contentView)
         needsDisplay = true
     }
+    private var _headerView: NSTableHeaderView?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/usespredominantaxisscrolling
     @MainActor open var usesPredominantAxisScrolling: Bool {
         get { _usesPredominantAxisScrolling }

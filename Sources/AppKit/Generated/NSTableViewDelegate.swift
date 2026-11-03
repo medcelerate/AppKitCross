@@ -60,7 +60,7 @@ public protocol NSTableViewDelegate: NSControlTextEditingDelegate, NSObjectProto
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSTableViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/selectionshouldchange(in:)
-    @MainActor public func selectionShouldChange(in tableView: NSTableView) -> Bool { return false }
+    @MainActor public func selectionShouldChange(in tableView: NSTableView) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:datacellfor:row:)
     @MainActor public func tableView(_ tableView: NSTableView, dataCellFor tableColumn: NSTableColumn?, row: Int) -> NSCell? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:didadd:forrow:)
@@ -72,43 +72,43 @@ extension NSTableViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:didremove:forrow:)
     @MainActor public func tableView(_ tableView: NSTableView, didRemove rowView: NSTableRowView, forRow row: Int) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:heightofrow:)
-    @MainActor public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { return tableView.rowHeight }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:isgrouprow:)
     @MainActor public func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:mousedowninheaderof:)
     @MainActor public func tableView(_ tableView: NSTableView, mouseDownInHeaderOf tableColumn: NSTableColumn) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:nexttypeselectmatchfromrow:torow:for:)
-    @MainActor public func tableView(_ tableView: NSTableView, nextTypeSelectMatchFromRow startRow: Int, toRow endRow: Int, for searchString: String) -> Int { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, nextTypeSelectMatchFromRow startRow: Int, toRow endRow: Int, for searchString: String) -> Int { return -1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:rowactionsforrow:edge:)
     @available(macOS 10.11, *)
-    @MainActor public func tableView(_ tableView: NSTableView, rowActionsForRow row: Int, edge: NSTableView.RowActionEdge) -> [NSTableViewRowAction] { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, rowActionsForRow row: Int, edge: NSTableView.RowActionEdge) -> [NSTableViewRowAction] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:rowviewforrow:)
     @MainActor public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:selectionindexesforproposedselection:)
-    @MainActor public func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet { return proposedSelectionIndexes }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldedit:row:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldEdit tableColumn: NSTableColumn?, row: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldreordercolumn:tocolumn:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldselect:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldSelect tableColumn: NSTableColumn?) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldSelect tableColumn: NSTableColumn?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldselectrow:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldshowcellexpansionfor:row:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldShowCellExpansionFor tableColumn: NSTableColumn?, row: Int) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldShowCellExpansionFor tableColumn: NSTableColumn?, row: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldtrackcell:for:row:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldTrackCell cell: NSCell, for tableColumn: NSTableColumn?, row: Int) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldTrackCell cell: NSCell, for tableColumn: NSTableColumn?, row: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:shouldtypeselectfor:withcurrentsearch:)
-    @MainActor public func tableView(_ tableView: NSTableView, shouldTypeSelectFor event: NSEvent, withCurrentSearch searchString: String?) -> Bool { return false }
+    @MainActor public func tableView(_ tableView: NSTableView, shouldTypeSelectFor event: NSEvent, withCurrentSearch searchString: String?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:sizetofitwidthofcolumn:)
-    @MainActor public func tableView(_ tableView: NSTableView, sizeToFitWidthOfColumn column: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func tableView(_ tableView: NSTableView, sizeToFitWidthOfColumn column: Int) -> CGFloat { return tableView.tableColumns[column].width }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:tooltipfor:rect:tablecolumn:row:mouselocation:)
     @MainActor public func tableView(_ tableView: NSTableView, toolTipFor cell: NSCell, rect: NSRectPointer, tableColumn: NSTableColumn?, row: Int, mouseLocation: NSPoint) -> String { unimplementedOptionalRequirement() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:typeselectstringfor:row:)
     @MainActor public func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:usercanchangevisibilityof:)
     @available(macOS 14.0, *)
-    public func tableView(_ tableView: NSTableView, userCanChangeVisibilityOf column: NSTableColumn) -> Bool { return false }
+    public func tableView(_ tableView: NSTableView, userCanChangeVisibilityOf column: NSTableColumn) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableviewdelegate/tableview(_:userdidchangevisibilityof:)
     @available(macOS 14.0, *)
     public func tableView(_ tableView: NSTableView, userDidChangeVisibilityOf columns: [NSTableColumn]) { }
