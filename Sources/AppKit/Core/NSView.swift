@@ -267,6 +267,7 @@ import CoreText
 
     internal func _windowVisibilityDidChange(_ visible: Bool) {
         if visible { _viewController?.viewDidAppear() } else { _viewController?.viewDidDisappear() }
+        if visible, let l = _layer, _isLayerRoot { CARuntime.resumeAnimations(of: l) }
         for s in _subviews { s._windowVisibilityDidChange(visible) }
     }
 
@@ -375,9 +376,11 @@ import CoreText
     /// `APPKITWIN_TRACE=1` logs every view invalidation (view class and rect), for finding
     /// what keeps a window repainting on a platform without usable backtraces.
     nonisolated(unsafe) public static let _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
+    /// Unbuffered, so a killed process keeps the tail of the trace.
+    public static func _trace(_ message: String) { fputs("[trace] \(message)\n", stderr) }
 
     private func _invalidate(_ rect: NSRect) {
-        if NSView._traceInvalidation { print("[trace] setNeedsDisplay \(type(of: self)) \(rect)") }
+        if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {
             // Under native hosting the layer's raster must be versioned and recommitted;
@@ -1548,6 +1551,8 @@ extension NSView: CALayerDelegate, CALayerHost {
     public func action(for layer: CALayer, forKey event: String) -> (any CAAction)? {
         NSAnimationContext.current.allowsImplicitAnimation ? nil : NSNull()
     }
+
+    public func layerHostIsOnScreen(_ root: CALayer) -> Bool { _window?.isVisible == true && !isHiddenOrHasHiddenAncestor }
 
     public func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?) {
         guard root === _layer else { return }

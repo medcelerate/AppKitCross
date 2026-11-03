@@ -150,6 +150,12 @@ public enum CARuntime {
         animatingRoots.contains { $0.value != nil } || displayLinks.contains { ($0.value?.isRunning) == true }
     }
 
+    /// A host came back on screen: its tree's animations drive frames again.
+    public static func resumeAnimations(of root: CALayer) {
+        guard root._hasAnimationsInTree else { return }
+        noteAnimating(root: root)
+    }
+
     static func noteAnimating(root: CALayer) {
         animatingRoots.removeAll { $0.value == nil }
         if !animatingRoots.contains(where: { $0.value === root }) { animatingRoots.append(CAWeak(root)) }
@@ -167,6 +173,8 @@ public enum CARuntime {
         var remaining: [CAWeak<CALayer>] = []
         for box in animatingRoots {
             guard let root = box.value else { continue }
+            // Off-screen trees keep their animations but stop costing frames.
+            if let h = root.host, !h.layerHostIsOnScreen(root) { continue }
             let still = root._advanceAnimations(now: t)
             root._invalidateHost(nil)
             if still { remaining.append(box) }

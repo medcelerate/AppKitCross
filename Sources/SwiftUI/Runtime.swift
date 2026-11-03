@@ -119,7 +119,7 @@ public final class _ViewNode {
 
     /// Marks the body stale; the host lays out again at the next display cycle.
     public func setNeedsUpdate() {
-        if NSView._traceInvalidation { print("[trace] setNeedsUpdate \(viewType)") }
+        if NSView._traceInvalidation { NSView._trace("setNeedsUpdate \(viewType)") }
         needsUpdate = true
         root?.noteTransaction(Transaction._current)
         root?.scheduleUpdate()
@@ -141,6 +141,7 @@ public final class _ViewNode {
     func animate(_ property: _Presentation.Property, from: [CGFloat], to: [CGFloat], with animation: Animation) {
         runningAnimations.removeAll { $0.property == property }
         runningAnimations.append(_RunningAnimation(property: property, from: from, to: to, animation: animation, start: CARuntime.now()))
+        if NSView._traceInvalidation { NSView._trace("animate \(viewType) \(property) \(from) -> \(to) at \(CARuntime.now())") }
         presentation.set(property, from)          // shown at the start value until the first frame
         root?.animationsDidStart()
     }
@@ -529,6 +530,7 @@ public final class _ViewRoot: NSHostingRoot {
         if let r = rootNode { visit(r) }
         if let r = rootNode, let host { r.syncBackingViews(in: host.hostView, containerFrame: .zero) }
         host?.setNeedsDisplay(in: nil)
+        if NSView._traceInvalidation { NSView._trace("advanceAnimations at \(now): still animating \(still)") }
         if !still {
             displayLink?.invalidate()
             displayLink = nil
@@ -577,7 +579,7 @@ public final class _ViewRoot: NSHostingRoot {
             updateIfNeeded()
             node.place(in: bounds)
         }
-        if NSView._traceInvalidation { print("[trace] root layout in \(bounds): \(passes) settle passes, still dirty: \(dirty)") }
+        if NSView._traceInvalidation { NSView._trace("root layout in \(bounds): \(passes) settle passes, still dirty: \(dirty)") }
         node.syncBackingViews(in: host.hostView, containerFrame: .zero)
         // Insertion transitions start once the new nodes have a frame.
         for n in insertedNodes where n.isAttached {

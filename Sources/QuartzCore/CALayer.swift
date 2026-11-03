@@ -46,6 +46,13 @@ extension CALayoutManager {
 public protocol CALayerHost: AnyObject {
     /// `rect` is in the root layer's superlayer space (the host's coordinate space), or nil for everything.
     func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?)
+    /// Whether the tree is on screen. Animations in a tree whose host is off screen (a
+    /// closed or hidden window) stop driving frames until `CARuntime.resumeAnimations(of:)`.
+    func layerHostIsOnScreen(_ root: CALayer) -> Bool
+}
+
+extension CALayerHost {
+    public func layerHostIsOnScreen(_ root: CALayer) -> Bool { true }
 }
 
 public struct CAAutoresizingMask: OptionSet, Sendable {
@@ -782,6 +789,13 @@ open class CALayer: NSObject, CAMediaTiming {
     }
 
     var hasActiveAnimations: Bool { !animations.isEmpty }
+
+    /// Whether this layer, its mask or any sublayer has animations attached.
+    public var _hasAnimationsInTree: Bool {
+        if !animations.isEmpty { return true }
+        if let m = _mask, m._hasAnimationsInTree { return true }
+        return _sublayers.contains { $0._hasAnimationsInTree }
+    }
 
     /// A copy of the layer with the running animations applied at `time`.
     func _presentation(at time: CFTimeInterval) -> CALayer {

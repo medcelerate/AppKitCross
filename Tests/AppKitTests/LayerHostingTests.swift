@@ -244,3 +244,36 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+final class LayerAnimationLifetimeTests: XCTestCase, @unchecked Sendable {
+    /// A repeating layer animation drives frames only while its window is on screen:
+    /// closing (or ordering out) the window stops the frame requests, showing it resumes them.
+    func testOffScreenAnimationsStopDrivingFrames() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 100
+            let savedNow = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = savedNow }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
+            let v = NSView(frame: NSRect(x: 10, y: 10, width: 40, height: 40))
+            v.wantsLayer = true
+            w.contentView!.addSubview(v)
+            w.makeKeyAndOrderFront(nil)
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 0.2; pulse.toValue = 1; pulse.duration = 0.5; pulse.repeatCount = .infinity
+            v.layer!.add(pulse, forKey: "pulse")
+            XCTAssertTrue(CARuntime.hasPendingWork)
+            clock = 101; CARuntime.tick()
+            XCTAssertTrue(CARuntime.hasPendingWork, "an infinite animation keeps requesting frames while visible")
+            w.orderOut(nil)
+            clock = 102; CARuntime.tick()
+            XCTAssertFalse(CARuntime.hasPendingWork, "an ordered-out window's animations stop driving frames")
+            XCTAssertNotNil(v.layer!.animation(forKey: "pulse"), "the animation itself is kept")
+            w.makeKeyAndOrderFront(nil)
+            XCTAssertTrue(CARuntime.hasPendingWork, "showing the window again resumes the frames")
+            w.close()
+            clock = 103; CARuntime.tick()
+            XCTAssertFalse(CARuntime.hasPendingWork, "a closed window's animations stop driving frames")
+        }
+    }
+}
