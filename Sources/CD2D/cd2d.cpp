@@ -15,6 +15,8 @@
 #include <shlwapi.h>
 #include <shobjidl.h>
 #include <shellapi.h>
+#include <shlobj.h>
+#include <shlguid.h>
 #include <ole2.h>
 #include <string>
 #include <vector>
