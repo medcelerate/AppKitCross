@@ -1,26 +1,64 @@
 # AppKitWin
 
-A source-compatible port of Apple's AppKit to Windows, written in Swift on top of
-native Windows APIs (Win32, WinRT, DirectX 12, Direct2D, DirectWrite).
+AppKit and SwiftUI for Windows and Linux, in Swift. Code written against Apple's
+frameworks compiles unchanged and runs on native Windows APIs (Win32, Direct2D,
+DirectWrite, DirectComposition, Direct3D 12) or on Linux (X11 or Wayland, Cairo, Pango).
 
-The long-term goal is a fully functioning SwiftUI stack on Windows. AppKit is the
-first layer because SwiftUI on macOS is hosted by AppKit (`NSHostingView`,
-`NSApplication`, the responder chain, `CALayer` trees). Linux is a planned
-follow-on that reuses the platform-independent core with a different backend.
+The package provides the modules by their Apple names: `AppKit`, `SwiftUI`, `CoreGraphics`,
+`CoreText`, `QuartzCore`, `Metal`, `MetalKit`, `Combine`, `UniformTypeIdentifiers` and
+`ImageIO`. Public API names, signatures and behaviour follow Apple's documentation exactly;
+anything not yet implemented says so rather than pretending.
+
+## The same windows on three platforms
+
+The sample app, rendered by the same code on macOS, Linux and Windows.
+
+<table>
+  <tr>
+    <th>macOS</th>
+    <th>Linux (X11, Cairo, Pango)</th>
+    <th>Windows (Direct2D, DirectWrite)</th>
+  </tr>
+  <tr>
+    <td><img src="docs/images/compare/hellowindow-macos.png" width="300" alt="HelloWindow on macOS"></td>
+    <td><img src="docs/images/compare/hellowindow-linux.png" width="300" alt="HelloWindow on Linux"></td>
+    <td><img src="docs/images/compare/hellowindow-windows.png" width="300" alt="HelloWindow on Windows"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/compare/layout-demo-macos.png" width="300" alt="Layout Demo on macOS"></td>
+    <td><img src="docs/images/compare/layout-demo-linux.png" width="300" alt="Layout Demo on Linux"></td>
+    <td><img src="docs/images/compare/layout-demo-windows.png" width="300" alt="Layout Demo on Windows"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/compare/swiftui-demo-macos.png" width="300" alt="SwiftUI demo on macOS"></td>
+    <td><img src="docs/images/compare/swiftui-demo-linux.png" width="300" alt="SwiftUI demo on Linux"></td>
+    <td><img src="docs/images/compare/swiftui-demo-windows.png" width="300" alt="SwiftUI demo on Windows"></td>
+  </tr>
+</table>
+
+Top to bottom: AppKit drawing, controls, a scroll view and a Core Animation badge; the
+Auto Layout form; the SwiftUI demo. Notes on what differs, and how to regenerate the
+images, are in [docs/comparisons.md](docs/comparisons.md).
 
 ## Status
 
-Pre-alpha. Milestone 1 ("open a window and draw into it") is in progress.
-See [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and
-[docs/API-COVERAGE.md](docs/API-COVERAGE.md) for the generated coverage report.
+Usable for real apps, with gaps. Windows, drawing, text, controls, menus, layout, Core
+Animation, Metal, the text system and the SwiftUI runtime are in place and verified on a
+Windows 11 machine and in a Linux container; the macOS build is headless and runs the test
+suite against Apple's own frameworks as the specification.
+
+Not there yet: SwiftUI `List` selection and `Table`, drag and drop, gestures beyond tap and
+hover, window caption buttons on Windows, Core Animation group opacity, shadows and masks,
+right-to-left layout, Wayland decorations and clipboard, Vulkan. The full milestone table is
+in [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
+lists every type with what is implemented.
 
 ## Getting started
 
-Requirements: Swift 6.2 or newer. On macOS, Xcode 16 or the swift.org toolchain (the macOS
-build is a headless host build used for type-checking and tests). On Windows 11, the
-swift.org toolchain with Visual Studio Build Tools and the Windows 10/11 SDK. On Linux,
-`swift:6.2-noble` or a 6.2 toolchain plus the Cairo, Pango, HarfBuzz, X11, Wayland and
-xkbcommon development packages (`tools/linux/Dockerfile` lists them).
+You need Swift 6.2 or newer: on Windows 11 the swift.org toolchain with Visual Studio
+Build Tools and the Windows SDK, on Linux a 6.2 toolchain with the Cairo, Pango, HarfBuzz,
+X11, Wayland and xkbcommon development packages (or the container in `tools/linux`), on
+macOS Xcode 16 or the swift.org toolchain.
 
 ```bash
 git clone https://github.com/medcelerate/AppKitWin.git
@@ -28,11 +66,9 @@ cd AppKitWin
 swift build
 swift run HelloWindow            # the AppKit sample: drawing, controls, menus, a glass window
 swift run HelloWindow --swiftui  # opens the SwiftUI demo window too
-swift test                       # on macOS; APPKITWIN_HOST_BACKEND=1 swift test on Windows and Linux
 ```
 
-To use the package from your own app, add it as a dependency and import the modules by
-their Apple names; code written for macOS compiles unchanged where the port covers it:
+Add the package to your own app and import the modules by their Apple names:
 
 ```swift
 // Package.swift
@@ -42,6 +78,8 @@ targets: [.executableTarget(name: "MyApp", dependencies: [
     .product(name: "SwiftUI", package: "AppKitWin"),
 ])]
 ```
+
+A SwiftUI app:
 
 ```swift
 import SwiftUI
@@ -58,6 +96,8 @@ struct MyApp: App {
     }
 }
 ```
+
+An AppKit app:
 
 ```swift
 import AppKit
@@ -79,68 +119,10 @@ app.delegate = delegate
 app.run()
 ```
 
-Useful switches: `APPKITWIN_SOFTWARE_LAYERS=1` (software compositing instead of
-DirectComposition on Windows), `APPKITWIN_LEGACY_TEXT=1` (the pre-CoreText text path on
-Windows), `APPKITWIN_METAL_REFERENCE=1` (the CPU Metal device), `APPKITWIN_LINUX_BACKEND=x11|wayland`,
-`APPKITWIN_HOST_BACKEND=1` (the headless backend the tests use). Side-by-side renderings
-of the same windows on the three platforms are in [docs/comparisons.md](docs/comparisons.md).
+## Learn more
 
-## Layout
-
-| Path | Purpose |
-| --- | --- |
-| `Sources/AppKit/Core` | Hand-written implementations of AppKit classes. |
-| `Sources/AppKit/Generated` | Generated stubs for the public AppKit surface that compile today. Regenerate with `tools/apigen`. |
-| `Sources/AppKit/Platform` | Backend protocols plus the Win32/DirectX backend and a headless host backend used for tests on macOS/Linux. |
-| `Sources/CoreGraphics` | Windows implementation of the CoreGraphics drawing API over Direct2D (Windows only). |
-| `Sources/CoreGraphics` (Windows only) | `CGContext`, `CGPath`, `CGColor` over Direct2D. |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004), used on Windows unless `APPKITWIN_METAL_REFERENCE=1`. |
-| `Sources/AppKit/Platform/Linux`, `Sources/CCairo`, `Sources/CX11`, `Sources/CWayland` | Linux backend: Wayland (xdg-shell) or X11 windows, Cairo drawing, PangoCairo text (`tools/linux/Dockerfile` builds and screenshots both). |
-| `Sources/UniformTypeIdentifiers` (Windows and Linux only) | `UTType` and `UTTagClass` with Apple's API over a table generated from the macOS SDK's core types (`tools/uttypes`), dynamic `dyn.*` types encoded as Apple does (ADR-0009). |
-| `Sources/ImageIO` (Windows and Linux only) | `CGImageSource` and `CGImageDestination` over the platform codecs: WIC through `CD2D` on Windows, Cairo PNG on Linux (ADR-0009). |
-| `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
-| `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
-| `Sources/CD2D` (Windows only) | `extern "C"` shim over the Direct2D C++ interfaces, which have no C vtables. |
-| `Stubs/Pending` | Generated stubs that do not compile yet. Not part of any target. |
-| `api-inventory` | Condensed public API inventory extracted from the macOS SDK. Source of truth for stubs and coverage. |
-| `tools/apigen` | Extraction, probing and stub generation scripts. |
-| `Examples/HelloWindow` | Milestone 1 sample. |
-
-## Building
-
-On macOS (host build, used for type-checking the shared core and running tests
-against the headless backend):
-
-```bash
-swift build && swift test
-```
-
-On Windows (requires the swift.org toolchain, 6.1 or newer, and the Windows 10 SDK):
-
-```bash
-swift build
-swift run HelloWindow
-```
-
-## Regenerating the API inventory and stubs
-
-```bash
-tools/apigen/extract.sh      # macOS only: dumps symbol graphs from the SDK
-tools/apigen/probe.sh        # macOS only: records enum raw values and string constants
-python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API-COVERAGE.md
-```
-
-## Linux
-
-`tools/linux/Dockerfile` builds the package on `swift:6.2-noble` with X11, Wayland, Cairo and Pango, runs the test suite on the headless host backend and HelloWindow under Xvfb. The sample as rendered there (no window manager, so no decorations):
-
-![HelloWindow on Linux under Xvfb](docs/images/hellowindow-linux-xvfb.png)
-
-The SwiftUI demo window (`HelloWindow --swiftui`, View > SwiftUI Demo) under Xvfb:
-
-![SwiftUI demo on Linux under Xvfb](docs/images/swiftui-demo-linux-xvfb.png)
-
-Two window backends share the Cairo drawing, PangoCairo text and the rest of the Linux platform code: Wayland (`WaylandBackend`, xdg-shell toplevels with wl_shm buffers, xkbcommon keyboards, wl_cursor themes, server-side decorations through xdg-decoration) is preferred when `WAYLAND_DISPLAY` is set and the connection succeeds, X11 is the fallback; `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one. `bash tools/linux/run.sh --wayland` in the container additionally runs HelloWindow under a headless sway and screenshots it with grim (sway draws the title bar):
-
-![HelloWindow on Linux under a headless sway](docs/images/hellowindow-linux-wayland.png)
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): repository layout, building and testing on
+  each platform, runtime switches, regenerating the generated code.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/decisions](docs/decisions): how
+  the port is put together and why.
+- [docs/comparisons.md](docs/comparisons.md): the rendering comparisons in full size.
