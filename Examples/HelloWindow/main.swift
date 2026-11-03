@@ -1183,6 +1183,7 @@ struct DataDemo: View {
                 TableColumn("Moons", value: \.moons) { Text("\($0.moons)") }.width(60)
                 TableColumn("Radius (km)", value: \.radius) { Text(String(format: "%.0f", $0.radius)) }.width(90)
             }
+            .frame(minHeight: 180)
             Text("Selected: \(selected.sorted().map(String.init).joined(separator: ", "))")
             HStack(spacing: 12) {
                 // Drag the chip onto the basket (a text drag, in-process).

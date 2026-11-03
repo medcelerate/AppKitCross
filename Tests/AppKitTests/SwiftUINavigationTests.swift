@@ -23,6 +23,13 @@ private func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allVie
 private func texts(_ v: NSView) -> [String] { allViews(v).compactMap { ($0 as? _TextView)?.storage.string } }
 @MainActor
 private func buttons(_ v: NSView) -> [NSButton] { allViews(v).compactMap { $0 as? NSButton } }
+@MainActor private func segmented(_ v: NSView) -> [NSSegmentedControl] { allViews(v).compactMap { $0 as? NSSegmentedControl } }
+/// Chooses a segment as a click would: selects it and fires the control's action.
+@MainActor private func choose(_ label: String, in control: NSSegmentedControl) {
+    guard let i = (0..<control.segmentCount).first(where: { control.label(forSegment: $0) == label }) else { return XCTFail("no segment \(label)") }
+    control.selectedSegment = i
+    _ = NSApplication.shared.sendAction(control.action!, to: control.target, from: control)
+}
 
 final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
     func testTabViewSwitchesPagesAndSelection() {
@@ -42,10 +49,10 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             let (w, h) = host(Tabs())
             XCTAssertTrue(texts(h).contains("Page B"), "the selection picks the initial page")
             XCTAssertFalse(texts(h).contains("Page A"))
-            let tabButtons = buttons(h).filter { $0.title == "A" || $0.title == "B" }
-            XCTAssertEqual(tabButtons.count, 2)
-            XCTAssertEqual(tabButtons.first { $0.title == "B" }?.state, .on)
-            tabButtons.first { $0.title == "A" }?.performClick(nil)
+            let bar = segmented(h).first!
+            XCTAssertEqual((0..<bar.segmentCount).map { bar.label(forSegment: $0) }, ["A", "B"])
+            XCTAssertEqual(bar.selectedSegment, 1)
+            choose("A", in: bar)
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("Page A"))
             XCTAssertTrue(texts(h).contains("Selected: a"), "the binding follows the tab")
@@ -73,10 +80,11 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             }
             let (w, h) = host(Chooser())
             XCTAssertTrue(texts(h).contains("Flavor"))
-            let segments = buttons(h).filter { ["mint", "choc", "vanilla"].contains($0.title) }
-            XCTAssertEqual(segments.count, 5, "three segments plus two radio buttons")
-            XCTAssertEqual(segments.first { $0.title == "choc" }?.state, .on)
-            segments.first { $0.title == "vanilla" }?.performClick(nil)
+            let control = segmented(h).first!
+            XCTAssertEqual(control.segmentCount, 3)
+            XCTAssertEqual(buttons(h).filter { ["mint", "choc"].contains($0.title) }.count, 2, "two radio buttons")
+            XCTAssertEqual(control.label(forSegment: control.selectedSegment), "choc")
+            choose("vanilla", in: control)
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("You chose vanilla"))
             // The radio group reflects the same binding (its "mint" button comes after the segment's).

@@ -83,7 +83,11 @@ public struct Settings<Content: View>: Scene, _PrimitiveScene {
     let content: () -> Content
     public init(@ViewBuilder content: @escaping () -> Content) { self.content = content }
     public var body: Never { fatalError() }
-    @MainActor public func _makeWindows(app: _AppRunner) {}     // opened on demand (Settings… menu) in a later version
+    /// Registers the content: the app menu's "Settings…" item (Cmd-,) opens it in its own window.
+    @MainActor public func _makeWindows(app: _AppRunner) {
+        let make = content
+        app.settingsContent = { AnyView(make()) }
+    }
 }
 
 extension Scene {
@@ -95,7 +99,18 @@ extension Scene {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scene/windowresizability(_:)
     public func windowResizability(_ resizability: WindowResizability) -> some Scene { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scene/commands(content:)
-    public func commands<C>(@_CommandsBuilder content: () -> C) -> some Scene { self }
+    public func commands<C: Commands>(@CommandsBuilder content: () -> C) -> some Scene { _CommandsScene(base: self, commands: content()) }
+}
+
+struct _CommandsScene<Base: Scene, C: Commands>: Scene, _PrimitiveScene {
+    typealias Body = Never
+    let base: Base
+    let commands: C
+    var body: Never { fatalError() }
+    @MainActor func _makeWindows(app: _AppRunner) {
+        app.run(scene: base)
+        app.commands.append(commands)
+    }
 }
 
 struct _SizedScene<Base: Scene>: Scene, _PrimitiveScene {
@@ -140,11 +155,6 @@ public struct WindowResizability: Sendable {
     public static let contentMinSize = WindowResizability()
 }
 
-@resultBuilder
-public struct _CommandsBuilder {
-    public static func buildBlock(_ parts: Any...) -> [Any] { parts }
-}
-
 // MARK: App
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/app
@@ -162,6 +172,7 @@ extension App {
         let runner = _AppRunner(name: _AppRunner.defaultName)
         runner.install(app)
         runner.run(scene: app.body)
+        runner.installMenuBar()
         NSApplication.shared.run()
     }
 }
@@ -174,6 +185,13 @@ public final class _AppRunner {
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
     private var delegate: AnyObject?
+    /// The Settings scene's content, opened from the app menu.
+    var settingsContent: (() -> AnyView)?
+    private var settingsWindow: NSWindow?
+    /// Commands gathered from the scenes, applied to the menu bar by `installMenuBar`.
+    var commands: [any Commands] = []
+    /// The first WindowGroup, for File > New Window.
+    var primaryWindowGroup: (() -> Void)?
 
     public init(name: String) { applicationName = name }
 
@@ -209,7 +227,37 @@ public final class _AppRunner {
 
     private func _runBody<S: Scene>(_ scene: S) { run(scene: scene.body) }
 
+    /// Builds the standard menu bar (app, File, Edit, View, Window, Help) and applies the
+    /// scenes' commands to it. Called once after the scenes ran.
+    public func installMenuBar() {
+        let builder = _MenuBarBuilder(appName: applicationName, hasSettings: settingsContent != nil, runner: self)
+        for c in commands { builder.apply(c) }
+        NSApplication.shared.mainMenu = builder.makeMenu()
+    }
+
+    /// Opens (or brings forward) the Settings scene's window.
+    public func openSettings() {
+        if let w = settingsWindow { w.makeKeyAndOrderFront(nil); return }
+        guard let make = settingsContent else { return }
+        let hosting = NSHostingView(rootView: make())
+        let ideal = hosting.sizeThatFits(.unspecified)
+        let size = NSSize(width: max(ideal.width, 320), height: max(ideal.height, 200))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "\(applicationName) Settings"
+        window.isReleasedWhenClosed = false
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        settingsWindow = window
+    }
+
     public func openWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?) {
+        if primaryWindowGroup == nil {
+            let size = defaultSize ?? pendingDefaultSize
+            primaryWindowGroup = { [weak self] in self?.openWindow(title: title, content: content, defaultSize: size) }
+        }
         let hosting = NSHostingView(rootView: content)
         let ideal = hosting.sizeThatFits(.unspecified)
         var size = defaultSize ?? pendingDefaultSize ?? NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))

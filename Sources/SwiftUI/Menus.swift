@@ -58,13 +58,26 @@ protocol _MenuItemConvertible {
 @MainActor
 func _buildMenu(_ box: _AnyViewBox, into menu: NSMenu) {
     for b in _flattenBoxes(box) {
-        let (_, content) = _metadata(of: b)
+        let (meta, content) = _metadata(of: b)
+        let before = menu.items.count
         if let c = content.value as? _MenuItemConvertible {
             c._addMenuItems(to: menu)
         } else if let t = content.value as? Text {
             let item = NSMenuItem(title: t._string, action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
+        }
+        // `.keyboardShortcut` on the item becomes its key equivalent.
+        if let (key, modifiers) = meta.keyShortcut {
+            for item in menu.items.dropFirst(before) where item.submenu == nil && !item.isSeparatorItem {
+                item.keyEquivalent = String(key.character)
+                var m: NSEvent.ModifierFlags = []
+                if modifiers.contains(.command) { m.insert(.command) }
+                if modifiers.contains(.shift) { m.insert(.shift) }
+                if modifiers.contains(.option) { m.insert(.option) }
+                if modifiers.contains(.control) { m.insert(.control) }
+                item.keyEquivalentModifierMask = m
+            }
         }
     }
 }

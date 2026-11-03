@@ -152,9 +152,11 @@ import CoreGraphics
     /// Rows forward clicks to the table, which runs the selection.
     @MainActor open override func hitTest(_ point: NSPoint) -> NSView? {
         guard let v = super.hitTest(point) else { return nil }
-        // Labels in cells are not interactive: the row (hence the table) takes the click.
-        if let f = v as? NSTextField, !f.isEditable, !f.isSelectable { return self }
-        return v
+        // Labels and other passive content in cells are not interactive: the row (hence
+        // the table) takes the click. Controls and editable fields keep it.
+        if let f = v as? NSTextField { return f.isEditable || f.isSelectable ? v : self }
+        if v is NSControl || v.acceptsFirstResponder { return v }
+        return self
     }
     @MainActor open override func mouseDown(with event: NSEvent) { superview?.mouseDown(with: event) }
     @MainActor open override func mouseDragged(with event: NSEvent) { superview?.mouseDragged(with: event) }

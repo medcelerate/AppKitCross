@@ -473,11 +473,13 @@ public struct EventModifiers: OptionSet, Sendable {
     public static let all: EventModifiers = [.capsLock, .shift, .control, .option, .command, .numericPad]
 }
 
-struct _KeyShortcut<Content: View>: View, _PrimitiveView {
+struct _KeyShortcut<Content: View>: View, _PrimitiveView, _MetadataView {
     typealias Body = Never
     let content: Content
     let key: KeyEquivalent
     let modifiers: EventModifiers
+    var _metaContent: _AnyViewBox { _ViewBox(content) }
+    func _apply(to meta: inout _ItemMetadata) { if meta.keyShortcut == nil { meta.keyShortcut = (key, modifiers) } }
     func _makePrimitive(node: _ViewNode) -> _Primitive {
         let p = _GroupPrimitive(children: [_ViewBox(content)])
         p.environmentTransform = { $0._keyShortcut = (self.key, self.modifiers) }

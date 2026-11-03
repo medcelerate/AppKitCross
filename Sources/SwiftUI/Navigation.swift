@@ -27,6 +27,7 @@ struct _ItemMetadata {
     var tag: AnyHashable? = nil
     var tabLabel: Text? = nil
     var tabImage: Image? = nil
+    var keyShortcut: (KeyEquivalent, EventModifiers)? = nil
 }
 
 /// Reads the metadata wrappers around a leaf and returns the innermost content.
@@ -74,65 +75,34 @@ extension View {
 // MARK: Segmented selector (tab bars, segmented pickers)
 
 @MainActor
-final class _SegmentedPrimitive: _Primitive {
-    let view = _ContainerView(frame: .zero)
+final class _SegmentedPrimitive: _ControlPrimitive<NSSegmentedControl> {
     var titles: [String]
-    var selected: Int
     var onSelect: (Int) -> Void
-    private var buttons: [NSButton] = []
 
     init(titles: [String], selected: Int, onSelect: @escaping (Int) -> Void) {
         self.titles = titles
-        self.selected = selected
         self.onSelect = onSelect
-        super.init()
-        view.passesThroughHits = false
-        rebuild()
+        let c = NSSegmentedControl(labels: titles, trackingMode: .selectOne, target: nil, action: nil)
+        c.selectedSegment = selected
+        super.init(control: c)
+        c.target = c
+        c.action = Selector(("swiftUISegmentAction:"))
+        c.setActionHandler(for: Selector(("swiftUISegmentAction:"))) { [weak self] _ in
+            guard let self else { return }
+            self.onSelect(self.control.selectedSegment)
+        }
     }
-    override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _SegmentedPrimitive else { return }
         onSelect = o.onSelect
-        if o.titles != titles { titles = o.titles; rebuild() }
-        selected = o.selected
-        refresh()
-    }
-    private func rebuild() {
-        for b in buttons { b.removeFromSuperview() }
-        buttons = titles.enumerated().map { i, t in
-            let b = NSButton(frame: .zero)
-            b.title = t
-            b.setButtonType(.pushOnPushOff)
-            b.bezelStyle = .rounded
-            b.target = b
-            b.action = Selector(("swiftUISegment:"))
-            b.setActionHandler(for: Selector(("swiftUISegment:"))) { [weak self] _ in self?.select(i) }
-            b.sizeToFit()
-            view.addSubview(b)
-            return b
+        if o.titles != titles {
+            titles = o.titles
+            control.segmentCount = titles.count
+            for (i, t) in titles.enumerated() { control.setLabel(t, forSegment: i) }
         }
-        refresh()
+        if control.selectedSegment != o.control.selectedSegment { control.selectedSegment = o.control.selectedSegment }
     }
-    private func select(_ i: Int) {
-        selected = i
-        refresh()
-        onSelect(i)
-    }
-    private func refresh() {
-        for (i, b) in buttons.enumerated() { b.state = i == selected ? .on : .off }
-        var x: CGFloat = 0
-        let h = buttons.map { $0.frame.height }.max() ?? 20
-        for b in buttons {
-            b.frame = NSRect(x: x, y: 0, width: b.frame.width, height: h)
-            x += b.frame.width + 2
-        }
-    }
-    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
-        let w = buttons.reduce(0) { $0 + $1.frame.width } + CGFloat(max(0, buttons.count - 1)) * 2
-        return CGSize(width: w, height: buttons.map { $0.frame.height }.max() ?? 20)
-    }
-    override func place(node: _ViewNode, in rect: CGRect) {}
 }
 
 struct _Segmented: View, _PrimitiveView {

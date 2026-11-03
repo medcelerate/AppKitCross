@@ -469,10 +469,13 @@ import CoreGraphics
                 let others = visible.dropFirst().reduce(0) { $0 + $1.width }
                 visible.first!._setWidthQuietly(available - spacing - others)
             case .uniformColumnAutoresizingStyle, .sequentialColumnAutoresizingStyle, .reverseSequentialColumnAutoresizingStyle:
-                let total = visible.reduce(0) { $0 + $1.width }
+                // Columns that autoresize share what the fixed ones leave, in proportion.
+                let flexible = visible.filter { $0.resizingMask.contains(.autoresizingMask) }
+                let fixed = visible.filter { !$0.resizingMask.contains(.autoresizingMask) }.reduce(0) { $0 + $1.width }
+                let total = flexible.reduce(0) { $0 + $1.width }
                 guard total > 0 else { break }
-                let target = available - spacing
-                for c in visible where c.resizingMask.contains(.autoresizingMask) { c._setWidthQuietly(c.width * target / total) }
+                let target = max(0, available - spacing - fixed)
+                for c in flexible { c._setWidthQuietly(c.width * target / total) }
             case .noColumnAutoresizing:
                 break
             }

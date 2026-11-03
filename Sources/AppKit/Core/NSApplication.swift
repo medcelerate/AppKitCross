@@ -337,9 +337,21 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcolorpanel(_:)
     @MainActor open func orderFrontColorPanel(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(_:)
-    @MainActor open func orderFrontStandardAboutPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontStandardAboutPanel(_ sender: Any?) { orderFrontStandardAboutPanel(options: [:]) }
+    /// The standard about panel: the application's name and version (from the bundle, or
+    /// the options) in an alert.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(options:)
-    @MainActor open func orderFrontStandardAboutPanel(options optionsDictionary: [NSApplication.AboutPanelOptionKey : Any] = [:]) { unimplemented() }
+    @MainActor open func orderFrontStandardAboutPanel(options optionsDictionary: [NSApplication.AboutPanelOptionKey : Any] = [:]) {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let name = (optionsDictionary[NSApplication.AboutPanelOptionKey(rawValue: "ApplicationName")] as? String)
+            ?? (info["CFBundleName"] as? String)
+            ?? ((CommandLine.arguments.first ?? "App") as NSString).lastPathComponent
+        let version = (optionsDictionary[NSApplication.AboutPanelOptionKey(rawValue: "ApplicationVersion")] as? String) ?? (info["CFBundleShortVersionString"] as? String) ?? ""
+        let alert = NSAlert()
+        alert.messageText = name
+        alert.informativeText = version.isEmpty ? "" : "Version \(version)"
+        _ = alert.runModal()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/ordereddocuments
     @MainActor open var orderedDocuments: [NSDocument] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderedwindows

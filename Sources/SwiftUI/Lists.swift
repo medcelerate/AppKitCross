@@ -412,29 +412,25 @@ public struct Table<Value: Identifiable, Rows: TableRowContent, Columns: TableCo
     }
 
     public var body: some View {
-        let widths = columns.map { _TableColumnWidth(fixed: $0.width, min: $0.minWidth, max: $0.maxWidth) }
-        let sort = sortOrder
         let cols = columns
-        let header = _TableCells(widths: widths, cells: columns.enumerated().map { i, c in
-            var title = c.title
-            if let s = sort?.wrappedValue.first, let kp = c.sortKeyPath, s.keyPath == kp { title += s.order == .forward ? " \u{25B2}" : " \u{25BC}" }
-            return AnyView(Text(title).bold())
-        }, onClick: sort.map { binding in { i in
-            guard let make = cols[i].comparator, let kp = cols[i].sortKeyPath else { return }
-            let current = binding.wrappedValue.first
-            let order: SortOrder = (current?.keyPath == kp && current?.order == .forward) ? .reverse : .forward
-            binding.wrappedValue = [make(order)]
-        } })
-        return VStack(spacing: 0) {
-            header.padding(.horizontal, 6).padding(.vertical, 4)
-            Divider()
-            ScrollView {
-                _ListRows(content: ForEach(rows) { row in
-                    _TableCells(widths: widths, cells: cols.map { $0.makeCell(row) }, onClick: nil)
-                }, selection: selection, rowInset: 6, rowPadding: 3)
-            }
+        let sort = sortOrder
+        var sortState: (column: Int, ascending: Bool)? = nil
+        if let s = sort?.wrappedValue.first, let i = cols.firstIndex(where: { $0.sortKeyPath == s.keyPath }) {
+            sortState = (i, s.order == .forward)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        let model = _TableModel(
+            rowIDs: rows.map { AnyHashable($0.id) },
+            columns: cols.map { _TableModel.Column(title: $0.title, width: _TableColumnWidth(fixed: $0.width, min: $0.minWidth, max: $0.maxWidth), sortable: $0.comparator != nil) },
+            cell: { row, column in cols[column].makeCell(rows[row]) },
+            selection: selection,
+            sort: sortState,
+            onSort: sort.map { binding in { i in
+                guard let make = cols[i].comparator, let kp = cols[i].sortKeyPath else { return }
+                let current = binding.wrappedValue.first
+                let order: SortOrder = (current?.keyPath == kp && current?.order == .forward) ? .reverse : .forward
+                binding.wrappedValue = [make(order)]
+            } })
+        return _NativeTable(model: model)
     }
 }
 

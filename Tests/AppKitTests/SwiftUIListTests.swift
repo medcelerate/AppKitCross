@@ -180,17 +180,20 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
                 }
             }
             let (w, h) = host(Probe(), width: 360)
+            let table = allViews(h).compactMap { $0 as? NSTableView }.first!
+            XCTAssertEqual(table.tableColumns.map(\.title), ["Name", "Age", "Note"])
+            XCTAssertTrue(table.highlightedTableColumn === table.tableColumns[0], "the sorted column is highlighted")
+            XCTAssertEqual(table.sortDescriptors.first?.ascending, true)
+            w.display()
             let shown = texts(h)
-            XCTAssertTrue(shown.contains("Name \u{25B2}"), "the sorted column shows its direction: \(shown)")
-            XCTAssertTrue(shown.contains("Age") && shown.contains("Note"))
-            XCTAssertEqual(shown.filter { ["Ada", "Grace", "36", "45"].contains($0) }, ["Ada", "36", "Grace", "45"], "rows in sort order, cells per column")
-            // The Age column is 60 wide; the others share the rest and the Name cells start at x 0.
+            XCTAssertEqual(shown.filter { ["Ada", "Grace", "36", "45"].contains($0) }, ["Ada", "36", "Grace", "45"], "rows in sort order, cells per column: \(shown)")
+            // The Age column is 60 wide; the Name cells start at the table's leading edge.
+            XCTAssertEqual(table.tableColumns[1].width, 60)
             let ada = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Ada" }!
             let age = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "36" }!
             XCTAssertGreaterThan(age.convert(age.bounds.origin, to: nil).x, ada.convert(ada.bounds.origin, to: nil).x + 60)
             // Selecting a row writes the element id, also when the click lands on a cell's view;
             // the table takes keyboard focus so the arrows move the selection.
-            let list = allViews(h).compactMap { $0 as? _ListView }.first!
             let grace = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Grace" }!
             let onCell = grace.convert(NSPoint(x: 2, y: 2), to: nil)
             for (type, n) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 2)] {
@@ -198,17 +201,16 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
             }
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 2 order fwd"), texts(h).joined(separator: "|"))
-            XCTAssertTrue(w.firstResponder === list, "the table has keyboard focus after a click on a cell")
-            key(126, in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(w.firstResponder === table, "the table has keyboard focus after a click on a cell")
+            key(126, "\u{F700}", in: w); h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 1 order fwd"), "up arrow moves to Ada: \(texts(h).joined(separator: "|"))")
-            key(125, in: w); h.layoutSubtreeIfNeeded()
+            key(125, "\u{F701}", in: w); h.layoutSubtreeIfNeeded()
             // Clicking the sorted header flips the order and the rows follow.
-            let header = allViews(h).compactMap { $0 as? _ContainerView }.first { $0.mouseDownHandler != nil }!
-            let p = header.convert(NSPoint(x: 10, y: header.bounds.midY), to: nil)
-            NSApplication.shared.sendEvent(NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
+            table._headerClicked(column: 0)
             h.layoutSubtreeIfNeeded()
+            w.display()
             XCTAssertTrue(texts(h).contains("sel 2 order rev"), texts(h).joined(separator: "|"))
-            XCTAssertTrue(texts(h).contains("Name \u{25BC}"))
+            XCTAssertEqual(table.sortDescriptors.first?.ascending, false)
             XCTAssertEqual(texts(h).filter { ["Ada", "Grace"].contains($0) }, ["Grace", "Ada"])
             w.close()
         }
