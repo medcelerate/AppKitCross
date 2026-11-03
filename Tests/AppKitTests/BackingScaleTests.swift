@@ -35,6 +35,9 @@ private final class TextView: NSView {
     }
 }
 
+/// Counts notifications from an observer closure (which Linux's Foundation makes `@Sendable`).
+private final class Counter: @unchecked Sendable { var n = 0 }
+
 @MainActor
 private final class BackingDelegate: NSObject, NSWindowDelegate {
     var backingChanges = 0
@@ -98,15 +101,15 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
 
             // The move to 1x above already counted once; the move to 2x counts once more.
             let delegateBefore = delegate.backingChanges, viewBefore = red.backingChanges
-            var notified = 0
-            let token = NotificationCenter.default.addObserver(forName: NSWindow.didChangeBackingPropertiesNotification, object: w, queue: nil) { _ in notified += 1 }
+            let notified = Counter()
+            let token = NotificationCenter.default.addObserver(forName: NSWindow.didChangeBackingPropertiesNotification, object: w, queue: nil) { _ in notified.n += 1 }
             defer { NotificationCenter.default.removeObserver(token) }
             platform.setBackingScaleFactor(2)
             XCTAssertEqual(w.backingScaleFactor, 2)
             XCTAssertEqual(w.frame, frameBefore, "the frame keeps its point size and position")
             XCTAssertEqual(w.contentView!.frame.size, NSSize(width: 100, height: 100))
             XCTAssertEqual(red.frame, NSRect(x: 10, y: 10, width: 40, height: 40))
-            XCTAssertEqual(notified, 1)
+            XCTAssertEqual(notified.n, 1)
             XCTAssertEqual(delegate.backingChanges, delegateBefore + 1)
             XCTAssertEqual(red.backingChanges, viewBefore + 1)
             XCTAssertEqual(w.convertToBacking(NSRect(x: 0, y: 0, width: 100, height: 100)), NSRect(x: 0, y: 0, width: 200, height: 200))
