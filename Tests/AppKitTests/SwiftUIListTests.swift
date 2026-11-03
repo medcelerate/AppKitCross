@@ -108,7 +108,11 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
             click(list, row: 0, flags: [.command], in: w); h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 3"), "command-click removes")
             click(list, row: 3, flags: [.shift], in: w); h.layoutSubtreeIfNeeded()
-            XCTAssertTrue(texts(h).contains("sel 1,2,3,4"), "shift-click extends from the anchor: \(texts(h).joined(separator: "|"))")
+            XCTAssertTrue(texts(h).contains("sel 1,2,3,4"), "shift-click adds the range from the anchor (the last clicked row): \(texts(h).joined(separator: "|"))")
+            click(list, row: 0, flags: [.command], in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(h).contains("sel 2,3,4"))
+            click(list, row: 1, flags: [.shift], in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(h).contains("sel 1,2,3,4"), "shift-click keeps the existing selection and adds the range: \(texts(h).joined(separator: "|"))")
             click(list, row: 1, in: w); h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 2"), "a plain click replaces")
             key(125, flags: [.shift], in: w); h.layoutSubtreeIfNeeded()
@@ -152,10 +156,20 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
             let ada = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Ada" }!
             let age = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "36" }!
             XCTAssertGreaterThan(age.convert(age.bounds.origin, to: nil).x, ada.convert(ada.bounds.origin, to: nil).x + 60)
-            // Selecting a row writes the element id.
+            // Selecting a row writes the element id, also when the click lands on a cell's view;
+            // the table takes keyboard focus so the arrows move the selection.
             let list = allViews(h).compactMap { $0 as? _ListView }.first!
-            click(list, row: 1, in: w); h.layoutSubtreeIfNeeded()
+            let grace = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Grace" }!
+            let onCell = grace.convert(NSPoint(x: 2, y: 2), to: nil)
+            for (type, n) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 2)] {
+                NSApplication.shared.sendEvent(NSEvent.mouseEvent(with: type, location: onCell, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: n, clickCount: 1, pressure: 1)!)
+            }
+            h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 2 order fwd"), texts(h).joined(separator: "|"))
+            XCTAssertTrue(w.firstResponder === list, "the table has keyboard focus after a click on a cell")
+            key(126, in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(h).contains("sel 1 order fwd"), "up arrow moves to Ada: \(texts(h).joined(separator: "|"))")
+            key(125, in: w); h.layoutSubtreeIfNeeded()
             // Clicking the sorted header flips the order and the rows follow.
             let header = allViews(h).compactMap { $0 as? _ContainerView }.first { $0.mouseDownHandler != nil }!
             let p = header.convert(NSPoint(x: 10, y: header.bounds.midY), to: nil)

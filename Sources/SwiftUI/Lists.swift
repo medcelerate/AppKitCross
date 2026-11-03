@@ -116,6 +116,8 @@ final class _ListView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard let onClick else { super.mouseDown(with: event); return }
+        // A click anywhere in a row (also on a row's own views) focuses the list for the keys.
+        if let w = window, w.firstResponder !== self { _ = w.makeFirstResponder(self) }
         if let i = row(at: convert(event.locationInWindow, from: nil)) { onClick(i, event.modifierFlags) }
     }
     override func keyDown(with event: NSEvent) {
@@ -241,7 +243,8 @@ final class _ListRowsPrimitive: _Primitive {
             sel.set(s)
             anchor = i
         } else if sel.allowsMultiple, flags.contains(.shift), let a = anchor {
-            sel.set(Set(rowValues[min(a, i)...max(a, i)]))
+            // Shift extends: the rows between the anchor and the click join what is selected.
+            sel.set(sel.get().union(rowValues[min(a, i)...max(a, i)]))
         } else {
             sel.set([v])
             anchor = i
@@ -255,7 +258,7 @@ final class _ListRowsPrimitive: _Primitive {
         let next = min(max(from + delta, 0), rowValues.count - 1)
         if extend, sel.allowsMultiple {
             let a = anchor ?? from
-            sel.set(Set(rowValues[min(a, next)...max(a, next)]))
+            sel.set(selected.union(rowValues[min(a, next)...max(a, next)]))
         } else {
             sel.set([rowValues[next]])
             anchor = next
@@ -459,7 +462,6 @@ final class _TableCellsPrimitive: _Primitive {
         self.onClick = onClick
         super.init()
         children = cells
-        view.passesThroughHits = false
         wire()
     }
     override var nsView: NSView? { view }
@@ -470,6 +472,8 @@ final class _TableCellsPrimitive: _Primitive {
         wire()
     }
     private func wire() {
+        // Header cells take the click themselves; row cells let it through to the list view.
+        view.passesThroughHits = onClick == nil
         guard onClick != nil else { view.mouseDownHandler = nil; return }
         view.mouseDownHandler = { [weak self] event in
             guard let self, let onClick = self.onClick else { return false }
