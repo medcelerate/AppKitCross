@@ -480,8 +480,9 @@ open class CALayer: NSObject, CAMediaTiming {
 
     open var shadowPath: CGPath? {
         get { _shadowPath }
-        set { _shadowPath = newValue; _changed("shadowPath", old: nil) }
+        set { _shadowPath = newValue; _shadowPathChanges += 1; _changed("shadowPath", old: nil) }
     }
+    var _shadowPathChanges = 0
 
     open var mask: CALayer? {
         get { _mask }
@@ -1038,49 +1039,171 @@ open class CALayer: NSObject, CAMediaTiming {
             ctx.translateBy(x: 0, y: p._bounds.minY + p._bounds.maxY)
             ctx.scaleBy(x: 1, y: -1)
         }
+        let localDirty: CGRect? = (dirty != nil && p._transform.isIdentity) ? _localRect(dirty!, p: p, flip: flip) : nil
+        _composeInBoundsSpace(into: ctx, presentation: p, alpha: alpha * CGFloat(p._opacity), time: time, dirty: localDirty)
+        ctx.restoreGState()
+    }
 
-        let a = alpha * CGFloat(p._opacity)
-        ctx.setAlpha(a)
+    /// Whether the mask can be a clip path (a shape, or a plain rounded rectangle) rather
+    /// than an alpha image.
+    private var _maskIsSimpleClip: Bool {
+        guard let m = _mask else { return true }
+        if let shape = m as? CAShapeLayer { return shape.path != nil && shape._sublayers.isEmpty && m._mask == nil }
+        return type(of: m) == CALayer.self && m._contents == nil && m.delegate == nil && m._sublayers.isEmpty && m._mask == nil
+    }
+
+    /// The rect (oriented bounds space) the layer's own content and sublayers can touch.
+    private func _subtreeExtent(presentation p: CALayer) -> CGRect {
+        var r = p._bounds
+        if p._masksToBounds { return r }
+        let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
+        for s in subs where !s._isHidden {
+            let f = s.frame
+            let inner = s._subtreeExtent(presentation: s)
+            // The sublayer's extent, from its bounds space into ours (its frame places its bounds).
+            let mapped = CGRect(x: f.minX + (inner.minX - s._bounds.minX), y: f.minY + (inner.minY - s._bounds.minY), width: inner.width, height: inner.height)
+            r = r.union(mapped)
+        }
+        return r
+    }
+
+    /// Composites the layer in its own oriented bounds space: shadow, own content, sublayers
+    /// and border, through an offscreen pass when the effects need the subtree as pixels
+    /// (group opacity, a blurred shadow of the content, an alpha mask).
+    private func _composeInBoundsSpace(into ctx: CGContext, presentation p: CALayer, alpha a: CGFloat, time: CFTimeInterval, dirty: CGRect?) {
         let b = p._bounds
-        if let m = p._mask { m._applyMask(to: ctx, in: self) }
+        let yDown = p._isGeometryFlipped
+        let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
+        let shadowOn = p._shadowOpacity > 0 && p._shadowColor != nil
+        let alphaMask = p._mask != nil && !_maskIsSimpleClip
+        let group = p._opacity < 1 && allowsGroupOpacity && !subs.isEmpty
+        let ctm = ctx.ctm
+        let scale = (x: max(0.01, hypot(ctm.a, ctm.b)), y: max(0.01, hypot(ctm.c, ctm.d)))
+
+        // Clips that apply to everything, the shadow included (as Core Animation does).
+        if let m = p._mask, !alphaMask { m._applyMask(to: ctx, in: self) }
         if p._masksToBounds { p._addBoundsPath(ctx, b); ctx.clip() }
 
-        // Shadow: an offset, translucent copy of the shape (no blur in the software path).
-        if p._shadowOpacity > 0, let sc = p._shadowColor {
-            let comps = CAInterpolation.rgba(sc)
-            ctx.saveGState()
-            ctx.setAlpha(a * CGFloat(p._shadowOpacity) * comps[3])
-            ctx.setFillColor(CAInterpolation.color([comps[0], comps[1], comps[2], 1]))
-            ctx.translateBy(x: p._shadowOffset.width, y: flip ? -p._shadowOffset.height : p._shadowOffset.height)
-            if let sp = p._shadowPath { ctx.addPath(sp) } else { p._addBoundsPath(ctx, b) }
-            ctx.fillPath()
-            ctx.restoreGState()
+        guard (shadowOn && p._shadowPath == nil) || alphaMask || group else {
+            if shadowOn, let path = p._shadowPath { _drawShadow(into: ctx, presentation: p, alpha: a, scale: scale, yDown: yDown, path: path) }
+            ctx.setAlpha(a)
+            _composeContent(into: ctx, presentation: p, alpha: a, time: time, dirty: dirty)
+            return
         }
 
-        _drawOwnContent(into: ctx, presentation: p)
+        let extent = _subtreeExtent(presentation: p)
+        guard var image = _CAPixels.render(extent: extent, scale: scale, yDown: yDown, draw: { off in
+            _composeContent(into: off, presentation: p, alpha: 1, time: time, dirty: nil)
+        }) else { return }
+        if alphaMask, let m = p._mask {
+            let maskImage = _CAPixels.render(extent: extent, scale: scale, yDown: yDown) { off in
+                m._compose(into: off, parentFlipped: p._isGeometryFlipped, alpha: 1, time: time, dirty: nil)
+            }
+            if let maskImage, let masked = _CAPixels.masked(image, by: maskImage) { image = masked }
+        }
+        if shadowOn {
+            if let path = p._shadowPath {
+                _drawShadow(into: ctx, presentation: p, alpha: a, scale: scale, yDown: yDown, path: path)
+            } else {
+                _drawShadow(into: ctx, presentation: p, alpha: a, scale: scale, yDown: yDown, content: image, extent: extent)
+            }
+        }
+        _CAPixels.blit(image, into: ctx, rect: extent, yDown: yDown, alpha: a)
+    }
 
-        // Sublayers, in bounds space, through the sublayer transform about the anchor.
+    /// Own content, sublayers (through the sublayer transform) and the border.
+    private func _composeContent(into ctx: CGContext, presentation p: CALayer, alpha a: CGFloat, time: CFTimeInterval, dirty: CGRect?) {
+        _drawOwnContent(into: ctx, presentation: p)
         let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
         if !subs.isEmpty {
+            let ax = p._bounds.minX + p._anchorPoint.x * p._bounds.width
+            let ay = p._bounds.minY + p._anchorPoint.y * p._bounds.height
             ctx.saveGState()
             if !p._sublayerTransform.isIdentity {
                 ctx.translateBy(x: ax, y: ay)
                 ctx.concatenate(p._sublayerTransform.affineTransform)
                 ctx.translateBy(x: -ax, y: -ay)
             }
-            let localDirty: CGRect? = (dirty != nil && p._transform.isIdentity) ? _localRect(dirty!, p: p, flip: flip) : nil
             let ordered = subs.enumerated().sorted { l, r in
                 l.element._zPosition != r.element._zPosition ? l.element._zPosition < r.element._zPosition : l.offset < r.offset
             }.map(\.element)
             for s in ordered {
-                s._compose(into: ctx, parentFlipped: p._isGeometryFlipped, alpha: a, time: time, dirty: localDirty)
+                s._compose(into: ctx, parentFlipped: p._isGeometryFlipped, alpha: a, time: time, dirty: dirty)
             }
             ctx.restoreGState()
         }
-
+        ctx.setAlpha(a)
         p._drawBorder(into: ctx)
-        ctx.restoreGState()
     }
+
+    // MARK: Shadows
+
+    /// The last shadow image, reused while the content, geometry and shadow settings hold.
+    private var _shadowCache: (key: String, image: CGImage, rect: CGRect)?
+
+    private func _shadowSigma(_ p: CALayer, scale: (x: CGFloat, y: CGFloat)) -> (sigma: CGFloat, pad: Int) {
+        // shadowRadius is the blur's standard deviation in points, as Apple's renders it.
+        let sigma = max(0, p._shadowRadius) * max(scale.x, scale.y)
+        return (sigma, Int((3 * sigma).rounded(.up)) + 1)
+    }
+
+    /// The shadow of the content image, drawn offset in the oriented bounds space.
+    private func _drawShadow(into ctx: CGContext, presentation p: CALayer, alpha a: CGFloat, scale: (x: CGFloat, y: CGFloat), yDown: Bool, content: CGImage, extent: CGRect) {
+        let (sigma, pad) = _shadowSigma(p, scale: scale)
+        let comps = CAInterpolation.rgba(p._shadowColor!)
+        let key = "c\(_treeVersion)|\(extent)|\(scale)|\(sigma)|\(comps)|\(p._masksToBounds)"
+        let animating = _subtreeAnimatesForShadow
+        let padded = CGRect(x: extent.minX - CGFloat(pad) / scale.x, y: extent.minY - CGFloat(pad) / scale.y,
+                            width: extent.width + 2 * CGFloat(pad) / scale.x, height: extent.height + 2 * CGFloat(pad) / scale.y)
+        let image: CGImage
+        if !animating, let cached = _shadowCache, cached.key == key { image = cached.image }
+        else {
+            guard let built = _CAPixels.shadow(of: content, pad: pad, sigma: sigma, color: (comps[0], comps[1], comps[2])) else { return }
+            image = built
+            if !animating { _shadowCache = (key, built, padded) }
+        }
+        _blitShadow(image, into: ctx, rect: padded, presentation: p, alpha: a * CGFloat(p._shadowOpacity) * comps[3], yDown: yDown)
+    }
+
+    /// The shadow of an explicit shadow path.
+    private func _drawShadow(into ctx: CGContext, presentation p: CALayer, alpha a: CGFloat, scale: (x: CGFloat, y: CGFloat), yDown: Bool, path: CGPath) {
+        let (sigma, pad) = _shadowSigma(p, scale: scale)
+        let extent = path.boundingBoxOfPath.insetBy(dx: -1, dy: -1)
+        guard extent.width > 0, extent.height > 0 else { return }
+        let comps = CAInterpolation.rgba(p._shadowColor!)
+        let key = "p\(extent)|\(scale)|\(sigma)|\(comps)|\(_shadowPathVersion)"
+        let padded = CGRect(x: extent.minX - CGFloat(pad) / scale.x, y: extent.minY - CGFloat(pad) / scale.y,
+                            width: extent.width + 2 * CGFloat(pad) / scale.x, height: extent.height + 2 * CGFloat(pad) / scale.y)
+        let image: CGImage
+        if let cached = _shadowCache, cached.key == key { image = cached.image }
+        else {
+            guard let raster = _CAPixels.render(extent: extent, scale: scale, yDown: yDown, draw: { off in
+                off.setFillColor(CGColor(gray: 0, alpha: 1))
+                off.addPath(path)
+                off.fillPath()
+            }), let built = _CAPixels.shadow(of: raster, pad: pad, sigma: sigma, color: (comps[0], comps[1], comps[2])) else { return }
+            image = built
+            _shadowCache = (key, built, padded)
+        }
+        _blitShadow(image, into: ctx, rect: padded, presentation: p, alpha: a * CGFloat(p._shadowOpacity) * comps[3], yDown: yDown)
+    }
+
+    private func _blitShadow(_ image: CGImage, into ctx: CGContext, rect: CGRect, presentation p: CALayer, alpha: CGFloat, yDown: Bool) {
+        // shadowOffset is in the layer's own coordinate space: +y is up in an unflipped
+        // layer and down in a flipped one, as on Apple's platforms.
+        let offset = CGRect(x: rect.minX + p._shadowOffset.width, y: rect.minY + p._shadowOffset.height, width: rect.width, height: rect.height)
+        _CAPixels.blit(image, into: ctx, rect: offset, yDown: yDown, alpha: alpha)
+    }
+
+    /// Whether anything in the subtree is animating (so a cached shadow would be stale).
+    private var _subtreeAnimatesForShadow: Bool {
+        if !animations.isEmpty { return true }
+        if let m = _mask, m._subtreeAnimatesForShadow { return true }
+        return _sublayers.contains { $0._subtreeAnimatesForShadow }
+    }
+
+    /// Counts shadowPath assignments (paths have no identity to key a cache on).
+    private var _shadowPathVersion: Int { _shadowPathChanges }
 
     /// Background, `contents` and delegate/subclass drawing, in the layer's oriented bounds
     /// space. `presentation` carries the animated values; `self` is the model the delegate sees.

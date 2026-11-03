@@ -40,6 +40,8 @@ final class _DecorationPrimitive: _Primitive {
         var borderWidth: CGFloat = 0
         var opacity: CGFloat = 1
         var hidden = false
+        /// `.shadow(color:radius:x:y:)`: drawn by the view's layer (offset in the view's y-down space).
+        var shadow: (color: Color, radius: CGFloat, x: CGFloat, y: CGFloat)? = nil
         var tap: (() -> Void)? = nil
         var tapCount = 1
         var hover: ((Bool) -> Void)? = nil
@@ -162,6 +164,19 @@ final class _DecorationPrimitive: _Primitive {
         view.clipsToBounds = clipping
         view.layer?.cornerRadius = style.clipShape == nil ? style.cornerRadius : 0
         view.layer?.masksToBounds = clipping
+        if let shadow = style.shadow {
+            view.wantsLayer = true
+            if let l = view.layer {
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                l.shadowColor = shadow.color.nsColor.cgColor
+                l.shadowOpacity = 1
+                l.shadowRadius = shadow.radius
+                l.shadowOffset = CGSize(width: shadow.x, height: shadow.y)
+                CATransaction.commit()
+            }
+        } else if let l = view.layer, l.shadowOpacity > 0 {
+            l.shadowOpacity = 0
+        }
         view.toolTip = style.helpText
         if let tap = style.tap {
             let count = style.tapCount
@@ -313,7 +328,11 @@ extension View {
         return d
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/shadow(color:radius:x:y:)
-    public func shadow(color: Color = Color(.sRGBLinear, white: 0, opacity: 0.33), radius: CGFloat, x: CGFloat = 0, y: CGFloat = 0) -> some View { self }
+    public func shadow(color: Color = Color(.sRGBLinear, white: 0, opacity: 0.33), radius: CGFloat, x: CGFloat = 0, y: CGFloat = 0) -> some View {
+        var d = _Decorated(content: self)
+        d.style.shadow = (color, radius, x, y)
+        return d
+    }
 }
 
 // MARK: Lifecycle hooks

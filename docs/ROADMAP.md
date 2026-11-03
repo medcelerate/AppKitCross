@@ -116,7 +116,7 @@ implicit animations, `CATransaction`, `CADisplayLink`, layer-backed `NSView`
 Status (2026-10-28): the QuartzCore module is real and cross-platform (pure Swift over
 CGContext, so the macOS test run covers it): `CALayer` tree with geometry, transforms
 (`CATransform3D`), flipped geometry, masks, corner radius, borders, contents images,
-shadows (offset only, no blur), hit testing and coordinate conversion; `CAShapeLayer`,
+shadows, hit testing and coordinate conversion; `CAShapeLayer`,
 `CAGradientLayer` (banded), `CATextLayer` (drawn by AppKit's string drawing),
 `CATransformLayer`, `CAScrollLayer`, `CAReplicatorLayer`, `CAConstraintLayoutManager`;
 `CATransaction` with completion blocks; explicit and implicit animations (`CABasicAnimation`,
@@ -126,8 +126,17 @@ compositor: the layer tree is rendered into the window's CGContext on each frame
 frame clock is a one-shot timer from the platform backend (`scheduleFrame`, WM_TIMER on
 Windows). AppKit: `wantsLayer` makes the subtree layer-backed (views draw through
 `CALayerDelegate`), `layer =` hosts a foreign tree, `animator()` plus `NSAnimationContext`
-animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Native
-hosting (2026-10-29, ADR-0005): a fully layer-backed window hands its tree to the platform
+animate frame/alpha on layer-backed views, `displayLink(target:selector:)`. Offscreen
+effects (2026-11-03): the software compositor renders a subtree to pixels when it needs
+them, through a bitmap CGContext on every platform, for group opacity (`opacity` < 1 with
+sublayers composites the subtree once, `allowsGroupOpacity`), blurred shadows (the
+subtree's alpha, or `shadowPath`, blurred by three box passes with `shadowRadius` as the
+standard deviation and cached while nothing changes; `shadowOffset` in the layer's own
+orientation) and alpha masks (a mask with contents, sublayers or a delegate multiplies
+the subtree's alpha; shape and rounded-rect masks stay clip paths). Native hosts flatten
+such layers into one rasterised node, so DirectComposition shows the same pixels;
+SwiftUI's `.shadow` sets the view's layer shadow. `LayerEffectsTests` checks the pixels.
+Native hosting (2026-10-29, ADR-0005): a fully layer-backed window hands its tree to the platform
 as a retained scene (`PlatformWindow.hostLayerScene`, nodes with transform/opacity/clip and
 versioned `draw` closures; masks, shadows and sublayer transforms flatten their subtree);
 the host backend's reference compositor matches the software composite in tests. The

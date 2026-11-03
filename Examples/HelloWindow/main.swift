@@ -1191,6 +1191,9 @@ struct ControlsDemo: View {
                 TextField("Your name", text: $name)
                 Button("Greet") { count += 1 }
             }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+            .shadow(color: Color(.sRGB, white: 0, opacity: 0.35), radius: 6, x: 0, y: 3)   // a blurred layer shadow
             Text(name.isEmpty ? "Type a name and press Greet." : "Hello, \(name)! (\(count) \(count == 1 ? "greeting" : "greetings"))")
             Group {
                 Toggle("Enabled", isOn: $enabled.animation(.easeInOut(duration: 0.3)))
