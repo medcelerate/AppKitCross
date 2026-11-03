@@ -33,9 +33,9 @@ CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t p
 /// a D3D11 device (BGRA support), an IDXGISwapChain1 from CreateSwapChainForHwnd
 /// (DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2 buffers, B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE)
 /// and an ID2D1DeviceContext drawing into a persistent canvas bitmap. Every cd2d_target_*
-/// call works on it; end_draw copies the frame's dirty region (cd2d_target_set_dirty) and
-/// the previous frame's into the back buffer and presents them with vsync, so frames may
-/// repaint only what changed.
+/// call works on it; end_draw blits the canvas into the back buffer and presents with
+/// vsync, telling DWM which region (cd2d_target_set_dirty) changed, so frames may repaint
+/// only what changed.
 /// Returns NULL when the device or swap chain cannot be created (the caller may fall
 /// back to cd2d_target_create_hwnd).
 CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
@@ -55,8 +55,8 @@ CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void 
 /// cd2d_target_create_swapchain or cd2d_target_create_composition_swapchain).
 bool cd2d_target_is_swapchain(CD2DTarget *target);
 /// Swap-chain targets draw into a persistent canvas: tells end_draw which pixels this
-/// frame touched (client pixels), so only that region (plus the previous frame's) is
-/// copied to the back buffer and presented as dirty. Without a call the frame is whole.
+/// frame touched (client pixels), presented as the dirty region. Without a call the
+/// frame counts as whole.
 void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom);
 /// True until the first end_draw after the canvas was created or resized: the caller
 /// should paint the whole client area that frame.

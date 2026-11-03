@@ -42,8 +42,7 @@ struct CD2DTarget {
     // buffers alternate) and presents with that rect as the dirty region.
     ID2D1Bitmap1 *canvas = nullptr;
     D2D1_RECT_U dirty = {};                       // this frame, pixels; whole when !hasDirty
-    D2D1_RECT_U previousDirty = {};
-    bool hasDirty = false, hasPreviousDirty = false;
+    bool hasDirty = false;
     bool canvasFresh = true;                      // new or resized: the next frame copies everything
     // DirectComposition presentation (Milestone 3b). Non-null only for composition
     // swap-chain targets; the back buffer is then premultiplied.
@@ -124,7 +123,6 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
     if (FAILED(hr)) { safeRelease(t->backBuffer); t->lost = true; return false; }
     t->canvasFresh = true;
     t->hasDirty = false;
-    t->hasPreviousDirty = false;
     t->dc->SetTarget(t->canvas);
     t->dc->SetDpi(t->dpi, t->dpi);
     return true;
@@ -308,41 +306,30 @@ void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_
     target->hasDirty = true;
 }
 
-static D2D1_RECT_U unionRect(const D2D1_RECT_U &a, const D2D1_RECT_U &b) {
-    return D2D1::RectU(a.left < b.left ? a.left : b.left, a.top < b.top ? a.top : b.top,
-                       a.right > b.right ? a.right : b.right, a.bottom > b.bottom ? a.bottom : b.bottom);
-}
-
 bool cd2d_target_end_draw(CD2DTarget *target) {
     if (!target || !target->target) return false;
     HRESULT hr = target->target->EndDraw();
     if (!target->swapChain) return hr != D2DERR_RECREATE_TARGET;
     if (target->lost || isDeviceLost(hr)) return false;
     if (!target->backBuffer || !target->canvas) { target->lost = true; return false; }
-    // The region the back buffer is stale in: what changed now and what changed last
-    // frame (it went to the other buffer). A fresh canvas or no rect means everything.
+    // The canvas is copied whole into the back buffer every frame (a GPU blit): the two
+    // buffers alternate and keeping a history of what each one holds proved fragile. What
+    // was repainted this frame is what DWM is told changed.
     D2D1_SIZE_U size = target->backBuffer->GetPixelSize();
     D2D1_RECT_U whole = D2D1::RectU(0, 0, size.width, size.height);
-    D2D1_RECT_U copy = whole;
-    bool partial = target->hasDirty && !target->canvasFresh;
-    if (partial) {
-        copy = target->dirty;
-        if (target->hasPreviousDirty) copy = unionRect(copy, target->previousDirty);
-        if (copy.left >= copy.right || copy.top >= copy.bottom) copy = target->dirty;
-        if (copy.right > size.width) copy.right = size.width;
-        if (copy.bottom > size.height) copy.bottom = size.height;
-        if (copy.left >= copy.right || copy.top >= copy.bottom) partial = false, copy = whole;
-    }
-    D2D1_POINT_2U dest = D2D1::Point2U(copy.left, copy.top);
-    HRESULT copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &copy);
+    D2D1_POINT_2U dest = D2D1::Point2U(0, 0);
+    HRESULT copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &whole);
     if (FAILED(copied)) { target->lost = true; return false; }
-    target->previousDirty = target->hasDirty ? target->dirty : whole;
-    target->hasPreviousDirty = true;
+    bool partial = target->hasDirty && !target->canvasFresh;
+    D2D1_RECT_U changed = partial ? target->dirty : whole;
+    if (changed.right > size.width) changed.right = size.width;
+    if (changed.bottom > size.height) changed.bottom = size.height;
+    if (changed.left >= changed.right || changed.top >= changed.bottom) partial = false;
     target->hasDirty = false;
     target->canvasFresh = false;
     HRESULT present;
     if (partial) {
-        RECT rect = { (LONG)copy.left, (LONG)copy.top, (LONG)copy.right, (LONG)copy.bottom };
+        RECT rect = { (LONG)changed.left, (LONG)changed.top, (LONG)changed.right, (LONG)changed.bottom };
         DXGI_PRESENT_PARAMETERS params = {};
         params.DirtyRectsCount = 1;
         params.pDirtyRects = &rect;

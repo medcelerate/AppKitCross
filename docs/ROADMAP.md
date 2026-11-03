@@ -102,7 +102,7 @@ through an `IDXGISwapChain1` (flip-sequential, 2 buffers, BGRA, vsync) with an
 `ID2D1DeviceContext` drawing into a back-buffer `ID2D1Bitmap1`; D3D11 device with WARP
 fallback and the HWND target as a last resort (`APPKITWIN_LEGACY_D2D=1` forces it);
 device loss goes through the existing recreate path; `APPKITWIN_DXGI_DEBUG=1` prints
-live DXGI objects. Partial repaint (2026-11-03): swap-chain targets draw into a persistent canvas bitmap; `end_draw` copies the frame's dirty rect (and the previous frame's, which went to the other buffer) into the back buffer and presents it through `Present1` with that rect as the dirty region, so a frame repaints and recomposes only what `InvalidateRect` marked (`APPKITWIN_TRACE=1` prints `win32 paint dirty` with the rect). Text antialiasing is
+live DXGI objects. Partial repaint (2026-11-03): swap-chain targets draw into a persistent canvas bitmap; `end_draw` blits the canvas into the back buffer and presents through `Present1` with the repainted rect as the dirty region, so a frame repaints (Direct2D work) and recomposes (DWM) only what `InvalidateRect` marked, while the blit keeps both alternating buffers whole (`APPKITWIN_TRACE=1` prints `win32 paint dirty` with the rect). Text antialiasing is
 forced to grayscale on the swap chain so frames match the HWND target. Open: D3D12 +
 D3D11On12 (only needed for Metal/M7 sharing), HDR, a real monitor-DPI-change test, and
 DirectComposition hosting (M3b/M4b).
