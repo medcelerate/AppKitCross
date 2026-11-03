@@ -72,6 +72,11 @@ Shape:
   segmented and radio-group pickers are built from AppKit buttons (menu style falls back to
   segmented until a popup button exists); sheets are `NSWindow.beginSheet` windows hosting
   the content with `dismiss` in the environment; alerts are `NSAlert`s shown as sheets.
+- `GeometryReader` rebuilds its content when its size changes and the root settles the pass;
+  `@AppStorage`/`@SceneStorage` read and write `UserDefaults` and re-render on
+  `UserDefaults.didChangeNotification`; `@FocusState` with `focused(_:equals:)` drives and
+  follows the first-responder state of the text field under the modifier (other focusable
+  controls are not tracked yet); `onSubmit` fires on the field's Return.
 - Not in this version: gestures beyond tap and hover, `NavigationStack`/`NavigationSplitView`,
   `List` selection and swipe actions, `Table`, `Form` styling, `Picker` menus,
   `Menu`/`commands`, `TabView`, sheets and alerts, `@AppStorage`, `@FocusState`,

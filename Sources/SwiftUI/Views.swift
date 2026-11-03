@@ -719,7 +719,11 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         super.init(control: f)
         f.target = f
         f.action = Selector(("swiftUIFieldAction:"))
-        f.setActionHandler(for: Selector(("swiftUIFieldAction:"))) { [weak self] _ in self?.onCommit() }
+        f.setActionHandler(for: Selector(("swiftUIFieldAction:"))) { [weak self] _ in
+            guard let self else { return }
+            self.onCommit()
+            self.node?.environment._onSubmit?.run()      // .onSubmit above the field
+        }
         f.setActionHandler(for: Selector(("swiftUIFieldChanged:"))) { [weak self] _ in self?.changed() }
         NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: f, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.changed() }
