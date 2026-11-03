@@ -223,14 +223,26 @@ final class Win32Backend: PlatformBackend {
             timeout = INFINITE
         }
         if let t = nextTimer { timeout = min(timeout, DWORD(min(t * 1000, 60_000))) }
-        if var handle = PlatformMainQueue.handle {
-            let r = MsgWaitForMultipleObjectsEx(1, &handle, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        pumpIterations += 1
+        if NSView._traceInvalidation {
+            let now = GetTickCount64()
+            if now - pumpTraceStart >= 1000 {
+                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms")")
+                pumpIterations = 0
+                pumpTraceStart = now
+            }
+        }
+        if let handle = PlatformMainQueue.handle {
+            var handles: [HANDLE?] = [handle]
+            let r = MsgWaitForMultipleObjectsEx(1, &handles, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
             if r == WAIT_OBJECT_0 { PlatformMainQueue.service() }
         } else {
             _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
         }
         return true
     }
+    private var pumpIterations = 0
+    private var pumpTraceStart: UInt64 = GetTickCount64()
 
     private var frameCallback: (@MainActor () -> Void)?
     private var frameDeadline: UInt64?          // GetTickCount64 milliseconds

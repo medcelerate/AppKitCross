@@ -37,7 +37,10 @@ enum PlatformMainQueue {
         _ = loop.run(mode: .default, before: Date())
         guard let next = loop.limitDate(forMode: .default) else { return nil }
         let interval = next.timeIntervalSinceNow
-        return interval == .infinity || interval > 86_400 ? nil : max(0, interval)
+        if interval == .infinity || interval > 86_400 { return nil }
+        // A due date in the past after a run step means a timer the loop declined to fire
+        // yet (tolerance): wait a frame rather than spin.
+        return max(interval, 1.0 / 60)
     }
 }
 #endif
