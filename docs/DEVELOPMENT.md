@@ -89,6 +89,7 @@ bar:
 | `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12. |
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
+| `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |
 | `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
 | `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |
 

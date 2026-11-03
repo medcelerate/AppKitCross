@@ -7,3 +7,5 @@ Xvfb :97 -screen 0 1600x1000x24 >/dev/null 2>&1 &
 export DISPLAY=:97
 sleep 1
 APPKITWIN_LINUX_BACKEND=x11 "${BIN:-./.build/debug/HelloWindow}" --swiftui --layout --screenshot "$OUT"
+# The SwiftUI demo's Data tab (Table) as a second capture.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/HelloWindow}" --swiftui --screenshot "$OUT"

@@ -10,6 +10,7 @@ by a capture of the live window.
 | HelloWindow main window: paths, text, controls, scroll view, the Core Animation badge | ![macOS](images/compare/hellowindow-macos.png) | ![Linux](images/compare/hellowindow-linux.png) | ![Windows](images/compare/hellowindow-windows.png) |
 | Layout Demo, Form tab: Auto Layout, labels, text fields, buttons | ![macOS](images/compare/layout-demo-macos.png) | ![Linux](images/compare/layout-demo-linux.png) | ![Windows](images/compare/layout-demo-windows.png) |
 | SwiftUI demo, Controls tab: stacks, text, controls, shapes, list | ![macOS](images/compare/swiftui-demo-macos.png) | ![Linux](images/compare/swiftui-demo-linux.png) | ![Windows](images/compare/swiftui-demo-windows.png) |
+| SwiftUI demo, Data tab: a sortable Table with selection | ![macOS](images/compare/swiftui-data-macos.png) | ![Linux](images/compare/swiftui-data-linux.png) | ![Windows](images/compare/swiftui-data-windows.png) |
 
 What to look for:
 
@@ -29,6 +30,7 @@ Regenerate the macOS and Linux columns with:
 
 ```bash
 swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # macOS, headless
+APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
 

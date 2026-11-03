@@ -207,8 +207,18 @@ final class _TextView: NSView {
     override var acceptsFirstResponder: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// Drawn on a selected list row: the text takes the selection's text colour.
+    var isInSelectedRow = false {
+        didSet { if isInSelectedRow != oldValue { applySelection(); needsDisplay = true } }
+    }
+    private func applySelection() {
+        let range = NSRange(location: 0, length: storage.length)
+        if isInSelectedRow { layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor.alternateSelectedControlTextColor, forCharacterRange: range) }
+        else { layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range) }
+    }
+
     func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode) {
-        if !storage.isEqual(to: text) { storage.setAttributedString(text) }
+        if !storage.isEqual(to: text) { storage.setAttributedString(text); if isInSelectedRow { applySelection() } }
         container.maximumNumberOfLines = lineLimit ?? 0
         container.lineBreakMode = lineLimit == 1 ? truncation : .byWordWrapping
         let style = NSMutableParagraphStyle()
@@ -985,80 +995,6 @@ public struct ScrollView<Content: View>: View, _PrimitiveView {
         self.axes = axes; self.showsIndicators = showsIndicators; self.content = content()
     }
     public func _makePrimitive(node: _ViewNode) -> _Primitive { _ScrollPrimitive(axes: axes, showsIndicators: showsIndicators, content: _ViewBox(content)) }
-}
-
-/// - SeeAlso: https://developer.apple.com/documentation/swiftui/list
-public struct List<SelectionValue: Hashable, Content: View>: View {
-    let content: Content
-    public init(@ViewBuilder content: () -> Content) where SelectionValue == Never { self.content = content() }
-    public init(selection: Binding<SelectionValue?>?, @ViewBuilder content: () -> Content) { self.content = content() }
-    public init(selection: Binding<Set<SelectionValue>>?, @ViewBuilder content: () -> Content) { self.content = content() }
-    public var body: some View {
-        ScrollView {
-            _ListRows(content: content)
-        }
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-}
-
-extension List where SelectionValue == Never {
-    public init<Data: RandomAccessCollection, RowContent: View>(_ data: Data, @ViewBuilder rowContent: @escaping (Data.Element) -> RowContent) where Content == ForEach<Data, Data.Element.ID, RowContent>, Data.Element: Identifiable {
-        content = ForEach(data, content: rowContent)
-    }
-    public init<Data: RandomAccessCollection, ID: Hashable, RowContent: View>(_ data: Data, id: KeyPath<Data.Element, ID>, @ViewBuilder rowContent: @escaping (Data.Element) -> RowContent) where Content == ForEach<Data, ID, RowContent> {
-        content = ForEach(data, id: id, content: rowContent)
-    }
-}
-
-/// Rows stacked with padding and separators.
-struct _ListRows<Content: View>: View, _PrimitiveView {
-    typealias Body = Never
-    let content: Content
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _ListRowsPrimitive(content: _ViewBox(content)) }
-}
-
-@MainActor
-final class _ListRowsPrimitive: _Primitive {
-    let view = _ShapeDrawingView(frame: .zero)
-    private var rowFrames: [CGRect] = []
-    let rowInset: CGFloat = 10
-    let rowSpacing: CGFloat = 0
-    init(content: _AnyViewBox) {
-        super.init()
-        children = [content]
-    }
-    override var nsView: NSView? { view }
-    override func attach(to node: _ViewNode) {
-        super.attach(to: node)
-        view.draw = { [weak self] ctx, _ in
-            guard let self else { return }
-            ctx.setFillColor(NSColor.separatorColor.cgColor)
-            for f in self.rowFrames.dropLast() { ctx.fill(CGRect(x: f.minX, y: f.maxY, width: f.width, height: 1)) }
-        }
-    }
-    private func rows(_ node: _ViewNode) -> [_ViewNode] { node.children.flatMap(\.layoutLeaves) }
-    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
-        var height: CGFloat = 0
-        var width: CGFloat = 0
-        for r in rows(node) {
-            let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - 2 * rowInset) }, height: nil))
-            height += s.height + 2 * 6 + 1
-            width = max(width, s.width + 2 * rowInset)
-        }
-        return CGSize(width: proposal.width.map { $0.isFinite ? max($0, width) : width } ?? width, height: height)
-    }
-    override func place(node: _ViewNode, in rect: CGRect) {
-        var y = rect.minY
-        rowFrames = []
-        for r in rows(node) {
-            let s = r.sizeThatFits(ProposedViewSize(width: rect.width - 2 * rowInset, height: nil))
-            let rowHeight = s.height + 12
-            r.place(in: CGRect(x: rect.minX + rowInset, y: y + 6, width: rect.width - 2 * rowInset, height: s.height).integralIfNeeded)
-            rowFrames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: rowHeight))
-            y += rowHeight + 1
-        }
-        view.needsDisplay = true
-    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section

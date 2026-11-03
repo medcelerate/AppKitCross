@@ -413,7 +413,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             w.display()
             let name: String
             switch w.title {
-            case "SwiftUI Demo": name = "swiftui-demo"
+            case "SwiftUI Demo":
+                let tab = ProcessInfo.processInfo.environment["APPKITWIN_DEMO_TAB"] ?? "controls"
+                name = tab == "controls" ? "swiftui-demo" : "swiftui-\(tab)"
             case "Layout Demo": name = "layout-demo"
             default: name = "hellowindow"
             }
@@ -1002,12 +1004,14 @@ final class DemoModel: ObservableObject {
 }
 
 struct SwiftUIDemo: View {
-    @State private var tab = "controls"
+    /// `APPKITWIN_DEMO_TAB=data` (or navigation, presentation) opens on that tab; screenshots use it.
+    @State private var tab = ProcessInfo.processInfo.environment["APPKITWIN_DEMO_TAB"] ?? "controls"
     var body: some View {
         TabView(selection: $tab) {
             ControlsDemo().tabItem { Text("Controls") }.tag("controls")
             NavigationDemo().tabItem { Text("Navigation") }.tag("navigation")
             PresentationDemo().tabItem { Text("Presentation") }.tag("presentation")
+            DataDemo().tabItem { Text("Data") }.tag("data")
         }
         .padding(12)
         .frame(minWidth: 420, minHeight: 360)
@@ -1015,6 +1019,34 @@ struct SwiftUIDemo: View {
 }
 
 enum Fruit: String, CaseIterable, Hashable { case apple, pear, plum }
+
+struct Planet: Identifiable {
+    let id: Int
+    let name: String
+    let moons: Int
+    let radius: Double     // km
+}
+
+/// Table with a selection and a sort order; the data is sorted by the app, as on macOS.
+struct DataDemo: View {
+    @State private var selected: Set<Int> = []
+    @State private var order = [KeyPathComparator(\Planet.name)]
+    let planets = [Planet(id: 1, name: "Mercury", moons: 0, radius: 2440), Planet(id: 2, name: "Venus", moons: 0, radius: 6052),
+                   Planet(id: 3, name: "Earth", moons: 1, radius: 6371), Planet(id: 4, name: "Mars", moons: 2, radius: 3390),
+                   Planet(id: 5, name: "Jupiter", moons: 95, radius: 69911), Planet(id: 6, name: "Saturn", moons: 146, radius: 58232)]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Click a header to sort, rows to select (Cmd and Shift extend).").foregroundColor(.secondary)
+            Table(planets.sorted(using: order), selection: $selected, sortOrder: $order) {
+                TableColumn("Planet", value: \.name)
+                TableColumn("Moons", value: \.moons) { Text("\($0.moons)") }.width(60)
+                TableColumn("Radius (km)", value: \.radius) { Text(String(format: "%.0f", $0.radius)) }.width(90)
+            }
+            Text("Selected: \(selected.sorted().map(String.init).joined(separator: ", "))")
+        }
+        .padding(12)
+    }
+}
 
 struct NavigationDemo: View {
     @State private var path: [Int] = []
@@ -1106,6 +1138,7 @@ struct ControlsDemo: View {
     @State private var count = 0
     @State private var enabled = true
     @State private var amount = 0.4
+    @State private var selectedItem: String? = nil
     @StateObject private var model = DemoModel()
 
     var body: some View {
@@ -1138,13 +1171,14 @@ struct ControlsDemo: View {
                 Button("Add") { model.items.append("Item \(model.nextIndex)"); model.nextIndex += 1 }
                 Button("Remove") { if !model.items.isEmpty { model.items.removeLast() } }
             }
-            List(model.items, id: \.self) { item in
+            List(model.items, id: \.self, selection: $selectedItem) { item in
                 HStack {
                     Circle().fill(Color.green).frame(width: 10, height: 10)
                     Text(item)
                     Spacer()
                 }
             }.frame(height: 120)
+            Text("Selected: \(selectedItem ?? "none")").foregroundColor(.secondary)
         }
         .padding(4)
     }
