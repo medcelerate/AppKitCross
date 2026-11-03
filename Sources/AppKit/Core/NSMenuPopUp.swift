@@ -372,6 +372,11 @@ final class _NSMenuTracker {
 
     /// Handles an event while tracking. Every event is consumed.
     func handle(_ event: NSEvent) {
+        if NSView._traceInvalidation, event.type != .keyDown, event.type != .keyUp, event.type != .flagsChanged {
+            let p = screenPoint(of: event)
+            let h = hit(p).map { "level \($0.level) row \($0.row.map(String.init) ?? "none")" } ?? "outside"
+            NSView._trace("menu mouse \(event.type) at \(p) from \(event.window.map { "'\($0.title)'" } ?? "no window") (\(event.locationInWindow)) menus \(levels.map { $0.window.frame }) -> \(h)")
+        }
         switch event.type {
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             let p = screenPoint(of: event)
