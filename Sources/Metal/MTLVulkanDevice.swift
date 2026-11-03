@@ -2,7 +2,7 @@
 // Command buffers record closures and replay them into a Vulkan command buffer on
 // commit; drawables are Vulkan images read back on present (MTKView's readback seam).
 // Shaders are SPIR-V: passed through, or compiled from HLSL/MSL with dxc or glslang
-// found on PATH. See ADR-0011.
+// found on PATH. See ADR-0012.
 
 #if os(Linux)
 import Foundation
@@ -549,7 +549,7 @@ enum MTLVulkanSPIRV {
 }
 
 /// HLSL → SPIR-V through a compiler on PATH: dxc when present, glslangValidator otherwise.
-/// Register shifts implement the binding model of ADR-0011.
+/// Register shifts implement the binding model of ADR-0012.
 enum MTLVulkanShaderCompiler {
     nonisolated(unsafe) static var cachedTool: (String, String)?? = nil
 

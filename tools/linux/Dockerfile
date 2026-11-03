@@ -5,7 +5,7 @@
 #   docker run --rm appkitwin-linux bash tools/linux/run.sh --wayland
 #                                              # ... and additionally under a headless sway (Wayland)
 # The container has no GPU: Mesa's lavapipe (mesa-vulkan-drivers, a CPU Vulkan 1.3
-# implementation) backs the Metal module's Vulkan device (ADR-0011), libvulkan-dev gives the
+# implementation) backs the Metal module's Vulkan device (ADR-0012), libvulkan-dev gives the
 # shim its headers, glslang-tools compiles HLSL to SPIR-V, and vulkan-validationlayers serve
 # APPKITWIN_VULKAN_DEBUG=1.
 FROM swift:6.2-noble

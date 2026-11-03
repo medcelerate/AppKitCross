@@ -15,7 +15,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Sources/CoreGraphics` (Windows and Linux only) | `CGContext`, `CGPath`, `CGColor`, `CGImage` over Direct2D or Cairo. |
 | `Sources/CoreText` (Windows and Linux only) | CoreText's API over DirectWrite or Pango/HarfBuzz (ADR-0007). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0011) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/UniformTypeIdentifiers`, `Sources/ImageIO` (Windows and Linux only) | `UTType` over a table generated from the macOS SDK (`tools/uttypes`); `CGImageSource`/`CGImageDestination` over WIC or Cairo (ADR-0009). |
 | `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
@@ -73,7 +73,7 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh -
 
 The container has no GPU: Mesa's lavapipe (`mesa-vulkan-drivers`) is the Vulkan device the
 Metal module runs on there, so the Metal tests and `HelloWindow --metal-selftest` exercise the
-Vulkan backend (ADR-0011). Without a Vulkan loader or ICD the Metal module falls back to the
+Vulkan backend (ADR-0012). Without a Vulkan loader or ICD the Metal module falls back to the
 reference device and the suite still passes; without `libvulkan-dev` the shim builds as stubs.
 HLSL and MSL shaders are compiled to SPIR-V with `glslangValidator` (`glslang-tools`) or `dxc`
 from `PATH`; SPIR-V can also be passed through `makeLibrary(data:)`.

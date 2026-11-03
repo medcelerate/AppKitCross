@@ -276,7 +276,7 @@ public enum MTLDeviceRegistry {
         // The D3D12 backend, when its shim is built (APPKITWIN_METAL_REFERENCE=1 skips it).
         if ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] != "1", let d = MTLD3D12Device() { cached = d; return d }
         #elseif os(Linux)
-        // The Vulkan backend when a loader and a Vulkan 1.3 device exist (ADR-0011).
+        // The Vulkan backend when a loader and a Vulkan 1.3 device exist (ADR-0012).
         if ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] != "1", let d = MTLVulkanDevice() { cached = d; return d }
         #endif
         let r = MTLReferenceDevice()

@@ -1,4 +1,4 @@
-// C interface of the Vulkan backend for the Metal module on Linux (ADR-0011).
+// C interface of the Vulkan backend for the Metal module on Linux (ADR-0012).
 //
 // Opaque handles wrap Vulkan objects; every call takes the handle it operates on. The
 // loader (`libvulkan.so.1`) is dlopen'ed at runtime, so nothing links against Vulkan:
@@ -125,7 +125,7 @@ typedef struct CMVPipelineDesc {
     uint32_t sampleCount;
 } CMVPipelineDesc;
 
-/// Graphics pipeline over the shared pipeline layout (ADR-0011 binding model). Viewport,
+/// Graphics pipeline over the shared pipeline layout (ADR-0012 binding model). Viewport,
 /// scissor, topology, cull mode, front face, depth/stencil state, stencil masks and
 /// reference, and blend constants are dynamic.
 CMVPipeline *cmv_pipeline_create(CMVDevice *device, const CMVPipelineDesc *desc, char *errorOut, uint32_t errorCapacity);

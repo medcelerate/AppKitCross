@@ -1,4 +1,4 @@
-// Vulkan backend for the Metal module on Linux (ADR-0011): the implementation of
+// Vulkan backend for the Metal module on Linux (ADR-0012): the implementation of
 // cmetal_vulkan.h. The loader is dlopen'ed and every entry point resolved through
 // vkGetInstanceProcAddr, so this file has no link-time Vulkan dependency. Without the
 // headers it compiles to stubs whose creators return NULL.
@@ -139,7 +139,7 @@ struct CMVQueue {
     std::vector<VkFence> spare;
 };
 
-// Binding model of ADR-0011: set 0 holds two halves (vertex/kernel, fragment) of 8
+// Binding model of ADR-0012: set 0 holds two halves (vertex/kernel, fragment) of 8
 // uniform buffers, 8 sampled images, 8 samplers and 8 storage images; set 1 holds the
 // `space1` storage buffers (8 per half).
 enum { kSlots = 8, kHalf = 32, kSet0Bindings = 64, kSet1Bindings = 16 };
@@ -676,7 +676,7 @@ static CMVTexture *createTexture(CMVDevice *d, uint32_t w, uint32_t h, uint32_t 
     vci.subresourceRange = {t->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : t->aspect, 0, t->levels, 0, 1};
     if (t->aspect == (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) vci.subresourceRange.aspectMask = t->aspect;
     if (vk.vkCreateImageView(d->device, &vci, nullptr, &t->view) != VK_SUCCESS) { cmv_texture_release(t); return nullptr; }
-    // Every image lives in GENERAL (ADR-0011).
+    // Every image lives in GENERAL (ADR-0012).
     if (!runUtility(d, [&](VkCommandBuffer cb) { transitionToGeneral(cb, t); })) { cmv_texture_release(t); return nullptr; }
     return t;
 }

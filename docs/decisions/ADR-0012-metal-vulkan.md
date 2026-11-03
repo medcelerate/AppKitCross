@@ -1,4 +1,4 @@
-# ADR-0011: A Vulkan backend for the `Metal` module on Linux
+# ADR-0012: A Vulkan backend for the `Metal` module on Linux
 
 Status: accepted. Date: 2026-11-03. Extends ADR-0004 and ADR-0006.
 

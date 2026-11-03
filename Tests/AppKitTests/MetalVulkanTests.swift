@@ -1,4 +1,4 @@
-// The Vulkan backend of the Metal module (ADR-0011): resources, blits and compute on the
+// The Vulkan backend of the Metal module (ADR-0012): resources, blits and compute on the
 // Vulkan device, with the reference device as the oracle. The tests skip when no Vulkan
 // device exists (macOS, or a Linux container without a loader or ICD).
 
@@ -20,7 +20,7 @@ final class MetalVulkanDeviceTests: XCTestCase, @unchecked Sendable {
 
     /// `doubleValues` from `kernelHLSL`, compiled with glslang 15 (`-D -V --target-env vulkan1.3
     /// -S comp --shift-uav-binding 24 0 0 1`): `RWStructuredBuffer<float> data : register(u0, space1)`
-    /// is descriptor set 1, binding 0 (ADR-0011).
+    /// is descriptor set 1, binding 0 (ADR-0012).
     static let doubleValuesSPIRV: [UInt32] = [
         0x07230203,0x00010600,0x0008000b,0x00000030,0x00000000,0x00020011,0x00000001,0x0006000b,
         0x00000001,0x4c534c47,0x6474732e,0x3035342e,0x00000000,0x0003000e,0x00000000,0x00000001,

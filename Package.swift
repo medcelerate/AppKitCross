@@ -144,7 +144,7 @@ targets += [
 ]
 let metalDependencies: [Target.Dependency] = ["CMetalD3D12"]
 #elseif os(Linux)
-// The Vulkan shim (ADR-0011) dlopens the loader at runtime; only <vulkan/vulkan.h> is a
+// The Vulkan shim (ADR-0012) dlopens the loader at runtime; only <vulkan/vulkan.h> is a
 // build-time dependency, and without it the shim compiles to stubs.
 targets += [
     .target(name: "CMetalVulkan", path: "Sources/CMetalVulkan", linkerSettings: [.linkedLibrary("dl")]),
