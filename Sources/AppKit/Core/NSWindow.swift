@@ -107,6 +107,8 @@ import CoreText
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
+    /// The screen the window was last seen on (its name), for `didChangeScreenNotification`.
+    private var _lastScreenName: String?
     /// Content rect at the time of the last close (the platform window knows its real frame insets).
     private var _lastContentRect: NSRect? = nil
     private var _animationBehavior: NSWindow.AnimationBehavior = .default
@@ -279,6 +281,21 @@ import CoreText
             post(NSWindow.didMoveNotification)
             delegate?.windowDidMove(Notification(name: NSWindow.didMoveNotification, object: self))
         }
+        _noteScreen()
+    }
+
+    /// Posts `didChangeScreenNotification` when the move or resize put the window on
+    /// another screen (a monitor of another scale on Windows sends WM_DPICHANGED too).
+    private func _noteScreen() {
+        guard let s = screen else { return }
+        let name = s.localizedName
+        guard name != _lastScreenName else { return }
+        let first = _lastScreenName == nil
+        _lastScreenName = name
+        if NSView._traceInvalidation { NSView._trace("screen \'\(_title)\' \(name) scale \(s.backingScaleFactor)") }
+        guard !first else { return }
+        post(NSWindow.didChangeScreenNotification)
+        delegate?.windowDidChangeScreen(Notification(name: NSWindow.didChangeScreenNotification, object: self))
     }
 
     public func platformWindowShouldClose() -> Bool {

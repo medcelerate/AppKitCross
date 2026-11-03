@@ -243,7 +243,13 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
 
             // Dragged onto the second monitor: the window system moves the frame and then
             // reports the new scale (WM_DPICHANGED); the window's own scale follows.
+            let screenChanges = Counter()
+            let token = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: w, queue: nil) { _ in screenChanges.n += 1 }
+            defer { NotificationCenter.default.removeObserver(token) }
+            w.setFrameOrigin(NSPoint(x: 1000, y: 100))      // still on the first screen
+            XCTAssertEqual(screenChanges.n, 0)
             w.setFrameOrigin(NSPoint(x: 2000, y: 100))
+            XCTAssertEqual(screenChanges.n, 1, "the move onto the second screen posts didChangeScreenNotification")
             host(w).setBackingScaleFactor(1)
             XCTAssertEqual(w.screen?.localizedName, "Second Display")
             XCTAssertEqual(w.screen?.backingScaleFactor, 1)
