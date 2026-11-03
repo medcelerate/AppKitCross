@@ -471,6 +471,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addsubview(_:positioned:relativeto:)
     @MainActor open func addSubview(_ view: NSView, positioned place: NSWindow.OrderingMode, relativeTo otherView: NSView?) {
         precondition(view !== self, "NSView: cannot add a view as a subview of itself")
+        if NSView._traceInvalidation { NSView._trace("addSubview \(type(of: view)) to \(type(of: self))\(view._superview === self ? " (re-add)" : "")") }
         if view._superview === self {
             _subviews.removeAll { $0 === view }
         } else {

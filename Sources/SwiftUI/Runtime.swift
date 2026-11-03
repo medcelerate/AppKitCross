@@ -333,6 +333,9 @@ public final class _ViewNode {
         collectBackingViews(into: &views)
         let current = container.subviews.filter { $0 is _SwiftUIBackedView || views.contains($0) }
         if current.map({ ObjectIdentifier($0) }) != views.map({ ObjectIdentifier($0) }) {
+            if NSView._traceInvalidation {
+                NSView._trace("syncBackingViews reorders \(type(of: container)): have \(current.map { "\(type(of: $0))" }) want \(views.map { "\(type(of: $0))" })")
+            }
             for v in current where !views.contains(v) { v.removeFromSuperview() }
             for v in views { v.removeFromSuperview(); container.addSubview(v) }
         }
