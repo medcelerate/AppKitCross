@@ -241,14 +241,15 @@ final class _TextPrimitive: _Primitive {
     override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
-        if let o = other as? _TextPrimitive { text = o.text; refresh() }
+        if let o = other as? _TextPrimitive { text = o.text; refresh(); view.needsDisplay = true }
     }
-    override func attach(to node: _ViewNode) { super.attach(to: node); refresh() }
+    override func attach(to node: _ViewNode) { super.attach(to: node); refresh(); view.needsDisplay = true }
+    /// Pushes the text and environment into the view; measurement calls this too, so it
+    /// must not invalidate anything by itself (the view redraws when its content changes).
     private func refresh() {
         guard let node else { return }
         let env = node.environment
         view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail)
-        view.needsDisplay = true
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         refresh()
@@ -585,7 +586,9 @@ class _ControlPrimitive<Control: NSView>: _Primitive {
     let control: Control
     init(control: Control) { self.control = control }
     override var nsView: NSView? { control }
-    var intrinsicSize: CGSize { let s = control.intrinsicContentSize; return CGSize(width: s.width == NSView.noIntrinsicMetric ? 100 : s.width, height: s.height == NSView.noIntrinsicMetric ? 22 : s.height) }
+    /// The control's natural size. Measurement never resizes the control: the frame is set
+    /// only by `place`, so a fractional natural width cannot fight the integral placed one.
+    var intrinsicSize: CGSize { let s = control.intrinsicContentSize; return CGSize(width: s.width == NSView.noIntrinsicMetric ? 100 : s.width.rounded(.up), height: s.height == NSView.noIntrinsicMetric ? 22 : s.height.rounded(.up)) }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { intrinsicSize }
     override func place(node: _ViewNode, in rect: CGRect) {}
 }
@@ -661,7 +664,7 @@ final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
         }
         control.sizeToFit()
     }
-    override var intrinsicSize: CGSize { control.sizeToFit(); return CGSize(width: max(control.frame.width, 20), height: max(control.frame.height, 20)) }
+    override var intrinsicSize: CGSize { let s = super.intrinsicSize; return CGSize(width: max(s.width, 20), height: max(s.height, 20)) }
 }
 
 /// A button with custom content: a tap-handling container around the label.
@@ -804,7 +807,7 @@ final class _TogglePrimitive: _ControlPrimitive<NSButton> {
         control.isEnabled = node?.environment.isEnabled ?? true
         control.sizeToFit()
     }
-    override var intrinsicSize: CGSize { control.sizeToFit(); return CGSize(width: max(control.frame.width, 18), height: max(control.frame.height, 18)) }
+    override var intrinsicSize: CGSize { let s = super.intrinsicSize; return CGSize(width: max(s.width, 18), height: max(s.height, 18)) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider

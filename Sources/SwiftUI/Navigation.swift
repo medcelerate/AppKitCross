@@ -356,7 +356,6 @@ final class _RadioPrimitive: _ControlPrimitive<NSButton> {
         control.state = o.control.state
         control.sizeToFit()
     }
-    override var intrinsicSize: CGSize { control.sizeToFit(); return control.frame.size }
 }
 
 // MARK: NavigationStack

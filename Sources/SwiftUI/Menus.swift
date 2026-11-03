@@ -44,7 +44,6 @@ final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         control.selectItem(at: o.control.indexOfSelectedItem)
         control.sizeToFit()
     }
-    override var intrinsicSize: CGSize { control.sizeToFit(); return control.frame.size }
 }
 
 // MARK: Menu items from views
@@ -171,7 +170,6 @@ final class _MenuPrimitive: _ControlPrimitive<NSPopUpButton> {
         contentBox = o.contentBox
         rebuild()
     }
-    override var intrinsicSize: CGSize { control.sizeToFit(); return control.frame.size }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/menustyle

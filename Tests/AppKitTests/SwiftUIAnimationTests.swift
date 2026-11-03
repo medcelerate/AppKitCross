@@ -295,6 +295,18 @@ final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(root.isAnimating)
             XCTAssertEqual(bar?.alphaValue ?? 0, 1, accuracy: 0.01, "the bar is opaque again")
             XCTAssertFalse(allViews(h).compactMap { $0 as? _TextView }.contains { $0.storage.string == "Disabled" }, "the Disabled line is gone")
+            // A control whose frame disagrees with its placement by a fraction (fractional text
+            // widths on Windows) must not re-layout the whole root on every pass.
+            let go = allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Go" }!
+            let placed = go.frame.size
+            go.setFrameSize(NSSize(width: placed.width + 0.4, height: placed.height))
+            XCTAssertFalse(h.needsLayout, "a frame change alone does not invalidate the hosting layout")
+            w.contentView!.layoutSubtreeIfNeeded()
+            w.displayIfNeeded()                      // the resized control redraws once
+            let paintsAfter = platform.paintCount
+            for _ in 0..<3 { w.contentView!.layoutSubtreeIfNeeded(); w.displayIfNeeded() }
+            XCTAssertEqual(platform.paintCount, paintsAfter, "and then nothing repaints")
+            XCTAssertEqual(go.frame.size.width, placed.width + 0.4, accuracy: 0.001, "nothing re-placed the control")
             w.close()
         }
     }

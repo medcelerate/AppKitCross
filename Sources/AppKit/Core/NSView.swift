@@ -88,8 +88,12 @@ import CoreText
     }
 
     /// Marks the engine root dirty; the next layout pass re-solves.
-    internal func _setNeedsConstraintLayout() {
+    /// Marks the layout root for another constraint pass. A plain frame change
+    /// (`force` false) only does so once an engine exists: re-laying out the whole root
+    /// for every frame set would turn any two disagreeing sizes into an endless loop.
+    internal func _setNeedsConstraintLayout(force: Bool = true) {
         let root = _layoutRoot
+        guard force || root._engine != nil else { return }
         root._constraintsDirty = true
         root._needsLayout = true
         if let w = root._window, root === w.contentView { w._viewNeedsDisplay(root, rect: root.bounds) }
@@ -1331,7 +1335,7 @@ import CoreText
         _syncLayerGeometry()
         if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
-        if !_applyingLayout { _needsLayout = true; _setNeedsConstraintLayout() }
+        if !_applyingLayout { _needsLayout = true; _setNeedsConstraintLayout(force: false) }
         _superview?.setNeedsDisplay(old.union(_frame))
         setNeedsDisplay(bounds)
         if _postsFrameChangedNotifications {
