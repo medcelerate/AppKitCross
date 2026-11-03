@@ -400,8 +400,10 @@ final class Win32Window: PlatformWindow {
                            y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
                            width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
                            height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
-        // A new or resized canvas has nothing to keep: paint everything this frame.
-        if cd2d_target_is_swapchain(rt), cd2d_target_canvas_is_fresh(rt) { dirty = NSRect(origin: .zero, size: size) }
+        // A new or resized canvas has nothing to keep: paint everything this frame. A
+        // transparent window repaints whole every frame: its cleared pixels must meet the
+        // DWM backdrop edge to edge, and a partial clear left dark bands after resizes.
+        if cd2d_target_is_swapchain(rt), cd2d_target_canvas_is_fresh(rt) || cd2d_target_is_composition(rt) { dirty = NSRect(origin: .zero, size: size) }
         if NSView._traceInvalidation { NSView._trace("win32 paint dirty \(ps.rcPaint.left),\(ps.rcPaint.top)-\(ps.rcPaint.right),\(ps.rcPaint.bottom) px of \(Int(size.width * scale))x\(Int(size.height * scale))") }
         painting = true
         defer { painting = false }
