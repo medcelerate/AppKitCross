@@ -419,7 +419,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             }
             guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { continue }
             cv.cacheDisplay(in: cv.bounds, to: rep)
-            if let png = rep.representation(using: .png, properties: [:]) {
+            // The views draw over the window's background, which the window paints itself:
+            // composite the hierarchy over it so the file shows what the screen shows.
+            let composed = NSImage(size: cv.bounds.size)
+            composed.lockFocus()
+            w.effectiveAppearance.performAsCurrentDrawingAppearance {
+                w.backgroundColor.setFill()
+                NSBezierPath.fill(NSRect(origin: .zero, size: cv.bounds.size))
+            }
+            if let cg = rep.cgImage { NSGraphicsContext.current?.cgContext.draw(cg, in: NSRect(origin: .zero, size: cv.bounds.size)) }
+            composed.unlockFocus()
+            guard let final = composed.cgImage(forProposedRect: nil, context: nil, hints: nil) else { continue }
+            let finalRep = NSBitmapImageRep(cgImage: final)
+            if let png = finalRep.representation(using: .png, properties: [:]) {
                 let path = (dir as NSString).appendingPathComponent("\(name)-\(platform).png")
                 try? png.write(to: URL(fileURLWithPath: path))
                 print("screenshot: \(path)")
