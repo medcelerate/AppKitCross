@@ -353,3 +353,59 @@ final class MenuPopUpTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+/// The HelloWindow canvas case: a context menu item with no target reaches the app
+/// delegate through the responder chain, starting at the view that was right-clicked.
+final class MenuResponderChainTests: XCTestCase, @unchecked Sendable {
+    @MainActor private final class Canvas: NSView {
+        var dots = 0
+        override var acceptsFirstResponder: Bool { true }
+        override func mouseDown(with event: NSEvent) { dots += 1; needsDisplay = true }
+    }
+    @MainActor private final class Delegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
+        weak var canvas: Canvas?
+        var handled: [String] = []
+        func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+            handled.append("\(action)")
+            if action == Selector(("clearDots:")) { canvas?.dots = 0; return true }
+            return false
+        }
+    }
+
+    func testUntargetedContextMenuItemReachesTheAppDelegate() {
+        MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            let previousDelegate = app.delegate
+            let delegate = Delegate()
+            app.delegate = delegate
+            defer { app.delegate = previousDelegate }
+            let w = makeWindow()
+            let canvas = Canvas(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            delegate.canvas = canvas
+            let menu = NSMenu(title: "Canvas")
+            menu.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "")
+            canvas.menu = menu
+            w.contentView!.addSubview(canvas)
+            // A dot, then a right click and a mouse choice of Clear Dots.
+            let p = w.convertPoint(toScreen: NSPoint(x: 100, y: 100))
+            send(.leftMouseDown, screen: p, in: w); send(.leftMouseUp, screen: p, in: w)
+            XCTAssertEqual(canvas.dots, 1)
+            send(.rightMouseDown, screen: p, in: w)
+            XCTAssertTrue(_NSMenuTracker.isTracking)
+            XCTAssertTrue(menu.items[0].isEnabled, "autoenabling found the delegate through the chain")
+            send(.rightMouseUp, screen: p, in: w)
+            send(.mouseMoved, screen: rowCenter(0))
+            send(.leftMouseUp, screen: rowCenter(0))
+            XCTAssertEqual(delegate.handled, ["clearDots:"])
+            XCTAssertEqual(canvas.dots, 0)
+            XCTAssertFalse(_NSMenuTracker.isTracking)
+            // Again from the keyboard.
+            send(.leftMouseDown, screen: p, in: w); send(.leftMouseUp, screen: p, in: w)
+            XCTAssertEqual(canvas.dots, 1)
+            send(.rightMouseDown, screen: p, in: w); send(.rightMouseUp, screen: p, in: w)
+            sendKey(125, window: w); sendKey(36, window: w)
+            XCTAssertEqual(canvas.dots, 0)
+            w.close()
+        }
+    }
+}
