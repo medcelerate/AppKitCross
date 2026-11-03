@@ -404,6 +404,7 @@ import CoreText
     }
 
     internal func _effectiveAppearanceDidChange() {
+        if NSView._traceInvalidation { NSView._trace("effectiveAppearanceDidChange \(type(of: self))") }
         viewDidChangeEffectiveAppearance()
         for s in _subviews where s._appearance == nil { s._effectiveAppearanceDidChange() }
     }
@@ -1318,6 +1319,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframesize(_:)
     @MainActor open func setFrameSize(_ newSize: NSSize) {
+        if NSView._traceInvalidation { NSView._trace("setFrameSize \(type(of: self)) \(newSize)") }
         let animate = _takeAnimator()
         guard newSize.width.isFinite, newSize.height.isFinite else { return }
         let newSize = NSSize(width: max(0, newSize.width), height: max(0, newSize.height))

@@ -263,6 +263,7 @@ import CoreText
     // MARK: PlatformWindowOwner
 
     public func platformWindowDidChangeFrame(_ frame: NSRect) {
+        if NSView._traceInvalidation { NSView._trace("frame \'\(_title)\' \(frame)") }
         let old = _lastFrame
         _lastFrame = frame
         let cr = contentRect(forFrameRect: frame)
@@ -291,6 +292,7 @@ import CoreText
     public func platformWindowDidResignKey() { resignKey() }
 
     public func platformWindowDidChangeBackingScaleFactor(_ scale: CGFloat) {
+        if NSView._traceInvalidation { NSView._trace("backing scale \'\(_title)\' \(scale)") }
         post(NSWindow.didChangeBackingPropertiesNotification)
         delegate?.windowDidChangeBackingProperties(Notification(name: NSWindow.didChangeBackingPropertiesNotification, object: self))
         func visit(_ v: NSView) {
@@ -303,6 +305,7 @@ import CoreText
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
+        if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
         _commitLayerSceneIfNeeded()
         context.saveGState()
         // The background is a dynamic colour: resolve it under the window's appearance, as the
@@ -464,6 +467,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomekey()
     @MainActor open func becomeKey() {
         guard !_isKey else { return }
+        if NSView._traceInvalidation { NSView._trace("becomeKey \'\(_title)\'") }
         let app = NSApplication.shared
         if let previous = app.keyWindow, previous !== self { previous.resignKey() }
         _isKey = true
@@ -1128,6 +1132,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignkey()
     @MainActor open func resignKey() {
         guard _isKey else { return }
+        if NSView._traceInvalidation { NSView._trace("resignKey \'\(_title)\'") }
         _isKey = false
         // Losing the keyboard (another window or application activated) dismisses open menus.
         if let t = _NSMenuTracker.current, !t.isMenuWindow(self) { t.cancel() }

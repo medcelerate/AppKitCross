@@ -164,6 +164,7 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
     }
 
     private func _refreshEnvironment() {
+        if NSView._traceInvalidation { NSView._trace("hosting refreshEnvironment") }
         var env = NSHostingEnvironment()
         env.displayScale = window?.backingScaleFactor ?? 1
         env.layoutDirection = userInterfaceLayoutDirection
