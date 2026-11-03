@@ -251,10 +251,12 @@ final class Win32Backend: PlatformBackend {
     func scheduleFrame(_ callback: @escaping @MainActor () -> Void) {
         frameCallback = callback
         if frameDeadline == nil { frameDeadline = GetTickCount64() + 16 }
+        if NSView._traceInvalidation { NSView._trace("win32 scheduleFrame deadline in \(Int64(frameDeadline!) - Int64(GetTickCount64())) ms") }
     }
 
     private func fireFrameIfDue() {
         guard let deadline = frameDeadline, GetTickCount64() >= deadline else { return }
+        if NSView._traceInvalidation { NSView._trace("win32 fireFrame") }
         frameDeadline = nil
         let cb = frameCallback
         frameCallback = nil
