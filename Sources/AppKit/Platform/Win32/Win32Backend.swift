@@ -25,6 +25,9 @@ final class Win32Backend: PlatformBackend {
     let image: any PlatformImageBackend = Win32ImageBackend()
     let menuBar = Win32MenuBar()
     private(set) var windows: [Win32Window] = []
+    /// OLE drag and drop (Win32DragDrop.swift).
+    private(set) var win32DragDrop: Win32DragDrop!
+    var dragDrop: (any PlatformDragDrop)? { win32DragDrop }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
@@ -46,6 +49,28 @@ final class Win32Backend: PlatformBackend {
         d2dFactory = cd2d_factory_create()
         registerClasses()
         createMessageWindow()
+        win32DragDrop = Win32DragDrop(backend: self)
+    }
+
+    // MARK: Nested loops owned by the system
+
+    private static let dragTimer: UINT_PTR = 1
+
+    /// While OLE runs a drag it pumps messages itself, so the frame clock and the main
+    /// queue are serviced from a timer on the message window instead of `pump()`.
+    func beginNestedDrag() {
+        if let hwnd = messageWindow { _ = SetTimer(hwnd, Win32Backend.dragTimer, 16, nil) }
+    }
+
+    func endNestedDrag() {
+        if let hwnd = messageWindow { _ = KillTimer(hwnd, Win32Backend.dragTimer) }
+    }
+
+    /// One pass of what `pump()` does between messages, for loops the system owns.
+    func serviceWhileNested() {
+        drainPosted()
+        fireFrameIfDue()
+        _ = PlatformMainQueue.service()
     }
 
     // MARK: Displays
@@ -437,6 +462,14 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
+        if msg == UINT(WM_TIMER), wParam == Win32Backend.dragTimer {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                MainActor.assumeIsolated { backend.serviceWhileNested() }
+            }
+            return 0
+        }
         if msg == Win32Backend.postMessage {
             let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0)
             if ptr != 0 {

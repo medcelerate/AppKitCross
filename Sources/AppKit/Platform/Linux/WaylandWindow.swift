@@ -422,6 +422,12 @@ final class WaylandWindow: PlatformWindow {
 
     // MARK: Events
 
+    // Drags delivered by the data device (WaylandDataDevice.swift) reach the owner through these.
+    func ownerDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragEntered(drag) ?? [] }
+    func ownerDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragUpdated(drag) ?? [] }
+    func ownerDragExited() { owner?.platformDragExited() }
+    func ownerDrop(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDrop(drag) ?? [] }
+
     private func windowNumber() -> Int { (owner as? NSWindow)?.windowNumber ?? 0 }
     private func contentPoint(_ p: NSPoint) -> NSPoint { NSPoint(x: p.x, y: _frame.height - p.y) }
     private func seconds(_ t: UInt32) -> TimeInterval { TimeInterval(t) / 1000 }

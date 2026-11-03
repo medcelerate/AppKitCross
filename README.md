@@ -49,9 +49,9 @@ Animation, Metal, the text system and the SwiftUI runtime are in place and verif
 Windows 11 machine and in a Linux container; the macOS build is headless and runs the test
 suite against Apple's own frameworks as the specification.
 
-Not there yet: drags to and from other applications, gestures beyond tap and hover,
-SwiftUI commands and the Settings scene, window caption buttons on Windows, Core Animation group opacity, shadows and masks,
-right-to-left layout, Wayland decorations and clipboard, Vulkan. The full milestone table is
+Not there yet: gestures beyond tap and hover, SwiftUI commands and the Settings scene,
+window caption buttons on Windows, Core Animation group opacity, shadows and masks,
+right-to-left layout, Wayland client-side decorations, Metal presentation on Linux. The full milestone table is
 in [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
 lists every type with what is implemented.
 

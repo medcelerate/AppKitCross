@@ -3,7 +3,8 @@
 // One X display, windows painted into Cairo image surfaces and blitted to the X window,
 // an event loop over poll() that also serves posted blocks and the Core Animation frame
 // clock. Menus have no native bar on X11 (key equivalents still work), the pasteboard is
-// in-process, and file dialogs run zenity when it is installed.
+// the CLIPBOARD selection and drags use XDND (LinuxSelection.swift, LinuxDragDrop.swift),
+// and file dialogs run zenity when it is installed.
 
 #if os(Linux)
 import Foundation
@@ -32,6 +33,13 @@ final class LinuxBackend: PlatformBackend {
     private var cursors: [Int32: Cursor] = [:]
     private(set) var currentCursor: Cursor = 0
     private var cursorHidden = false
+    // Selections (LinuxSelection.swift) and XDND (LinuxDragDrop.swift)
+    var atoms: [String: Atom] = [:]
+    var selectionWindow: Window = 0
+    /// The server time of the last input event, for selection ownership and XDND.
+    var lastEventTime: Time = Time(CurrentTime)
+    private(set) var x11DragDrop: X11DragDrop!
+    var dragDrop: (any PlatformDragDrop)? { x11DragDrop }
 
     init() {
         guard let d = XOpenDisplay(nil) else {
@@ -52,6 +60,7 @@ final class LinuxBackend: PlatformBackend {
         if pipe(&fds) == 0 { wakePipe = fds }
         text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
+        x11DragDrop = X11DragDrop(backend: self)
     }
 
     var displays: [PlatformDisplay] {
@@ -117,8 +126,44 @@ final class LinuxBackend: PlatformBackend {
 
     private func dispatch(_ event: inout XEvent) {
         let xid = event.xany.window
+        if xid == selectionWindow && xid != 0 {
+            // Replies and requests for the selections this application owns or asked for.
+            switch Int32(event.type) {
+            case SelectionRequest:
+                if event.xselectionrequest.selection == atom("CLIPBOARD") { x11Pasteboard.handleRequest(event.xselectionrequest) }
+                else { _ = x11DragDrop.handle(&event, window: nil) }
+            case SelectionClear:
+                if event.xselectionclear.selection == atom("CLIPBOARD") { x11Pasteboard.selectionCleared() }
+            default:
+                _ = x11DragDrop.handle(&event, window: nil)
+            }
+            return
+        }
         guard let w = window(for: xid) else { return }
         w.handle(&event)
+    }
+
+    /// AppKit modifier flags from an X key/button state mask: Ctrl plays Command (as on
+    /// Windows) so key equivalents land on Ctrl+key; Super maps to .control.
+    static func modifierFlags(fromState state: UInt32) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if state & UInt32(ShiftMask) != 0 { flags.insert(.shift) }
+        if state & UInt32(LockMask) != 0 { flags.insert(.capsLock) }
+        if state & UInt32(ControlMask) != 0 { flags.insert(.command) }
+        if state & UInt32(Mod1Mask) != 0 { flags.insert(.option) }
+        if state & UInt32(Mod4Mask) != 0 { flags.insert(.control) }
+        return flags
+    }
+
+    /// The modifier keys held now (for events that carry no state, such as XDND messages).
+    func queryModifierFlags() -> NSEvent.ModifierFlags {
+        var rootReturn: Window = 0, childReturn: Window = 0
+        var rx: Int32 = 0, ry: Int32 = 0, wx: Int32 = 0, wy: Int32 = 0
+        var mask: UInt32 = 0
+        _ = XQueryPointer(display, root, &rootReturn, &childReturn, &rx, &ry, &wx, &wy, &mask)
+        let flags = LinuxBackend.modifierFlags(fromState: mask)
+        NSEvent._currentModifierFlags = flags
+        return flags
     }
 
     func post(_ block: @escaping @MainActor () -> Void) {
@@ -165,7 +210,9 @@ final class LinuxBackend: PlatformBackend {
 
     let text: any PlatformTextBackend
     let image: any PlatformImageBackend
-    let systemPasteboard: any PlatformPasteboard = LinuxPasteboard()
+    /// The CLIPBOARD selection (LinuxSelection.swift).
+    private(set) lazy var x11Pasteboard = X11Pasteboard(backend: self)
+    var systemPasteboard: any PlatformPasteboard { x11Pasteboard }
 
     func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
         LinuxBackend.runZenity(options)
@@ -244,11 +291,4 @@ final class LinuxBackend: PlatformBackend {
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect { frameRect }
 }
 
-@MainActor
-final class LinuxPasteboard: PlatformPasteboard {
-    private var entries: [PlatformPasteboardEntry] = []
-    private(set) var changeCount = 0
-    func write(_ entries: [PlatformPasteboardEntry]) { self.entries = entries; changeCount += 1 }
-    func read() -> [PlatformPasteboardEntry] { entries }
-}
 #endif

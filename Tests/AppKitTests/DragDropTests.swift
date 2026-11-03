@@ -213,3 +213,115 @@ final class DragDropTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+// MARK: Drags the window system delivers (ADR-0011 stage B)
+
+/// The `PlatformWindowOwner` drag methods, as a backend calls them for a drag from
+/// another application: types known up front, data loaded on demand, one item per file.
+final class PlatformDragDeliveryTests: XCTestCase, @unchecked Sendable {
+    @MainActor
+    private func makeInfo(in w: NSWindow, at point: NSPoint, loads: inout Int) -> PlatformDragInfo {
+        nonisolated(unsafe) var count = 0
+        let info = PlatformDragInfo(location: point, sourceOperations: [.copy, .move], modifierFlags: [],
+                                    items: [["public.utf8-plain-text", "public.file-url"], ["public.file-url"]], isFromThisApplication: false) { item, type in
+            count += 1
+            switch (item, type) {
+            case (0, "public.utf8-plain-text"): return Data("from outside".utf8)
+            case (0, "public.file-url"): return Data("file:///tmp/a.txt".utf8)
+            case (1, "public.file-url"): return Data("file:///tmp/b.txt".utf8)
+            default: return nil
+            }
+        }
+        loads = count
+        return info
+    }
+
+    func testForeignDragEntersUpdatesDropsWithLazyData() {
+        MainActor.assumeIsolated {
+            let w = makeWindow()
+            let target = Target(frame: NSRect(x: 150, y: 10, width: 100, height: 100))
+            w.contentView!.addSubview(target)
+            var loads = 0
+            let info = makeInfo(in: w, at: NSPoint(x: 50, y: 50), loads: &loads)
+            // Over empty content: nothing accepts, no data loaded.
+            XCTAssertEqual(w.platformDragEntered(info), [])
+            XCTAssertTrue(target.log.isEmpty)
+            info.location = NSPoint(x: 160, y: 30)
+            XCTAssertEqual(w.platformDragUpdated(info), .copy)
+            XCTAssertEqual(target.log, ["entered"])
+            info.location = NSPoint(x: 170, y: 40)
+            XCTAssertEqual(w.platformDragUpdated(info), .copy)
+            XCTAssertEqual(target.log, ["entered"])
+            w.platformDragExited()
+            XCTAssertEqual(target.log, ["entered", "exited"])
+            info.location = NSPoint(x: 200, y: 50)
+            XCTAssertEqual(w.platformDragEntered(info), .copy)
+            XCTAssertEqual(w.platformDrop(info), .copy)
+            XCTAssertEqual(target.dropped, "from outside", "the representation is loaded when the destination reads it")
+            XCTAssertEqual(target.log, ["entered", "exited", "entered", "performed at 200,50", "ended"])
+            w.close()
+        }
+    }
+
+    func testForeignFileDropYieldsOneItemPerFile() {
+        MainActor.assumeIsolated {
+            final class Files: NSView {
+                var urls: [String] = []
+                override init(frame: NSRect) { super.init(frame: frame); registerForDraggedTypes([.fileURL]) }
+                required init?(coder: NSCoder) { nil }
+                override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { .copy }
+                override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+                    urls = (sender.draggingPasteboard.pasteboardItems ?? []).compactMap { $0.string(forType: .fileURL) }
+                    return !urls.isEmpty
+                }
+            }
+            let w = makeWindow()
+            let files = Files(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            w.contentView!.addSubview(files)
+            var loads = 0
+            let info = makeInfo(in: w, at: NSPoint(x: 50, y: 50), loads: &loads)
+            XCTAssertEqual(w.platformDragEntered(info), .copy)
+            XCTAssertEqual(w.platformDrop(info), .copy)
+            XCTAssertEqual(files.urls, ["file:///tmp/a.txt", "file:///tmp/b.txt"])
+            w.close()
+        }
+    }
+
+    func testSwiftUIDropTakesForeignDrags() {
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                @State var dropped = "none"
+                var body: some View {
+                    Text("drop: \(dropped)").frame(width: 200, height: 100)
+                        .onDrop(of: [.utf8PlainText], isTargeted: nil) { providers in
+                            guard let p = providers.first else { return false }
+                            p.loadDataRepresentation(forTypeIdentifier: UTType.utf8PlainText.identifier) { data, _ in
+                                let s = data.map { String(decoding: $0, as: UTF8.self) } ?? "?"
+                                DispatchQueue.main.async { dropped = s }
+                            }
+                            return true
+                        }
+                }
+            }
+            let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 320, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+            let h = NSHostingView(rootView: Probe())
+            h.frame = NSRect(x: 0, y: 0, width: 320, height: 160)
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            var loads = 0
+            let info = makeInfo(in: w, at: NSPoint(x: 160, y: 80), loads: &loads)
+            XCTAssertEqual(w.platformDragEntered(info), .copy)
+            XCTAssertEqual(w.platformDrop(info), .copy)
+            @MainActor func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allViews) }
+            @MainActor func texts() -> [String] { allViews(h).compactMap { ($0 as? _TextView)?.storage.string } }
+            let deadline = Date(timeIntervalSinceNow: 2)
+            while !texts().contains("drop: from outside") && Date() < deadline {
+                _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02))
+                h.layoutSubtreeIfNeeded()
+            }
+            XCTAssertTrue(texts().contains("drop: from outside"), texts().joined(separator: "|"))
+            w.close()
+        }
+    }
+}

@@ -66,6 +66,8 @@ public protocol PlatformBackend: AnyObject {
     /// Frame/content conversion for a window that does not exist yet.
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
+    /// Drags to and from other applications (see DragDrop.swift); nil when the platform has none.
+    var dragDrop: (any PlatformDragDrop)? { get }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.
@@ -135,6 +137,13 @@ public protocol PlatformWindowOwner: AnyObject {
     /// An input event for this window, already translated into an `NSEvent` whose
     /// `locationInWindow` is in content coordinates.
     func platformWindowDispatch(_ event: NSEvent)
+    /// A drag the window system runs entered the content area (see DragDrop.swift). The
+    /// answers are the operation the destination under the pointer would perform.
+    func platformDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation
+    func platformDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation
+    func platformDragExited()
+    /// The drag was released here; returns the operation performed ([] when refused).
+    func platformDrop(_ drag: PlatformDragInfo) -> NSDragOperation
 }
 
 public struct PlatformFileDialogOptions: Sendable {

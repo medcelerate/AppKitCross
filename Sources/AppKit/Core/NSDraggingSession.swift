@@ -9,7 +9,7 @@ import CoreGraphics
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsession
 open class NSDraggingSession: NSObject {
-    nonisolated(unsafe) private static var _nextSequenceNumber = 1
+    nonisolated(unsafe) internal static var _nextSequenceNumber = 1
 
     internal let _items: [NSDraggingItem]
     internal let _pasteboard: NSPasteboard
@@ -30,6 +30,17 @@ open class NSDraggingSession: NSObject {
         super.init()
         _ = pb.clearContents()
         pb.writeObjects(items.map { $0._makePasteboardItem(for: pb) })
+    }
+
+    /// A session over an existing pasteboard (drags from other applications, whose
+    /// items load their data from the window system on demand).
+    internal init(pasteboard: NSPasteboard, items: [NSDraggingItem], source: AnyObject?) {
+        _items = items
+        _source = source
+        _sequenceNumber = NSDraggingSession._nextSequenceNumber
+        NSDraggingSession._nextSequenceNumber += 1
+        _pasteboard = pasteboard
+        super.init()
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsession/animatestostartingpositionsoncancelorfail

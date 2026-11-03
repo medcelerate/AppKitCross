@@ -67,7 +67,7 @@ Cairo and Pango):
 ```bash
 docker build -t appkitwin-linux -f tools/linux/Dockerfile .
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash -c "swift build; APPKITWIN_HOST_BACKEND=1 swift test"
-docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # HelloWindow under Xvfb, screenshots
+docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard) and HelloWindow under Xvfb
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh --wayland  # the same under a headless sway
 ```
 

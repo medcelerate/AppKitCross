@@ -9,7 +9,7 @@ are concrete and testable.
 |---|---|
 | M0 Foundation | done |
 | M1 Window and drawing | done, verified on Windows |
-| M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session; menu pop-ups (`NSMenu.popUp`, `popUpContextMenu`, `NSView.menu` on right click) and `NSPopUpButton` drawn by the package in non-activating windows; drag and drop within the application (`beginDraggingSession`, `registerForDraggedTypes`, the NSDraggingDestination messages, a drag image window; ADR-0011), drags to and from other applications pending per platform; the Win32, X11 and Wayland event pumps service the main dispatch queue and RunLoop timers (DispatchQueue.main, @MainActor hops, Timer) |
+| M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session; menu pop-ups (`NSMenu.popUp`, `popUpContextMenu`, `NSView.menu` on right click) and `NSPopUpButton` drawn by the package in non-activating windows; drag and drop (`beginDraggingSession`, `registerForDraggedTypes`, the NSDraggingDestination messages; ADR-0011) within the application and with other applications: OLE on Windows, XDND on X11 (tested end to end in the container against a second X client), the Wayland data device; the same selection machinery gives Linux its system clipboard; the Win32, X11 and Wayland event pumps service the main dispatch queue and RunLoop timers (DispatchQueue.main, @MainActor hops, Timer) |
 | M3a DXGI swap chain | done, verified on Windows (PR #1) |
 | M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |
@@ -296,11 +296,18 @@ Wayland: client-side decorations (compositors without xdg-decoration show a bare
 surface), window positions (`frame.origin` is never honoured; `mouseLocation` is relative
 to the window under the pointer), `makeKey`/`orderBack` (no focus requests; xdg-activation
 not used), key repeat, touch and tablet input, fractional scaling, the cursor-shape
-protocol, Wayland clipboard/data-device (the pasteboard stays in-process), drag and drop,
-IME (text-input-v3), `wp_viewporter`, and a GPU path.
+protocol, IME (text-input-v3), `wp_viewporter`, and a GPU path.
 
-Open on Linux: X11 selections and Wayland data devices for the pasteboard, JPEG via
-gdk-pixbuf, IME, a GPU path (Vulkan) for the Metal module.
+Selections and drag and drop (2026-11-03, ADR-0011 stage B): the X11 pasteboard is the
+CLIPBOARD selection (served from a hidden selection window; TARGETS, TIMESTAMP and INCR
+on the way in) and drags use XDND 5 in both directions; on Wayland the clipboard and
+drags go through the seat's data device (`wl_data_device_manager` v3, data sources
+answering `send` over pipes, offers read the same way, an shm icon surface for the drag
+image). `X11DragDropTests` and `X11ClipboardTests` run under Xvfb in `tools/linux/run.sh`
+against a second X client in the test process.
+
+Open on Linux: JPEG via gdk-pixbuf, IME, a Wayland seat in the container to drive data
+device tests.
 
 ## M10: SwiftUI stack modules
 

@@ -5,7 +5,8 @@
 // the X11 `LinuxBackend` remains the fallback. One wl_display, an event loop over poll()
 // that also serves posted blocks and the Core Animation frame clock; surface frame
 // callbacks fire the clock early when the compositor is actually presenting. Text,
-// images, the pasteboard and file dialogs are shared with the X11 backend.
+// images and file dialogs are shared with the X11 backend; the clipboard and drag and
+// drop go through the seat's data device (WaylandDataDevice.swift).
 
 #if os(Linux)
 import Foundation
@@ -59,6 +60,13 @@ final class WaylandBackend: PlatformBackend {
     private(set) var pointerFocus: WaylandWindow?
     private(set) var pointerPosition = NSPoint.zero     // surface-local, points, y down
     private var pointerEnterSerial: UInt32 = 0
+    /// Serials the data device needs: the last button press (start_drag) and the last
+    /// input event of any kind (set_selection).
+    private(set) var lastButtonSerial: UInt32 = 0
+    private(set) var lastInputSerial: UInt32 = 0
+    /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
+    private(set) var dataDevice: WaylandDataDevice!
+    var dragDrop: (any PlatformDragDrop)? { dataDevice }
     private var pendingAxis = (x: CGFloat(0), y: CGFloat(0), time: UInt32(0), has: false)
 
     // Cursor
@@ -91,6 +99,7 @@ final class WaylandBackend: PlatformBackend {
         image = LinuxImageBackend()
         var fds: [Int32] = [-1, -1]
         if pipe(&fds) == 0 { wakePipe = fds }
+        dataDevice = WaylandDataDevice(backend: self)
         registry = wl_display_get_registry(d)
         let registryListener = WaylandBackend.listener(wl_registry_listener(
             global: { data, registry, name, interface, version in
@@ -168,6 +177,8 @@ final class WaylandBackend: PlatformBackend {
             xdg_wm_base_add_listener(wmBase, wmListener, opaque)
         case "zxdg_decoration_manager_v1":
             decorationManager = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
+        case "wl_data_device_manager":
+            dataDevice.managerAdded(name: name, version: version)
         default:
             break
         }
@@ -182,6 +193,7 @@ final class WaylandBackend: PlatformBackend {
     }
 
     private func seatCapabilities(_ caps: UInt32) {
+        dataDevice.seatDidChange()
         let hasPointer = caps & UInt32(WL_SEAT_CAPABILITY_POINTER.rawValue) != 0
         let hasKeyboard = caps & UInt32(WL_SEAT_CAPABILITY_KEYBOARD.rawValue) != 0
         if hasPointer && pointer == nil {
@@ -331,7 +343,7 @@ final class WaylandBackend: PlatformBackend {
 
     let text: any PlatformTextBackend
     let image: any PlatformImageBackend
-    let systemPasteboard: any PlatformPasteboard = LinuxPasteboard()
+    var systemPasteboard: any PlatformPasteboard { dataDevice }
 
     func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
         LinuxBackend.runZenity(options)
@@ -433,9 +445,13 @@ final class WaylandBackend: PlatformBackend {
             guard let backend = WaylandBackend.from(data) else { return }
             MainActor.assumeIsolated { backend.pointerMoved(time: time, x: wl_fixed_to_double(sx), y: wl_fixed_to_double(sy)) }
         },
-        button: { data, _, _, time, button, state in
+        button: { data, _, serial, time, button, state in
             guard let backend = WaylandBackend.from(data) else { return }
-            MainActor.assumeIsolated { backend.pointerButton(time: time, button: button, pressed: state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue)) }
+            MainActor.assumeIsolated {
+                backend.lastInputSerial = serial
+                if state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue) { backend.lastButtonSerial = serial }
+                backend.pointerButton(time: time, button: button, pressed: state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue))
+            }
         },
         axis: { data, _, time, axis, value in
             guard let backend = WaylandBackend.from(data) else { return }
@@ -453,6 +469,7 @@ final class WaylandBackend: PlatformBackend {
 
     private func pointerEntered(serial: UInt32, surface: OpaquePointer?, x: Double, y: Double) {
         pointerEnterSerial = serial
+        lastInputSerial = serial
         pointerFocus = window(for: surface)
         pointerPosition = NSPoint(x: x, y: y)
         applyCursor()
@@ -498,15 +515,18 @@ final class WaylandBackend: PlatformBackend {
         },
         enter: { data, _, serial, surface, _ in
             guard let backend = WaylandBackend.from(data) else { return }
-            MainActor.assumeIsolated { backend.keyboardEntered(surface: surface) }
+            MainActor.assumeIsolated { backend.lastInputSerial = serial; backend.keyboardEntered(surface: surface) }
         },
         leave: { data, _, _, surface in
             guard let backend = WaylandBackend.from(data) else { return }
             MainActor.assumeIsolated { backend.keyboardLeft(surface: surface) }
         },
-        key: { data, _, _, time, key, state in
+        key: { data, _, serial, time, key, state in
             guard let backend = WaylandBackend.from(data) else { return }
-            MainActor.assumeIsolated { backend.key(time: time, key: key, pressed: state == UInt32(WL_KEYBOARD_KEY_STATE_PRESSED.rawValue)) }
+            MainActor.assumeIsolated {
+                backend.lastInputSerial = serial
+                backend.key(time: time, key: key, pressed: state == UInt32(WL_KEYBOARD_KEY_STATE_PRESSED.rawValue))
+            }
         },
         modifiers: { data, _, _, depressed, latched, locked, group in
             guard let backend = WaylandBackend.from(data) else { return }

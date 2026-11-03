@@ -52,6 +52,12 @@ open class NSPasteboard: NSObject {
         }
     }
 
+    /// Replaces the items without touching the system clipboard (drag pasteboards).
+    internal func _setItems(_ items: [NSPasteboardItem]) {
+        _items = items
+        _localChangeCount += 1
+    }
+
     private var _firstItem: NSPasteboardItem {
         if let i = _items.first { return i }
         let i = NSPasteboardItem()

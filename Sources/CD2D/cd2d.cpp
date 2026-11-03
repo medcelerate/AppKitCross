@@ -14,6 +14,8 @@
 #include <wincodec.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
+#include <shellapi.h>
+#include <ole2.h>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -1108,3 +1110,361 @@ uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------- Drag and drop (OLE)
+
+namespace {
+
+CD2DDragCallbacks g_dnd = {};
+bool g_dndInitialized = false;
+IDataObject *g_dndSourceObject = nullptr;        // the data object of the drag this application runs
+IDropTargetHelper *g_dropTargetHelper = nullptr;
+
+std::wstring utf16(const uint16_t *s) { return s ? std::wstring(reinterpret_cast<const wchar_t *>(s)) : std::wstring(); }
+
+std::string utf8FromWide(const wchar_t *s, int length) {
+    if (!s || length == 0) return std::string();
+    int n = WideCharToMultiByte(CP_UTF8, 0, s, length, nullptr, 0, nullptr, nullptr);
+    std::string out(n > 0 ? n : 0, '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, s, length, &out[0], n, nullptr, nullptr);
+    return out;
+}
+
+std::wstring wideFromUTF8(const uint8_t *s, uint32_t length) {
+    if (!s || length == 0) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char *>(s), (int)length, nullptr, 0);
+    std::wstring out(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char *>(s), (int)length, &out[0], n);
+    return out;
+}
+
+HGLOBAL globalFrom(const void *bytes, size_t length) {
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, length ? length : 1);
+    if (!h) return nullptr;
+    void *p = GlobalLock(h);
+    if (p && length) memcpy(p, bytes, length);
+    GlobalUnlock(h);
+    return h;
+}
+
+HGLOBAL duplicateGlobal(HGLOBAL h) {
+    if (!h) return nullptr;
+    SIZE_T size = GlobalSize(h);
+    const void *src = GlobalLock(h);
+    HGLOBAL copy = globalFrom(src, size);
+    GlobalUnlock(h);
+    return copy;
+}
+
+CLIPFORMAT appKitFormat(const std::wstring &type) {
+    std::wstring name = L"AppKitWin:" + type;
+    return (CLIPFORMAT)RegisterClipboardFormatW(name.c_str());
+}
+
+/// The data object this application offers: formats held as HGLOBALs (or whatever a
+/// caller stored through SetData, which the shell drag-image helper does).
+class DataObject : public IDataObject {
+    struct Entry { FORMATETC format; STGMEDIUM medium; };
+    std::vector<Entry> entries;
+    LONG refs = 1;
+public:
+    ~DataObject() { for (auto &e : entries) ReleaseStgMedium(&e.medium); }
+
+    void addGlobal(CLIPFORMAT cf, HGLOBAL h) {
+        FORMATETC f = { cf, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        STGMEDIUM m = {}; m.tymed = TYMED_HGLOBAL; m.hGlobal = h;
+        entries.push_back({ f, m });
+    }
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_IDataObject) { *ppv = static_cast<IDataObject *>(this); AddRef(); return S_OK; }
+        *ppv = nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() override { ULONG r = InterlockedDecrement(&refs); if (r == 0) delete this; return r; }
+
+    Entry *find(FORMATETC *f) {
+        for (auto &e : entries) {
+            if (e.format.cfFormat == f->cfFormat && (e.format.tymed & f->tymed) && (e.format.dwAspect & f->dwAspect)) return &e;
+        }
+        return nullptr;
+    }
+
+    // IDataObject
+    HRESULT STDMETHODCALLTYPE GetData(FORMATETC *f, STGMEDIUM *m) override {
+        if (!f || !m) return E_POINTER;
+        Entry *e = find(f);
+        if (!e) return DV_E_FORMATETC;
+        *m = {};
+        m->tymed = e->medium.tymed;
+        switch (e->medium.tymed) {
+        case TYMED_HGLOBAL: m->hGlobal = duplicateGlobal(e->medium.hGlobal); return m->hGlobal ? S_OK : E_OUTOFMEMORY;
+        case TYMED_ISTREAM: m->pstm = e->medium.pstm; if (m->pstm) m->pstm->AddRef(); return S_OK;
+        case TYMED_GDI: case TYMED_MFPICT: case TYMED_ENHMF:
+            // Hand the stored handle out without transferring ownership: the caller's
+            // ReleaseStgMedium then releases `pUnkForRelease` (us) instead of the handle.
+            m->hGlobal = e->medium.hGlobal; m->pUnkForRelease = this; AddRef(); return S_OK;
+        default: return DV_E_TYMED;
+        }
+    }
+    HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC *, STGMEDIUM *) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC *f) override { return f && find(f) ? S_OK : DV_E_FORMATETC; }
+    HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC *, FORMATETC *out) override { if (out) out->ptd = nullptr; return DATA_S_SAMEFORMATETC; }
+    HRESULT STDMETHODCALLTYPE SetData(FORMATETC *f, STGMEDIUM *m, BOOL release) override {
+        if (!f || !m) return E_POINTER;
+        Entry *e = find(f);
+        STGMEDIUM stored = {};
+        if (release) {
+            stored = *m;
+        } else {
+            stored.tymed = m->tymed;
+            if (m->tymed == TYMED_HGLOBAL) stored.hGlobal = duplicateGlobal(m->hGlobal);
+            else if (m->tymed == TYMED_ISTREAM) { stored.pstm = m->pstm; if (stored.pstm) stored.pstm->AddRef(); }
+            else return DV_E_TYMED;
+        }
+        if (e) { ReleaseStgMedium(&e->medium); e->medium = stored; e->format = *f; }
+        else entries.push_back({ *f, stored });
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC **out) override {
+        if (!out) return E_POINTER;
+        if (direction != DATADIR_GET) return E_NOTIMPL;
+        std::vector<FORMATETC> formats;
+        for (auto &e : entries) formats.push_back(e.format);
+        return SHCreateStdEnumFmtEtc((UINT)formats.size(), formats.data(), out);
+    }
+    HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC *, DWORD, IAdviseSink *, DWORD *) override { return OLE_E_ADVISENOTSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+    HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA **) override { return OLE_E_ADVISENOTSUPPORTED; }
+};
+
+class DropSource : public IDropSource {
+    LONG refs = 1;
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_IDropSource) { *ppv = static_cast<IDropSource *>(this); AddRef(); return S_OK; }
+        *ppv = nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() override { ULONG r = InterlockedDecrement(&refs); if (r == 0) delete this; return r; }
+    HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escapePressed, DWORD keyState) override {
+        if (g_dnd.sourceTick) g_dnd.sourceTick(g_dnd.context);
+        if (escapePressed) return DRAGDROP_S_CANCEL;
+        if (!(keyState & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON))) return DRAGDROP_S_DROP;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
+};
+
+class DropTarget : public IDropTarget {
+    LONG refs = 1;
+    HWND hwnd;
+public:
+    explicit DropTarget(HWND h) : hwnd(h) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) { *ppv = static_cast<IDropTarget *>(this); AddRef(); return S_OK; }
+        *ppv = nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() override { ULONG r = InterlockedDecrement(&refs); if (r == 0) delete this; return r; }
+
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject *data, DWORD keyState, POINTL pt, DWORD *effect) override {
+        if (!effect) return E_POINTER;
+        if (g_dropTargetHelper) { POINT p = { pt.x, pt.y }; g_dropTargetHelper->DragEnter(hwnd, data, &p, *effect); }
+        uint32_t result = g_dnd.enter ? g_dnd.enter(g_dnd.context, hwnd, reinterpret_cast<CD2DDragData *>(data), data == g_dndSourceObject, pt.x, pt.y, keyState, *effect) : DROPEFFECT_NONE;
+        *effect = result;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL pt, DWORD *effect) override {
+        if (!effect) return E_POINTER;
+        if (g_dropTargetHelper) { POINT p = { pt.x, pt.y }; g_dropTargetHelper->DragOver(&p, *effect); }
+        *effect = g_dnd.over ? g_dnd.over(g_dnd.context, hwnd, pt.x, pt.y, keyState, *effect) : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE DragLeave() override {
+        if (g_dropTargetHelper) g_dropTargetHelper->DragLeave();
+        if (g_dnd.leave) g_dnd.leave(g_dnd.context, hwnd);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject *data, DWORD keyState, POINTL pt, DWORD *effect) override {
+        if (!effect) return E_POINTER;
+        if (g_dropTargetHelper) { POINT p = { pt.x, pt.y }; g_dropTargetHelper->Drop(data, &p, *effect); }
+        *effect = g_dnd.drop ? g_dnd.drop(g_dnd.context, hwnd, reinterpret_cast<CD2DDragData *>(data), data == g_dndSourceObject, pt.x, pt.y, keyState, *effect) : DROPEFFECT_NONE;
+        return S_OK;
+    }
+};
+
+struct ReadEntry { uint32_t item; std::wstring type; std::string bytes; };
+
+} // namespace
+
+bool cd2d_dnd_initialize(const CD2DDragCallbacks *callbacks) {
+    if (callbacks) g_dnd = *callbacks;
+    if (g_dndInitialized) return true;
+    HRESULT hr = OleInitialize(nullptr);
+    g_dndInitialized = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+    if (g_dndInitialized && !g_dropTargetHelper) {
+        CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&g_dropTargetHelper));
+    }
+    return g_dndInitialized;
+}
+
+bool cd2d_dnd_register(void *hwnd) {
+    if (!g_dndInitialized || !hwnd) return false;
+    DropTarget *target = new DropTarget(static_cast<HWND>(hwnd));
+    HRESULT hr = RegisterDragDrop(static_cast<HWND>(hwnd), target);
+    target->Release();      // RegisterDragDrop holds its own reference
+    return SUCCEEDED(hr);
+}
+
+void cd2d_dnd_revoke(void *hwnd) {
+    if (g_dndInitialized && hwnd) RevokeDragDrop(static_cast<HWND>(hwnd));
+}
+
+uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t allowedEffects,
+                          const uint8_t *imageBGRA, uint32_t width, uint32_t height, int32_t hotspotX, int32_t hotspotY) {
+    if (!g_dndInitialized) return DROPEFFECT_NONE;
+    DataObject *object = new DataObject();
+    // Files travel together as one CF_HDROP; everything else is one format per entry.
+    std::vector<std::wstring> paths;
+    for (uint32_t i = 0; i < count; i++) {
+        const CD2DDragEntry &e = entries[i];
+        std::wstring type = utf16(e.type);
+        if (type == L"public.file-url") {
+            paths.push_back(wideFromUTF8(e.bytes, e.length));
+        } else if (type == L"public.utf8-plain-text") {
+            std::wstring text = wideFromUTF8(e.bytes, e.length);
+            object->addGlobal(CF_UNICODETEXT, globalFrom(text.c_str(), (text.size() + 1) * sizeof(wchar_t)));
+        } else {
+            object->addGlobal(appKitFormat(type), globalFrom(e.bytes, e.length));
+        }
+    }
+    if (!paths.empty()) {
+        size_t chars = 1;
+        for (auto &p : paths) chars += p.size() + 1;
+        size_t size = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+        std::vector<uint8_t> buffer(size, 0);
+        DROPFILES *df = reinterpret_cast<DROPFILES *>(buffer.data());
+        df->pFiles = sizeof(DROPFILES);
+        df->fWide = TRUE;
+        wchar_t *out = reinterpret_cast<wchar_t *>(buffer.data() + sizeof(DROPFILES));
+        for (auto &p : paths) { memcpy(out, p.c_str(), (p.size() + 1) * sizeof(wchar_t)); out += p.size() + 1; }
+        *out = 0;
+        object->addGlobal(CF_HDROP, globalFrom(buffer.data(), buffer.size()));
+    }
+    if (imageBGRA && width > 0 && height > 0) {
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = (LONG)width;
+        bi.bmiHeader.biHeight = -(LONG)height;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        void *bits = nullptr;
+        HDC dc = GetDC(nullptr);
+        HBITMAP bitmap = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        ReleaseDC(nullptr, dc);
+        if (bitmap && bits) {
+            memcpy(bits, imageBGRA, (size_t)width * height * 4);
+            IDragSourceHelper *helper = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&helper))) && helper) {
+                SHDRAGIMAGE image = {};
+                image.sizeDragImage = { (LONG)width, (LONG)height };
+                image.ptOffset = { hotspotX, hotspotY };
+                image.hbmpDragImage = bitmap;
+                image.crColorKey = CLR_NONE;
+                if (FAILED(helper->InitializeFromBitmap(&image, object))) DeleteObject(bitmap);   // success: the helper owns it
+                helper->Release();
+            } else {
+                DeleteObject(bitmap);
+            }
+        } else if (bitmap) {
+            DeleteObject(bitmap);
+        }
+    }
+    DropSource *source = new DropSource();
+    DWORD effect = DROPEFFECT_NONE;
+    g_dndSourceObject = object;
+    HRESULT hr = DoDragDrop(object, source, allowedEffects, &effect);
+    g_dndSourceObject = nullptr;
+    source->Release();
+    object->Release();
+    return hr == DRAGDROP_S_DROP ? effect : DROPEFFECT_NONE;
+}
+
+CD2DDragEntry *cd2d_drag_data_read(CD2DDragData *data, uint32_t *count) {
+    if (count) *count = 0;
+    IDataObject *object = reinterpret_cast<IDataObject *>(data);
+    if (!object || !count) return nullptr;
+    std::vector<ReadEntry> read;
+    IEnumFORMATETC *formats = nullptr;
+    if (FAILED(object->EnumFormatEtc(DATADIR_GET, &formats)) || !formats) return nullptr;
+    FORMATETC f;
+    bool haveText = false;
+    while (formats->Next(1, &f, nullptr) == S_OK) {
+        if (!(f.tymed & TYMED_HGLOBAL)) continue;
+        std::wstring type;
+        if (f.cfFormat == CF_UNICODETEXT) { if (haveText) continue; type = L"public.utf8-plain-text"; }
+        else if (f.cfFormat == CF_HDROP) type = L"public.file-url";
+        else {
+            wchar_t name[256] = {};
+            if (GetClipboardFormatNameW(f.cfFormat, name, 256) == 0) continue;
+            std::wstring n(name);
+            if (n.rfind(L"AppKitWin:", 0) != 0) continue;
+            type = n.substr(10);
+        }
+        FORMATETC request = { f.cfFormat, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+        STGMEDIUM medium = {};
+        if (FAILED(object->GetData(&request, &medium))) continue;
+        if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal) {
+            if (f.cfFormat == CF_HDROP) {
+                HDROP drop = static_cast<HDROP>(medium.hGlobal);
+                UINT n = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+                for (UINT i = 0; i < n; i++) {
+                    UINT len = DragQueryFileW(drop, i, nullptr, 0);
+                    std::wstring path(len + 1, L'\0');
+                    DragQueryFileW(drop, i, &path[0], len + 1);
+                    path.resize(len);
+                    read.push_back({ i, type, utf8FromWide(path.c_str(), (int)path.size()) });
+                }
+            } else {
+                const void *p = GlobalLock(medium.hGlobal);
+                SIZE_T size = GlobalSize(medium.hGlobal);
+                if (p) {
+                    if (f.cfFormat == CF_UNICODETEXT) {
+                        const wchar_t *w = static_cast<const wchar_t *>(p);
+                        size_t len = wcsnlen(w, size / sizeof(wchar_t));
+                        read.push_back({ 0, type, utf8FromWide(w, (int)len) });
+                        haveText = true;
+                    } else {
+                        read.push_back({ 0, type, std::string(static_cast<const char *>(p), size) });
+                    }
+                    GlobalUnlock(medium.hGlobal);
+                }
+            }
+        }
+        ReleaseStgMedium(&medium);
+    }
+    formats->Release();
+    if (read.empty()) return nullptr;
+    CD2DDragEntry *out = new CD2DDragEntry[read.size()];
+    for (size_t i = 0; i < read.size(); i++) {
+        uint16_t *type = new uint16_t[read[i].type.size() + 1];
+        memcpy(type, read[i].type.c_str(), (read[i].type.size() + 1) * sizeof(uint16_t));
+        uint8_t *bytes = new uint8_t[read[i].bytes.size() + 1];
+        memcpy(bytes, read[i].bytes.data(), read[i].bytes.size());
+        out[i] = { read[i].item, type, bytes, (uint32_t)read[i].bytes.size() };
+    }
+    *count = (uint32_t)read.size();
+    return out;
+}
+
+void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count) {
+    if (!entries) return;
+    for (uint32_t i = 0; i < count; i++) { delete[] entries[i].type; delete[] entries[i].bytes; }
+    delete[] entries;
+}

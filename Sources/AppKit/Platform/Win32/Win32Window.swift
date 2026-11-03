@@ -40,6 +40,7 @@ final class Win32Window: PlatformWindow {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
         dpi = GetDpiForWindow(hwnd)
         backend.register(self)
+        backend.win32DragDrop.register(hwnd)
         if usesCustomFrame {
             // CreateWindowExW sent WM_NCCALCSIZE before the window procedure knew this
             // object; recalculate so the client area covers the window from the start.
@@ -293,6 +294,19 @@ final class Win32Window: PlatformWindow {
     }
 
     /// Client pixel coordinates -> AppKit content points.
+    /// Content coordinates for a point in screen pixels (OLE drag positions).
+    func contentPoint(screenX: Int32, screenY: Int32) -> NSPoint {
+        var pt = POINT(x: screenX, y: screenY)
+        if let hwnd { ScreenToClient(hwnd, &pt) }
+        return contentPoint(x: pt.x, y: pt.y)
+    }
+
+    // Drags delivered by OLE (Win32DragDrop.swift) reach the owner through these.
+    func ownerDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragEntered(drag) ?? [] }
+    func ownerDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragUpdated(drag) ?? [] }
+    func ownerDragExited() { owner?.platformDragExited() }
+    func ownerDrop(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDrop(drag) ?? [] }
+
     private func contentPoint(x: Int32, y: Int32) -> NSPoint {
         let h = contentSize.height
         return NSPoint(x: CGFloat(x) / scale, y: h - CGFloat(y) / scale)
@@ -767,7 +781,7 @@ final class Win32Window: PlatformWindow {
             return nil
         case WM_DESTROY:
             if NSView._traceInvalidation { NSView._trace("win32 WM_DESTROY '\(title)' destroying \(destroying)") }
-            if let hwnd { backend.menuBar.windowDestroyed(hwnd) }
+            if let hwnd { backend.win32DragDrop.revoke(hwnd); backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
             tearDownLayerHosting()
             discardRenderTarget()

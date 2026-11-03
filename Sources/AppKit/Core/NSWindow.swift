@@ -326,6 +326,10 @@ import CoreText
         context.restoreGState()
     }
 
+    public func platformDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation { _NSPlatformDragDelivery.entered(drag, window: self) }
+    public func platformDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation { _NSPlatformDragDelivery.updated(drag, window: self) }
+    public func platformDragExited() { _NSPlatformDragDelivery.exited(window: self) }
+    public func platformDrop(_ drag: PlatformDragInfo) -> NSDragOperation { _NSPlatformDragDelivery.drop(drag, window: self) }
     public func platformWindowDispatch(_ event: NSEvent) {
         NSApplication.shared.sendEvent(event)
     }

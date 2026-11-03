@@ -188,6 +188,40 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, con
                       uint16_t **paths, uint32_t *length);
 void cd2d_file_dialog_free(uint16_t *paths);
 
+// Drag and drop (OLE; ADR-0011 stage B)
+/// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit
+/// pasteboard type; "public.utf8-plain-text" travels as CF_UNICODETEXT, "public.file-url"
+/// (whose bytes are a UTF-8 file system path here) as CF_HDROP, and every other type as the
+/// registered clipboard format "AppKitWin:<type>".
+typedef struct CD2DDragEntry { uint32_t item; const uint16_t *type; const uint8_t *bytes; uint32_t length; } CD2DDragEntry;
+typedef struct CD2DDragData CD2DDragData;    // an IDataObject being delivered to a window
+typedef struct CD2DDragCallbacks {
+    void *context;
+    /// Destination messages for a registered HWND: `x`,`y` are screen pixels, `keyState` the
+    /// MK_* flags, `allowed` the DROPEFFECT mask the source permits. Each returns the
+    /// DROPEFFECT the window would perform (DROPEFFECT_NONE to refuse).
+    uint32_t (*enter)(void *context, void *hwnd, CD2DDragData *data, bool fromThisApplication, int32_t x, int32_t y, uint32_t keyState, uint32_t allowed);
+    uint32_t (*over)(void *context, void *hwnd, int32_t x, int32_t y, uint32_t keyState, uint32_t allowed);
+    void (*leave)(void *context, void *hwnd);
+    uint32_t (*drop)(void *context, void *hwnd, CD2DDragData *data, bool fromThisApplication, int32_t x, int32_t y, uint32_t keyState, uint32_t allowed);
+    /// Called from OLE's loop while this application is the source (every pointer or key change).
+    void (*sourceTick)(void *context);
+} CD2DDragCallbacks;
+/// Initialises OLE on this thread and installs the callbacks (once per process).
+bool cd2d_dnd_initialize(const CD2DDragCallbacks *callbacks);
+/// Makes a window a drop target / stops it being one.
+bool cd2d_dnd_register(void *hwnd);
+void cd2d_dnd_revoke(void *hwnd);
+/// Runs an OLE drag to completion (modal: OLE pumps this thread's messages meanwhile).
+/// The optional image is premultiplied BGRA, top row first, shown with its `hotspot`
+/// under the pointer. Returns the DROPEFFECT performed (DROPEFFECT_NONE when cancelled).
+uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t allowedEffects,
+                          const uint8_t *imageBGRA, uint32_t width, uint32_t height, int32_t hotspotX, int32_t hotspotY);
+/// Reads a delivered data object as entries (CF_UNICODETEXT, CF_HDROP with one item per
+/// file, and the AppKitWin:* formats). Free with cd2d_drag_data_free_entries.
+CD2DDragEntry *cd2d_drag_data_read(CD2DDragData *data, uint32_t *count);
+void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count);
+
 // DirectWrite
 typedef struct CD2DTextFormat CD2DTextFormat;
 typedef struct CD2DTextLayout CD2DTextLayout;

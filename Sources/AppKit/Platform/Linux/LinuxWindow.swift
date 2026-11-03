@@ -49,6 +49,11 @@ final class LinuxWindow: PlatformWindow {
                      KeyPressMask | KeyReleaseMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask)
         var protocols = [backend.wmDeleteWindow]
         XSetWMProtocols(d, xid, &protocols, 1)
+        // Drags from other applications (XDND version 5).
+        var xdndVersion: [UInt] = [5]
+        xdndVersion.withUnsafeMutableBufferPointer { buf in
+            _ = XChangeProperty(d, xid, backend.atom("XdndAware"), XA_ATOM, 32, PropModeReplace, UnsafeRawPointer(buf.baseAddress!).assumingMemoryBound(to: UInt8.self), 1)
+        }
         if styleMask.contains(.nonactivatingPanel) {
             // Pop-ups (menus) bypass the window manager: no decorations, no focus, on top.
             var attrs = XSetWindowAttributes()
@@ -264,16 +269,16 @@ final class LinuxWindow: PlatformWindow {
     }
 
     private func modifierFlags(_ state: UInt32) -> NSEvent.ModifierFlags {
-        var flags: NSEvent.ModifierFlags = []
-        if state & UInt32(ShiftMask) != 0 { flags.insert(.shift) }
-        if state & UInt32(LockMask) != 0 { flags.insert(.capsLock) }
-        // Ctrl plays Command (as on Windows) so AppKit key equivalents land on Ctrl+key; Super maps to .control.
-        if state & UInt32(ControlMask) != 0 { flags.insert(.command) }
-        if state & UInt32(Mod1Mask) != 0 { flags.insert(.option) }
-        if state & UInt32(Mod4Mask) != 0 { flags.insert(.control) }
+        let flags = LinuxBackend.modifierFlags(fromState: state)
         NSEvent._currentModifierFlags = flags
         return flags
     }
+
+    // Drags delivered by XDND (LinuxDragDrop.swift) reach the owner through these.
+    func ownerDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragEntered(drag) ?? [] }
+    func ownerDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragUpdated(drag) ?? [] }
+    func ownerDragExited() { owner?.platformDragExited() }
+    func ownerDrop(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDrop(drag) ?? [] }
 
     private func seconds(_ t: Time) -> TimeInterval { TimeInterval(t) / 1000 }
 
@@ -359,6 +364,7 @@ final class LinuxWindow: PlatformWindow {
             if !destroying { destroying = true; owner?.platformWindowWillClose() }
             xid = 0
         case ClientMessage:
+            if backend.x11DragDrop.handle(&event, window: self) { return }
             if Atom(event.xclient.data.l.0) == backend.wmDeleteWindow {
                 if owner?.platformWindowShouldClose() ?? true {
                     if let owner { owner.platformWindowWillClose() } else { close() }
@@ -372,6 +378,7 @@ final class LinuxWindow: PlatformWindow {
             owner?.platformWindowDidResignKey()
         case ButtonPress:
             let b = event.xbutton
+            backend.lastEventTime = b.time
             switch b.button {
             case 4, 5, 6, 7:
                 let vertical = b.button == 4 || b.button == 5
@@ -389,6 +396,7 @@ final class LinuxWindow: PlatformWindow {
             }
         case ButtonRelease:
             let b = event.xbutton
+            backend.lastEventTime = b.time
             guard b.button <= 3 else { return }
             let (type, bit, number): (NSEvent.EventType, Int, Int) = b.button == 1 ? (.leftMouseUp, 1, 0) : b.button == 3 ? (.rightMouseUp, 2, 1) : (.otherMouseUp, 4, 2)
             pressedButtons &= ~bit
@@ -396,13 +404,16 @@ final class LinuxWindow: PlatformWindow {
             mouse(type, x: b.x, y: b.y, state: b.state, time: b.time, button: number, clickCount: clickCount)
         case MotionNotify:
             let m = event.xmotion
+            backend.lastEventTime = m.time
             if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, x: m.x, y: m.y, state: m.state, time: m.time, button: 0) }
             else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, x: m.x, y: m.y, state: m.state, time: m.time, button: 1) }
             else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, x: m.x, y: m.y, state: m.state, time: m.time, button: 2) }
             else { mouse(.mouseMoved, x: m.x, y: m.y, state: m.state, time: m.time, button: 0, clickCount: 0) }
         case KeyPress:
+            backend.lastEventTime = event.xkey.time
             key(.keyDown, event.xkey)
         case KeyRelease:
+            backend.lastEventTime = event.xkey.time
             key(.keyUp, event.xkey)
         default:
             break

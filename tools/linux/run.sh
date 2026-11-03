@@ -8,10 +8,12 @@ WAYLAND=0
 for arg in "$@"; do case "$arg" in --wayland) WAYLAND=1 ;; esac; done
 echo "== tests (host backend)"
 APPKITWIN_HOST_BACKEND=1 swift test 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:" | tail -12
-echo "== HelloWindow under Xvfb (X11 backend)"
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 export DISPLAY=:99
 sleep 1
+echo "== tests on the X11 backend under Xvfb (XDND, CLIPBOARD, the event pump)"
+swift test --filter "X11DragDropTests|X11ClipboardTests|MainQueueTests" 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:" | tail -6
+echo "== HelloWindow under Xvfb (X11 backend)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/HelloWindow &
 APP=$!
 sleep 3

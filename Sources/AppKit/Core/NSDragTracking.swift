@@ -1,8 +1,18 @@
-// Drag and drop tracking. A dragging session started from a view is driven in-process:
-// NSApplication hands every mouse and key event to the tracker, which moves the drag
-// image window, finds the destination view under the pointer (across this
-// application's windows, by registered types) and sends it the NSDraggingDestination
-// messages. Drags to and from other applications are the platform backends' half.
+// Drag and drop tracking (ADR-0011).
+//
+// A dragging session started from a view is tracked by `_NSDragTracker`. On platforms
+// where the application keeps the pointer during a drag (the host backend, X11), the
+// tracker takes every mouse and key event from `NSApplication.sendEvent`, moves the drag
+// image window, and drives the destinations itself; while the pointer is over no window
+// of this application it hands the position to the backend, which talks to other
+// applications' windows. On platforms that run drags themselves (OLE on Windows, the
+// Wayland data device) the tracker hands the drag over at the start and the backend
+// delivers it back to this application's windows through the `PlatformWindowOwner` drag
+// methods, exactly as it delivers drags from other applications.
+//
+// `_NSDragDestinationDriver` is the part both paths share: finding the destination view
+// under a point (by registered types, walking up from the hit view) and sending it the
+// NSDraggingDestination messages in AppKit's order.
 
 import Foundation
 #if canImport(CoreGraphics)
@@ -65,7 +75,8 @@ final class _NSDraggingInfo: NSObject, NSDraggingInfo {
 
 // MARK: Drag image window
 
-/// The translucent image that follows the pointer.
+/// The translucent image that follows the pointer on platforms where the application
+/// draws it itself.
 @MainActor
 final class _NSDragImageWindow: NSPanel {
     private let image: NSImage?
@@ -100,88 +111,44 @@ final class _NSDragImageView: NSView {
     }
 }
 
-// MARK: Tracker
+// MARK: Destinations
 
+/// Drives the NSDraggingDestination messages for one drag: finds the registered view
+/// under the pointer, sends entered/updated/exited as it changes, performs the drop, and
+/// tells every destination that saw the drag when it ends.
 @MainActor
-final class _NSDragTracker {
-    private(set) static var current: _NSDragTracker?
-    static var isDragging: Bool { current != nil }
-
-    let session: NSDraggingSession
+final class _NSDragDestinationDriver {
     let info: _NSDraggingInfo
-    private weak var source: (any NSDraggingSource)?
-    private weak var sourceView: NSView?
-    private var imageWindow: _NSDragImageWindow?
-    private var imageOffset: NSPoint = .zero         // pointer to the image frame's bottom-left, in points
-    private var destinationView: NSView?
+    private(set) var destinationView: NSView?
     private var destinationOperation: NSDragOperation = []
-    private var modifierMask: NSDragOperation = .every
-    private(set) var finished = false
-    private(set) var result: NSDragOperation = []
-    /// Set by an in-process destination that wants to be told when the drag ends.
     private var destinationsSeen: [NSView] = []
+    private var modifierMask: NSDragOperation = .every
+    /// `NSDraggingSource.ignoreModifierKeys`: the source wants the destination's answer unfiltered.
+    var ignoresModifierKeys = false
 
-    /// Starts a drag for `items` from `view`. The pointer is at `event`'s location.
-    static func begin(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource, view: NSView) -> NSDraggingSession {
-        current?.cancel()
-        let session = NSDraggingSession(items: items, source: source as AnyObject)
-        let t = _NSDragTracker(session: session, source: source, view: view, event: event)
-        current = t
-        return session
-    }
+    init(info: _NSDraggingInfo) { self.info = info }
 
-    private init(session: NSDraggingSession, source: any NSDraggingSource, view: NSView, event: NSEvent) {
-        self.session = session
-        self.source = source
-        self.sourceView = view
-        let mask = source.draggingSession(session, sourceOperationMaskFor: .withinApplication)
-        info = _NSDraggingInfo(session: session, source: source as AnyObject, mask: mask)
-        let screen = _NSDragTracker.screenPoint(of: event)
-        session._location = screen
-        // The image: the leader item's first component, or a placeholder of its frame.
-        let leader = session._items.indices.contains(session.draggingLeaderIndex) ? session._items[session.draggingLeaderIndex] : session._items.first
-        let frameInView = leader?.draggingFrame ?? NSRect(x: -8, y: -8, width: 16, height: 16)
-        let component = leader?.imageComponents?.first
-        let image = component?.contents as? NSImage
-        let size = frameInView.size == .zero ? NSSize(width: 16, height: 16) : frameInView.size
-        // Where the pointer sits inside the frame (frames are in the source view's space).
-        let pointerInView = view.convert(event.locationInWindow, from: nil)
-        let frameInWindow = view.convert(frameInView, to: nil)
-        _ = pointerInView
-        let pointerInWindow = event.locationInWindow
-        imageOffset = NSPoint(x: frameInWindow.minX - pointerInWindow.x, y: frameInWindow.minY - pointerInWindow.y)
-        if frameInView.size == .zero { imageOffset = NSPoint(x: -8, y: -8) }
-        let w = _NSDragImageWindow(image: image, size: size)
-        w.setFrame(NSRect(origin: NSPoint(x: screen.x + imageOffset.x, y: screen.y + imageOffset.y), size: size), display: false)
-        w.orderFront(nil)
-        imageWindow = w
-        source.draggingSession(session, willBeginAt: screen)
-        updateModifiers(event.modifierFlags)
-        // The drag may start over a destination already.
-        moved(to: screen, flags: event.modifierFlags)
-    }
-
-    private static func screenPoint(of event: NSEvent) -> NSPoint {
-        if let w = event.window { return w.convertPoint(toScreen: event.locationInWindow) }
-        return event.locationInWindow
-    }
-
-    private func updateModifiers(_ flags: NSEvent.ModifierFlags) {
-        if source?.ignoreModifierKeys(for: session) == true { modifierMask = .every; return }
+    func updateModifiers(_ flags: NSEvent.ModifierFlags) {
+        if ignoresModifierKeys { modifierMask = .every; return }
         if flags.contains(.option) { modifierMask = .copy }
         else if flags.contains(.control) { modifierMask = .link }
         else if flags.contains(.command) { modifierMask = .generic }
         else { modifierMask = .every }
     }
 
-    /// The registered destination view under a screen point, and its window.
-    private func destination(at point: NSPoint) -> (NSView, NSWindow)? {
-        let app = NSApplication.shared
+    /// The registered destination view under a screen point, searching `window` only
+    /// or, with nil, this application's windows front to back.
+    private func destination(at point: NSPoint, in window: NSWindow?) -> (NSView, NSWindow)? {
         var candidates: [NSWindow] = []
-        if let k = app.keyWindow { candidates.append(k) }
-        candidates += app.windows.reversed().filter { !candidates.contains($0) }
-        let types = session.draggingPasteboard.types ?? []
-        for w in candidates where w.isVisible && !(w is _NSDragImageWindow) && !(w is _NSMenuWindow) && w.frame.contains(point) {
+        if let window {
+            candidates = [window]
+        } else {
+            let app = NSApplication.shared
+            if let k = app.keyWindow { candidates.append(k) }
+            candidates += app.windows.reversed().filter { !candidates.contains($0) }
+        }
+        let types = info.session.draggingPasteboard.types ?? []
+        for w in candidates where w.isVisible && !(w is _NSDragImageWindow) && !(w is _NSMenuWindow) && (window != nil || w.frame.contains(point)) {
             guard let content = w.contentView else { continue }
             let local = w.convertPoint(fromScreen: point)
             var v: NSView? = content.hitTest(local) ?? content
@@ -194,34 +161,13 @@ final class _NSDragTracker {
         return nil
     }
 
-    /// Handles an event while dragging. Every event is consumed.
-    func handle(_ event: NSEvent) {
-        switch event.type {
-        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .mouseMoved:
-            moved(to: _NSDragTracker.screenPoint(of: event), flags: event.modifierFlags)
-        case .flagsChanged:
-            updateModifiers(event.modifierFlags)
-            moved(to: session._location, flags: event.modifierFlags)
-        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            moved(to: _NSDragTracker.screenPoint(of: event), flags: event.modifierFlags)
-            drop()
-        case .keyDown:
-            if event.keyCode == 53 { cancel() }
-        default:
-            break
-        }
-    }
-
-    private func moved(to point: NSPoint, flags: NSEvent.ModifierFlags) {
-        session._location = point
-        if let w = imageWindow {
-            w.setFrame(NSRect(origin: NSPoint(x: point.x + imageOffset.x, y: point.y + imageOffset.y), size: w.frame.size), display: true)
-        }
-        source?.draggingSession(session, movedTo: point)
-        let hit = destination(at: point)
-        if let (view, window) = hit {
-            info.destinationWindow = window
-            info.locationInDestination = window.convertPoint(fromScreen: point)
+    /// Tracks the pointer to `point`: enters, updates or exits destinations as needed and
+    /// returns the operation a drop would perform now.
+    @discardableResult
+    func track(screenPoint point: NSPoint, in window: NSWindow?) -> NSDragOperation {
+        if let (view, w) = destination(at: point, in: window) {
+            info.destinationWindow = w
+            info.locationInDestination = w.convertPoint(fromScreen: point)
             if view !== destinationView {
                 if let old = destinationView { old.draggingExited(info) }
                 destinationView = view
@@ -232,23 +178,31 @@ final class _NSDragTracker {
             } else {
                 destinationOperation = view.draggingUpdated(info)
             }
-        } else if let old = destinationView {
-            old.draggingExited(info)
-            destinationView = nil
-            destinationOperation = []
+        } else {
+            exit()
         }
-        updateCursor()
+        return effectiveOperation
+    }
+
+    /// The pointer left this application's windows (or the drag was cancelled over one).
+    func exit() {
+        guard let old = destinationView else { return }
+        old.draggingExited(info)
+        destinationView = nil
+        destinationOperation = []
     }
 
     /// The operation the drop would perform now: the destination's answer, limited by the
     /// source and the modifier keys. One operation is chosen when several are offered.
-    private var effectiveOperation: NSDragOperation {
+    var effectiveOperation: NSDragOperation {
+        guard destinationView != nil else { return [] }
         let allowed = destinationOperation.intersection(info.sourceOperationMask).intersection(modifierMask)
         for one in [NSDragOperation.copy, .move, .link, .generic, .private, .delete] where allowed.contains(one) { return one }
         return []
     }
 
-    private func updateCursor() {
+    /// Sets the cursor for the current destination's answer (tracker-driven drags).
+    func updateCursor() {
         let op = effectiveOperation
         if destinationView != nil && op == [] { NSCursor.operationNotAllowed.set() }
         else if op == .copy { NSCursor.dragCopy.set() }
@@ -256,8 +210,8 @@ final class _NSDragTracker {
         else { NSCursor.arrow.set() }
     }
 
-    private func drop() {
-        guard !finished else { return }
+    /// Performs the drop on the current destination; returns the operation performed.
+    func drop() -> NSDragOperation {
         let op = effectiveOperation
         var performed: NSDragOperation = []
         if let view = destinationView, op != [] {
@@ -270,25 +224,302 @@ final class _NSDragTracker {
         } else if let view = destinationView {
             view.draggingExited(info)
         }
-        end(with: performed)
+        destinationView = nil
+        destinationOperation = []
+        return performed
+    }
+
+    /// The drag is over: every destination that saw it hears `draggingEnded`.
+    func end() {
+        for v in destinationsSeen { v.draggingEnded(info) }
+        destinationsSeen.removeAll()
+    }
+}
+
+// MARK: Tracker
+
+@MainActor
+final class _NSDragTracker: PlatformDragSource {
+    private(set) static var current: _NSDragTracker?
+    static var isDragging: Bool { current != nil }
+    /// A tracker whose drop a foreign window took: kept until the outcome arrives.
+    private static var awaitingOutcome: _NSDragTracker?
+
+    let session: NSDraggingSession
+    let driver: _NSDragDestinationDriver
+    var info: _NSDraggingInfo { driver.info }
+    private weak var source: (any NSDraggingSource)?
+    private weak var sourceView: NSView?
+    private var imageWindow: _NSDragImageWindow?
+    private var imageOffset: NSPoint = .zero         // pointer to the image frame's bottom-left, in points
+    private let imageSize: NSSize
+    private let image: NSImage?
+    /// The window system runs this drag (OLE, Wayland): events are not ours to track.
+    private(set) var platformDriven = false
+    /// A foreign window took the drop; the outcome arrives through `platformDragEnded`.
+    private var awaitingForeignDrop = false
+    private(set) var finished = false
+    private(set) var result: NSDragOperation = []
+
+    /// Starts a drag for `items` from `view`. The pointer is at `event`'s location.
+    static func begin(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource, view: NSView) -> NSDraggingSession {
+        current?.cancel()
+        let session = NSDraggingSession(items: items, source: source as AnyObject)
+        let t = _NSDragTracker(session: session, source: source, view: view, event: event)
+        current = t
+        t.start(event: event, view: view)
+        return session
+    }
+
+    private init(session: NSDraggingSession, source: any NSDraggingSource, view: NSView, event: NSEvent) {
+        self.session = session
+        self.source = source
+        self.sourceView = view
+        let mask = source.draggingSession(session, sourceOperationMaskFor: .withinApplication)
+        driver = _NSDragDestinationDriver(info: _NSDraggingInfo(session: session, source: source as AnyObject, mask: mask))
+        driver.ignoresModifierKeys = source.ignoreModifierKeys(for: session)
+        // The image: the leader item's first component, or a placeholder of its frame.
+        let leader = session._items.indices.contains(session.draggingLeaderIndex) ? session._items[session.draggingLeaderIndex] : session._items.first
+        let frameInView = leader?.draggingFrame ?? NSRect(x: -8, y: -8, width: 16, height: 16)
+        image = leader?.imageComponents?.first?.contents as? NSImage
+        imageSize = frameInView.size == .zero ? NSSize(width: 16, height: 16) : frameInView.size
+        // Where the pointer sits inside the frame (frames are in the source view's space).
+        let frameInWindow = view.convert(frameInView, to: nil)
+        let pointerInWindow = event.locationInWindow
+        imageOffset = NSPoint(x: frameInWindow.minX - pointerInWindow.x, y: frameInWindow.minY - pointerInWindow.y)
+        if frameInView.size == .zero { imageOffset = NSPoint(x: -8, y: -8) }
+    }
+
+    private func start(event: NSEvent, view: NSView) {
+        let screen = _NSDragTracker.screenPoint(of: event)
+        session._location = screen
+        source?.draggingSession(session, willBeginAt: screen)
+        driver.updateModifiers(event.modifierFlags)
+        // A platform that runs drags takes it from here; it returns once the drag is over
+        // on Windows (OLE is modal), later on Wayland.
+        if let dd = Platform.backend.dragDrop, let pw = view.window?._platformWindow {
+            platformDriven = true
+            if dd.beginDrag(from: pw, entries: pasteboardEntries(), operations: info.sourceOperationMask, image: nativeImage(), source: self) { return }
+            platformDriven = false
+        }
+        let w = _NSDragImageWindow(image: image, size: imageSize)
+        w.setFrame(NSRect(origin: NSPoint(x: screen.x + imageOffset.x, y: screen.y + imageOffset.y), size: imageSize), display: false)
+        w.orderFront(nil)
+        imageWindow = w
+        // The drag may start over a destination already.
+        moved(to: screen, flags: event.modifierFlags)
+    }
+
+    /// Every representation of every item, for a platform that carries the data itself.
+    private func pasteboardEntries() -> [(item: Int, entry: PlatformPasteboardEntry)] {
+        var entries: [(item: Int, entry: PlatformPasteboardEntry)] = []
+        for (i, item) in (session.draggingPasteboard.pasteboardItems ?? []).enumerated() {
+            for t in item.types { if let d = item.data(forType: t) { entries.append((i, PlatformPasteboardEntry(type: t.rawValue, data: d))) } }
+        }
+        return entries
+    }
+
+    /// The drag image as pixels (the placeholder drawn when the item has none).
+    private func nativeImage() -> PlatformDragImage? {
+        #if canImport(Darwin)
+        return nil
+        #else
+        let scale = sourceView?.window?.backingScaleFactor ?? 1
+        guard imageSize.width > 0, imageSize.height > 0, let surface = Platform.backend.image.makeOffscreen(size: imageSize, scale: scale) else { return nil }
+        let ctx = surface.context
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        let v = _NSDragImageView(frame: NSRect(origin: .zero, size: imageSize))
+        v.image = image
+        v.draw(v.bounds)
+        NSGraphicsContext.restoreGraphicsState()
+        guard let cg = surface.makeImage(), cg.bitsPerPixel == 32 else { return nil }
+        var bgra = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
+        cg.data.withUnsafeBytes { src in
+            for row in 0..<cg.height {
+                let from = src.baseAddress! + row * cg.bytesPerRow
+                bgra.withUnsafeMutableBytes { dst in dst.baseAddress!.advanced(by: row * cg.width * 4).copyMemory(from: from, byteCount: cg.width * 4) }
+            }
+        }
+        let hot = (x: Int((-imageOffset.x * scale).rounded()), y: Int(((imageSize.height + imageOffset.y) * scale).rounded()))
+        return PlatformDragImage(width: cg.width, height: cg.height, scale: scale, bgra: bgra, hotspot: hot)
+        #endif
+    }
+
+    private static func screenPoint(of event: NSEvent) -> NSPoint {
+        if let w = event.window { return w.convertPoint(toScreen: event.locationInWindow) }
+        return event.locationInWindow
+    }
+
+    /// Handles an event while dragging. Every event is consumed.
+    func handle(_ event: NSEvent) {
+        guard !platformDriven, !awaitingForeignDrop else { return }
+        switch event.type {
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .mouseMoved:
+            moved(to: _NSDragTracker.screenPoint(of: event), flags: event.modifierFlags)
+        case .flagsChanged:
+            driver.updateModifiers(event.modifierFlags)
+            moved(to: session._location, flags: event.modifierFlags)
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            moved(to: _NSDragTracker.screenPoint(of: event), flags: event.modifierFlags)
+            drop()
+        case .keyDown:
+            if event.keyCode == 53 { cancel() }
+        default:
+            break
+        }
+    }
+
+    /// The source's operations, limited by the modifier keys, for a foreign window.
+    private var foreignOperations: NSDragOperation {
+        var mask: NSDragOperation = .every
+        if !driver.ignoresModifierKeys {
+            let flags = NSEvent._currentModifierFlags
+            if flags.contains(.option) { mask = .copy } else if flags.contains(.control) { mask = .link } else if flags.contains(.command) { mask = .generic }
+        }
+        return info.sourceOperationMask.intersection(mask)
+    }
+
+    private func moved(to point: NSPoint, flags: NSEvent.ModifierFlags) {
+        session._location = point
+        if let w = imageWindow {
+            w.setFrame(NSRect(origin: NSPoint(x: point.x + imageOffset.x, y: point.y + imageOffset.y), size: w.frame.size), display: true)
+        }
+        source?.draggingSession(session, movedTo: point)
+        driver.updateModifiers(flags)
+        driver.track(screenPoint: point, in: nil)
+        if driver.destinationView == nil, let dd = Platform.backend.dragDrop {
+            // Over no window of ours: another application's window may be there.
+            let op = dd.foreignDragMoved(to: point, operations: foreignOperations)
+            if op == .copy { NSCursor.dragCopy.set() } else if op == .link { NSCursor.dragLink.set() } else { NSCursor.arrow.set() }
+            return
+        }
+        Platform.backend.dragDrop?.foreignDragEnded()
+        driver.updateCursor()
+    }
+
+    private func drop() {
+        guard !finished else { return }
+        if driver.destinationView == nil, let dd = Platform.backend.dragDrop, dd.foreignDrop(at: session._location, operations: foreignOperations) {
+            // A foreign window takes it; the image goes now, the outcome comes later.
+            awaitingForeignDrop = true
+            _NSDragTracker.awaitingOutcome = self
+            imageWindow?.close()
+            imageWindow = nil
+            NSCursor.arrow.set()
+            if _NSDragTracker.current === self { _NSDragTracker.current = nil }
+            return
+        }
+        end(with: driver.drop())
     }
 
     /// Ends the drag without dropping.
     func cancel() {
-        guard !finished else { return }
-        destinationView?.draggingExited(info)
+        guard !finished, !platformDriven else { return }
+        driver.exit()
         end(with: [])
     }
 
     private func end(with operation: NSDragOperation) {
+        guard !finished else { return }
         finished = true
         result = operation
-        destinationView = nil
         imageWindow?.close()
         imageWindow = nil
-        NSCursor.arrow.set()
+        if !platformDriven {
+            NSCursor.arrow.set()
+            Platform.backend.dragDrop?.foreignDragEnded()
+        }
         if _NSDragTracker.current === self { _NSDragTracker.current = nil }
-        for v in destinationsSeen { v.draggingEnded(info) }
+        driver.end()
         source?.draggingSession(session, endedAt: session._location, operation: operation)
+        if _NSDragTracker.awaitingOutcome === self { _NSDragTracker.awaitingOutcome = nil }
+    }
+
+    // MARK: PlatformDragSource
+
+    func platformDragEnded(at screenPoint: NSPoint, operation: NSDragOperation) {
+        session._location = screenPoint
+        end(with: operation)
+    }
+}
+
+// MARK: Drags delivered by the window system
+
+/// Routes the `PlatformWindowOwner` drag methods: a drag this application started goes to
+/// its tracker's driver; one from another application gets a session of its own, whose
+/// pasteboard loads each representation from the platform on demand.
+@MainActor
+enum _NSPlatformDragDelivery {
+    private static var foreign: _NSDragDestinationDriver?
+
+    private static func driver(for drag: PlatformDragInfo) -> _NSDragDestinationDriver? {
+        if drag.isFromThisApplication { return _NSDragTracker.current?.driver }
+        if let f = foreign { return f }
+        let load = drag.load
+        let items: [NSPasteboardItem] = drag.items.enumerated().map { index, types in
+            let item = NSPasteboardItem()
+            let provider = _NSClosurePasteboardDataProvider { type in load(index, type.rawValue) }
+            _ = item.setDataProvider(provider, forTypes: types.map { NSPasteboard.PasteboardType($0) })
+            return item
+        }
+        let pb = NSPasteboard(name: NSPasteboard.Name("drag-foreign-\(NSDraggingSession._nextSequenceNumber)"))
+        pb._setItems(items)
+        let session = NSDraggingSession(pasteboard: pb, items: items.map { NSDraggingItem(pasteboardWriter: $0) }, source: nil)
+        let d = _NSDragDestinationDriver(info: _NSDraggingInfo(session: session, source: nil, mask: drag.sourceOperations))
+        foreign = d
+        return d
+    }
+
+    private static func prepare(_ d: _NSDragDestinationDriver, _ drag: PlatformDragInfo, _ window: NSWindow) -> NSPoint {
+        if !drag.isFromThisApplication { d.info.sourceOperationMask = drag.sourceOperations }
+        d.updateModifiers(drag.modifierFlags)
+        let screen = window.convertPoint(toScreen: drag.location)
+        d.info.session._location = screen
+        return screen
+    }
+
+    static func entered(_ drag: PlatformDragInfo, window: NSWindow) -> NSDragOperation {
+        guard let d = driver(for: drag) else { return [] }
+        let screen = prepare(d, drag, window)
+        return d.track(screenPoint: screen, in: window)
+    }
+
+    static func updated(_ drag: PlatformDragInfo, window: NSWindow) -> NSDragOperation {
+        guard let d = driver(for: drag) else { return [] }
+        let screen = prepare(d, drag, window)
+        return d.track(screenPoint: screen, in: window)
+    }
+
+    static func exited(window: NSWindow) {
+        (_NSDragTracker.current?.driver ?? foreign)?.exit()
+    }
+
+    static func drop(_ drag: PlatformDragInfo, window: NSWindow) -> NSDragOperation {
+        guard let d = driver(for: drag) else { return [] }
+        let screen = prepare(d, drag, window)
+        d.track(screenPoint: screen, in: window)
+        let performed = d.drop()
+        if !drag.isFromThisApplication {
+            d.end()
+            foreign = nil
+        }
+        return performed
+    }
+
+    /// A foreign drag left the application without dropping (every window told).
+    static func foreignDragLeft() {
+        foreign?.exit()
+    }
+}
+
+/// A pasteboard data provider over a closure (data from the window system on demand).
+final class _NSClosurePasteboardDataProvider: NSObject, NSPasteboardItemDataProvider, @unchecked Sendable {
+    private let load: @MainActor (NSPasteboard.PasteboardType) -> Data?
+    init(_ load: @escaping @MainActor (NSPasteboard.PasteboardType) -> Data?) { self.load = load }
+    nonisolated func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+        MainActor.assumeIsolated {
+            if let d = load(type) { _ = item.setData(d, forType: type) }
+        }
     }
 }

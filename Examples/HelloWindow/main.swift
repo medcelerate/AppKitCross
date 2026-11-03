@@ -1036,6 +1036,8 @@ struct DataDemo: View {
     @State private var selected: Set<Int> = []
     @State private var basket = "empty"
     @State private var basketTargeted = false
+    @State private var files = "none"
+    @State private var filesTargeted = false
     @State private var order = [KeyPathComparator(\Planet.name)]
     let planets = [Planet(id: 1, name: "Mercury", moons: 0, radius: 2440), Planet(id: 2, name: "Venus", moons: 0, radius: 6052),
                    Planet(id: 3, name: "Earth", moons: 1, radius: 6371), Planet(id: 4, name: "Mars", moons: 2, radius: 3390),
@@ -1068,6 +1070,21 @@ struct DataDemo: View {
                         return true
                     }
             }
+            // Files dropped from another application (Explorer, a file manager): one item per file.
+            Text(filesTargeted ? "Drop files here" : "Files: \(files)")
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: filesTargeted ? .selectedContentBackgroundColor : .controlBackgroundColor)))
+                .onDrop(of: [.fileURL], isTargeted: $filesTargeted) { providers in
+                    var names: [String] = []
+                    for p in providers {
+                        p.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                            guard let data, let url = URL(string: String(decoding: data, as: UTF8.self)) else { return }
+                            names.append(url.lastPathComponent)
+                            DispatchQueue.main.async { files = names.joined(separator: ", ") }
+                        }
+                    }
+                    return !providers.isEmpty
+                }
         }
         .padding(12)
     }
