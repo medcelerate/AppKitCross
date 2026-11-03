@@ -971,10 +971,8 @@ final class _ScrollPrimitive: _Primitive {
         content.place(in: CGRect(origin: rect.origin, size: size))
         document.frame = NSRect(origin: .zero, size: size)
     }
-    override func didSyncBackingViews(node: _ViewNode) {
-        // Content backing views belong in the document, not in the scroll view itself.
-        for c in node.children { c.syncBackingViews(in: document, containerFrame: node.frame) }
-    }
+    /// Content backing views belong in the document, not in the scroll view itself.
+    override var childContainer: NSView? { document }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scrollview

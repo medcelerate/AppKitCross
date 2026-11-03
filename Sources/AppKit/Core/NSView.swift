@@ -101,7 +101,7 @@ import CoreText
 
     /// Whether any view in the subtree has constraints, layout guides or opts out of
     /// autoresizing translation (the engine is only built when it has work).
-    private var _subtreeUsesConstraints: Bool {
+    internal var _subtreeUsesConstraints: Bool {
         if !_constraints.isEmpty || !_layoutGuides.isEmpty || !_translatesAutoresizingMaskIntoConstraints { return true }
         return _subviews.contains { $0._subtreeUsesConstraints }
     }
@@ -489,7 +489,9 @@ import CoreText
         if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(_window)
         if _layer != nil && !_layerIsHosted { view._becomeLayerBacked() } else if view._layer != nil { view._attachLayerToSuperview() }
-        _setNeedsConstraintLayout()
+        // A new constraint participant needs a root pass; a plain view (re)added does not,
+        // or every backing-view reorder would schedule another full layout.
+        _setNeedsConstraintLayout(force: view._subtreeUsesConstraints)
         if view._appearance == nil { view._effectiveAppearanceDidChange() }
         view.viewDidMoveToSuperview()
         didAddSubview(view)
@@ -1154,7 +1156,7 @@ import CoreText
             cur._constraints.removeAll { $0.firstItem === self || $0.secondItem === self }
             a = cur._superview
         }
-        sup._setNeedsConstraintLayout()
+        sup._setNeedsConstraintLayout(force: sup._engine != nil)
         viewWillMove(toSuperview: nil)
         _superview = nil
         nextResponder = nil

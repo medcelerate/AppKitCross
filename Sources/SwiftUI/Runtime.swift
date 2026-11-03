@@ -347,9 +347,11 @@ public final class _ViewNode {
             let pf = presentedFrame
             let f = CGRect(x: pf.minX - containerFrame.minX, y: pf.minY - containerFrame.minY, width: pf.width, height: pf.height)
             if v.frame != f { v.frame = f }
-            // Children of a backing view live inside it.
-            for c in children { c.syncBackingViews(in: v, containerFrame: pf) }
-            for e in exiting { e.syncBackingViews(in: v, containerFrame: pf) }
+            // Children of a backing view live inside it, or inside the container the
+            // primitive names (a scroll view's document view).
+            let inner = primitive?.childContainer ?? v
+            for c in children { c.syncBackingViews(in: inner, containerFrame: pf) }
+            for e in exiting { e.syncBackingViews(in: inner, containerFrame: pf) }
             primitive?.didSyncBackingViews(node: self)
             return
         }
@@ -415,6 +417,8 @@ open class _Primitive {
     }
     open func didLayout(node: _ViewNode) {}
     open func didSyncBackingViews(node: _ViewNode) {}
+    /// Where the children's backing views go; nil puts them inside `nsView` itself.
+    open var childContainer: NSView? { nil }
 }
 
 /// A structural group: its children are the stack's items.

@@ -307,6 +307,16 @@ final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
             for _ in 0..<3 { w.contentView!.layoutSubtreeIfNeeded(); w.displayIfNeeded() }
             XCTAssertEqual(platform.paintCount, paintsAfter, "and then nothing repaints")
             XCTAssertEqual(go.frame.size.width, placed.width + 0.4, accuracy: 0.001, "nothing re-placed the control")
+            // Scroll content lives in the document view and stays there across layouts: it
+            // must not bounce between the scroll view and its document on every pass.
+            let scroll = allViews(h).compactMap { $0 as? NSScrollView }.first!
+            let content = allViews(scroll.documentView!).filter { $0 is _TextView }
+            XCTAssertFalse(content.isEmpty)
+            XCTAssertFalse(scroll.subviews.contains { $0 is _TextView || $0 is _ContainerView && $0 !== scroll.documentView })
+            h.needsLayout = true
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(allViews(scroll.documentView!).filter { $0 is _TextView }.map { ObjectIdentifier($0) }, content.map { ObjectIdentifier($0) })
+            XCTAssertFalse(scroll.subviews.contains { $0 is _TextView })
             w.close()
         }
     }
