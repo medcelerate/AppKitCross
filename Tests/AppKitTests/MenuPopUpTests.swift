@@ -116,6 +116,26 @@ final class MenuPopUpTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testMenuWindowIsAllClientArea() {
+        MainActor.assumeIsolated {
+            let w = makeWindow()
+            let r = Receiver()
+            let menu = sampleMenu(r)
+            let click = NSEvent.mouseEvent(with: .rightMouseDown, location: NSPoint(x: 50, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                           context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            NSMenu.popUpContextMenu(menu, with: click, for: w.contentView!)
+            let mw = menuWindows()[0]
+            let h = mw.contentView!.bounds.height
+            // Every point, including the top rows, is client area: the platform must deliver
+            // mouse moves and clicks there rather than treat them as a title bar.
+            for y in stride(from: CGFloat(1), to: h, by: 4) {
+                XCTAssertEqual(mw.platformWindowHitTest(NSPoint(x: 10, y: y)), .client, "y \(y) of \(h)")
+            }
+            menu.cancelTracking()
+            w.close()
+        }
+    }
+
     func testClickOutsideClosesAndIsSwallowed() {
         MainActor.assumeIsolated {
             let w = makeWindow()

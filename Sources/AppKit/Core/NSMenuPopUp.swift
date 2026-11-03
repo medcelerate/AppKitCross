@@ -103,6 +103,11 @@ final class _NSMenuView: NSView {
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
+    /// The menu fills its window, so the whole window is client area: never a draggable
+    /// title band (a borderless window's top 28 points otherwise count as one), or the
+    /// platform turns moves and clicks over the first rows into non-client traffic.
+    override var isOpaque: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [.font: layout.font]
