@@ -209,3 +209,274 @@ final class MetalVulkanDeviceTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(Array(results[1][0..<4]), [255, 128, 64, 255])
     }
 }
+
+// MARK: Stage 3: render pipelines, depth and stencil, presentation
+
+final class MetalVulkanRenderTests: XCTestCase, @unchecked Sendable {
+    /// Positions at attribute 0 (buffer 1), a colour constant at fragment buffer 0.
+    static let shaders = """
+    struct VSIn { float3 position : ATTRIBUTE0; };
+    cbuffer Paint : register(b0) { float4 color; };
+    float4 vsMain(VSIn v) : SV_Position { return float4(v.position, 1); }
+    float4 psMain() : SV_Target { return color; }
+    """
+
+    struct Scene {
+        let device: any MTLDevice
+        let queue: any MTLCommandQueue
+        let library: any MTLLibrary
+        let target: any MTLTexture
+        let width = 32, height = 32
+
+        init() throws {
+            device = try MetalVulkanDeviceTests.vulkanDevice()
+            queue = try XCTUnwrap(device.makeCommandQueue())
+            let options = MTLCompileOptions()
+            options.shaderLanguage = .hlsl
+            library = try device.makeLibrary(source: MetalVulkanRenderTests.shaders, options: options)
+            let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 32, height: 32, mipmapped: false)
+            td.usage = [.renderTarget, .shaderRead]
+            target = try XCTUnwrap(device.makeTexture(descriptor: td))
+        }
+
+        func pipeline(depth: MTLPixelFormat = .invalid, stencil: MTLPixelFormat = .invalid, blending: Bool = false) throws -> any MTLRenderPipelineState {
+            let pd = MTLRenderPipelineDescriptor()
+            pd.vertexFunction = library.makeFunction(name: "vsMain")
+            pd.fragmentFunction = library.makeFunction(name: "psMain")
+            pd.colorAttachments[0].pixelFormat = .bgra8Unorm
+            if blending {
+                pd.colorAttachments[0].isBlendingEnabled = true
+                pd.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+                pd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+                pd.colorAttachments[0].sourceAlphaBlendFactor = .one
+                pd.colorAttachments[0].destinationAlphaBlendFactor = .zero
+            }
+            pd.depthAttachmentPixelFormat = depth
+            pd.stencilAttachmentPixelFormat = stencil
+            let vd = MTLVertexDescriptor()
+            vd.attributes[0].format = .float3
+            vd.attributes[0].bufferIndex = 1
+            vd.layouts[1].stride = 12
+            pd.vertexDescriptor = vd
+            do { return try device.makeRenderPipelineState(descriptor: pd) }
+            catch let error as MTLLibraryError where error.code == .unsupported { throw XCTSkip("no SPIR-V compiler on PATH: \(error.message)") }
+        }
+
+        func depthTexture(_ format: MTLPixelFormat) throws -> any MTLTexture {
+            let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
+            dd.usage = .renderTarget
+            return try XCTUnwrap(device.makeTexture(descriptor: dd))
+        }
+
+        /// One pass over `target` (cleared to black) with `draws` of (pipeline, vertices, colour).
+        func render(depth: (any MTLTexture)? = nil, clearDepth: Double = 1, stencil: (any MTLTexture)? = nil, _ encode: (any MTLRenderCommandEncoder) throws -> Void) throws {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = target
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].storeAction = .store
+            pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1)
+            if let depth {
+                pass.depthAttachment.texture = depth
+                pass.depthAttachment.loadAction = .clear
+                pass.depthAttachment.clearDepth = clearDepth
+            }
+            if let stencil {
+                pass.stencilAttachment.texture = stencil
+                pass.stencilAttachment.loadAction = .clear
+                pass.stencilAttachment.clearStencil = 0
+            }
+            let cb = try XCTUnwrap(queue.makeCommandBuffer())
+            let enc = try XCTUnwrap(cb.makeRenderCommandEncoder(descriptor: pass))
+            try encode(enc)
+            enc.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+            XCTAssertEqual(cb.status, .completed)
+        }
+
+        func draw(_ enc: any MTLRenderCommandEncoder, _ pipeline: any MTLRenderPipelineState, _ vertices: [Float], color: [Float]) {
+            guard let vb = vertices.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }) else { XCTFail("vertex buffer"); return }
+            var c = color
+            enc.setRenderPipelineState(pipeline)
+            enc.setVertexBuffer(vb, offset: 0, index: 1)
+            enc.setFragmentBytes(&c, length: 16, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertices.count / 3)
+        }
+
+        /// BGRA at (x, y), y down from the top.
+        func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+            var out = [UInt8](repeating: 0, count: 4)
+            target.getBytes(&out, bytesPerRow: 4, from: MTLRegionMake2D(x, y, 1, 1), mipmapLevel: 0)
+            return out
+        }
+    }
+
+    static let red: [Float] = [1, 0, 0, 1], green: [Float] = [0, 1, 0, 1], blue: [Float] = [0, 0, 1, 1]
+    /// Covers the top half of clip space (y up in Metal: the top rows of the texture).
+    static let topHalf: [Float] = [-1, 1, 0.5, 1, 1, 0.5, 0, 0, 0.5]
+    static let topHalfNear: [Float] = [-1, 1, 0.2, 1, 1, 0.2, 0, 0, 0.2]
+    static let topHalfFar: [Float] = [-1, 1, 0.8, 1, 1, 0.8, 0, 0, 0.8]
+    static let fullQuad: [Float] = [-1, -1, 0.5, 1, -1, 0.5, -1, 1, 0.5, 1, -1, 0.5, 1, 1, 0.5, -1, 1, 0.5]
+    static let leftHalf: [Float] = [-1, -1, 0.5, 0, -1, 0.5, -1, 1, 0.5, 0, -1, 0.5, 0, 1, 0.5, -1, 1, 0.5]
+
+    func testTriangleOrientationViewportAndScissor() throws {
+        let s = try Scene()
+        let p = try s.pipeline()
+        try s.render { s.draw($0, p, Self.topHalf, color: Self.red) }
+        XCTAssertEqual(s.pixel(16, 2), [0, 0, 255, 255], "Metal's +y is up: the triangle fills the top rows")
+        XCTAssertEqual(s.pixel(16, 29), [0, 0, 0, 255], "the bottom rows keep the clear colour")
+        XCTAssertEqual(s.pixel(2, 2), [0, 0, 255, 255])
+        try s.render { enc in
+            enc.setScissorRect(MTLScissorRect(x: 0, y: 0, width: 16, height: 32))
+            s.draw(enc, p, Self.topHalf, color: Self.green)
+        }
+        XCTAssertEqual(s.pixel(4, 2), [0, 255, 0, 255], "inside the scissor")
+        XCTAssertEqual(s.pixel(28, 2), [0, 0, 0, 255], "outside the scissor")
+        try s.render { enc in
+            enc.setViewport(MTLViewport(originX: 0, originY: 16, width: 32, height: 16, znear: 0, zfar: 1))
+            s.draw(enc, p, Self.fullQuad, color: Self.blue)
+        }
+        XCTAssertEqual(s.pixel(16, 24), [255, 0, 0, 255], "a viewport at the bottom half draws there")
+        XCTAssertEqual(s.pixel(16, 8), [0, 0, 0, 255], "and not above it")
+    }
+
+    func testDepthTestKeepsTheNearerTriangle() throws {
+        let s = try Scene()
+        let p = try s.pipeline(depth: .depth32Float)
+        let depth = try s.depthTexture(.depth32Float)
+        let dsd = MTLDepthStencilDescriptor()
+        dsd.depthCompareFunction = .less
+        dsd.isDepthWriteEnabled = true
+        let less = try XCTUnwrap(s.device.makeDepthStencilState(descriptor: dsd))
+        // Near first, then far: the far one fails the test.
+        try s.render(depth: depth) { enc in
+            enc.setDepthStencilState(less)
+            s.draw(enc, p, Self.topHalfNear, color: Self.green)
+            s.draw(enc, p, Self.topHalfFar, color: Self.red)
+        }
+        XCTAssertEqual(s.pixel(16, 4), [0, 255, 0, 255], "near green stays over far red")
+        // Far first, then near: the near one overwrites.
+        try s.render(depth: depth) { enc in
+            enc.setDepthStencilState(less)
+            s.draw(enc, p, Self.topHalfFar, color: Self.red)
+            s.draw(enc, p, Self.topHalfNear, color: Self.green)
+        }
+        XCTAssertEqual(s.pixel(16, 4), [0, 255, 0, 255])
+        // A clear depth of 0 rejects everything under `less`.
+        try s.render(depth: depth, clearDepth: 0) { enc in
+            enc.setDepthStencilState(less)
+            s.draw(enc, p, Self.topHalfNear, color: Self.green)
+        }
+        XCTAssertEqual(s.pixel(16, 4), [0, 0, 0, 255])
+        // Without a depth state the last draw wins regardless of z.
+        try s.render(depth: depth) { enc in
+            s.draw(enc, p, Self.topHalfNear, color: Self.green)
+            s.draw(enc, p, Self.topHalfFar, color: Self.red)
+        }
+        XCTAssertEqual(s.pixel(16, 4), [0, 0, 255, 255])
+    }
+
+    func testStencilMaskConfinesTheSecondDraw() throws {
+        let s = try Scene()
+        let p = try s.pipeline(depth: .depth32Float_stencil8, stencil: .depth32Float_stencil8)
+        let ds = try s.depthTexture(.depth32Float_stencil8)
+        let writer = MTLDepthStencilDescriptor()
+        writer.frontFaceStencil.stencilCompareFunction = .always
+        writer.frontFaceStencil.depthStencilPassOperation = .replace
+        writer.backFaceStencil = writer.frontFaceStencil
+        let reader = MTLDepthStencilDescriptor()
+        reader.frontFaceStencil.stencilCompareFunction = .equal
+        reader.backFaceStencil = reader.frontFaceStencil
+        let write = try XCTUnwrap(s.device.makeDepthStencilState(descriptor: writer))
+        let read = try XCTUnwrap(s.device.makeDepthStencilState(descriptor: reader))
+        try s.render(depth: ds, stencil: ds) { enc in
+            enc.setDepthStencilState(write)
+            enc.setStencilReferenceValue(1)
+            s.draw(enc, p, Self.leftHalf, color: Self.blue)     // stencil = 1 on the left
+            enc.setDepthStencilState(read)
+            s.draw(enc, p, Self.fullQuad, color: Self.red)       // only where stencil == 1
+        }
+        XCTAssertEqual(s.pixel(8, 16), [0, 0, 255, 255], "left half: stencil matched, red drawn")
+        XCTAssertEqual(s.pixel(24, 16), [0, 0, 0, 255], "right half: stencil 0, red rejected")
+    }
+
+    func testAlphaBlendingAndBlendColor() throws {
+        let s = try Scene()
+        let p = try s.pipeline(blending: true)
+        try s.render { enc in
+            s.draw(enc, p, Self.fullQuad, color: [0, 0, 1, 1])
+            s.draw(enc, p, Self.fullQuad, color: [1, 0, 0, 0.5])
+        }
+        let px = s.pixel(16, 16)
+        XCTAssertEqual(Int(px[0]), 128, accuracy: 2, "blue halved")
+        XCTAssertEqual(Int(px[2]), 128, accuracy: 2, "red at half alpha")
+        XCTAssertEqual(px[1], 0)
+    }
+
+    func testMTKViewPresentsAVulkanFrameInAWindow() throws {
+        let device = try MetalVulkanDeviceTests.vulkanDevice()
+        try MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            let view = MTKView(frame: NSRect(x: 0, y: 0, width: 100, height: 100), device: device)
+            XCTAssertTrue(view.device === device)
+            final class Renderer: MTKViewDelegate {
+                var pipeline: (any MTLRenderPipelineState)?
+                var frames = 0
+                func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+                func draw(in view: MTKView) {
+                    frames += 1
+                    view.clearColor = MTLClearColorMake(0, 0, 1, 1)
+                    guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable, let device = view.device,
+                          let cb = device.makeCommandQueue()?.makeCommandBuffer(), let enc = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
+                    if let pipeline, let vb = MetalVulkanRenderTests.topHalf.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: []) }) {
+                        var red: [Float] = [1, 0, 0, 1]
+                        enc.setRenderPipelineState(pipeline)
+                        enc.setVertexBuffer(vb, offset: 0, index: 1)
+                        enc.setFragmentBytes(&red, length: 16, index: 0)
+                        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+                    }
+                    enc.endEncoding()
+                    cb.present(drawable)
+                    cb.commit()
+                }
+            }
+            let renderer = Renderer()
+            let options = MTLCompileOptions()
+            options.shaderLanguage = .hlsl
+            let library = try device.makeLibrary(source: Self.shaders, options: options)
+            let pd = MTLRenderPipelineDescriptor()
+            pd.vertexFunction = library.makeFunction(name: "vsMain")
+            pd.fragmentFunction = library.makeFunction(name: "psMain")
+            pd.colorAttachments[0].pixelFormat = view.colorPixelFormat
+            let vd = MTLVertexDescriptor()
+            vd.attributes[0].format = .float3
+            vd.attributes[0].bufferIndex = 1
+            vd.layouts[1].stride = 12
+            pd.vertexDescriptor = vd
+            do { renderer.pipeline = try device.makeRenderPipelineState(descriptor: pd) }
+            catch let error as MTLLibraryError where error.code == .unsupported { throw XCTSkip("no SPIR-V compiler on PATH: \(error.message)") }
+            view.delegate = renderer
+            view.enableSetNeedsDisplay = true
+            w.contentView!.addSubview(view)
+            w.makeKeyAndOrderFront(nil)
+            view.draw()
+            XCTAssertGreaterThan(renderer.frames, 0)
+            let presented = try XCTUnwrap(view.presentedTexture)
+            XCTAssertTrue(presented.device === device, "the presented drawable is a Vulkan texture")
+            w.display()
+            let platform = Mirror(reflecting: w).descendant("_platform") as! HostWindow
+            let image = platform.lastImage!
+            let data = _pixels(image)
+            func pixel(_ x: Int, _ y: Int) -> (UInt8, UInt8, UInt8) {   // window points, y down from the top; BGRA rows top-down
+                let i = y * 2 * image.bytesPerRow + x * 2 * 4
+                return (data[i], data[i + 1], data[i + 2])
+            }
+            let top = pixel(50, 10), bottom = pixel(50, 90)
+            XCTAssertGreaterThan(top.2, 200, "top of the view: the red triangle \(top)")
+            XCTAssertLessThan(top.0, 40)
+            XCTAssertGreaterThan(bottom.0, 200, "bottom of the view: the blue clear \(bottom)")
+            XCTAssertLessThan(bottom.2, 40)
+            w.close()
+        }
+    }
+}

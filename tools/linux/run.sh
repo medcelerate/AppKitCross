@@ -19,6 +19,16 @@ xwd -root -silent | convert xwd:- /tmp/hellowindow-linux.png
 echo "screenshot: /tmp/hellowindow-linux.png ($(stat -c %s /tmp/hellowindow-linux.png) bytes)"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
+echo "== HelloWindow Metal tab under Xvfb (Vulkan device, ADR-0012)"
+# The Metal tab logs the drawable's corner and centre pixels every 30 frames; the corner
+# follows the clear colour and the centre is the triangle on a device that rasterizes.
+APPKITWIN_LINUX_BACKEND=x11 timeout 6 ./.build/debug/HelloWindow --metal --metal-log >/tmp/hellowindow-linux-metal.log 2>&1 &
+APP=$!
+sleep 4
+xwd -root -silent | convert xwd:- /tmp/hellowindow-linux-metal.png
+wait $APP 2>/dev/null || true
+grep -E "^device|Vulkan|^frame" /tmp/hellowindow-linux-metal.log | head -4
+echo "screenshot: /tmp/hellowindow-linux-metal.png ($(stat -c %s /tmp/hellowindow-linux-metal.png) bytes)"
 if [ "$WAYLAND" = 1 ]; then
     echo "== HelloWindow under headless sway (Wayland backend)"
     # sway refuses to run as root; the image has an unprivileged user for it.
