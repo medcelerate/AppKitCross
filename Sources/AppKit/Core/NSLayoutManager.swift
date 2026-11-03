@@ -35,6 +35,9 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     private var _extraRect = NSRect.zero, _extraUsedRect = NSRect.zero
     private var _extraContainer: Int? = nil
     private var _layoutValid = false
+    /// Whether the fragments' colours were resolved under a dark appearance; a draw under
+    /// the other appearance lays out again (a text view's colour is dynamic).
+    private var _layoutIsDark: Bool?
     private var _laidOutLength = 0
     private var _typesetter: CTTypesetter? = nil
     private var _allowsNonContiguousLayout = false
@@ -187,6 +190,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         // Semantic colours resolve under the text view's appearance (a dark field editor
         // draws light text), not whatever appearance happens to be current during layout.
         let appearance: NSAppearance? = MainActor.assumeIsolated { firstTextView?.effectiveAppearance }
+        _layoutIsDark = appearance?.isDark ?? MainActor.assumeIsolated { NSAppearance.currentIsDark }
         func convert(_ attrs: [NSAttributedString.Key: Any], into range: NSRange) {
             var ct: [NSAttributedString.Key: Any] = [:]
             MainActor.assumeIsolated {
@@ -724,6 +728,10 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/drawglyphs(forglyphrange:at:)
     open func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        MainActor.assumeIsolated {
+            // Laid out (measured) under one appearance, drawn under another: resolve again.
+            if firstTextView == nil, let dark = _layoutIsDark, dark != NSAppearance.currentIsDark { _layoutValid = false }
+        }
         _ensureLayout()
         MainActor.assumeIsolated {
             guard let gc = NSGraphicsContext.current else { return }

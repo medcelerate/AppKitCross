@@ -39,6 +39,25 @@ private func key(_ code: UInt16, _ chars: String = "", flags: NSEvent.ModifierFl
 }
 
 final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
+    /// Text measured before its window turned dark draws with colours resolved for dark.
+    func testTextColourFollowsTheDrawingAppearance() {
+        MainActor.assumeIsolated {
+            let (w, h) = host(Text("hello"), width: 120, height: 40)
+            let platform = w._platformWindow as! HostWindow
+            w.display()
+            let light = _pixels(platform.lastImage!)
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.display()
+            let dark = _pixels(platform.lastImage!)
+            // Count light pixels (text) in each render: dark mode draws light text on a dark fill.
+            func lightPixels(_ d: Data) -> Int { stride(from: 0, to: d.count, by: 4).filter { d[$0] > 200 && d[$0 + 1] > 200 && d[$0 + 2] > 200 }.count }
+            func darkPixels(_ d: Data) -> Int { stride(from: 0, to: d.count, by: 4).filter { d[$0] < 60 && d[$0 + 1] < 60 && d[$0 + 2] < 60 }.count }
+            XCTAssertGreaterThan(darkPixels(light), 20, "light appearance: dark glyphs")
+            XCTAssertGreaterThan(lightPixels(dark), 20, "dark appearance: light glyphs, re-resolved although the text was laid out under light")
+            w.close()
+        }
+    }
+
     func testSingleSelectionByMouseKeyboardAndBinding() {
         MainActor.assumeIsolated {
             struct Probe: View {
@@ -120,6 +139,19 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
             key(0, "a", flags: [.command], in: w); h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("sel 1,2,3,4"), "command-A selects all")
             XCTAssertEqual(list.selectedRows, [0, 1, 2, 3])
+            // With an Edit menu owning Cmd-A, the menu's selectAll: reaches the focused list.
+            click(list, row: 1, in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(h).contains("sel 2"))
+            let menu = NSMenu(title: "Main")
+            let edit = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+            edit.submenu = NSMenu(title: "Edit")
+            edit.submenu!.addItem(withTitle: "Select All", action: Selector(("selectAll:")), keyEquivalent: "a")
+            menu.addItem(edit)
+            let previousMenu = NSApplication.shared.mainMenu
+            NSApplication.shared.mainMenu = menu
+            defer { NSApplication.shared.mainMenu = previousMenu }
+            key(0, "a", flags: [.command], in: w); h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(h).contains("sel 1,2,3,4"), "Select All from the menu: \(texts(h).joined(separator: "|"))")
             w.close()
         }
     }

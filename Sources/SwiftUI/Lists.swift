@@ -91,7 +91,7 @@ struct _ListRows<Content: View>: View, _PrimitiveView {
 
 /// The view behind the rows: draws separators and the selection, takes clicks and keys.
 @MainActor
-final class _ListView: NSView {
+final class _ListView: NSView, NSSelectorHandling {
     var rowFrames: [CGRect] = []
     var selectedRows: Set<Int> = []
     var emphasized = true
@@ -132,6 +132,13 @@ final class _ListView: NSView {
     }
     override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
     override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
+    /// The Edit menu's Select All (Cmd-A as a key equivalent) reaches the focused list.
+    func respondsToSelectorAction(_ action: Selector) -> Bool { action == Selector(("selectAll:")) && onSelectAll != nil }
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action == Selector(("selectAll:")), let onSelectAll else { return false }
+        onSelectAll()
+        return true
+    }
 }
 
 @MainActor
