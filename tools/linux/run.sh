@@ -22,14 +22,17 @@ echo "screenshot: /tmp/hellowindow-linux.png ($(stat -c %s /tmp/hellowindow-linu
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
 echo "== HelloWindow Metal tab under Xvfb (Vulkan device, ADR-0012)"
-# The Metal tab logs the drawable's corner and centre pixels every 30 frames; the corner
-# follows the clear colour and the centre is the triangle on a device that rasterizes.
+# The Metal tab names its device, then logs the drawable's corner and centre pixels every
+# 30 frames after that frame's command buffer completes. The corner follows the clear
+# colour; the centre is the triangle (a blend of its vertex colours, around BGRA
+# [111, 118, 135]) on lavapipe, and the clear colour again on the reference device,
+# which does not rasterize. A "Vulkan device unavailable" line says why it fell back.
 APPKITWIN_LINUX_BACKEND=x11 timeout 6 ./.build/debug/HelloWindow --metal --metal-log >/tmp/hellowindow-linux-metal.log 2>&1 &
 APP=$!
 sleep 4
 xwd -root -silent | convert xwd:- /tmp/hellowindow-linux-metal.png
 wait $APP 2>/dev/null || true
-grep -E "^device|Vulkan|^frame" /tmp/hellowindow-linux-metal.log | head -4
+grep -E "^device|Vulkan|pipeline failed|^frame" /tmp/hellowindow-linux-metal.log | head -5
 echo "screenshot: /tmp/hellowindow-linux-metal.png ($(stat -c %s /tmp/hellowindow-linux-metal.png) bytes)"
 if [ "$WAYLAND" = 1 ]; then
     echo "== HelloWindow under headless sway (Wayland backend)"

@@ -624,7 +624,7 @@ enum MetalSelfTest {
         guard let device = made, let queue = device.makeCommandQueue() else { check(false, "device and queue"); return }
         print("device: \(device.name) rasterizes=\(device.supportsRasterization)")
         #if os(Linux)
-        if !(device is MTLVulkanDevice) { print("Vulkan device unavailable: \(MTLVulkanDevice.unavailabilityReason)") }
+        if !(device is MTLVulkanDevice) { print("Vulkan device unavailable: \(MTLVulkanDevice.unavailabilityReason.isEmpty ? "APPKITWIN_METAL_REFERENCE=1" : MTLVulkanDevice.unavailabilityReason)") }
         #endif
 
         // Buffers and a blit copy.
@@ -997,7 +997,9 @@ final class ColorViewController: NSViewController {
 /// An MTKView on the system device: the clear colour cycles every frame through the
 /// display link and an HLSL pipeline draws a spinning triangle over it (the reference
 /// device does not rasterize, so there only the clear shows). With `--metal-log` the
-/// centre and corner pixels of every 30th frame are read back and printed.
+/// device is named on start (with the reason no Vulkan device was made, on Linux) and the
+/// centre and corner pixels of every 30th frame are read back and printed after the
+/// frame's command buffer completes.
 final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     private var frame = 0
     private let label = NSTextField(labelWithString: "")
@@ -1060,6 +1062,13 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
         mtk.preferredFramesPerSecond = 30
         mtk.colorPixelFormat = .bgra8Unorm
         label.stringValue = "Device: \(device?.name ?? "none")"
+        if logsPixels {
+            print("device: \(device?.name ?? "none") rasterizes=\(device?.supportsRasterization ?? false)")
+            #if os(Linux)
+            if !(device is MTLVulkanDevice) { print("Vulkan device unavailable: \(MTLVulkanDevice.unavailabilityReason.isEmpty ? "APPKITWIN_METAL_REFERENCE=1" : MTLVulkanDevice.unavailabilityReason)") }
+            #endif
+            fflush(nil)
+        }
         label.textColor = .white
         label.translatesAutoresizingMaskIntoConstraints = false
         mtk.addSubview(label)
@@ -1097,6 +1106,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             pipeline = try device.makeRenderPipelineState(descriptor: desc)
         } catch {
             label.stringValue += " (triangle pipeline failed: \(error))"
+            if logsPixels { print("triangle pipeline failed: \(error)"); fflush(nil) }
         }
     }
 
