@@ -396,23 +396,30 @@ final class Win32Window: PlatformWindow {
         let size = contentSize
         // Both kinds of target keep their contents between frames (the swap chain through
         // its canvas), so only the rect Windows reports is repainted and presented.
-        let dirty = NSRect(x: CGFloat(ps.rcPaint.left) / scale,
+        var dirty = NSRect(x: CGFloat(ps.rcPaint.left) / scale,
                            y: size.height - CGFloat(ps.rcPaint.bottom) / scale,
                            width: CGFloat(ps.rcPaint.right - ps.rcPaint.left) / scale,
                            height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
+        // A new or resized canvas has nothing to keep: paint everything this frame.
+        if cd2d_target_is_swapchain(rt), cd2d_target_canvas_is_fresh(rt) { dirty = NSRect(origin: .zero, size: size) }
         if NSView._traceInvalidation { NSView._trace("win32 paint dirty \(ps.rcPaint.left),\(ps.rcPaint.top)-\(ps.rcPaint.right),\(ps.rcPaint.bottom) px of \(Int(size.width * scale))x\(Int(size.height * scale))") }
         painting = true
         defer { painting = false }
         cd2d_target_begin_draw(rt)
-        if cd2d_target_is_swapchain(rt), !dirty.isEmpty {
+        let whole = dirty == NSRect(origin: .zero, size: size)
+        if cd2d_target_is_swapchain(rt), !dirty.isEmpty, !whole {
             cd2d_target_set_dirty(rt, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom)
         }
-        // A transparent window starts every frame fully transparent so unpainted areas
-        // show the backdrop; an opaque window fills its background in NSWindow.
+        // A transparent window starts every frame fully transparent in the painted area so
+        // unpainted pixels show the backdrop; an opaque window fills its background in NSWindow.
         if cd2d_target_is_composition(rt) {
-            cd2d_target_push_clip_rect(rt, Float(ps.rcPaint.left) / Float(scale), Float(ps.rcPaint.top) / Float(scale), Float(ps.rcPaint.right) / Float(scale), Float(ps.rcPaint.bottom) / Float(scale), false)
-            cd2d_target_clear(rt, 0, 0, 0, 0)
-            cd2d_target_pop_clip_rect(rt)
+            if whole {
+                cd2d_target_clear(rt, 0, 0, 0, 0)
+            } else {
+                cd2d_target_push_clip_rect(rt, Float(ps.rcPaint.left) / Float(scale), Float(ps.rcPaint.top) / Float(scale), Float(ps.rcPaint.right) / Float(scale), Float(ps.rcPaint.bottom) / Float(scale), false)
+                cd2d_target_clear(rt, 0, 0, 0, 0)
+                cd2d_target_pop_clip_rect(rt)
+            }
         }
         // Flip: CoreGraphics is bottom-left in points; Direct2D is top-left in DIPs.
         let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)

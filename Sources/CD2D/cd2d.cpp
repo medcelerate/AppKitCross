@@ -291,7 +291,15 @@ void cd2d_target_set_dpi(CD2DTarget *target, float dpi) {
 }
 
 void cd2d_target_begin_draw(CD2DTarget *target) {
-    if (target && target->target) target->target->BeginDraw();
+    if (!target || !target->target) return;
+    target->target->BeginDraw();
+    // A new or resized canvas holds undefined pixels: start it transparent (black on an
+    // opaque chain) so a partial first paint cannot show memory garbage.
+    if (target->swapChain && target->canvasFresh) target->target->Clear(D2D1::ColorF(0, 0, 0, 0));
+}
+
+bool cd2d_target_canvas_is_fresh(CD2DTarget *target) {
+    return target && target->swapChain && target->canvasFresh;
 }
 
 void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom) {

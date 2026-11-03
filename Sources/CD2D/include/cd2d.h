@@ -58,6 +58,9 @@ bool cd2d_target_is_swapchain(CD2DTarget *target);
 /// frame touched (client pixels), so only that region (plus the previous frame's) is
 /// copied to the back buffer and presented as dirty. Without a call the frame is whole.
 void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom);
+/// True until the first end_draw after the canvas was created or resized: the caller
+/// should paint the whole client area that frame.
+bool cd2d_target_canvas_is_fresh(CD2DTarget *target);
 /// True when the target is a premultiplied composition swap chain
 /// (cd2d_target_create_composition_swapchain): the caller clears it to transparent
 /// before drawing a frame.
