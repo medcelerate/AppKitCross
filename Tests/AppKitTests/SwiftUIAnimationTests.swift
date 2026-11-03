@@ -225,3 +225,63 @@ final class SwiftUIHostedAnimationTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
+    struct Demo: View {
+        @State var tab = "a"
+        @State var text = ""
+        @State var amount = 0.4
+        @State var enabled = true
+        var body: some View {
+            TabView(selection: $tab) {
+                VStack(alignment: .leading) {
+                    Text("Title").font(.title)
+                    HStack { TextField("Name", text: $text); Button("Go") {} }
+                    Toggle("Enabled", isOn: $enabled.animation(.easeInOut(duration: 0.3)))
+                    Slider(value: $amount, in: 0...1).disabled(!enabled)
+                    RoundedRectangle(cornerRadius: 8).fill(Color.blue).opacity(enabled ? 1 : 0.3)
+                        .frame(width: 100 * amount + 20, height: 20).animation(.easeOut(duration: 0.25), value: amount)
+                    if !enabled { Text("Disabled").transition(.move(edge: .leading).combined(with: .opacity)) }
+                    GeometryReader { p in Text("\(Int(p.size.width))") }
+                    List { ForEach(["a", "b"], id: \.self) { Text($0) } }
+                }.tabItem { Text("Controls") }.tag("a")
+                Text("Other").tabItem { Text("Other") }.tag("b")
+            }
+        }
+    }
+
+    /// A displayed window stays displayed: no pass re-invalidates it, so the platform is
+    /// not asked to repaint forever (which on Windows starves the frame timer).
+    func testDisplayAndAnimationsSettle() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 10
+            let saved = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = saved }
+            let (w, h) = host(Demo(), width: 360, height: 400)
+            let platform = w._platformWindow as! HostWindow
+            w.display()
+            let painted = platform.paintCount
+            for _ in 0..<3 { w.displayIfNeeded(); h.layoutSubtreeIfNeeded() }
+            XCTAssertEqual(platform.paintCount, painted, "a settled window does not repaint")
+            XCTAssertFalse(CARuntime.hasPendingWork)
+            // Toggle with an animation: frames run while it animates, then stop.
+            allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Enabled" }?.performClick(nil)
+            h.layoutSubtreeIfNeeded()
+            let root = h.hostingRoot as! _ViewRoot
+            XCTAssertTrue(root.isAnimating)
+            for step in 1...8 {
+                clock = 10 + Double(step) * 0.05
+                CARuntime.tick()
+                w.displayIfNeeded()
+            }
+            XCTAssertFalse(root.isAnimating, "the display link stops once every animation has finished")
+            XCTAssertFalse(CARuntime.hasPendingWork)
+            let after = platform.paintCount
+            for _ in 0..<3 { w.displayIfNeeded() }
+            XCTAssertEqual(platform.paintCount, after)
+            XCTAssertTrue(allViews(h).compactMap { $0 as? _TextView }.contains { $0.storage.string == "Disabled" })
+            w.close()
+        }
+    }
+}

@@ -183,12 +183,8 @@ final class Win32Backend: PlatformBackend {
 
     func run() {
         running = true
-        var msg = MSG()
         while running {
-            // The overlay imports BOOL as Bool: WM_QUIT (0) and errors (-1) both end the loop.
-            if !GetMessageW(&msg, nil, 0, 0) { break }
-            TranslateMessage(&msg)
-            DispatchMessageW(&msg)
+            if !pump() { break }
         }
         running = false
     }
@@ -198,17 +194,48 @@ final class Win32Backend: PlatformBackend {
         PostQuitMessage(0)
     }
 
-    private var frameCallback: (@MainActor () -> Void)?
-    private static let frameTimerID: UINT_PTR = 1
-
-    /// One-shot WM_TIMER on the message window (~16 ms; USER_TIMER_MINIMUM applies).
-    func scheduleFrame(_ callback: @escaping @MainActor () -> Void) {
-        frameCallback = callback
-        if let hwnd = messageWindow { SetTimer(hwnd, Win32Backend.frameTimerID, 16, nil) }
+    /// Dispatches every queued message, fires the animation frame when its deadline has
+    /// passed, then blocks until the next message or the deadline. Returns false on WM_QUIT
+    /// (left in the queue for an outer loop).
+    ///
+    /// Frames are driven by a deadline checked here rather than by WM_TIMER: Windows only
+    /// synthesises WM_TIMER (and WM_PAINT) when the queue is otherwise empty, so a window
+    /// that repaints every frame would starve the timer and animations would never advance.
+    private func pump() -> Bool {
+        var msg = MSG()
+        while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
+            if msg.message == UINT(WM_QUIT) {
+                PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
+                return false
+            }
+            TranslateMessage(&msg)
+            DispatchMessageW(&msg)
+            fireFrameIfDue()
+        }
+        fireFrameIfDue()
+        let timeout: DWORD
+        if let deadline = frameDeadline {
+            let now = GetTickCount64()
+            timeout = deadline > now ? DWORD(min(deadline - now, 1000)) : 0
+        } else {
+            timeout = INFINITE
+        }
+        _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+        return true
     }
 
-    fileprivate func fireFrame() {
-        if let hwnd = messageWindow { KillTimer(hwnd, Win32Backend.frameTimerID) }
+    private var frameCallback: (@MainActor () -> Void)?
+    private var frameDeadline: UInt64?          // GetTickCount64 milliseconds
+
+    /// Schedules one frame about 16 ms from now; `pump()` fires it.
+    func scheduleFrame(_ callback: @escaping @MainActor () -> Void) {
+        frameCallback = callback
+        if frameDeadline == nil { frameDeadline = GetTickCount64() + 16 }
+    }
+
+    private func fireFrameIfDue() {
+        guard let deadline = frameDeadline, GetTickCount64() >= deadline else { return }
+        frameDeadline = nil
         let cb = frameCallback
         frameCallback = nil
         cb?()
@@ -266,24 +293,16 @@ final class Win32Backend: PlatformBackend {
         let modal = (window as? Win32Window)?.hwnd
         let others = windows.compactMap { $0.hwnd }.filter { $0 != modal }
         for h in others { EnableWindow(h, false) }
-        var msg = MSG()
         while !stop() {
-            if !GetMessageW(&msg, nil, 0, 0) { PostQuitMessage(Int32(msg.wParam)); break }
-            TranslateMessage(&msg)
-            DispatchMessageW(&msg)
-            drainPosted()
+            if !pump() { break }
         }
         for h in others { EnableWindow(h, true) }
         if let modal { SetActiveWindow(modal) }
     }
 
     func runNested(until stop: @escaping @MainActor () -> Bool) {
-        var msg = MSG()
         while !stop() {
-            if !GetMessageW(&msg, nil, 0, 0) { PostQuitMessage(Int32(msg.wParam)); break }
-            TranslateMessage(&msg)
-            DispatchMessageW(&msg)
-            drainPosted()
+            if !pump() { break }
         }
     }
 
@@ -388,16 +407,12 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
-        if msg == Win32Backend.postMessage || msg == UINT(WM_TIMER) {
+        if msg == Win32Backend.postMessage {
             let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0)
             if ptr != 0 {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr)
                 let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
-                if msg == UINT(WM_TIMER) {
-                    MainActor.assumeIsolated { backend.fireFrame() }
-                } else {
-                    MainActor.assumeIsolated { backend.drainPosted() }
-                }
+                MainActor.assumeIsolated { backend.drainPosted() }
             }
             return 0
         }
