@@ -181,8 +181,9 @@ final class _TabViewPrimitive: _Primitive {
         let page = pages.isEmpty ? _ViewBox(EmptyView()) : pages[index].box
         let body = VStack(spacing: 8) {
             bar
-            // A page fills the space below the bar from the top and never spills over it.
-            _Page(box: page).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).clipped()
+            // A page fills the space below the bar from the top, so a tall page spills past
+            // the window's bottom edge rather than over the bar.
+            _Page(box: page).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         children = [_ViewBox(body, id: AnyHashable("tabview"))]
         // The page keeps its identity across selection changes only when the same page shows.
