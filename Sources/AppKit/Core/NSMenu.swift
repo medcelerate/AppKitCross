@@ -103,9 +103,9 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/canceltracking()
-    open func cancelTracking() { }
+    open func cancelTracking() { MainActor.assumeIsolated { if _NSMenuTracker.current?.rootMenu === self || _NSMenuTracker.current?.levels.contains(where: { $0.menu === self }) == true { _NSMenuTracker.current?.cancel() } } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/canceltrackingwithoutanimation()
-    open func cancelTrackingWithoutAnimation() { }
+    open func cancelTrackingWithoutAnimation() { cancelTracking() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/delegate
     open var delegate: (any NSMenuDelegate)? {
         get { _delegate }
@@ -131,7 +131,7 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/helprequested(with:)
     open func helpRequested(with eventPtr: NSEvent) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/highlighteditem
-    open var highlightedItem: NSMenuItem? { nil }
+    open var highlightedItem: NSMenuItem? { MainActor.assumeIsolated { _NSMenuTracker.current?.levels.first { $0.menu === self }?.window.menuView.highlightedItem } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/index(of:)
     open func index(of item: NSMenuItem) -> Int { _items.firstIndex { $0 === item } ?? -1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/indexofitem(withrepresentedobject:)
@@ -239,11 +239,31 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/popup(positioning:at:in:)
-    open func popUp(positioning item: NSMenuItem?, at location: NSPoint, in view: NSView?) -> Bool { unimplemented() }
+    /// Opens the menu with `item` (or its first item) at `location` and returns once it
+    /// closes: true when an item was chosen. Events are pumped by a nested run loop.
+    open func popUp(positioning item: NSMenuItem?, at location: NSPoint, in view: NSView?) -> Bool {
+        MainActor.assumeIsolated { () -> Bool in
+            var point = location
+            if let view { point = view.convert(location, to: nil); if let w = view.window { point = w.convertPoint(toScreen: point) } }
+            let itemIndex = item.map { self.index(of: $0) }.flatMap { $0 >= 0 ? $0 : nil }
+            let tracker = _NSMenuTracker.begin(menu: self, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: itemIndex), openedWithMouseDown: false)
+            Platform.backend.runNested { tracker.finished }
+            return tracker.chosenItem != nil
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/popupcontextmenu(_:with:for:)
-    public class func popUpContextMenu(_ menu: NSMenu, with event: NSEvent, for view: NSView) { unimplemented() }
+    public class func popUpContextMenu(_ menu: NSMenu, with event: NSEvent, for view: NSView) { popUpContextMenu(menu, with: event, for: view, with: nil) }
+    /// Opens the menu at the event's location. Unlike AppKit this returns at once; the
+    /// menu tracks asynchronously and sends the chosen item's action when it closes.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/popupcontextmenu(_:with:for:with:)
-    public class func popUpContextMenu(_ menu: NSMenu, with event: NSEvent, for view: NSView, with font: NSFont?) { unimplemented() }
+    public class func popUpContextMenu(_ menu: NSMenu, with event: NSEvent, for view: NSView, with font: NSFont?) {
+        MainActor.assumeIsolated {
+            let window = event.window ?? view.window
+            let point = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+            let isDown = event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown
+            _NSMenuTracker.begin(menu: menu, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: nil), font: font, openedWithMouseDown: isDown)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/presentationstyle
     @available(macOS 14.0, *)
     open var presentationStyle: NSMenu.PresentationStyle {
@@ -289,7 +309,7 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         set { _showsStateColumn = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/size
-    open var size: NSSize { .zero }
+    open var size: NSSize { MainActor.assumeIsolated { _NSMenuLayout(menu: self, font: _font ?? NSFont.menuFont(ofSize: NSFont.systemFontSize)).size } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/submenuaction(_:)
     open func submenuAction(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/supermenu

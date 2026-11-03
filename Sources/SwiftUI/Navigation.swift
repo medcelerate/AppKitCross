@@ -274,8 +274,8 @@ extension View {
     public func pickerStyle<S: PickerStyle>(_ style: S) -> some View { environment(\.pickerStyle, style._kind) }
 }
 
-/// Picker rendering: a labelled segmented row (menu and automatic styles fall back to it
-/// until a popup-button control exists), or a vertical radio group.
+/// Picker rendering: a labelled pop-up button (menu and automatic styles), a segmented row,
+/// or a vertical radio group.
 @MainActor
 final class _PickerPrimitive: _Primitive {
     var label: String
@@ -309,10 +309,16 @@ final class _PickerPrimitive: _Primitive {
                     _RadioRow(title: pair.element, isOn: pair.offset == index) { sel.set(tags[pair.offset]) }
                 }
             })
-        } else {
+        } else if style == .segmented {
             body = AnyView(HStack(spacing: 8) {
                 if !labelText.isEmpty { Text(labelText) }
                 _Segmented(titles: titles, selected: index) { i in sel.set(tags[i]) }
+            })
+        } else {
+            // Menu and automatic styles: a pop-up button, as on macOS.
+            body = AnyView(HStack(spacing: 8) {
+                if !labelText.isEmpty { Text(labelText) }
+                _PopUp(titles: titles, selected: index) { i in sel.set(tags[i]) }
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]

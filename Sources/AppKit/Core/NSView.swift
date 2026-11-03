@@ -997,7 +997,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/makebackinglayer()
     @MainActor open func makeBackingLayer() -> CALayer { CALayer() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/menu(for:)
-    @MainActor open func menu(for event: NSEvent) -> NSMenu? { unimplemented() }
+    @MainActor open func menu(for event: NSEvent) -> NSMenu? { menu }
+    /// A right click opens the view's contextual menu (`menu(for:)`), as in AppKit.
+    @MainActor open override func rightMouseDown(with event: NSEvent) {
+        if let m = menu(for: event) { NSMenu.popUpContextMenu(m, with: event, for: self) } else { super.rightMouseDown(with: event) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/mousedowncanmovewindow
     @MainActor open var mouseDownCanMoveWindow: Bool { !isOpaque }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needsdisplay

@@ -1124,6 +1124,8 @@ import CoreText
     @MainActor open func resignKey() {
         guard _isKey else { return }
         _isKey = false
+        // Losing the keyboard (another window or application activated) dismisses open menus.
+        if let t = _NSMenuTracker.current, !t.isMenuWindow(self) { t.cancel() }
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
         post(NSWindow.didResignKeyNotification)

@@ -421,6 +421,17 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
+        // An open menu owns the mouse and keyboard until it closes.
+        if let tracker = _NSMenuTracker.current {
+            switch event.type {
+            case .keyDown, .keyUp, .flagsChanged, .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+                 .rightMouseDown, .rightMouseUp, .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged, .scrollWheel:
+                tracker.handle(event)
+                return
+            default:
+                break
+            }
+        }
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.
         if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {

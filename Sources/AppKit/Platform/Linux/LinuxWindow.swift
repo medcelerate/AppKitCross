@@ -49,6 +49,12 @@ final class LinuxWindow: PlatformWindow {
                      KeyPressMask | KeyReleaseMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask)
         var protocols = [backend.wmDeleteWindow]
         XSetWMProtocols(d, xid, &protocols, 1)
+        if styleMask.contains(.nonactivatingPanel) {
+            // Pop-ups (menus) bypass the window manager: no decorations, no focus, on top.
+            var attrs = XSetWindowAttributes()
+            attrs.override_redirect = 1
+            XChangeWindowAttributes(d, xid, UInt(CWOverrideRedirect), &attrs)
+        }
         if !styleMask.contains(.titled) {
             // Borderless: ask the window manager for no decorations (Motif hints).
             let motif = XInternAtom(d, "_MOTIF_WM_HINTS", 0)

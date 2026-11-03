@@ -137,6 +137,10 @@ final class Win32Backend: PlatformBackend {
             if mask.contains(.resizable) { style |= DWORD(WS_THICKFRAME) }
         }
         if mask.contains(.utilityWindow) { ex |= DWORD(WS_EX_TOOLWINDOW) }
+        if mask.contains(.nonactivatingPanel) {
+            // Menus and other pop-ups: no taskbar entry, never activated, above the owner.
+            ex = (ex & ~DWORD(WS_EX_APPWINDOW)) | DWORD(WS_EX_TOOLWINDOW) | DWORD(WS_EX_NOACTIVATE) | DWORD(WS_EX_TOPMOST)
+        }
         return (style, ex)
     }
 
@@ -271,6 +275,16 @@ final class Win32Backend: PlatformBackend {
         }
         for h in others { EnableWindow(h, true) }
         if let modal { SetActiveWindow(modal) }
+    }
+
+    func runNested(until stop: @escaping @MainActor () -> Bool) {
+        var msg = MSG()
+        while !stop() {
+            if !GetMessageW(&msg, nil, 0, 0) { PostQuitMessage(Int32(msg.wParam)); break }
+            TranslateMessage(&msg)
+            DispatchMessageW(&msg)
+            drainPosted()
+        }
     }
 
     // MARK: Cursor

@@ -56,6 +56,8 @@ public protocol PlatformBackend: AnyObject {
     /// Runs a nested event loop for a modal window until `stop` reports true.
     /// Other windows of the application do not receive input meanwhile.
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
+    /// Pumps events until `stop` returns true without disabling any window (menu tracking).
+    func runNested(until stop: @escaping @MainActor () -> Bool)
     /// Sets the mouse cursor shown over this application's windows.
     func setCursor(_ cursor: PlatformCursor)
     func setCursorHidden(_ hidden: Bool)
@@ -101,6 +103,10 @@ public protocol PlatformWindow: AnyObject {
 
 /// A layer tree flattened for the platform compositor; see `_CALayerScene` in QuartzCore.
 public typealias PlatformLayerScene = _CALayerScene
+
+extension PlatformBackend {
+    public func runNested(until stop: @escaping @MainActor () -> Bool) { runModal(for: nil, until: stop) }
+}
 
 extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }

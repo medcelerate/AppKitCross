@@ -14,6 +14,7 @@ final class CanvasView: NSView {
     private var clicks: [NSPoint] = []
     var showsGrid = true { didSet { needsDisplay = true } }
     var circleSize: CGFloat = 120 { didSet { needsDisplay = true } }
+    var circleColor: NSColor = .systemBlue { didSet { needsDisplay = true } }
 
     func clearDots() {
         clicks.removeAll()
@@ -44,9 +45,9 @@ final class CanvasView: NSView {
 
         // Filled rounded rectangle with a stroke
         let box = NSBezierPath(roundedRect: NSRect(x: 40, y: 40, width: 220, height: 140), xRadius: 16, yRadius: 16)
-        NSColor.systemBlue.withAlphaComponent(0.85).setFill()
+        circleColor.withAlphaComponent(0.85).setFill()
         box.fill()
-        NSColor.systemBlue.shadow(withLevel: 0.3)?.setStroke()
+        circleColor.shadow(withLevel: 0.3)?.setStroke()
         box.lineWidth = 3
         box.stroke()
 
@@ -131,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             canvas.showsGrid.toggle()
             gridMenuItem.state = canvas.showsGrid ? .on : .off
             gridCheckbox.state = gridMenuItem.state
+            return true
+        case Selector(("colourChanged:")):
+            let names: [String: NSColor] = ["Blue": .systemBlue, "Red": .systemRed, "Green": .systemGreen]
+            canvas.circleColor = names[(sender as? NSPopUpButton)?.titleOfSelectedItem ?? ""] ?? .systemBlue
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
         case Selector(("closeGlass:")):
@@ -294,6 +299,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         imageView.imageFrameStyle = .grayBezel
         imageView.autoresizingMask = [.minXMargin, .maxYMargin]
         canvas.addSubview(imageView)
+
+        // A pop-up button choosing the circle's colour, and a context menu on the canvas.
+        let colours = NSPopUpButton(frame: NSRect(x: 280, y: 60, width: 0, height: 0), pullsDown: false)
+        colours.addItems(withTitles: ["Blue", "Red", "Green"])
+        colours.target = self
+        colours.action = Selector(("colourChanged:"))
+        colours.sizeToFit()
+        colours.autoresizingMask = [.maxYMargin]
+        canvas.addSubview(colours)
+        let context = NSMenu(title: "Canvas")
+        context.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "")
+        context.addItem(withTitle: "Toggle Grid", action: Selector(("toggleGridMenu:")), keyEquivalent: "")
+        canvas.menu = context
 
         // A slider controlling the circle's size.
         let slider = NSSlider(value: 120, minValue: 40, maxValue: 200, target: self, action: Selector(("sizeChanged:")))
@@ -1026,6 +1044,21 @@ struct PresentationDemo: View {
                 ForEach(Fruit.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
             }.pickerStyle(.radioGroup)
             Text("Selected: \(fruit.rawValue)")
+            HStack {
+                Menu("Actions") {
+                    Button("Eat") { lastAnswer = "eat (menu)" }
+                    Button("Keep") { lastAnswer = "keep (menu)" }
+                    Divider()
+                    Menu("More") {
+                        Button("Share") { lastAnswer = "share" }
+                        Button("Print") { lastAnswer = "print" }
+                    }
+                }
+                Text("Right-click me").padding(6).contextMenu {
+                    Button("Hello") { lastAnswer = "hello (context)" }
+                    Button("Goodbye") { lastAnswer = "goodbye (context)" }
+                }
+            }
             HStack {
                 Button("Show sheet") { showSheet = true }
                 Button("Ask") { showAlert = true }

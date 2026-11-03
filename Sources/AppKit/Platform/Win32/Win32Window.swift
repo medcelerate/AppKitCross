@@ -245,7 +245,7 @@ final class Win32Window: PlatformWindow {
         return NSSize(width: CGFloat(r.right - r.left) / scale, height: CGFloat(r.bottom - r.top) / scale)
     }
 
-    func show() { if let hwnd { ShowWindow(hwnd, SW_SHOWNORMAL); UpdateWindow(hwnd) } }
+    func show() { if let hwnd { ShowWindow(hwnd, _styleMask.contains(.nonactivatingPanel) ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL); UpdateWindow(hwnd) } }
     func hide() { if let hwnd { ShowWindow(hwnd, SW_HIDE) } }
     func makeKey() { if let hwnd { SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd) } }
     func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND(bitPattern: 1) /* HWND_BOTTOM */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }
@@ -747,6 +747,10 @@ final class Win32Window: PlatformWindow {
             isKey = false
             owner?.platformWindowDidResignKey()
             return nil      // ... and deactivates it
+        case WM_MOUSEACTIVATE:
+            // Pop-up windows take clicks without taking activation from their owner.
+            if _styleMask.contains(.nonactivatingPanel) { return LRESULT(MA_NOACTIVATE) }
+            return nil
         case WM_LBUTTONDOWN, WM_LBUTTONDBLCLK:
             if let hwnd { SetCapture(hwnd) }
             pressedButtons |= 1

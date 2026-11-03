@@ -62,7 +62,7 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
                     VStack {
                         Picker("Flavor", selection: $flavor) {
                             ForEach(Flavor.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
+                        }.pickerStyle(.segmented)
                         Picker("Radio", selection: $flavor) {
                             Text("mint").tag(Flavor.mint)
                             Text("choc").tag(Flavor.choc)
