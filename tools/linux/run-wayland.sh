@@ -41,8 +41,9 @@ echo "screenshot: /tmp/hellowindow-linux-wayland-metal.png ($(stat -c %s /tmp/he
 # the new scale, and NSWindow logs "backing scale '...' 2.0" (APPKITWIN_TRACE). The window's
 # logical size in sway's tree (points) must not change; the 2x screenshot shows it crisp.
 echo "== monitor scale change: HelloWindow moved to a 2x output"
+export SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null | head -1)
 swaymsg create_output >/dev/null
-swaymsg output HEADLESS-2 resolution 1280x800 position 1280,0 scale 2 background '#6e3c91' solid_color >/dev/null
+swaymsg output HEADLESS-2 resolution 1280x800 position 1280 0 scale 2 background '#6e3c91' solid_color >/dev/null
 APPKITWIN_TRACE=1 ./.build/debug/HelloWindow >/tmp/hellowindow-wayland-dpi.log 2>&1 &
 APP=$!
 sleep 3
