@@ -33,4 +33,8 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.
 ```
 
 The Windows column is captured by the Windows test machine (window captures of the live
-app).
+app). Two more Windows captures show the SwiftUI demo's other tabs:
+
+| Navigation tab | Presentation tab |
+|---|---|
+| ![Navigation](images/swiftui-demo-navigation-windows.png) | ![Presentation](images/swiftui-demo-presentation-windows.png) |
