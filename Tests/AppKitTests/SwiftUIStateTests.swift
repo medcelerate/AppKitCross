@@ -26,7 +26,7 @@ final class SwiftUIStateTests: XCTestCase, @unchecked Sendable {
             struct Probe: View {
                 var body: some View {
                     VStack(spacing: 0) {
-                        Text("header")
+                        Text("header").frame(height: 16)   // fixed: the text's line height differs per platform font
                         GeometryReader { proxy in
                             Text("\(Int(proxy.size.width))x\(Int(proxy.size.height)) at \(Int(proxy.frame(in: .global).minY))")
                         }
