@@ -1,5 +1,7 @@
 # AppKitWin
 
+[![CI](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml/badge.svg)](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml)
+
 AppKit and SwiftUI for Windows and Linux, in Swift. Code written against Apple's
 frameworks compiles unchanged and runs on native Windows APIs (Win32, Direct2D,
 DirectWrite, DirectComposition, Direct3D 12) or on Linux (X11 or Wayland, Cairo, Pango).

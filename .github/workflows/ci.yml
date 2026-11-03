@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same branch or PR cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   macos:
     name: macOS host build and tests
@@ -16,7 +21,7 @@ jobs:
       - run: swift test
 
   windows:
-    name: Windows build
+    name: Windows build and tests
     # windows-latest ships VS 2026 (MSVC 14.5x), whose STL needs Clang 20; Swift 6.2's clang is older.
     runs-on: windows-2022
     steps:
@@ -27,6 +32,10 @@ jobs:
           tag: 6.2-RELEASE
       - run: swift --version
       - run: swift build -c debug
+      - name: Tests on the host backend
+        run: swift test
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
 
   linux:
     name: Linux build (X11 + Wayland, Cairo)
