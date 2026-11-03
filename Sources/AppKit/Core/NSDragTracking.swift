@@ -479,16 +479,24 @@ enum _NSPlatformDragDelivery {
         return screen
     }
 
+    private static func trace(_ what: String, _ d: _NSDragDestinationDriver, _ op: NSDragOperation) {
+        if NSView._traceInvalidation { NSView._trace("platform drag \(what): destination \(d.destinationView.map { String(describing: type(of: $0)) } ?? "none") source mask \(d.info.sourceOperationMask.rawValue) -> \(op.rawValue)") }
+    }
+
     static func entered(_ drag: PlatformDragInfo, window: NSWindow) -> NSDragOperation {
-        guard let d = driver(for: drag) else { return [] }
+        guard let d = driver(for: drag) else { if NSView._traceInvalidation { NSView._trace("platform drag entered: no driver (local \(drag.isFromThisApplication), tracker \(_NSDragTracker.current != nil))") }; return [] }
         let screen = prepare(d, drag, window)
-        return d.track(screenPoint: screen, in: window)
+        let op = d.track(screenPoint: screen, in: window)
+        trace("entered", d, op)
+        return op
     }
 
     static func updated(_ drag: PlatformDragInfo, window: NSWindow) -> NSDragOperation {
         guard let d = driver(for: drag) else { return [] }
         let screen = prepare(d, drag, window)
-        return d.track(screenPoint: screen, in: window)
+        let op = d.track(screenPoint: screen, in: window)
+        trace("updated", d, op)
+        return op
     }
 
     static func exited(window: NSWindow) {
@@ -499,7 +507,9 @@ enum _NSPlatformDragDelivery {
         guard let d = driver(for: drag) else { return [] }
         let screen = prepare(d, drag, window)
         d.track(screenPoint: screen, in: window)
+        trace("drop", d, d.effectiveOperation)
         let performed = d.drop()
+        if NSView._traceInvalidation { NSView._trace("platform drag performed \(performed.rawValue)") }
         if !drag.isFromThisApplication {
             d.end()
             foreign = nil

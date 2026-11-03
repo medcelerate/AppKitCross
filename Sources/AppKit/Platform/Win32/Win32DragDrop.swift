@@ -122,7 +122,11 @@ final class Win32DragDrop: PlatformDragDrop {
             }
         }
         backend.endNestedDrag()
+        if NSView._traceInvalidation { NSView._trace("win32 dnd DoDragDrop returned effect \(effect)") }
         source.platformDragEnded(at: backend.mouseLocation, operation: Win32DragDrop.operations(fromEffects: effect))
+        // OLE took the mouse capture during the drag, so the button release never reached
+        // the window: end the press now so the next moves are not reported as drags.
+        (window as? Win32Window)?.endPressAfterDrag()
         return true
     }
 
@@ -166,7 +170,9 @@ final class Win32DragDrop: PlatformDragDrop {
         let info = makeInfo(data: data, local: local, window: window, x: x, y: y, keys: keys, allowed: allowed)
         inbound = info
         inboundWindow = window
-        return Win32DragDrop.effect(from: window.ownerDragEntered(info))
+        let op = window.ownerDragEntered(info)
+        if NSView._traceInvalidation { NSView._trace("win32 dnd enter local \(local) at \(info.location) items \(info.items) keys \(keys) allowed \(allowed) -> \(op.rawValue)") }
+        return Win32DragDrop.effect(from: op)
     }
 
     private func moved(hwnd: UnsafeMutableRawPointer?, x: Int32, y: Int32, keys: UInt32, allowed: UInt32) -> UInt32 {
@@ -174,10 +180,13 @@ final class Win32DragDrop: PlatformDragDrop {
         info.location = window.contentPoint(screenX: x, screenY: y)
         info.sourceOperations = Win32DragDrop.operations(fromEffects: allowed)
         info.modifierFlags = Win32DragDrop.modifierFlags(fromKeys: keys)
-        return Win32DragDrop.effect(from: window.ownerDragUpdated(info))
+        let op = window.ownerDragUpdated(info)
+        if NSView._traceInvalidation { NSView._trace("win32 dnd over at \(info.location) keys \(keys) allowed \(allowed) -> \(op.rawValue)") }
+        return Win32DragDrop.effect(from: op)
     }
 
     private func left(hwnd: UnsafeMutableRawPointer?) {
+        if NSView._traceInvalidation { NSView._trace("win32 dnd leave") }
         inboundWindow?.ownerDragExited()
         inbound = nil
         inboundWindow = nil
@@ -191,7 +200,9 @@ final class Win32DragDrop: PlatformDragDrop {
         info.modifierFlags = Win32DragDrop.modifierFlags(fromKeys: keys)
         inbound = nil
         inboundWindow = nil
-        return Win32DragDrop.effect(from: window.ownerDrop(info))
+        let op = window.ownerDrop(info)
+        if NSView._traceInvalidation { NSView._trace("win32 dnd drop local \(local) at \(info.location) keys \(keys) allowed \(allowed) -> \(op.rawValue)") }
+        return Win32DragDrop.effect(from: op)
     }
 }
 #endif

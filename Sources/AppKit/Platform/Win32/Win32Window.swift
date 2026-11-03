@@ -301,6 +301,21 @@ final class Win32Window: PlatformWindow {
         return contentPoint(x: pt.x, y: pt.y)
     }
 
+    /// After an OLE drag (which captured the mouse): the pressed buttons are released and
+    /// the owner sees the mouse-up it missed, at the current pointer position.
+    func endPressAfterDrag() {
+        guard pressedButtons != 0, let hwnd else { return }
+        var pt = POINT()
+        GetCursorPos(&pt)
+        ScreenToClient(hwnd, &pt)
+        let button = pressedButtons & 1 != 0 ? 0 : pressedButtons & 2 != 0 ? 1 : 2
+        pressedButtons = 0
+        NSEvent._pressedMouseButtons = 0
+        let e = NSEvent._mouseEvent(type: button == 0 ? .leftMouseUp : button == 1 ? .rightMouseUp : .otherMouseUp, location: contentPoint(x: pt.x, y: pt.y),
+                                    modifierFlags: modifierFlags(), timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 1, buttonNumber: button)
+        owner?.platformWindowDispatch(e)
+    }
+
     // Drags delivered by OLE (Win32DragDrop.swift) reach the owner through these.
     func ownerDragEntered(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragEntered(drag) ?? [] }
     func ownerDragUpdated(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDragUpdated(drag) ?? [] }
