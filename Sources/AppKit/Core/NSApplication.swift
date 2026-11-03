@@ -421,6 +421,16 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
+        // A drag in progress owns the mouse (and Escape) until it drops or cancels.
+        if let drag = _NSDragTracker.current {
+            switch event.type {
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .leftMouseUp, .rightMouseUp, .otherMouseUp, .flagsChanged, .keyDown, .keyUp:
+                drag.handle(event)
+                return
+            default:
+                break
+            }
+        }
         // An open menu owns the mouse and keyboard until it closes.
         if let tracker = _NSMenuTracker.current {
             switch event.type {

@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 64 |
-| Types generated | 474 |
+| Types handwritten | 67 |
+| Types generated | 471 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10212 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1144 |
+| Members unimplemented-calls | 1172 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -201,11 +201,11 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDraggingContext | enum | generated | 2 | 0 | 0 |  |
 | NSDraggingDestination | protocol | generated | 9 | 0 | 0 |  |
 | NSDraggingFormation | enum | generated | 5 | 0 | 0 |  |
-| NSDraggingImageComponent | class | generated | 4 | 0 | 0 |  |
+| NSDraggingImageComponent | class | handwritten | 4 | 0 | 0 | 8 |
 | NSDraggingInfo | protocol | generated | 16 | 0 | 0 |  |
-| NSDraggingItem | class | generated | 8 | 0 | 1 |  |
+| NSDraggingItem | class | handwritten | 8 | 0 | 1 | 9 |
 | NSDraggingItemEnumerationOptions | struct | generated | 2 | 0 | 0 |  |
-| NSDraggingSession | class | generated | 7 | 0 | 0 |  |
+| NSDraggingSession | class | handwritten | 7 | 0 | 0 | 11 |
 | NSDraggingSource | protocol | generated | 5 | 0 | 0 |  |
 | NSDrawer | class | generated | 26 | 0 | 1 |  |
 | NSDrawerDelegate | protocol | generated | 7 | 0 | 0 |  |

@@ -61,7 +61,7 @@ targets += [
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
-let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine"]
+let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
 let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
 let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
 #elseif os(Linux)
@@ -111,7 +111,7 @@ targets += [
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
-let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine"]
+let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
 let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
 let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
 #else

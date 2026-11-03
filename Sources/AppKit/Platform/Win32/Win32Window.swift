@@ -584,6 +584,20 @@ final class Win32Window: PlatformWindow {
 
     // MARK: Input methods (IME)
 
+    /// `APPKITWIN_IME_LAYOUT=00000411` (a keyboard layout identifier: 00000411 is Japanese)
+    /// activates that layout for this thread and opens its IME in native conversion mode
+    /// on the focused window. A test hook for machines whose input settings cannot be
+    /// switched by hand; it changes nothing outside the process.
+    private func activateTestInputMethodIfRequested() {
+        guard let hwnd, let id = ProcessInfo.processInfo.environment["APPKITWIN_IME_LAYOUT"], !id.isEmpty else { return }
+        let layout = id.withCString(encodedAs: UTF16.self) { LoadKeyboardLayoutW($0, UINT(KLF_ACTIVATE)) }
+        guard layout != nil, let himc = ImmGetContext(hwnd) else { return }
+        defer { _ = ImmReleaseContext(hwnd, himc) }
+        _ = ImmSetOpenStatus(himc, true)
+        // Native (kana) input, full-width characters: the Hiragana mode of Microsoft IME.
+        _ = ImmSetConversionStatus(himc, DWORD(IME_CMODE_NATIVE | IME_CMODE_FULLSHAPE), DWORD(IME_SMODE_PHRASEPREDICT))
+    }
+
     /// The composition string of one kind (`GCS_COMPSTR`, `GCS_RESULTSTR`) as text.
     private func compositionString(_ himc: HIMC, _ kind: DWORD) -> String {
         let bytes = ImmGetCompositionStringW(himc, kind, nil, 0)
@@ -752,6 +766,7 @@ final class Win32Window: PlatformWindow {
         case WM_SETFOCUS:
             isKey = true
             owner?.platformWindowDidBecomeKey()
+            activateTestInputMethodIfRequested()
             return nil      // DefWindowProc activates the input method context for the window
         case WM_KILLFOCUS:
             isKey = false

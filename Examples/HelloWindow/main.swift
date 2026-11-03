@@ -5,6 +5,7 @@ import AppKit
 import Metal
 import MetalKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// `HelloWindow --no-layer-backing` keeps the windows' views unbacked (the Milestone 1-8
 /// drawing path); otherwise their content views are layer-backed (Milestone 9).
@@ -1030,6 +1031,8 @@ struct Planet: Identifiable {
 /// Table with a selection and a sort order; the data is sorted by the app, as on macOS.
 struct DataDemo: View {
     @State private var selected: Set<Int> = []
+    @State private var basket = "empty"
+    @State private var basketTargeted = false
     @State private var order = [KeyPathComparator(\Planet.name)]
     let planets = [Planet(id: 1, name: "Mercury", moons: 0, radius: 2440), Planet(id: 2, name: "Venus", moons: 0, radius: 6052),
                    Planet(id: 3, name: "Earth", moons: 1, radius: 6371), Planet(id: 4, name: "Mars", moons: 2, radius: 3390),
@@ -1043,6 +1046,25 @@ struct DataDemo: View {
                 TableColumn("Radius (km)", value: \.radius) { Text(String(format: "%.0f", $0.radius)) }.width(90)
             }
             Text("Selected: \(selected.sorted().map(String.init).joined(separator: ", "))")
+            HStack(spacing: 12) {
+                // Drag the chip onto the basket (a text drag, in-process).
+                Text("Drag me")
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.accentColor))
+                    .foregroundColor(.white)
+                    .onDrag { NSItemProvider(object: "a dragged chip" as NSString) }
+                Text(basketTargeted ? "Drop here" : "Basket: \(basket)")
+                    .frame(width: 220, height: 40)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: basketTargeted ? .selectedContentBackgroundColor : .controlBackgroundColor)))
+                    .onDrop(of: [.utf8PlainText], isTargeted: $basketTargeted) { providers in
+                        guard let p = providers.first else { return false }
+                        p.loadDataRepresentation(forTypeIdentifier: UTType.utf8PlainText.identifier) { data, _ in
+                            let s = data.map { String(decoding: $0, as: UTF8.self) } ?? "?"
+                            DispatchQueue.main.async { basket = s }
+                        }
+                        return true
+                    }
+            }
         }
         .padding(12)
     }
