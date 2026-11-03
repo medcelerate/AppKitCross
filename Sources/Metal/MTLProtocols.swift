@@ -264,7 +264,7 @@ extension MTLDevice {
 // MARK: Device discovery
 
 /// Where devices come from. The reference device is always available; platform backends
-/// (D3D12 on Windows) register themselves at startup and take precedence.
+/// (D3D12 on Windows, Vulkan on Linux) take precedence when they can create a device.
 public enum MTLDeviceRegistry {
     nonisolated(unsafe) public static var makers: [() -> (any MTLDevice)?] = []
     nonisolated(unsafe) private static var cached: (any MTLDevice)?
@@ -275,6 +275,9 @@ public enum MTLDeviceRegistry {
         #if os(Windows)
         // The D3D12 backend, when its shim is built (APPKITWIN_METAL_REFERENCE=1 skips it).
         if ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] != "1", let d = MTLD3D12Device() { cached = d; return d }
+        #elseif os(Linux)
+        // The Vulkan backend when a loader and a Vulkan 1.3 device exist (ADR-0011).
+        if ProcessInfo.processInfo.environment["APPKITWIN_METAL_REFERENCE"] != "1", let d = MTLVulkanDevice() { cached = d; return d }
         #endif
         let r = MTLReferenceDevice()
         cached = r

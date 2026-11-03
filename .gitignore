@@ -6,3 +6,4 @@
 api-inventory/raw/
 Stubs/Seeds/
 .claude/worktrees/
+.build-linux*/
