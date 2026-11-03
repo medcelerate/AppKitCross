@@ -119,6 +119,7 @@ public final class _ViewNode {
 
     /// Marks the body stale; the host lays out again at the next display cycle.
     public func setNeedsUpdate() {
+        if NSView._traceInvalidation { print("[trace] setNeedsUpdate \(viewType)") }
         needsUpdate = true
         root?.noteTransaction(Transaction._current)
         root?.scheduleUpdate()
@@ -576,6 +577,7 @@ public final class _ViewRoot: NSHostingRoot {
             updateIfNeeded()
             node.place(in: bounds)
         }
+        if NSView._traceInvalidation { print("[trace] root layout in \(bounds): \(passes) settle passes, still dirty: \(dirty)") }
         node.syncBackingViews(in: host.hostView, containerFrame: .zero)
         // Insertion transitions start once the new nodes have a frame.
         for n in insertedNodes where n.isAttached {

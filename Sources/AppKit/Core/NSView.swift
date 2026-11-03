@@ -372,7 +372,12 @@ import CoreText
         for s in _subviews { s._clearNeedsDisplay() }
     }
 
+    /// `APPKITWIN_TRACE=1` logs every view invalidation (view class and rect), for finding
+    /// what keeps a window repainting on a platform without usable backtraces.
+    nonisolated(unsafe) public static let _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
+
     private func _invalidate(_ rect: NSRect) {
+        if NSView._traceInvalidation { print("[trace] setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {
             // Under native hosting the layer's raster must be versioned and recommitted;

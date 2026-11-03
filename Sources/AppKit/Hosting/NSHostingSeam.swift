@@ -255,6 +255,7 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
         return CADisplayLink(callback: callback)
     }
     public func rootDidChangeIdealSize(_ size: NSSize) {
+        if NSView._traceInvalidation { print("[trace] rootDidChangeIdealSize \(size)") }
         invalidateIntrinsicContentSize()
         _viewController?.preferredContentSize = size
     }

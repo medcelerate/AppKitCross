@@ -89,7 +89,8 @@ bar:
 | `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12. |
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
-| `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use. |
+| `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
+| `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |
 
 ## Regenerating the API inventory and stubs
 

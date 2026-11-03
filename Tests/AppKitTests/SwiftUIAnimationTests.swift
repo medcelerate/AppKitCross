@@ -281,6 +281,20 @@ final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
             for _ in 0..<3 { w.displayIfNeeded() }
             XCTAssertEqual(platform.paintCount, after)
             XCTAssertTrue(allViews(h).compactMap { $0 as? _TextView }.contains { $0.storage.string == "Disabled" })
+            let bar = allViews(h).first { $0.alphaValue < 0.31 && $0.alphaValue > 0.29 }
+            XCTAssertNotNil(bar, "the bar faded to 0.3")
+            // Toggle back on: the bar fades up and the Disabled line leaves after its transition.
+            allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Enabled" }?.performClick(nil)
+            h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(root.isAnimating)
+            for step in 1...8 {
+                clock = 11 + Double(step) * 0.05
+                CARuntime.tick()
+                w.displayIfNeeded()
+            }
+            XCTAssertFalse(root.isAnimating)
+            XCTAssertEqual(bar?.alphaValue ?? 0, 1, accuracy: 0.01, "the bar is opaque again")
+            XCTAssertFalse(allViews(h).compactMap { $0 as? _TextView }.contains { $0.storage.string == "Disabled" }, "the Disabled line is gone")
             w.close()
         }
     }
