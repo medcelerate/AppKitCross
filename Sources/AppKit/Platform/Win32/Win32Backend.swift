@@ -227,20 +227,25 @@ final class Win32Backend: PlatformBackend {
         if NSView._traceInvalidation {
             let now = GetTickCount64()
             if now - pumpTraceStart >= 1000 {
-                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms") (frame deadline \(frameDeadline.map { "\(Int64($0) - Int64(now)) ms" } ?? "none"), timer \(nextTimer.map { "\($0) s" } ?? "none"))")
+                NSView._trace("pump \(pumpIterations) iterations in \(now - pumpTraceStart) ms, wait \(timeout == INFINITE ? "infinite" : "\(timeout) ms") (frame deadline \(frameDeadline.map { "\(Int64($0) - Int64(now)) ms" } ?? "none"), timer \(nextTimer.map { "\($0) s" } ?? "none")); wakes: queue \(wakesQueue) input \(wakesInput) timeout \(wakesTimeout)")
                 pumpIterations = 0
+                wakesQueue = 0; wakesInput = 0; wakesTimeout = 0
                 pumpTraceStart = now
             }
         }
         if let handle = PlatformMainQueue.handle {
             var handles: [HANDLE?] = [handle]
             let r = MsgWaitForMultipleObjectsEx(1, &handles, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
-            if r == WAIT_OBJECT_0 { PlatformMainQueue.service() }
+            if r == WAIT_OBJECT_0 { wakesQueue += 1; PlatformMainQueue.service() }
+            else if r == WAIT_OBJECT_0 + 1 { wakesInput += 1 }
+            else { wakesTimeout += 1 }
         } else {
-            _ = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+            let r = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
+            if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1 }
         }
         return true
     }
+    private var wakesQueue = 0, wakesInput = 0, wakesTimeout = 0
     private var pumpIterations = 0
     private var pumpTraceStart: UInt64 = GetTickCount64()
 
