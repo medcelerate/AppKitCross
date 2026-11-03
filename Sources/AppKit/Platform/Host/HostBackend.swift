@@ -125,7 +125,18 @@ final class HostWindow: PlatformWindow {
     private unowned let backend: HostBackend
     var title: String = ""
     var styleMask: NSWindow.StyleMask
-    var backingScaleFactor: CGFloat { backend.displays[0].backingScaleFactor }
+    /// The window's own scale once a test moved it to a "monitor" of another scale;
+    /// otherwise the host display's.
+    private var scaleOverride: CGFloat?
+    var backingScaleFactor: CGFloat { scaleOverride ?? backend.displays[0].backingScaleFactor }
+    /// Test hook: the window moved to a monitor of another scale, as WM_DPICHANGED or a
+    /// `wl_surface.enter` would report. The frame keeps its point size; the owner
+    /// re-rasterises for the new pixel size.
+    func setBackingScaleFactor(_ scale: CGFloat) {
+        guard scale != backingScaleFactor else { return }
+        scaleOverride = scale
+        owner?.platformWindowDidChangeBackingScaleFactor(scale)
+    }
     private(set) var isVisible = false
     private(set) var isKey = false
     var minSize = NSSize(width: 0, height: 0)

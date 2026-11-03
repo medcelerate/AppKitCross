@@ -171,6 +171,8 @@ import CoreText
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
+    /// The screen the window was last seen on (its name), for `didChangeScreenNotification`.
+    private var _lastScreenName: String?
     /// Content rect at the time of the last close (the platform window knows its real frame insets).
     private var _lastContentRect: NSRect? = nil
     private var _animationBehavior: NSWindow.AnimationBehavior = .default
@@ -345,6 +347,21 @@ import CoreText
             post(NSWindow.didMoveNotification)
             delegate?.windowDidMove(Notification(name: NSWindow.didMoveNotification, object: self))
         }
+        _noteScreen()
+    }
+
+    /// Posts `didChangeScreenNotification` when the move or resize put the window on
+    /// another screen (a monitor of another scale on Windows sends WM_DPICHANGED too).
+    private func _noteScreen() {
+        guard let s = screen else { return }
+        let name = s.localizedName
+        guard name != _lastScreenName else { return }
+        let first = _lastScreenName == nil
+        _lastScreenName = name
+        guard !first else { return }        // the first sighting, at creation, before a title exists
+        if NSView._traceInvalidation { NSView._trace("screen \'\(_title)\' \(name) scale \(s.backingScaleFactor)") }
+        post(NSWindow.didChangeScreenNotification)
+        delegate?.windowDidChangeScreen(Notification(name: NSWindow.didChangeScreenNotification, object: self))
     }
 
     public func platformWindowShouldClose() -> Bool {
@@ -371,6 +388,8 @@ import CoreText
         }
         if let cv = _contentView { visit(cv) }
         _setLayerSceneNeedsCommit()
+        // The backing store is a new pixel size: everything is drawn again at the new scale.
+        _platform?.setNeedsDisplay(nil)
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
@@ -1264,6 +1283,9 @@ import CoreText
     @MainActor open func saveFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/screen
     @MainActor open var screen: NSScreen? {
+        // A backend that knows which monitor holds the window answers directly (its scale
+        // is the window's); otherwise the screen holding most of the frame wins.
+        if let d = _platform?.currentDisplay { return NSScreen(display: d) }
         let f = frame
         let all = NSScreen.screens
         return all.max { $0.frame.intersection(f).area < $1.frame.intersection(f).area } ?? all.first

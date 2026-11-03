@@ -77,6 +77,10 @@ public protocol PlatformWindow: AnyObject {
     var frame: NSRect { get set }
     var styleMask: NSWindow.StyleMask { get set }
     var backingScaleFactor: CGFloat { get }
+    /// The display the window system says the window is on, when it tracks that itself
+    /// (Windows: the monitor an HWND belongs to). Nil when only `displays` and the frame
+    /// can tell, which is how the core then decides `NSWindow.screen`.
+    var currentDisplay: PlatformDisplay? { get }
     var isVisible: Bool { get }
     var isKey: Bool { get }
     var minSize: NSSize { get set }
@@ -118,6 +122,7 @@ extension PlatformBackend {
 
 extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
+    public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }
     public func deminiaturize() { }
     public func zoom() { }

@@ -39,6 +39,17 @@ final class Win32Window: PlatformWindow {
         guard let hwnd else { return }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
         dpi = GetDpiForWindow(hwnd)
+        if CGFloat(dpi) / 96 != scale {
+            // The window opened on a monitor whose DPI is not the system's: per-monitor-v2
+            // awareness gives it that monitor's DPI without touching its size, so the
+            // pixels requested at the system scale are the wrong number of points. Size
+            // the client area from the point size at the window's own DPI, like
+            // WM_DPICHANGED does, keeping the top-left corner.
+            let i = nonClientInsets(dpi: dpi)
+            let width = Int32((contentRect.width * self.scale).rounded()) + i.left + i.right
+            let height = Int32((contentRect.height * self.scale).rounded()) + i.top + i.bottom
+            SetWindowPos(hwnd, nil, 0, 0, width, height, UINT(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+        }
         backend.register(self)
         backend.win32DragDrop.register(hwnd)
         if usesCustomFrame {
@@ -178,6 +189,13 @@ final class Win32Window: PlatformWindow {
     }
 
     var backingScaleFactor: CGFloat { scale }
+
+    /// The monitor holding most of the window (what WM_DPICHANGED tracks), so
+    /// `NSWindow.screen` reports its scale rather than guessing from point rects.
+    var currentDisplay: PlatformDisplay? {
+        guard let hwnd else { return nil }
+        return Win32Backend.display(for: MonitorFromWindow(hwnd, DWORD(MONITOR_DEFAULTTONEAREST)), primaryHeight: Win32Backend.primaryHeightPixels)
+    }
 
     var isVisible: Bool { hwnd.map { IsWindowVisible($0) } ?? false }
 
