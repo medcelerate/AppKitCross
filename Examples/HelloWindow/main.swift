@@ -950,7 +950,10 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
 
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action.description {
-        case "filterChanged:": applyFilterAndSort(); return true
+        case "filterChanged:":
+            table.deselectAll(nil)      // the rows change identity: reloadData keeps selection by index
+            applyFilterAndSort()
+            return true
         case "rowClicked:": return true
         default: return false
         }
