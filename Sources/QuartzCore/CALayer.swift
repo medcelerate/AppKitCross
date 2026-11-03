@@ -511,6 +511,9 @@ open class CALayer: NSObject, CAMediaTiming {
         layer.hasPresentation = layer.hasPresentation || hasPresentation
         _needsLayout = true
         _setNeedsRedraw()
+        // Animations added before the layer joined this tree were registered under the
+        // layer itself; they now belong to (and are gated by) this tree's root.
+        if layer._hasAnimationsInTree { CARuntime.moveAnimating(from: layer, to: root) }
         if hasPresentation, !CATransaction.disableActions(), let a = layer.action(forKey: kCAOnOrderIn) {
             a.run(forKey: kCAOnOrderIn, object: layer, arguments: nil)
         }
