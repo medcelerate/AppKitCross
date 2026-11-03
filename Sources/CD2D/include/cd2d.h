@@ -32,9 +32,10 @@ CD2DTarget *cd2d_target_create_hwnd(CD2DFactory *factory, void *hwnd, uint32_t p
 /// Creates a window target presented through a DXGI flip-model swap chain (Milestone 3):
 /// a D3D11 device (BGRA support), an IDXGISwapChain1 from CreateSwapChainForHwnd
 /// (DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, 2 buffers, B8G8R8A8_UNORM, DXGI_ALPHA_MODE_IGNORE)
-/// and an ID2D1DeviceContext drawing into an ID2D1Bitmap1 over the back buffer. Every
-/// cd2d_target_* call works on it; end_draw presents with vsync. The swap chain does not
-/// retain contents between frames, so each frame must repaint the whole client area.
+/// and an ID2D1DeviceContext drawing into a persistent canvas bitmap. Every cd2d_target_*
+/// call works on it; end_draw copies the frame's dirty region (cd2d_target_set_dirty) and
+/// the previous frame's into the back buffer and presents them with vsync, so frames may
+/// repaint only what changed.
 /// Returns NULL when the device or swap chain cannot be created (the caller may fall
 /// back to cd2d_target_create_hwnd).
 CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
@@ -53,6 +54,10 @@ CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void 
 /// True when the target presents through a swap chain (created with
 /// cd2d_target_create_swapchain or cd2d_target_create_composition_swapchain).
 bool cd2d_target_is_swapchain(CD2DTarget *target);
+/// Swap-chain targets draw into a persistent canvas: tells end_draw which pixels this
+/// frame touched (client pixels), so only that region (plus the previous frame's) is
+/// copied to the back buffer and presented as dirty. Without a call the frame is whole.
+void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom);
 /// True when the target is a premultiplied composition swap chain
 /// (cd2d_target_create_composition_swapchain): the caller clears it to transparent
 /// before drawing a frame.

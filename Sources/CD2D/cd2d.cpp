@@ -37,6 +37,14 @@ struct CD2DTarget {
     ID2D1Device *d2dDevice = nullptr;
     ID2D1DeviceContext *dc = nullptr;
     ID2D1Bitmap1 *backBuffer = nullptr;
+    // Partial repaint: drawing goes to a persistent canvas; end_draw copies what changed
+    // into the back buffer (this frame's rect and the previous one's, since the two
+    // buffers alternate) and presents with that rect as the dirty region.
+    ID2D1Bitmap1 *canvas = nullptr;
+    D2D1_RECT_U dirty = {};                       // this frame, pixels; whole when !hasDirty
+    D2D1_RECT_U previousDirty = {};
+    bool hasDirty = false, hasPreviousDirty = false;
+    bool canvasFresh = true;                      // new or resized: the next frame copies everything
     // DirectComposition presentation (Milestone 3b). Non-null only for composition
     // swap-chain targets; the back buffer is then premultiplied.
     IDCompositionDevice *dcompDevice = nullptr;
@@ -108,13 +116,23 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
     hr = t->dc->CreateBitmapFromDxgiSurface(surface, &props, &t->backBuffer);
     surface->Release();
     if (FAILED(hr)) { t->lost = true; return false; }
-    t->dc->SetTarget(t->backBuffer);
+    // The canvas the frames accumulate in, same size and format as the back buffer.
+    D2D1_SIZE_U size = t->backBuffer->GetPixelSize();
+    D2D1_BITMAP_PROPERTIES1 canvasProps = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, t->alphaMode), t->dpi, t->dpi);
+    hr = t->dc->CreateBitmap(size, nullptr, 0, &canvasProps, &t->canvas);
+    if (FAILED(hr)) { safeRelease(t->backBuffer); t->lost = true; return false; }
+    t->canvasFresh = true;
+    t->hasDirty = false;
+    t->hasPreviousDirty = false;
+    t->dc->SetTarget(t->canvas);
     t->dc->SetDpi(t->dpi, t->dpi);
     return true;
 }
 
 static void releaseBackBufferBitmap(CD2DTarget *t) {
     if (t->dc) t->dc->SetTarget(nullptr);
+    safeRelease(t->canvas);
     safeRelease(t->backBuffer);
     // ResizeBuffers needs every reference to the buffers gone, including any the D3D
     // immediate context still holds for in-flight work.
@@ -276,12 +294,54 @@ void cd2d_target_begin_draw(CD2DTarget *target) {
     if (target && target->target) target->target->BeginDraw();
 }
 
+void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom) {
+    if (!target || !target->swapChain) return;
+    target->dirty = D2D1::RectU((UINT32)(left < 0 ? 0 : left), (UINT32)(top < 0 ? 0 : top), (UINT32)(right < 0 ? 0 : right), (UINT32)(bottom < 0 ? 0 : bottom));
+    target->hasDirty = true;
+}
+
+static D2D1_RECT_U unionRect(const D2D1_RECT_U &a, const D2D1_RECT_U &b) {
+    return D2D1::RectU(a.left < b.left ? a.left : b.left, a.top < b.top ? a.top : b.top,
+                       a.right > b.right ? a.right : b.right, a.bottom > b.bottom ? a.bottom : b.bottom);
+}
+
 bool cd2d_target_end_draw(CD2DTarget *target) {
     if (!target || !target->target) return false;
     HRESULT hr = target->target->EndDraw();
     if (!target->swapChain) return hr != D2DERR_RECREATE_TARGET;
     if (target->lost || isDeviceLost(hr)) return false;
-    HRESULT present = target->swapChain->Present(1, 0);
+    if (!target->backBuffer || !target->canvas) { target->lost = true; return false; }
+    // The region the back buffer is stale in: what changed now and what changed last
+    // frame (it went to the other buffer). A fresh canvas or no rect means everything.
+    D2D1_SIZE_U size = target->backBuffer->GetPixelSize();
+    D2D1_RECT_U whole = D2D1::RectU(0, 0, size.width, size.height);
+    D2D1_RECT_U copy = whole;
+    bool partial = target->hasDirty && !target->canvasFresh;
+    if (partial) {
+        copy = target->dirty;
+        if (target->hasPreviousDirty) copy = unionRect(copy, target->previousDirty);
+        if (copy.left >= copy.right || copy.top >= copy.bottom) copy = target->dirty;
+        if (copy.right > size.width) copy.right = size.width;
+        if (copy.bottom > size.height) copy.bottom = size.height;
+        if (copy.left >= copy.right || copy.top >= copy.bottom) partial = false, copy = whole;
+    }
+    D2D1_POINT_2U dest = D2D1::Point2U(copy.left, copy.top);
+    HRESULT copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &copy);
+    if (FAILED(copied)) { target->lost = true; return false; }
+    target->previousDirty = target->hasDirty ? target->dirty : whole;
+    target->hasPreviousDirty = true;
+    target->hasDirty = false;
+    target->canvasFresh = false;
+    HRESULT present;
+    if (partial) {
+        RECT rect = { (LONG)copy.left, (LONG)copy.top, (LONG)copy.right, (LONG)copy.bottom };
+        DXGI_PRESENT_PARAMETERS params = {};
+        params.DirtyRectsCount = 1;
+        params.pDirtyRects = &rect;
+        present = target->swapChain->Present1(1, 0, &params);
+    } else {
+        present = target->swapChain->Present(1, 0);
+    }
     if (isDeviceLost(present)) { target->lost = true; return false; }
     // A composition swap chain reaches the screen only when the visual tree commits.
     if (target->dcompDevice) target->dcompDevice->Commit();
