@@ -19,7 +19,7 @@ private func sorts<V>(_ d: NSSortDescriptor, by key: String, keyPath: KeyPath<Pl
     #if canImport(Darwin)
     return d.key == key
     #else
-    return d.keyPath == keyPath
+    return d.keyPath == (keyPath as AnyKeyPath)
     #endif
 }
 

@@ -944,7 +944,7 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
         #if canImport(Darwin)
         return d.key == key
         #else
-        return d.keyPath == keyPath
+        return d.keyPath == (keyPath as AnyKeyPath)
         #endif
     }
 
