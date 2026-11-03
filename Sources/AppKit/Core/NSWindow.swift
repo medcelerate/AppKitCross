@@ -166,6 +166,7 @@ import CoreText
     /// a window that was not released when closed.
     private func _reopenIfNeeded() {
         guard _platform == nil else { return }
+        if NSView._traceInvalidation { NSView._trace("reopen \'\(_title)\'") }
         let content = _lastContentRect ?? Platform.backend.contentRect(forFrameRect: _lastFrame, styleMask: _styleMask)
         _platform = Platform.backend.makeWindow(owner: self, contentRect: content, styleMask: _styleMask)
         _platform?.title = _title
@@ -281,7 +282,9 @@ import CoreText
     }
 
     public func platformWindowShouldClose() -> Bool {
-        delegate?.windowShouldClose(self) ?? true
+        let should = delegate?.windowShouldClose(self) ?? true
+        if NSView._traceInvalidation { NSView._trace("shouldClose \'\(_title)\' -> \(should)") }
+        return should
     }
 
     public func platformWindowWillClose() {
@@ -532,6 +535,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/close()
     @MainActor open func close() {
         guard !_isClosing else { return }
+        if NSView._traceInvalidation { NSView._trace("close \'\(_title)\'") }
         _isClosing = true
         post(NSWindow.willCloseNotification)
         delegate?.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: self))

@@ -748,6 +748,7 @@ final class Win32Window: PlatformWindow {
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
             // last-window-closed check run; NSWindow then calls close() here.
+            if NSView._traceInvalidation { NSView._trace("win32 WM_CLOSE '\(title)' owner \(owner == nil ? "nil" : "set")") }
             if owner?.platformWindowShouldClose() ?? true {
                 if let owner { owner.platformWindowWillClose() } else { close() }
             }
@@ -765,6 +766,7 @@ final class Win32Window: PlatformWindow {
             if (wParam >> 16) & 0xFFFF == 0, lParam == 0, backend.menuBar.command(Int(wParam & 0xFFFF)) { return 0 }
             return nil
         case WM_DESTROY:
+            if NSView._traceInvalidation { NSView._trace("win32 WM_DESTROY '\(title)' destroying \(destroying)") }
             if let hwnd { backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
             tearDownLayerHosting()
