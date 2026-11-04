@@ -893,6 +893,7 @@ struct CD2DCompVisual {
     IDCompositionMatrixTransform3D *transform3D = nullptr;   // on the effect group while a node is 3D
     IDCompositionSurface *surface = nullptr;
     uint32_t surfaceWidth = 0, surfaceHeight = 0;
+    IUnknown *swapChain = nullptr;                 // foreign content (cd2d_comp_tree_set_swapchain), retained
     bool seen = false;                             // ensured in the current update
     std::vector<int64_t> children, newChildren;    // ids, back to front
 };
@@ -927,6 +928,7 @@ static void compDestroyVisual(CD2DCompVisual *v) {
         v->visual->SetEffect(nullptr);
     }
     safeRelease(v->surface);
+    safeRelease(v->swapChain);
     safeRelease(v->clip);
     safeRelease(v->transform3D);
     safeRelease(v->effect);
@@ -1085,6 +1087,11 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
     if (!v || !v->visual || !tree->dc || tree->drawing) return nullptr;
     if (!w) w = 1;
     if (!h) h = 1;
+    if (v->swapChain) {
+        // The node draws again: its swap chain gives way to a surface.
+        v->visual->SetContent(nullptr);
+        safeRelease(v->swapChain);
+    }
     if (v->surface && (v->surfaceWidth != w || v->surfaceHeight != h)) {
         v->visual->SetContent(nullptr);
         safeRelease(v->surface);
@@ -1136,6 +1143,26 @@ void cd2d_comp_tree_surface_end_draw(CD2DCompTree *tree, int64_t id) {
     if (v && v->surface) v->surface->EndDraw();
     tree->surfaceTarget.originX = tree->surfaceTarget.originY = 0;
     tree->drawing = 0;
+}
+
+bool cd2d_comp_tree_set_swapchain(CD2DCompTree *tree, int64_t id, void *dxgiSwapChain) {
+    CD2DCompVisual *v = compVisual(tree, id);
+    if (!v || !v->visual) return false;
+    IUnknown *content = static_cast<IUnknown *>(dxgiSwapChain);
+    if (content == v->swapChain) return true;
+    if (tree->drawing == id) cd2d_comp_tree_surface_end_draw(tree, id);
+    safeRelease(v->surface);
+    v->surfaceWidth = v->surfaceHeight = 0;
+    safeRelease(v->swapChain);
+    if (content) {
+        content->AddRef();
+        v->swapChain = content;
+        // A swap chain is shown pixel for pixel at the visual's origin: no filtering.
+        v->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    } else {
+        v->visual->SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+    }
+    return SUCCEEDED(v->visual->SetContent(content));
 }
 
 void cd2d_comp_tree_remove_surface(CD2DCompTree *tree, int64_t id) {

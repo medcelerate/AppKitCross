@@ -21,8 +21,9 @@ import CoreText
 
     // MARK: Native layer hosting
 
-    /// True while the platform composites the content view's layer tree itself.
-    internal private(set) var _hostsLayersNatively = false
+    /// True while the platform composites the content view's layer tree itself. Not part
+    /// of Apple's API: MetalKit presents through a swap chain only on a hosted tree.
+    public internal(set) var _hostsLayersNatively = false
     private var _layerSceneDirty = false
     private var _layerSceneFrame = 0
 

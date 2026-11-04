@@ -22,6 +22,135 @@ enum MetalDemoShaders {
     """
 }
 
+/// The MSL sources the translator tests check, shared with the Windows tests that compile
+/// each translation through the Direct3D 12 shim's HLSL compiler (`MetalD3D12DeviceTests`).
+enum MSLSamples {
+    struct Sample { let name: String; let source: String; let functions: [(name: String, type: MTLFunctionType)] }
+
+    static let uniforms = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct Uniforms { float4x4 mvp; float4 tint; };
+        struct VIn { float3 position [[attribute(0)]]; float2 uv [[attribute(1)]]; };
+        struct VOut { float4 position [[position]]; float2 uv [[user(texcoord)]]; float pointSize [[point_size]]; };
+        vertex VOut vmain(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]], uint vid [[vertex_id]], uint iid [[instance_id]]) {
+            VOut out;
+            out.position = u.mvp * float4(in.position, 1.0);
+            out.uv = in.uv;
+            out.pointSize = 1.0;
+            return out;
+        }
+        fragment half4 fmain(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]], sampler smp [[sampler(2)]], constant float4& tint [[buffer(3)]]) {
+            float4 c = tex.sample(smp, in.uv) * tint;
+            if (c.a < 0.5h) discard_fragment();
+            return half4(c);
+        }
+        """
+
+    static let compute = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct Params { uint count; float scale; };
+        kernel void scaleValues(device float* values [[buffer(0)]], constant Params& p [[buffer(1)]], const device float* weights [[buffer(2)]],
+                                uint id [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]]) {
+            threadgroup float cache[64];
+            if (id >= p.count) return;
+            cache[lid] = weights[id];
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            values[id] = values[id] * p.scale + cache[lid];
+        }
+        [[threads_per_threadgroup(8, 8, 1)]] kernel void fill(texture2d<float, access::write> out [[texture(0)]], texture2d<float> in [[texture(1)]], uint2 gid [[thread_position_in_grid]]) {
+            if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
+            float4 c = in.read(gid);
+            out.write(c * 2.0, gid);
+        }
+        """
+
+    static let intrinsics = """
+        #include <metal_stdlib>
+        using namespace metal;
+        fragment float4 f(float4 p [[position]]) {
+            float a = fract(p.x) + mix(0.0, 1.0, p.y) + dfdx(p.x) + dfdy(p.y) + fma(p.x, p.y, 1.0) + rsqrt(p.x) + fmod(p.x, 2.0) + atan2(p.y, p.x);
+            float b = select(1.0, 2.0, p.x > 0.5) + fast::sin(p.x) + metal::abs(p.y) + M_PI_F;
+            float3 c = float3(a) + float3(b, 1, 2);
+            uint bits = as_type<uint>(a) + popcount(7u);
+            return float4(c, b + float(bits));
+        }
+        """
+
+    static let matrices = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct U { float4x4 model; float4x4 view; float3x3 normalMatrix; float2x3 oddShape; };
+        vertex float4 v(constant U& u [[buffer(0)]], uint vid [[vertex_id]]) {
+            float4 pos = float4(float(vid), 0, 0, 1);
+            float4 world = u.model * pos;
+            float4 clip = u.view * u.model * pos;
+            float4 rowVec = pos * u.model;
+            float3 n = u.normalMatrix * pos.xyz;
+            float3x3 upper = float3x3(u.model);
+            float4x4 identity = float4x4(1.0);
+            float2x2 rot = float2x2(float2(0, 1), float2(-1, 0));
+            float4 column0 = u.model[0];
+            float2 scaled = rot * pos.xy * 2.0;
+            return world + clip + rowVec + float4(n, 0) + float4(upper[0], 0) + identity[1] + float4(scaled, 0, 0) + column0;
+        }
+        """
+
+    static let samplers = """
+        #include <metal_stdlib>
+        using namespace metal;
+        constexpr sampler linearSampler(filter::linear, address::repeat, mip_filter::linear);
+        float4 fetch(texture2d<float> t, sampler s, float2 uv) { return t.sample(s, uv, level(0)); }
+        fragment float4 f(float2 uv [[user(uv)]], texture2d<float> tex [[texture(0)]], sampler explicitSampler [[sampler(0)]], depth2d<float> shadow [[texture(1)]], sampler cmp [[sampler(1)]]) {
+            float d = shadow.sample_compare(cmp, uv, 0.5);
+            return fetch(tex, linearSampler, uv) + tex.sample(explicitSampler, uv, bias(1.0)) * d;
+        }
+        """
+
+    static let keywords = "#include <metal_stdlib>\nusing namespace metal;\nstruct S { float4 position [[position]]; float sample; };\nvertex S linear(uint vid [[vertex_id]]) { S out; out.position = float4(0); out.sample = 1; return out; }"
+
+    /// HelloWindow's self-test shaders (`MetalSelfTest.shaders` / `mslShaders`; keep in sync).
+    static let selfTestHLSL = """
+    cbuffer Frame { float4 tint; };
+    struct VSIn { float2 position : ATTRIBUTE0; float4 color : ATTRIBUTE1; };
+    struct VSOut { float4 position : SV_Position; float4 color : COLOR0; };
+    VSOut triangleVertex(VSIn v) { VSOut o; o.position = float4(v.position, 0, 1); o.color = v.color * tint; return o; }
+    float4 triangleFragment(VSOut i) : SV_Target { return i.color; }
+    Texture2D image;
+    SamplerState imageSampler;
+    float4 sampledFragment(VSOut i) : SV_Target { return image.Sample(imageSampler, i.color.xy); }
+    """
+    static let selfTestMSL = """
+    #include <metal_stdlib>
+    using namespace metal;
+    struct Frame { float4 tint; };
+    struct VSIn { float2 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
+    struct VSOut { float4 position [[position]]; float4 color; };
+    vertex VSOut mslVertex(VSIn v [[stage_in]], constant Frame& frame [[buffer(0)]]) {
+        VSOut o;
+        o.position = float4(v.position, 0, 1);
+        o.color = v.color * frame.tint;
+        return o;
+    }
+    fragment half4 mslFragment(VSOut i [[stage_in]]) { return half4(i.color); }
+    """
+
+    /// Every source with its entry points, as a GPU backend must compile them.
+    static let all: [Sample] = [
+        Sample(name: "triangle (MSL)", source: MSLTranslatorTests.triangleMSL, functions: [("triangleVertex", .vertex), ("triangleFragment", .fragment)]),
+        Sample(name: "triangle (HLSL)", source: MetalDemoShaders.hlsl, functions: [("triangleVertex", .vertex), ("triangleFragment", .fragment)]),
+        Sample(name: "uniforms, textures and samplers", source: uniforms, functions: [("vmain", .vertex), ("fmain", .fragment)]),
+        Sample(name: "compute kernels", source: compute, functions: [("scaleValues", .kernel), ("fill", .kernel)]),
+        Sample(name: "intrinsic renames", source: intrinsics, functions: [("f", .fragment)]),
+        Sample(name: "matrix convention", source: matrices, functions: [("v", .vertex)]),
+        Sample(name: "keyword renames", source: keywords, functions: [("linear", .vertex)]),
+        Sample(name: "constexpr samplers and helpers", source: samplers, functions: [("f", .fragment)]),
+        Sample(name: "self-test (HLSL)", source: selfTestHLSL, functions: [("triangleVertex", .vertex), ("triangleFragment", .fragment), ("sampledFragment", .fragment)]),
+        Sample(name: "self-test (MSL)", source: selfTestMSL, functions: [("mslVertex", .vertex), ("mslFragment", .fragment)]),
+    ]
+}
+
 /// Drops all whitespace so comparisons ignore layout.
 private func squash(_ s: String) -> String { s.filter { !$0.isWhitespace } }
 
@@ -83,25 +212,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
     }
 
     func testUniformBufferTexturesAndSamplers() throws {
-        let msl = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct Uniforms { float4x4 mvp; float4 tint; };
-        struct VIn { float3 position [[attribute(0)]]; float2 uv [[attribute(1)]]; };
-        struct VOut { float4 position [[position]]; float2 uv [[user(texcoord)]]; float pointSize [[point_size]]; };
-        vertex VOut vmain(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]], uint vid [[vertex_id]], uint iid [[instance_id]]) {
-            VOut out;
-            out.position = u.mvp * float4(in.position, 1.0);
-            out.uv = in.uv;
-            out.pointSize = 1.0;
-            return out;
-        }
-        fragment half4 fmain(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]], sampler smp [[sampler(2)]], constant float4& tint [[buffer(3)]]) {
-            float4 c = tex.sample(smp, in.uv) * tint;
-            if (c.a < 0.5h) discard_fragment();
-            return half4(c);
-        }
-        """
+        let msl = MSLSamples.uniforms
         let t = try translate(msl)
         let h = t.hlsl
         XCTAssertTrue(h.contains("struct VIn {\n    float3 position : ATTRIBUTE0;\n    float2 uv : ATTRIBUTE1;\n};"), h)
@@ -121,24 +232,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
     }
 
     func testComputeKernel() throws {
-        let msl = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct Params { uint count; float scale; };
-        kernel void scaleValues(device float* values [[buffer(0)]], constant Params& p [[buffer(1)]], const device float* weights [[buffer(2)]],
-                                uint id [[thread_position_in_grid]], uint lid [[thread_index_in_threadgroup]]) {
-            threadgroup float cache[64];
-            if (id >= p.count) return;
-            cache[lid] = weights[id];
-            threadgroup_barrier(mem_flags::mem_threadgroup);
-            values[id] = values[id] * p.scale + cache[lid];
-        }
-        [[threads_per_threadgroup(8, 8, 1)]] kernel void fill(texture2d<float, access::write> out [[texture(0)]], texture2d<float> in [[texture(1)]], uint2 gid [[thread_position_in_grid]]) {
-            if (gid.x >= out.get_width() || gid.y >= out.get_height()) return;
-            float4 c = in.read(gid);
-            out.write(c * 2.0, gid);
-        }
-        """
+        let msl = MSLSamples.compute
         let t = try translate(msl)
         let h = t.hlsl
         XCTAssertTrue(h.contains("RWStructuredBuffer<float> values : register(u0, space1);"), h)
@@ -160,17 +254,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
     }
 
     func testIntrinsicRenames() throws {
-        let msl = """
-        #include <metal_stdlib>
-        using namespace metal;
-        fragment float4 f(float4 p [[position]]) {
-            float a = fract(p.x) + mix(0.0, 1.0, p.y) + dfdx(p.x) + dfdy(p.y) + fma(p.x, p.y, 1.0) + rsqrt(p.x) + fmod(p.x, 2.0) + atan2(p.y, p.x);
-            float b = select(1.0, 2.0, p.x > 0.5) + fast::sin(p.x) + metal::abs(p.y) + M_PI_F;
-            float3 c = float3(a) + float3(b, 1, 2);
-            uint bits = as_type<uint>(a) + popcount(7u);
-            return float4(c, b + float(bits));
-        }
-        """
+        let msl = MSLSamples.intrinsics
         let t = try translate(msl)
         let h = squash(t.hlsl)
         XCTAssertTrue(h.contains(squash("float a = frac(p.x) + lerp(0.0, 1.0, p.y) + ddx(p.x) + ddy(p.y) + mad(p.x, p.y, 1.0) + rsqrt(p.x) + fmod(p.x, 2.0) + atan2(p.y, p.x);")), t.hlsl)
@@ -181,24 +265,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
     }
 
     func testMatrixConvention() throws {
-        let msl = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct U { float4x4 model; float4x4 view; float3x3 normalMatrix; float2x3 oddShape; };
-        vertex float4 v(constant U& u [[buffer(0)]], uint vid [[vertex_id]]) {
-            float4 pos = float4(float(vid), 0, 0, 1);
-            float4 world = u.model * pos;
-            float4 clip = u.view * u.model * pos;
-            float4 rowVec = pos * u.model;
-            float3 n = u.normalMatrix * pos.xyz;
-            float3x3 upper = float3x3(u.model);
-            float4x4 identity = float4x4(1.0);
-            float2x2 rot = float2x2(float2(0, 1), float2(-1, 0));
-            float4 column0 = u.model[0];
-            float2 scaled = rot * pos.xy * 2.0;
-            return world + clip + rowVec + float4(n, 0) + float4(upper[0], 0) + identity[1] + float4(scaled, 0, 0) + column0;
-        }
-        """
+        let msl = MSLSamples.matrices
         let t = try translate(msl)
         let h = squash(t.hlsl)
         XCTAssertTrue(t.hlsl.contains("#pragma pack_matrix(column_major)"))
@@ -244,7 +311,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(MSLTranslator.detectLanguage("float4 PSMain() : SV_Target { return 1; }"), .hlsl)
         XCTAssertEqual(MSLTranslator.detectLanguage("vertex float4 v() { return float4(0); }"), .metal)
         // HLSL keywords used as MSL identifiers get a trailing underscore, entry points included.
-        let msl = "#include <metal_stdlib>\nusing namespace metal;\nstruct S { float4 position [[position]]; float sample; };\nvertex S linear(uint vid [[vertex_id]]) { S out; out.position = float4(0); out.sample = 1; return out; }"
+        let msl = MSLSamples.keywords
         let t = try translate(msl)
         XCTAssertTrue(t.hlsl.contains("S linear_(uint vid : SV_VertexID)"), t.hlsl)
         XCTAssertTrue(squash(t.hlsl).contains(squash("out_.sample_ = 1;")), t.hlsl)
@@ -252,16 +319,7 @@ final class MSLTranslatorTests: XCTestCase, @unchecked Sendable {
     }
 
     func testConstexprSamplersAndHelpers() throws {
-        let msl = """
-        #include <metal_stdlib>
-        using namespace metal;
-        constexpr sampler linearSampler(filter::linear, address::repeat, mip_filter::linear);
-        float4 fetch(texture2d<float> t, sampler s, float2 uv) { return t.sample(s, uv, level(0)); }
-        fragment float4 f(float2 uv [[user(uv)]], texture2d<float> tex [[texture(0)]], sampler explicitSampler [[sampler(0)]], depth2d<float> shadow [[texture(1)]], sampler cmp [[sampler(1)]]) {
-            float d = shadow.sample_compare(cmp, uv, 0.5);
-            return fetch(tex, linearSampler, uv) + tex.sample(explicitSampler, uv, bias(1.0)) * d;
-        }
-        """
+        let msl = MSLSamples.samplers
         let t = try translate(msl)
         let h = t.hlsl
         XCTAssertTrue(h.contains("SamplerState linearSampler : register(s2);"), h)
