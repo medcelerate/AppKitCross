@@ -437,10 +437,14 @@ final class _ContainerView: NSView {
     override var isFlipped: Bool { true }
     var drawHandler: ((NSRect, NSView) -> Void)?
     var mouseDownHandler: ((NSEvent) -> Bool)?
+    var mouseUpHandler: ((NSEvent) -> Void)?
     var hoverHandler: ((Bool) -> Void)?
     override func draw(_ dirtyRect: NSRect) { drawHandler?(dirtyRect, self) }
     override func mouseDown(with event: NSEvent) {
         if mouseDownHandler?(event) != true { super.mouseDown(with: event) }
+    }
+    override func mouseUp(with event: NSEvent) {
+        if let h = mouseUpHandler { h(event) } else { super.mouseUp(with: event) }
     }
     override func mouseEntered(with event: NSEvent) { hoverHandler?(true) }
     override func mouseExited(with event: NSEvent) { hoverHandler?(false) }
@@ -465,9 +469,11 @@ final class _ContainerView: NSView {
         return true
     }
     var passesThroughHits = true
+    /// Recognizers the decoration installed for `.gesture` modifiers.
+    var installedRecognizers: [NSGestureRecognizer] = []
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil { return nil }
+        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil, installedRecognizers.isEmpty { return nil }
         return hit
     }
 }

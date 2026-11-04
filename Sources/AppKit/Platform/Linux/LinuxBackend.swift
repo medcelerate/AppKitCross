@@ -18,6 +18,8 @@ final class LinuxBackend: PlatformBackend {
     let display: OpaquePointer                  // Display*
     let screen: Int32
     let root: Window
+    /// The XInput extension's opcode when the server speaks XI 2.4 (gestures); nil otherwise.
+    private(set) var xiGestureOpcode: Int32?
     let scale: CGFloat
     /// Screen height in pixels, for the y flip between AppKit and X coordinates.
     let screenHeightPx: CGFloat
@@ -54,6 +56,13 @@ final class LinuxBackend: PlatformBackend {
         if let value = XGetDefault(d, "Xft", "dpi"), let v = Double(String(cString: value)), v > 0 { dpi = v }
         scale = CGFloat(dpi / 96)
         screenHeightPx = CGFloat(XDisplayHeight(d, screen))
+        // XInput 2.4 delivers touchpad pinch and swipe gestures (libinput); older
+        // servers answer with a lower version and the windows then select none.
+        var opcode: Int32 = 0, firstEvent: Int32 = 0, firstError: Int32 = 0
+        if XQueryExtension(d, "XInputExtension", &opcode, &firstEvent, &firstError) != 0 {
+            var major: Int32 = 2, minor: Int32 = 4
+            if XIQueryVersion(d, &major, &minor) == Success, major > 2 || (major == 2 && minor >= 4) { xiGestureOpcode = opcode }
+        }
         wmDeleteWindow = XInternAtom(d, "WM_DELETE_WINDOW", 0)
         wmProtocols = XInternAtom(d, "WM_PROTOCOLS", 0)
         netWmName = XInternAtom(d, "_NET_WM_NAME", 0)
@@ -160,6 +169,22 @@ final class LinuxBackend: PlatformBackend {
                 if event.xselectionclear.selection == atom("CLIPBOARD") { x11Pasteboard.selectionCleared() }
             default:
                 _ = x11DragDrop.handle(&event, window: nil)
+            }
+            return
+        }
+        if Int32(event.type) == GenericEvent, let opcode = xiGestureOpcode, event.xcookie.extension == opcode {
+            guard XGetEventData(display, &event.xcookie) != 0, let data = event.xcookie.data else { return }
+            defer { XFreeEventData(display, &event.xcookie) }
+            switch event.xcookie.evtype {
+            case XI_GesturePinchBegin, XI_GesturePinchUpdate, XI_GesturePinchEnd:
+                let g = data.assumingMemoryBound(to: XIGesturePinchEvent.self).pointee
+                window(for: g.event)?.gesturePinch(evtype: event.xcookie.evtype, time: g.time, x: g.event_x, y: g.event_y, scale: g.scale,
+                                                   deltaAngle: g.delta_angle, state: UInt32(g.mods.effective), cancelled: g.flags & XIGesturePinchEventCancelled != 0)
+            case XI_GestureSwipeBegin, XI_GestureSwipeUpdate, XI_GestureSwipeEnd:
+                let g = data.assumingMemoryBound(to: XIGestureSwipeEvent.self).pointee
+                window(for: g.event)?.gestureSwipe(evtype: event.xcookie.evtype, time: g.time, x: g.event_x, y: g.event_y, dx: g.delta_x, dy: g.delta_y,
+                                                   state: UInt32(g.mods.effective), cancelled: g.flags & XIGestureSwipeEventCancelled != 0)
+            default: break
             }
             return
         }

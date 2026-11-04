@@ -159,6 +159,21 @@ void cd2d_comp_tree_begin_update(CD2DCompTree *tree);
 bool cd2d_comp_tree_ensure_visual(CD2DCompTree *tree, int64_t id, int64_t parentId);
 /// Local → parent space, as a 3x2 matrix (row-vector convention: x' = x*m11 + y*m21 + dx).
 void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, float m12, float m21, float m22, float dx, float dy);
+/// Touch gestures (WM_GESTURE). `cd2d_gestures_enable` asks for every gesture on the
+/// window (zoom, rotate, pan, press-and-tap, two-finger tap) instead of the default set.
+void cd2d_gestures_enable(void *hwnd);
+/// Decodes a WM_GESTURE's lParam. `id` is the GID_* value, `begin`/`end`/`inertia` the
+/// GF_* flags, `x`/`y` the screen location, `argument` the raw ullArguments (zoom: finger
+/// distance in pixels; pan: distance between fingers) and `angle` the rotation in radians
+/// for GID_ROTATE. Always closes the handle. Returns false when the message carries no info.
+typedef struct CD2DGesture {
+    uint32_t id;
+    bool begin, end, inertia;
+    int32_t x, y;
+    uint64_t argument;
+    double angle;
+} CD2DGesture;
+bool cd2d_gesture_decode(intptr_t lParam, CD2DGesture *out);
 /// A full 4x4 local → parent matrix (16 floats, row-major, row-vector convention, applied
 /// after the 2D transform through the visual's effect group, with perspective). NULL removes it.
 void cd2d_comp_tree_set_transform3d(CD2DCompTree *tree, int64_t id, const float *m);
