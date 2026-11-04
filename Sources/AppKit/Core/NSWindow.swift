@@ -1045,6 +1045,7 @@ import CoreText
             _accessibilityNotify(.focus(nil))
             return false
         }
+        if NSView._traceInvalidation { NSView._trace("a11y focus '\(_title)' -> \(String(describing: type(of: target))) element \(accessibilityFocusedElementID.map(String.init) ?? "none")") }
         _accessibilityNotify(.focus(accessibilityFocusedElementID))
         return true
     }
@@ -1306,6 +1307,7 @@ import CoreText
     @MainActor open override func keyDown(with event: NSEvent) {
         if event.charactersIgnoringModifiers == "\t" || event.charactersIgnoringModifiers == "\u{19}" {
             if event.modifierFlags.contains(.shift) || event.charactersIgnoringModifiers == "\u{19}" { selectPreviousKeyView(self) } else { selectNextKeyView(self) }
+            if NSView._traceInvalidation { NSView._trace("window '\(_title)' Tab -> first responder \(firstResponder.map { String(describing: type(of: $0)) } ?? "nil")") }
             return
         }
         super.keyDown(with: event)

@@ -195,8 +195,9 @@ final class UIAutomationTests: XCTestCase, @unchecked Sendable {
             _ = property(root, 1, 30005)
         }
         XCTAssertEqual(log.refreshes, 6)
-        XCTAssertNotNil(property(root, 2, 30005))
-        XCTAssertNil(property(root, 2 + 64 + 40, 30005), "the last id of the other range is gone")
+        XCTAssertNotNil(property(root, 42, 30005), "the last round pushed ids 42...105")
+        XCTAssertNil(property(root, 2, 30005), "the other range's first id is gone")
+        XCTAssertNil(property(root, 106, 30005))
     }
     #else
     func testSkippedWithoutUIAutomation() throws {

@@ -38,6 +38,7 @@ extension Win32Window {
             MainActor.assumeIsolated { Win32Window.from(context).accessibilityOwner?.platformAccessibility.accessibilityFocus(Int(id)) ?? false }
         }
         let root = cuia_root_create(UnsafeMutableRawPointer(hwnd), &callbacks)
+        cuia_set_trace(NSView._traceInvalidation)
         uiaRoot = root
         return root
     }
@@ -75,9 +76,14 @@ extension Win32Window {
     /// loop, coalesced, so a tree is never pushed while the view hierarchy is mid-change
     /// or from inside a provider call (a press that changes views).
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) {
-        guard let root = uiaRoot else { return }
+        guard let root = uiaRoot else {
+            if NSView._traceInvalidation { NSView._trace("uia change \(change) '\(title)': no provider root yet (no WM_GETOBJECT so far)") }
+            return
+        }
         cuia_root_invalidate(root)
-        guard cuia_clients_are_listening() else { return }
+        let listening = cuia_clients_are_listening()
+        if NSView._traceInvalidation { NSView._trace("uia change \(change) '\(title)': clients listening \(listening)") }
+        guard listening else { return }
         pendingAccessibilityChanges.append(change)
         guard !accessibilityFlushScheduled else { return }
         accessibilityFlushScheduled = true

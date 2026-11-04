@@ -95,6 +95,8 @@ void cuia_root_raise_structure_changed(CUIARoot *root, int32_t id);
 void cuia_root_destroy(CUIARoot *root);
 /// True when a UI Automation client is listening (events are worth raising).
 bool cuia_clients_are_listening(void);
+/// Prints every UiaRaise* call and its HRESULT to stderr (APPKITWIN_TRACE).
+void cuia_set_trace(bool enabled);
 
 /// Test hooks: a property through IRawElementProviderSimple::GetPropertyValue, rendered
 /// as text (numbers and booleans too); false when the provider has no value for it.

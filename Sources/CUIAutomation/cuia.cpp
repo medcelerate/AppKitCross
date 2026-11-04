@@ -16,6 +16,13 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <cstdio>
+
+static bool g_trace = false;
+void cuia_set_trace(bool enabled) { g_trace = enabled; }
+static void traceEvent(const char *what, int32_t id, HRESULT hr) {
+    if (g_trace) fprintf(stderr, "[trace] uia raise %s on %d: hr 0x%08lx\n", what, id, static_cast<unsigned long>(hr));
+}
 
 namespace {
 
@@ -834,7 +841,8 @@ static Provider *providerForEvent(CUIARoot *root, int32_t id) {
 
 void cuia_root_raise_focus(CUIARoot *root, int32_t id) {
     Provider *p = providerForEvent(root, id);
-    if (p) UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple *>(p), UIA_AutomationFocusChangedEventId);
+    if (p) traceEvent("focus", id, UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple *>(p), UIA_AutomationFocusChangedEventId));
+    else traceEvent("focus (no provider)", id, E_FAIL);
 }
 
 void cuia_root_raise_property_changed(CUIARoot *root, int32_t id, int32_t which) {
@@ -848,9 +856,9 @@ void cuia_root_raise_property_changed(CUIARoot *root, int32_t id, int32_t which)
     IRawElementProviderSimple *s = static_cast<IRawElementProviderSimple *>(p);
     if (which == 1) {
         value.vt = VT_BSTR; value.bstrVal = toBSTR(n->name);
-        UiaRaiseAutomationPropertyChangedEvent(s, UIA_NamePropertyId, empty, value);
+        traceEvent("name", id, UiaRaiseAutomationPropertyChangedEvent(s, UIA_NamePropertyId, empty, value));
     } else if (which == 2) {
-        UiaRaiseAutomationEvent(s, UIA_Selection_InvalidatedEventId);
+        traceEvent("selection", id, UiaRaiseAutomationEvent(s, UIA_Selection_InvalidatedEventId));
         for (int32_t c : n->children) {
             Node *cn = root->node(c);
             if (!cn || !(cn->flags & CUIA_SELECTED)) continue;
@@ -859,21 +867,21 @@ void cuia_root_raise_property_changed(CUIARoot *root, int32_t id, int32_t which)
         }
     } else if (n->flags & CUIA_HAS_TOGGLE) {
         value.vt = VT_I4; value.lVal = n->toggleState == 1 ? ToggleState_On : n->toggleState == 2 ? ToggleState_Indeterminate : ToggleState_Off;
-        UiaRaiseAutomationPropertyChangedEvent(s, UIA_ToggleToggleStatePropertyId, empty, value);
+        traceEvent("toggle", id, UiaRaiseAutomationPropertyChangedEvent(s, UIA_ToggleToggleStatePropertyId, empty, value));
     } else if (n->flags & CUIA_HAS_RANGE) {
         value.vt = VT_R8; value.dblVal = n->rangeValue;
-        UiaRaiseAutomationPropertyChangedEvent(s, UIA_RangeValueValuePropertyId, empty, value);
+        traceEvent("range", id, UiaRaiseAutomationPropertyChangedEvent(s, UIA_RangeValueValuePropertyId, empty, value));
     } else {
         value.vt = VT_BSTR; value.bstrVal = toBSTR(n->value);
-        UiaRaiseAutomationPropertyChangedEvent(s, UIA_ValueValuePropertyId, empty, value);
-        if (n->flags & CUIA_HAS_TEXT) UiaRaiseAutomationEvent(s, UIA_Text_TextChangedEventId);
+        traceEvent("value", id, UiaRaiseAutomationPropertyChangedEvent(s, UIA_ValueValuePropertyId, empty, value));
+        if (n->flags & CUIA_HAS_TEXT) traceEvent("text", id, UiaRaiseAutomationEvent(s, UIA_Text_TextChangedEventId));
     }
     VariantClear(&value);
 }
 
 void cuia_root_raise_structure_changed(CUIARoot *root, int32_t id) {
     Provider *p = providerForEvent(root, id);
-    if (p) UiaRaiseStructureChangedEvent(static_cast<IRawElementProviderSimple *>(p), StructureChangeType_ChildrenInvalidated, nullptr, 0);
+    if (p) traceEvent("structure", id, UiaRaiseStructureChangedEvent(static_cast<IRawElementProviderSimple *>(p), StructureChangeType_ChildrenInvalidated, nullptr, 0));
 }
 
 void cuia_root_destroy(CUIARoot *root) {
@@ -891,6 +899,7 @@ void cuia_root_destroy(CUIARoot *root) {
 }
 
 bool cuia_clients_are_listening(void) { return UiaClientsAreListening() ? true : false; }
+
 
 static bool writeString(const std::wstring &s, uint16_t *buffer, int32_t capacity) {
     if (!buffer || capacity <= 0) return false;
