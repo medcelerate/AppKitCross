@@ -41,6 +41,10 @@ public struct _CALayerSceneNode {
     public var cornerRadius: CGFloat
     public var maskedCorners: CACornerMask
     public var content: _CALayerSceneContent?
+    /// Content the compositor shows directly instead of a rasterised surface: on Windows an
+    /// `IDXGISwapChain1` (a `CAMetalLayer` presenting through DirectComposition). The node's
+    /// own `content` is nil then; children still composite above it.
+    public var nativeContent: UnsafeMutableRawPointer?
     public var name: String?
 }
 
@@ -186,7 +190,9 @@ extension CALayer {
         }
 
         let hasOwnContent = p._backgroundColor != nil || _contents != nil || delegate != nil || !(type(of: self) == CALayer.self || self is CATransformLayer)
-        if hasOwnContent {
+        if let native = _nativeContent {
+            node.nativeContent = native
+        } else if hasOwnContent {
             let version = _rasterAnimates ? frame : _rasterVersion
             node.content = _CALayerSceneContent(version: version) { [self] ctx in
                 _enterBoundsSpace(ctx, p: p)

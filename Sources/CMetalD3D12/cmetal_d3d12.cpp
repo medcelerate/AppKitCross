@@ -318,6 +318,7 @@ struct CMSwapChain {
     DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
     uint32_t bufferCount = 0, width = 0, height = 0;
     std::vector<CMTexture *> buffers;
+    char lastError[256] = {};
 };
 
 namespace {
@@ -378,6 +379,13 @@ void drainMessages(CMDevice *d) {
     }
     HRESULT removed = d->device->GetDeviceRemovedReason();
     if (removed != S_OK) logf("device removed: 0x%08lX", static_cast<unsigned long>(removed));
+}
+
+// Verbose: the device-removed reason at a named step (S_OK prints nothing).
+void logDeviceState(CMDevice *d, const char *step) {
+    if (!gVerbose || !d || !d->device) return;
+    HRESULT removed = d->device->GetDeviceRemovedReason();
+    if (removed != S_OK) logf("%s: device removed 0x%08lX", step, static_cast<unsigned long>(removed));
 }
 
 void queueWait(CMQueue *q, uint64_t value) {
@@ -770,7 +778,8 @@ extern "C" {
 
 CMDevice *cm_device_create(bool debug) {
     char env[8] = {};
-    gVerbose = debug || (GetEnvironmentVariableA("APPKITWIN_D3D12_DEBUG", env, sizeof env) > 0 && env[0] == '1');
+    gVerbose = debug || (GetEnvironmentVariableA("APPKITWIN_D3D12_DEBUG", env, sizeof env) > 0 && env[0] == '1')
+        || (GetEnvironmentVariableA("APPKITWIN_D3D12_LOG", env, sizeof env) > 0 && env[0] == '1');   // logging without the debug layer
     CMDevice *d = new CMDevice;
     d->debug = debug;
     if (debug) {
@@ -1060,7 +1069,8 @@ bool cm_texture_read(CMDevice *d, CMQueue *queue, CMTexture *t, void *out, uint3
         bd.MipLevels = 1;
         bd.SampleDesc.Count = 1;
         bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        if (FAILED(d->device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(t->readback.put())))) return false;
+        HRESULT hr = d->device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(t->readback.put()));
+        if (FAILED(hr)) { logf("readback buffer creation failed 0x%08lX (%ux%u)", hr, t->width, t->height); drainMessages(d); return false; }
         t->readbackSize = total;
     }
     bool ok = runUtility(d, queue, [&](ID3D12GraphicsCommandList *list) {
@@ -1075,10 +1085,11 @@ bool cm_texture_read(CMDevice *d, CMQueue *queue, CMTexture *t, void *out, uint3
         dstLoc.PlacedFootprint = footprint;
         list->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
     });
-    if (!ok) return false;
+    if (!ok) { logf("texture readback: utility list failed (%ux%u, swap chain %d)", t->width, t->height, t->fromSwapChain ? 1 : 0); drainMessages(d); return false; }
     void *mapped = nullptr;
     D3D12_RANGE readRange{0, static_cast<SIZE_T>(total)};
-    if (FAILED(t->readback->Map(0, &readRange, &mapped))) return false;
+    HRESULT mapResult = t->readback->Map(0, &readRange, &mapped);
+    if (FAILED(mapResult)) { logf("texture readback: Map failed 0x%08lX", mapResult); drainMessages(d); return false; }
     const uint8_t *src = static_cast<const uint8_t *>(mapped) + footprint.Offset;
     uint8_t *dst = static_cast<uint8_t *>(out);
     UINT copyRows = std::min<UINT>(numRows, height);
@@ -1412,14 +1423,53 @@ void cm_commandlist_copy_texture(CMCommandList *l, CMTexture *src, CMTexture *ds
     list->CopyTextureRegion(&d, 0, 0, 0, &s, &box);
 }
 
+void cm_commandlist_copy_texture_region(CMCommandList *l, CMTexture *src, uint32_t srcX, uint32_t srcY, CMTexture *dst, uint32_t dstX, uint32_t dstY, uint32_t width, uint32_t height) {
+    if (!l || !l->open || !src || !dst || width == 0 || height == 0) return;
+    if (srcX + width > src->width || srcY + height > src->height || dstX + width > dst->width || dstY + height > dst->height) return;
+    retain(l->textureRefs, src);
+    retain(l->textureRefs, dst);
+    ID3D12GraphicsCommandList *list = l->list.get();
+    auto location = [](CMTexture *t) {
+        D3D12_TEXTURE_COPY_LOCATION loc{};
+        loc.pResource = t->resource.get();
+        loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        return loc;
+    };
+    D3D12_BOX box{srcX, srcY, 0, srcX + width, srcY + height, 1};
+    if (src != dst) {
+        transition(list, src->resource.get(), src->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        transition(list, dst->resource.get(), dst->state, D3D12_RESOURCE_STATE_COPY_DEST);
+        D3D12_TEXTURE_COPY_LOCATION s = location(src), d = location(dst);
+        list->CopyTextureRegion(&d, dstX, dstY, 0, &s, &box);
+        return;
+    }
+    // D3D12 forbids copying within one resource: stage the region in a transient texture
+    // that the list's references keep alive until it has executed.
+    CMTexture *tmp = cm_texture_create(l->device, width, height, 1, static_cast<uint32_t>(src->format), false, false);
+    if (!tmp) return;
+    retain(l->textureRefs, tmp);
+    tmp->released = true;
+    D3D12_TEXTURE_COPY_LOCATION s = location(src), t = location(tmp);
+    transition(list, src->resource.get(), src->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    transition(list, tmp->resource.get(), tmp->state, D3D12_RESOURCE_STATE_COPY_DEST);
+    list->CopyTextureRegion(&t, 0, 0, 0, &s, &box);
+    transition(list, tmp->resource.get(), tmp->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    transition(list, dst->resource.get(), dst->state, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_BOX whole{0, 0, 0, width, height, 1};
+    list->CopyTextureRegion(&s, dstX, dstY, 0, &t, &whole);
+}
+
 uint64_t cm_commandlist_execute(CMCommandList *l, CMQueue *queue) {
     if (!l || !queue) return 0;
     if (l->open) {
-        if (FAILED(l->list->Close())) { l->open = false; return 0; }
+        HRESULT hr = l->list->Close();
         l->open = false;
+        if (FAILED(hr)) { logf("ID3D12GraphicsCommandList::Close failed 0x%08lX", static_cast<unsigned long>(hr)); drainMessages(l->device); return 0; }
     }
+    logDeviceState(l->device, "before ExecuteCommandLists");
     ID3D12CommandList *lists[] = {l->list.get()};
     queue->queue->ExecuteCommandLists(1, lists);
+    logDeviceState(l->device, "after ExecuteCommandLists");
     l->executedOn = queue;
     l->fenceValue = queueSignal(queue);
     return l->fenceValue;
@@ -1427,12 +1477,13 @@ uint64_t cm_commandlist_execute(CMCommandList *l, CMQueue *queue) {
 
 // MARK: - Swap chain
 
-CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount) {
-    if (!d || !queue || !hwnd || width == 0 || height == 0 || dxgiFormat == 0) return nullptr;
+/// Shared body of cm_swapchain_create (HWND) and cm_swapchain_create_composition (no HWND).
+static CMSwapChain *createSwapChain(CMDevice *d, CMQueue *queue, HWND hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool composition, bool opaque) {
+    if (!d || !queue || width == 0 || height == 0 || dxgiFormat == 0) return nullptr;
     CMSwapChain *sc = new CMSwapChain;
     sc->device = d;
     sc->queue = queue;
-    sc->hwnd = static_cast<HWND>(hwnd);
+    sc->hwnd = hwnd;
     sc->format = static_cast<DXGI_FORMAT>(dxgiFormat);
     sc->bufferCount = std::max(2u, std::min(bufferCount, 16u));
     sc->width = width;
@@ -1445,16 +1496,40 @@ CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.BufferCount = sc->bufferCount;
     desc.Scaling = DXGI_SCALING_STRETCH;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    // A composition chain is read back after presenting (MTKView's pixel logging and the
+    // parity tests), so its buffers keep their contents: FLIP_SEQUENTIAL.
+    desc.SwapEffect = composition ? DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL : DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    desc.AlphaMode = composition ? (opaque ? DXGI_ALPHA_MODE_IGNORE : DXGI_ALPHA_MODE_PREMULTIPLIED) : DXGI_ALPHA_MODE_UNSPECIFIED;
     Com<IDXGISwapChain1> sc1;
-    HRESULT hr = d->factory->CreateSwapChainForHwnd(queue->queue.get(), sc->hwnd, &desc, nullptr, nullptr, sc1.put());
-    if (FAILED(hr) || FAILED(sc1->QueryInterface(IID_PPV_ARGS(sc->swapChain.put())))) { logf("swap chain creation failed 0x%08lX", hr); delete sc; return nullptr; }
-    d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
+    HRESULT hr = composition
+        ? d->factory->CreateSwapChainForComposition(queue->queue.get(), &desc, nullptr, sc1.put())
+        : d->factory->CreateSwapChainForHwnd(queue->queue.get(), sc->hwnd, &desc, nullptr, nullptr, sc1.put());
+    if (FAILED(hr) || FAILED(sc1->QueryInterface(IID_PPV_ARGS(sc->swapChain.put())))) { logf("swap chain creation failed 0x%08lX (%s, %ux%u, format %u)", hr, composition ? "composition" : "hwnd", width, height, dxgiFormat); drainMessages(d); delete sc; return nullptr; }
+    logf("swap chain created (%s, %ux%u, format %u, %u buffers)", composition ? "composition" : "hwnd", width, height, dxgiFormat, sc->bufferCount);
+    logDeviceState(d, "after swap chain creation");
+    if (hwnd) d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
     char error[256] = {};
     if (!acquireSwapChainBuffers(sc, error, sizeof error)) { logf("%s", error); cm_swapchain_release(sc); return nullptr; }
+    logDeviceState(d, "after acquiring the back buffers");
     d->liveSwapChains++;
     return sc;
+}
+
+CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount) {
+    if (!hwnd) return nullptr;
+    return createSwapChain(d, queue, static_cast<HWND>(hwnd), width, height, dxgiFormat, bufferCount, false, true);
+}
+
+CMSwapChain *cm_swapchain_create_composition(CMDevice *d, CMQueue *queue, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool opaque) {
+    return createSwapChain(d, queue, nullptr, width, height, dxgiFormat, bufferCount, true, opaque);
+}
+
+void *cm_swapchain_native(CMSwapChain *sc) {
+    return sc ? static_cast<IDXGISwapChain1 *>(sc->swapChain.get()) : nullptr;
+}
+
+void cm_swapchain_last_error(CMSwapChain *sc, char *errorOut, uint32_t errorCapacity) {
+    setError(errorOut, errorCapacity, sc ? sc->lastError : "no swap chain");
 }
 
 void cm_swapchain_release(CMSwapChain *sc) {
@@ -1470,17 +1545,21 @@ bool cm_swapchain_resize(CMSwapChain *sc, uint32_t width, uint32_t height) {
     queueWait(sc->queue, sc->queue->lastSignaled);
     releaseSwapChainBuffers(sc);
     HRESULT hr = sc->swapChain->ResizeBuffers(sc->bufferCount, width, height, sc->format, 0);
-    if (FAILED(hr)) { logf("ResizeBuffers failed 0x%08lX", hr); return false; }
+    if (FAILED(hr)) { setErrorHR(sc->lastError, sizeof sc->lastError, "IDXGISwapChain::ResizeBuffers", hr); logf("ResizeBuffers to %ux%u failed 0x%08lX (device removed: 0x%08lX)", width, height, hr, static_cast<unsigned long>(sc->device->device->GetDeviceRemovedReason())); drainMessages(sc->device); return false; }
+    logf("swap chain resized to %ux%u", width, height);
     sc->width = width;
     sc->height = height;
     char error[256] = {};
-    if (!acquireSwapChainBuffers(sc, error, sizeof error)) { logf("%s", error); return false; }
+    if (!acquireSwapChainBuffers(sc, error, sizeof error)) { setError(sc->lastError, sizeof sc->lastError, error); logf("%s", error); return false; }
     return true;
 }
 
 CMTexture *cm_swapchain_acquire(CMSwapChain *sc) {
-    if (!sc || sc->buffers.empty()) return nullptr;
-    return sc->buffers[sc->swapChain->GetCurrentBackBufferIndex()];
+    if (!sc || sc->buffers.empty()) { if (sc) setError(sc->lastError, sizeof sc->lastError, "no back buffers (a resize failed)"); return nullptr; }
+    UINT index = sc->swapChain->GetCurrentBackBufferIndex();
+    logDeviceState(sc->device, "at acquire");
+    if (index >= sc->buffers.size()) { setError(sc->lastError, sizeof sc->lastError, "back buffer index out of range"); return nullptr; }
+    return sc->buffers[index];
 }
 
 bool cm_swapchain_present(CMSwapChain *sc, bool vsync) {
@@ -1490,7 +1569,12 @@ bool cm_swapchain_present(CMSwapChain *sc, bool vsync) {
         runUtility(sc->device, sc->queue, [&](ID3D12GraphicsCommandList *list) { transition(list, back->resource.get(), back->state, D3D12_RESOURCE_STATE_PRESENT); });
     }
     HRESULT hr = sc->swapChain->Present(vsync ? 1 : 0, 0);
-    if (FAILED(hr)) { logf("Present failed 0x%08lX", hr); return false; }
+    if (FAILED(hr)) {
+        setErrorHR(sc->lastError, sizeof sc->lastError, "IDXGISwapChain::Present", hr);
+        logf("Present failed 0x%08lX (device removed: 0x%08lX)", hr, static_cast<unsigned long>(sc->device->device->GetDeviceRemovedReason()));
+        drainMessages(sc->device);
+        return false;
+    }
     return true;
 }
 
