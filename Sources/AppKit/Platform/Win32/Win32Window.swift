@@ -10,6 +10,8 @@ import CD2D
 @MainActor
 final class Win32Window: PlatformWindow {
     private unowned let backend: Win32Backend
+    /// Timer that drives animation frames during the modal move/size loop.
+    private static let sizeMoveTimer: UINT_PTR = 7
     private weak var owner: PlatformWindowOwner?
     private(set) var hwnd: HWND?
     private var renderTarget: OpaquePointer?        // CD2DTarget*
@@ -752,6 +754,19 @@ final class Win32Window: PlatformWindow {
             }
         }
         switch Int32(msg) {
+        case WM_ENTERSIZEMOVE:
+            // DefWindowProc runs its own message loop while the user drags or resizes the
+            // window, so the backend's pump (which fires animation frames) is not reached:
+            // a timer fires them (display links, MTKView) until the loop ends.
+            if let hwnd { _ = SetTimer(hwnd, Win32Window.sizeMoveTimer, 16, nil) }
+            return nil
+        case WM_EXITSIZEMOVE:
+            if let hwnd { _ = KillTimer(hwnd, Win32Window.sizeMoveTimer) }
+            return nil
+        case WM_TIMER:
+            guard wParam == Win32Window.sizeMoveTimer else { return nil }
+            backend.fireFrameIfDue()
+            return 0
         case WM_PAINT:
             paint()
             return 0

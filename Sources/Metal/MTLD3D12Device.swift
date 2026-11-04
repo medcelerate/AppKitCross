@@ -589,12 +589,15 @@ final class MTLD3D12CommandBuffer: MTLCommandBuffer {
     func commit() {
         guard status.rawValue < MTLCommandBufferStatus.committed.rawValue else { return }
         status = .committed
-        guard let d3d = device as? MTLD3D12Device, let q = (commandQueue as? MTLD3D12CommandQueue)?.handle, let list = cm_commandlist_create(d3d.handle) else {
+        guard let d3d = device as? MTLD3D12Device, let ownQueue = (commandQueue as? MTLD3D12CommandQueue)?.handle, let list = cm_commandlist_create(d3d.handle) else {
             status = .error
             error = MTLCommandBufferError.internal
             for h in completedHandlers { h(self) }
             return
         }
+        // A frame that presents a swap-chain drawable is executed on the queue the chain was
+        // created with: DXGI synchronises Present against that queue's work.
+        let q = drawables.contains(where: { $0 is MTLD3D12Drawable }) ? (drawables.first { $0 is MTLD3D12Drawable } as! MTLD3D12Drawable).swapChain.queue : ownQueue
         cm_commandlist_reset(list)
         pendingGPUWork = false
         for w in work { w(list) }
@@ -781,6 +784,16 @@ public final class MTLD3D12SwapChain {
 
     /// The `IDXGISwapChain1`, for `IDCompositionVisual::SetContent` (not retained).
     public var nativeHandle: UnsafeMutableRawPointer? { cm_swapchain_native(handle) }
+
+    /// The last present/resize/acquire failure with its HRESULT, or "" (diagnostics).
+    public var lastError: String {
+        var buffer = [CChar](repeating: 0, count: 256)
+        cm_swapchain_last_error(handle, &buffer, 256)
+        return String(cString: buffer)
+    }
+
+    /// The direct queue the chain was created on: work into its buffers is executed there.
+    var queue: OpaquePointer { device.utilityQueue }
 
     /// Resizes the buffers; drawables handed out earlier must have been dropped.
     @discardableResult

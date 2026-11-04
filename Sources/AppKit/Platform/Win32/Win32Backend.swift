@@ -296,7 +296,7 @@ final class Win32Backend: PlatformBackend {
         if NSView._traceInvalidation { NSView._trace("win32 scheduleFrame deadline in \(Int64(frameDeadline!) - Int64(GetTickCount64())) ms") }
     }
 
-    private func fireFrameIfDue() {
+    func fireFrameIfDue() {
         guard let deadline = frameDeadline, GetTickCount64() >= deadline else { return }
         if NSView._traceInvalidation { NSView._trace("win32 fireFrame") }
         frameDeadline = nil

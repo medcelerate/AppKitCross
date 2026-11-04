@@ -132,6 +132,8 @@ CMSwapChain *cm_swapchain_create(CMDevice *device, CMQueue *queue, void *hwnd, u
 CMSwapChain *cm_swapchain_create_composition(CMDevice *device, CMQueue *queue, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool opaque);
 /// The IDXGISwapChain1 (not AddRef'd) for IDCompositionVisual::SetContent.
 void *cm_swapchain_native(CMSwapChain *swapChain);
+/// The last failure of present/resize/acquire on this chain ("" when none), with its HRESULT.
+void cm_swapchain_last_error(CMSwapChain *swapChain, char *errorOut, uint32_t errorCapacity);
 void cm_swapchain_release(CMSwapChain *swapChain);
 bool cm_swapchain_resize(CMSwapChain *swapChain, uint32_t width, uint32_t height);
 CMTexture *cm_swapchain_acquire(CMSwapChain *swapChain);

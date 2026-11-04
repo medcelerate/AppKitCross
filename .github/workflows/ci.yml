@@ -36,6 +36,9 @@ jobs:
         run: swift test
         env:
           APPKITWIN_HOST_BACKEND: "1"
+          # The Direct3D 12 shim's log (device, shader compiler, swap-chain and readback
+          # failures with HRESULTs) on stderr, without the debug layer.
+          APPKITWIN_D3D12_LOG: "1"
 
   linux:
     name: Linux build (X11 + Wayland, Cairo)

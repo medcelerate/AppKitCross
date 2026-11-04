@@ -159,15 +159,22 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
         }
         XCTAssertNotNil(swapChain.nativeHandle)
         let queue = try XCTUnwrap(device.makeCommandQueue())
-        func clearAndPresent(_ colour: MTLClearColor) throws -> (any MTLTexture, OpaquePointer) {
-            let drawable = try XCTUnwrap(swapChain.nextDrawable())
+        func clearAndPresent(_ colour: MTLClearColor, expecting pixel: [UInt8]) throws -> (any MTLTexture, OpaquePointer) {
+            let drawable = try XCTUnwrap(swapChain.nextDrawable(), "nextDrawable: \(swapChain.lastError)")
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = drawable.texture
             pass.colorAttachments[0].loadAction = .clear
             pass.colorAttachments[0].storeAction = .store
             pass.colorAttachments[0].clearColor = colour
+            // First the clear alone: a back buffer renders and reads back like any texture.
+            let clear = try XCTUnwrap(queue.makeCommandBuffer())
+            try XCTUnwrap(clear.makeRenderCommandEncoder(descriptor: pass)).endEncoding()
+            clear.commit()
+            clear.waitUntilCompleted()
+            XCTAssertEqual(clear.status, .completed)
+            XCTAssertEqual(Self.pixel(drawable.texture, 1, 1), pixel, "the clear landed in the back buffer before presenting")
+            // Then an empty command buffer that presents it.
             let cb = try XCTUnwrap(queue.makeCommandBuffer())
-            try XCTUnwrap(cb.makeRenderCommandEncoder(descriptor: pass)).endEncoding()
             cb.present(drawable)
             cb.commit()
             cb.waitUntilCompleted()
@@ -175,18 +182,18 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(drawable.presentedTime, 0)
             return (drawable.texture, (drawable.texture as! MTLD3D12Texture).handle)
         }
-        let (first, firstHandle) = try clearAndPresent(MTLClearColorMake(0.25, 0.5, 1, 1))
+        let (first, firstHandle) = try clearAndPresent(MTLClearColorMake(0.25, 0.5, 1, 1), expecting: [255, 128, 64, 255])
         XCTAssertEqual(first.width, 32)
         XCTAssertEqual(first.height, 16)
-        XCTAssertEqual(swapChain.presentCount, 1, "Present succeeded")
+        XCTAssertEqual(swapChain.presentCount, 1, "Present succeeded: \(swapChain.lastError)")
         XCTAssertEqual(Self.pixel(first, 3, 2), [255, 128, 64, 255], "a presented buffer keeps its pixels")
-        let (second, secondHandle) = try clearAndPresent(MTLClearColorMake(0, 1, 0, 1))
+        let (second, secondHandle) = try clearAndPresent(MTLClearColorMake(0, 1, 0, 1), expecting: [0, 255, 0, 255])
         XCTAssertNotEqual(firstHandle, secondHandle, "the chain flipped to its other buffer")
         XCTAssertEqual(Self.pixel(second, 0, 0), [0, 255, 0, 255])
         XCTAssertEqual(Self.pixel(first, 3, 2), [255, 128, 64, 255], "the earlier buffer is untouched")
-        XCTAssertTrue(swapChain.resize(width: 48, height: 24))
+        XCTAssertTrue(swapChain.resize(width: 48, height: 24), "resize: \(swapChain.lastError)")
         XCTAssertEqual(swapChain.width, 48)
-        let (third, _) = try clearAndPresent(MTLClearColorMake(1, 1, 1, 1))
+        let (third, _) = try clearAndPresent(MTLClearColorMake(1, 1, 1, 1), expecting: [255, 255, 255, 255])
         XCTAssertEqual(third.width, 48)
         XCTAssertEqual(third.height, 24)
         XCTAssertEqual(Self.pixel(third, 47, 23), [255, 255, 255, 255])
