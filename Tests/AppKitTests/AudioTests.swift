@@ -476,6 +476,12 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
     // MARK: Real-time path and the player class
 
     #if APPKITWIN_AVFAUDIO
+    /// Polls `condition` every few milliseconds for up to two seconds.
+    private func waitUntil(_ condition: () -> Bool) {
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while !condition() && Date() < deadline { Thread.sleep(forTimeInterval: 0.005) }
+    }
+
     /// Installs the null output backend for the test and restores the previous one.
     private func withNullBackend(_ body: () throws -> Void) rethrows {
         let previous = PlatformAudio.backend
@@ -547,7 +553,9 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(player.prepareToPlay())
             XCTAssertTrue(player.play())
             XCTAssertTrue(player.isPlaying)
-            Thread.sleep(forTimeInterval: 0.1)
+            // The null stream renders in real time: wait for the position to advance rather
+            // than sleeping a fixed time (CI runners are slow and their clocks coarse).
+            waitUntil { player.currentTime > 0.02 }
             XCTAssertGreaterThan(player.currentTime, 0.02)
             XCTAssertLessThan(player.currentTime, 0.2)
             player.pause()
@@ -563,7 +571,7 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             // stop() keeps currentTime; play() resumes there.
             player.numberOfLoops = 0
             XCTAssertTrue(player.play())
-            Thread.sleep(forTimeInterval: 0.05)
+            waitUntil { player.currentTime > 0.02 }
             player.stop()
             XCTAssertFalse(player.isPlaying)
             XCTAssertGreaterThan(player.currentTime, 0.01)
