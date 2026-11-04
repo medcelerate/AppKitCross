@@ -24,7 +24,7 @@ final class Stage {
 
     func install(in root: CALayer) {
         box.bounds = CGRect(x: 0, y: 0, width: 56, height: 56)
-        box.position = CGPoint(x: 60, y: 50)
+        box.position = CGPoint(x: 60, y: 230)
         box.backgroundColor = colors[0].cgColor
         box.cornerRadius = 10
         root.addSublayer(box)
@@ -32,7 +32,7 @@ final class Stage {
         dot.path = CGPath(ellipseIn: CGRect(x: -9, y: -9, width: 18, height: 18), transform: nil)
         dot.bounds = CGRect(x: -10, y: -10, width: 20, height: 20)
         dot.fillColor = NSColor.systemOrange.cgColor
-        dot.position = CGPoint(x: 120, y: 190)
+        dot.position = CGPoint(x: 40, y: 90)
         root.addSublayer(dot)
         let track = CAShapeLayer()
         track.path = Stage.trackPath
@@ -46,7 +46,7 @@ final class Stage {
         var perspective = CATransform3DIdentity
         perspective.m34 = -1 / 300
         flipHost.sublayerTransform = perspective
-        flipHost.frame = CGRect(x: 320, y: 110, width: 160, height: 100)
+        flipHost.frame = CGRect(x: 320, y: 70, width: 160, height: 100)
         root.addSublayer(flipHost)
         card.bounds = CGRect(x: 0, y: 0, width: 120, height: 70)
         card.position = CGPoint(x: 80, y: 50)
@@ -59,7 +59,7 @@ final class Stage {
         flipHost.addSublayer(card)
 
         pulse.bounds = CGRect(x: 0, y: 0, width: 40, height: 40)
-        pulse.position = CGPoint(x: 400, y: 50)
+        pulse.position = CGPoint(x: 400, y: 230)
         pulse.cornerRadius = 20
         pulse.backgroundColor = NSColor.systemPink.cgColor
         root.addSublayer(pulse)
@@ -67,9 +67,9 @@ final class Stage {
 
     static var trackPath: CGPath {
         let p = CGMutablePath()
-        p.move(to: CGPoint(x: 40, y: 190))
-        p.addCurve(to: CGPoint(x: 200, y: 190), control1: CGPoint(x: 80, y: 110), control2: CGPoint(x: 160, y: 270))
-        p.addCurve(to: CGPoint(x: 40, y: 190), control1: CGPoint(x: 240, y: 110), control2: CGPoint(x: 0, y: 270))
+        p.move(to: CGPoint(x: 40, y: 90))
+        p.addCurve(to: CGPoint(x: 200, y: 90), control1: CGPoint(x: 80, y: 170), control2: CGPoint(x: 160, y: 10))
+        p.addCurve(to: CGPoint(x: 40, y: 90), control1: CGPoint(x: 240, y: 170), control2: CGPoint(x: 0, y: 10))
         return p
     }
 
@@ -132,8 +132,8 @@ final class Stage {
         elapsed = 0
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        box.position = CGPoint(x: 60, y: 50); box.opacity = 1; box.transform = CATransform3DIdentity
-        dot.position = CGPoint(x: 40, y: 190)
+        box.position = CGPoint(x: 60, y: 230); box.opacity = 1; box.transform = CATransform3DIdentity
+        dot.position = CGPoint(x: 40, y: 90)
         card.transform = CATransform3DIdentity
         pulse.opacity = 1; pulse.transform = CATransform3DIdentity
         CATransaction.commit()
@@ -220,8 +220,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         let content = window.contentView!
         content.wantsLayer = true
 
-        // The stage: a layer-backed, flipped view whose layer hosts the scene (y down).
-        let stageView = FlippedView(frame: NSRect(x: 0, y: 140, width: 520, height: 280))
+        // The stage: a layer-backed view whose layer hosts the scene (AppKit coordinates, y up).
+        let stageView = NSView(frame: NSRect(x: 0, y: 140, width: 520, height: 280))
         stageView.wantsLayer = true
         stageView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
         content.addSubview(stageView)
@@ -230,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         playButton = NSButton(title: "Play", target: self, action: Selector(("togglePlay:")))
         let jump = NSButton(title: "Jump (implicit)", target: self, action: Selector(("jump:")))
         let reset = NSButton(title: "Reset", target: self, action: Selector(("reset:")))
-        let caption = NSTextField(labelWithString: "Core Animation: slide, keyframe path, 3D flip, pulse group")
+        let caption = NSTextField(labelWithString: "CA: slide, path, 3D flip, pulse")
         caption.textColor = .secondaryLabelColor
         let row = NSStackView(views: [playButton, jump, reset, caption])
         row.orientation = .horizontal
@@ -248,10 +248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-}
-
-final class FlippedView: NSView {
-    override var isFlipped: Bool { true }
 }
 
 let delegate = AppDelegate()

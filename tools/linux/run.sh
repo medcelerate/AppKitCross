@@ -84,6 +84,6 @@ if [ "$WAYLAND" = 1 ]; then
     fi
 fi
 if [ -n "$APPKITWIN_OUT" ] && [ -d "$APPKITWIN_OUT" ]; then
-    cp /tmp/hellowindow-linux*.png /tmp/*-linux.png "$APPKITWIN_OUT"/
+    cp /tmp/*-linux*.png "$APPKITWIN_OUT"/
 fi
 echo "done"

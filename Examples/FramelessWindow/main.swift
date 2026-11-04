@@ -68,7 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
         // Title bar hidden and transparent, content under it: AppKit draws the three
         // standard buttons itself over the content (NSWindow+fullSizeContentView).
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         window.title = "Frameless"
@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let title = NSTextField(labelWithString: "Frameless window")
         title.font = NSFont.boldSystemFont(ofSize: 22)
         title.textColor = .white
-        let hint = NSTextField(labelWithString: "Drag anywhere to move. The buttons top-left are AppKit's standard window buttons.")
+        let hint = NSTextField(labelWithString: "Drag anywhere to move. Top-left: AppKit's standard window buttons.")
         hint.textColor = NSColor.white.withAlphaComponent(0.8)
         hint.lineBreakMode = .byWordWrapping
         hint.maximumNumberOfLines = 2
@@ -111,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let close = NSButton(title: "Close", target: self, action: Selector(("closeWindow:")))
         let minimize = NSButton(title: "Minimize", target: self, action: Selector(("minimizeWindow:")))
         let zoom = NSButton(title: "Zoom", target: self, action: Selector(("zoomWindow:")))
-        let panelButton = NSButton(title: "Borderless panel", target: self, action: Selector(("showPanel:")))
+        let panelButton = NSButton(title: "Panel", target: self, action: Selector(("showPanel:")))
         let backdropToggle = NSButton(checkboxWithTitle: "Backdrop", target: self, action: Selector(("toggleBackdrop:")))
         backdropToggle.state = .on
         backdropToggle.contentTintColor = .white
