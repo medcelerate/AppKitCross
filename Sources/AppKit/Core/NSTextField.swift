@@ -340,6 +340,7 @@ import CoreText
         if let e = _editor, (notification.object as? NSTextView) === e {
             _editedSinceBegin = true
             _cell?.stringValue = e.string      // keep the model current without redrawing the editor's text
+            _accessibilityValueChanged()
         }
         NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)
         _delegate?.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: self))
@@ -357,20 +358,44 @@ import CoreText
     @MainActor open func textShouldBeginEditing(_ textObject: NSText) -> Bool { _delegate?.control(self, textShouldBeginEditing: textObject) ?? true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/textshouldendediting(_:)
     @MainActor open func textShouldEndEditing(_ textObject: NSText) -> Bool { _delegate?.control(self, textShouldEndEditing: textObject) ?? true }
+    // MARK: Accessibility (ADR-0013)
+    //
+    // A label is AXStaticText whose value is its string; an editable field is
+    // AXTextField (AXSecureTextField for secure fields) with the placeholder and the
+    // editor's selection, and assistive technology may set its text.
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? (isEditable ? .textField : .staticText) }
+    open override func accessibilitySubrole() -> NSAccessibility.Subrole? { _a11y.subrole ?? (_cell is NSSecureTextFieldCell ? .secureTextField : nil) }
+    open override func accessibilityPlaceholderValue() -> String? { _a11y.placeholder ?? placeholderString }
+    /// Editable fields are labelled by their placeholder when nothing else names them.
+    open override func accessibilityLabel() -> String? { _a11y.label ?? (isEditable ? placeholderString : nil) }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : _accessibilityString }
+    private var _accessibilityString: String { _cell is NSSecureTextFieldCell ? String(repeating: "\u{2022}", count: stringValue.count) : stringValue }
+    override func _accessibilityValueIsSettable() -> Bool { isEditable && isEnabled }
+    override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEditable, isEnabled else { return false }
+        if let e = _editor { e.string = value.stringValue; e.didChangeText() } else { stringValue = value.stringValue }
+        _fireAction()
+        return true
+    }
+    override func _accessibilityIsFocusable() -> Bool { (isEditable || isSelectable) && isEnabled && !isHiddenOrHasHiddenAncestor }
+    /// The field editor's selection while editing, else the whole text unselected.
+    open override func accessibilitySelectedTextRange() -> NSRange { _editor?.selectedRange ?? NSRange(location: 0, length: 0) }
+    open override func accessibilityPerformConfirm() -> Bool { guard isEditable else { return false }; _fireAction(); return true }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityString(for range: NSRange) -> String? { unimplemented() }
+    open func accessibilityString(for range: NSRange) -> String? { (_accessibilityString as NSString)._accessibilitySubstring(range) }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityLine(for index: Int) -> Int { unimplemented() }
+    open func accessibilityLine(for index: Int) -> Int { 0 }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityRange(forLine lineNumber: Int) -> NSRange { unimplemented() }
+    open func accessibilityRange(forLine lineNumber: Int) -> NSRange { lineNumber == 0 ? NSRange(location: 0, length: (_accessibilityString as NSString).length) : NSRange(location: NSNotFound, length: 0) }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityFrame(for range: NSRange) -> NSRect { unimplemented() }
+    open func accessibilityFrame(for range: NSRange) -> NSRect { accessibilityFrame() }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityValue() -> String? { unimplemented() }
+    open func accessibilityValue() -> String? { _accessibilityString }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? { unimplemented() }
+    open func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? { accessibilityString(for: range).map { NSAttributedString(string: $0) } }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityVisibleCharacterRange() -> NSRange { unimplemented() }
+    open func accessibilityVisibleCharacterRange() -> NSRange { NSRange(location: 0, length: (_accessibilityString as NSString).length) }
+    open func accessibilityNumberOfCharacters() -> Int { (_accessibilityString as NSString).length }
     // Requirement of NSTextContent
     open var contentType: NSTextContentType? {
         get { MainActor.assumeIsolated { _contentType } }

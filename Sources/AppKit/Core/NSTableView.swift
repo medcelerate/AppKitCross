@@ -646,7 +646,11 @@ import CoreGraphics
     }
 
     /// Makes row views for the visible rows and recycles the rest.
+    private var _updatingVisibleRows = false
     private func _updateVisibleRows() {
+        guard !_updatingVisibleRows else { return }
+        _updatingVisibleRows = true
+        defer { _updatingVisibleRows = false }
         _reloadIfNeeded()
         let visible = visibleRect
         let range = rows(in: visible.isEmpty ? bounds : visible)
@@ -830,6 +834,7 @@ import CoreGraphics
         let n = Notification(name: NSTableView.selectionDidChangeNotification, object: self)
         NotificationCenter.default.post(n)
         _delegate?.tableViewSelectionDidChange(n)
+        _accessibilityNotify(.selection(_accessibilityElementID))
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/clickedcolumn
@@ -1068,11 +1073,36 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsource/draggingsession(_:sourceoperationmaskfor:)
     @MainActor open func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [] }
 
-    // Accessibility
-    open func accessibilityLabel() -> String? { nil }
-    open func accessibilityRows() -> [any NSAccessibilityRow]? { MainActor.assumeIsolated { _rowViews.sorted { $0.key < $1.key }.map { $0.value } } }
+    // MARK: Accessibility (ADR-0013)
+    //
+    // AXTable whose children are the row views the table currently has (the visible
+    // rows and the recycled margin), each an AXRow carrying its cells. Selection goes
+    // through `selectRowIndexes`, so delegates and notifications see it.
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .table }
+    open override func accessibilityLabel() -> String? { _a11y.label }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : nil }
+    open override func accessibilityChildren() -> [Any]? {
+        if let c = _a11y.children { return c }
+        let rows: [any NSAccessibilityRow]? = accessibilityRows()      // the typed overload, not the protocol default
+        return rows ?? []
+    }
+    open func accessibilitySelectedChildren() -> [Any]? {
+        let rows: [any NSAccessibilityRow]? = accessibilitySelectedRows()
+        return rows ?? []
+    }
+    override func _accessibilityAllowsMultipleSelection() -> Bool { allowsMultipleSelection }
+    open func accessibilityRowCount() -> Int { numberOfRows }
+    open func accessibilityColumnCount() -> Int { numberOfColumns }
+    /// The rows the table has views for (the visible rect), made now if the table has
+    /// not drawn yet, so a snapshot taken before the first paint already has them.
+    open func accessibilityRows() -> [any NSAccessibilityRow]? { MainActor.assumeIsolated { _updateVisibleRows(); return _rowViews.sorted { $0.key < $1.key }.map { $0.value } } }
     open func accessibilitySelectedRows() -> [any NSAccessibilityRow]? { MainActor.assumeIsolated { _rowViews.filter { _selectedRows.contains($0.key) }.sorted { $0.key < $1.key }.map { $0.value } } }
-    open func setAccessibilitySelectedRows(_ selectedRows: [any NSAccessibilityRow]) { }
+    open func setAccessibilitySelectedRows(_ selectedRows: [any NSAccessibilityRow]) {
+        MainActor.assumeIsolated {
+            let rows = IndexSet(selectedRows.compactMap { ($0 as? NSTableRowView)?._row }.filter { $0 >= 0 })
+            selectRowIndexes(rows, byExtendingSelection: false)
+        }
+    }
     open func accessibilityVisibleRows() -> [any NSAccessibilityRow]? { accessibilityRows() }
     open func accessibilityColumns() -> [Any]? { MainActor.assumeIsolated { _tableColumns } }
     open func accessibilityVisibleColumns() -> [Any]? { MainActor.assumeIsolated { _tableColumns.filter { !$0.isHidden } } }

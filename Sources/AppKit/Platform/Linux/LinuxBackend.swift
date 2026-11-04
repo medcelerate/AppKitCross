@@ -40,6 +40,8 @@ final class LinuxBackend: PlatformBackend {
     var lastEventTime: Time = Time(CurrentTime)
     private(set) var x11DragDrop: X11DragDrop!
     var dragDrop: (any PlatformDragDrop)? { x11DragDrop }
+    /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013); nil without an accessibility bus.
+    private(set) var atspi: AtspiBridge?
 
     init() {
         guard let d = XOpenDisplay(nil) else {
@@ -61,6 +63,23 @@ final class LinuxBackend: PlatformBackend {
         text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
         x11DragDrop = X11DragDrop(backend: self)
+        let scale = self.scale, screenHeightPx = self.screenHeightPx
+        atspi = AtspiBridge.connect(rootWindowProperty: { [self] in atspiBusFromRootWindow() }) { r in
+            (Int32((r.minX * scale).rounded()), Int32((screenHeightPx - r.maxY * scale).rounded()),
+             Int32((r.width * scale).rounded()), Int32((r.height * scale).rounded()))
+        }
+    }
+
+    /// The accessibility bus address the bus launcher stores on the root window.
+    private func atspiBusFromRootWindow() -> String? {
+        let atom = XInternAtom(display, "AT_SPI_BUS", 1)
+        guard atom != 0 else { return nil }
+        var actualType: Atom = 0, format: Int32 = 0, count: UInt = 0, after: UInt = 0
+        var data: UnsafeMutablePointer<UInt8>? = nil
+        guard XGetWindowProperty(display, root, atom, 0, 1024, 0, Atom(0), &actualType, &format, &count, &after, &data) == 0, let data else { return nil }
+        defer { XFree(data) }
+        guard format == 8, count > 0 else { return nil }
+        return String(decoding: UnsafeBufferPointer(start: data, count: Int(count)), as: UTF8.self)
     }
 
     var displays: [PlatformDisplay] {
@@ -75,8 +94,11 @@ final class LinuxBackend: PlatformBackend {
         LinuxWindow(backend: self, owner: owner, contentRect: contentRect, styleMask: styleMask)
     }
 
-    func register(_ window: LinuxWindow) { windows.append(window) }
-    func unregister(_ window: LinuxWindow) { windows.removeAll { $0 === window } }
+    func register(_ window: LinuxWindow) { windows.append(window); atspi?.register(window) }
+    func unregister(_ window: LinuxWindow) {
+        if windows.contains(where: { $0 === window }) { atspi?.unregister(window) }
+        windows.removeAll { $0 === window }
+    }
     func window(for id: Window) -> LinuxWindow? { windows.first { $0.xid == id } }
 
     // MARK: Event loop
@@ -100,13 +122,14 @@ final class LinuxBackend: PlatformBackend {
             var fds = [pollfd(fd: XConnectionNumber(display), events: Int16(POLLIN), revents: 0),
                        pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
                        pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
+            if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
             var timeout: Int32 = -1
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
             }
             if let t = nextTimer { let ms = Int32(min(Double(Int32.max), t * 1000)); timeout = timeout < 0 ? ms : min(timeout, ms) }
             if windows.contains(where: { $0.needsPaint }) { timeout = 0 }
-            _ = poll(&fds, 3, timeout)
+            _ = poll(&fds, nfds_t(fds.count), timeout)
             if fds[1].revents != 0 {
                 var buf = [UInt8](repeating: 0, count: 64)
                 _ = read(wakePipe[0], &buf, 64)
@@ -118,6 +141,7 @@ final class LinuxBackend: PlatformBackend {
             XNextEvent(display, &event)
             dispatch(&event)
         }
+        atspi?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }

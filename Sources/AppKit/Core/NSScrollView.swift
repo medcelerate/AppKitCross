@@ -451,6 +451,15 @@ import CoreText
         get { _verticalScrollElasticity }
         set { _verticalScrollElasticity = newValue }
     }
+    // MARK: Accessibility (ADR-0013)
+    // AXScrollArea: the clip view is ignored, so the document view's elements and the
+    // scrollers are the children.
+    @MainActor open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .scrollArea }
+    @MainActor open func accessibilityContents() -> [Any]? { documentView.map { [$0] } }
+    @MainActor open func accessibilityVerticalScrollBar() -> Any? { hasVerticalScroller ? verticalScroller : nil }
+    @MainActor open func accessibilityHorizontalScrollBar() -> Any? { hasHorizontalScroller ? horizontalScroller : nil }
+    @MainActor override func _accessibilityIsFocusable() -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/verticalscroller
     @MainActor open var verticalScroller: NSScroller? {
         get { _verticalScroller }

@@ -153,6 +153,10 @@ final class HostWindow: PlatformWindow {
     private var surface: CGContext?     // retained between paints, like the Direct2D target
     #endif
     private(set) var paintCount = 0
+    /// Accessibility changes the core reported (ADR-0013), oldest first.
+    private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []
+    func accessibilityDidChange(_ change: PlatformAccessibilityChange) { accessibilityChanges.append(change) }
+    func clearAccessibilityChanges() { accessibilityChanges.removeAll() }
 
     /// Test hook: when set, the window hosts layer scenes and composites them itself
     /// (a reference for the DirectComposition implementation).

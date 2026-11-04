@@ -53,6 +53,14 @@ import CoreGraphics
         set { _textField = newValue }
     }
 
+    // MARK: Accessibility (ADR-0013)
+    // AXCell: its text field and image view are its children.
+    @MainActor open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .cell }
+    @MainActor open override func accessibilityLabel() -> String? { _a11y.label ?? _textField?.stringValue }
+    @MainActor open override func isAccessibilitySelected() -> Bool { _a11y.isSelected ?? ((superview as? NSTableRowView)?.isSelected ?? false) }
+    @MainActor override func _accessibilityIsFocusable() -> Bool { false }
+
     /// A cell view with one label filling it, for tables whose delegate provides no views.
     internal static func _makeLabelCell(frame: NSRect) -> NSTableCellView {
         let cell = NSTableCellView(frame: frame)

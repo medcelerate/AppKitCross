@@ -207,6 +207,11 @@ final class _TextView: NSView {
     override var acceptsFirstResponder: Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    // Accessibility (ADR-0013): AXStaticText whose value is the text.
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { super.accessibilityRole() ?? .staticText }
+    override func accessibilityValue() -> Any? { super.accessibilityValue() ?? storage.string }
+
     /// Drawn on a selected list row: the text takes the selection's text colour.
     var isInSelectedRow = false {
         didSet { if isInSelectedRow != oldValue { applySelection(); needsDisplay = true } }
@@ -692,6 +697,7 @@ final class _CustomButtonPrimitive: _Primitive {
     override func attach(to node: _ViewNode) {
         super.attach(to: node)
         view.mouseDownHandler = { [weak self] _ in self?.action(); return true }
+        view.accessibilityPress = { [weak self] in self?.action() }
     }
 }
 

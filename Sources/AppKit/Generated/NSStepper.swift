@@ -42,12 +42,4 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
-    // Requirement of NSAccessibilityStepper
-    open func accessibilityLabel() -> String? { unimplemented() }
-    // Requirement of NSAccessibilityStepper
-    open func accessibilityPerformIncrement() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityStepper
-    open func accessibilityPerformDecrement() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityStepper
-    open func accessibilityValue() -> Any? { unimplemented() }
 }

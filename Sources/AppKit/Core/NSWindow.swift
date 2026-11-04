@@ -134,6 +134,8 @@ import CoreText
         }
     }
     private var _contentView: NSView?
+    private var _accessibilityID = 0
+    private var _a11yOverrides = _NSAccessibilityOverrides()
     private var _styleMask: NSWindow.StyleMask
     private var _title = ""
     private var _subtitle = ""
@@ -1040,8 +1042,11 @@ import CoreText
         _firstResponder = target
         if target !== self && !target.becomeFirstResponder() {
             _firstResponder = self
+            _accessibilityNotify(.focus(nil))
             return false
         }
+        if NSView._traceInvalidation { NSView._trace("a11y focus '\(_title)' -> \(String(describing: type(of: target))) element \(accessibilityFocusedElementID.map(String.init) ?? "none")") }
+        _accessibilityNotify(.focus(accessibilityFocusedElementID))
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/makekey()
@@ -1297,6 +1302,17 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectnextkeyview(_:)
     @MainActor open func selectNextKeyView(_ sender: Any?) { _selectKeyView(forward: true, from: nil) }
 
+    /// A key the responder chain did not use: Tab and Shift-Tab move the key view, as
+    /// AppKit's window does when a plain view is the first responder.
+    @MainActor open override func keyDown(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == "\t" || event.charactersIgnoringModifiers == "\u{19}" {
+            if event.modifierFlags.contains(.shift) || event.charactersIgnoringModifiers == "\u{19}" { selectPreviousKeyView(self) } else { selectNextKeyView(self) }
+            if NSView._traceInvalidation { NSView._trace("window '\(_title)' Tab -> first responder \(firstResponder.map { String(describing: type(of: $0)) } ?? "nil")") }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     /// Moves focus through the views that accept first responder, in hierarchy order
     /// (`nextKeyView` chains are not wired yet).
     private func _selectKeyView(forward: Bool, from start: NSView?) {
@@ -1486,7 +1502,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/title
     @MainActor open var title: String {
         get { _title }
-        set { _title = newValue; _platform?.title = newValue }
+        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlevisibility
     @available(macOS 10.10, *)
@@ -1603,14 +1619,70 @@ import CoreText
         guard delegate?.windowShouldZoom(self, toFrame: screen?.visibleFrame ?? frame) ?? true else { return }
         _platform?.zoom()
     }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    // MARK: Accessibility (ADR-0013)
+
+    /// Stable identity of the window in the platform accessibility tree.
+    public var _accessibilityElementID: Int {
+        if _accessibilityID == 0 { _accessibilityID = _NSAccessibilityIDs.next() }
+        return _accessibilityID
+    }
+    /// Forwards a change to the platform window (UI Automation, AT-SPI) and keeps it for tests.
+    @MainActor internal func _accessibilityNotify(_ change: PlatformAccessibilityChange) {
+        _platform?.accessibilityDidChange(change)
+    }
+    open func accessibilityRole() -> NSAccessibility.Role? { _a11yOverrides.role ?? (isSheet ? .sheet : .window) }
+    open func setAccessibilityRole(_ accessibilityRole: NSAccessibility.Role?) { _a11yOverrides.role = accessibilityRole }
+    open func accessibilitySubrole() -> NSAccessibility.Subrole? {
+        if let s = _a11yOverrides.subrole { return s }
+        if isSheet { return .dialog }
+        if self is NSPanel { return _styleMask.contains(.utilityWindow) ? .floatingWindow : .dialog }
+        return .standardWindow
+    }
+    open func setAccessibilitySubrole(_ accessibilitySubrole: NSAccessibility.Subrole?) { _a11yOverrides.subrole = accessibilitySubrole }
+    open func accessibilityTitle() -> String? { _a11yOverrides.title ?? _title }
+    open func setAccessibilityTitle(_ accessibilityTitle: String?) { _a11yOverrides.title = accessibilityTitle; _accessibilityNotify(.name(_accessibilityElementID)) }
+    open func accessibilityLabel() -> String? { _a11yOverrides.label }
+    open func setAccessibilityLabel(_ accessibilityLabel: String?) { _a11yOverrides.label = accessibilityLabel; _accessibilityNotify(.name(_accessibilityElementID)) }
+    open func accessibilityIdentifier() -> String { _a11yOverrides.identifier ?? _identifier?.rawValue ?? "" }
+    open func setAccessibilityIdentifier(_ accessibilityIdentifier: String?) { _a11yOverrides.identifier = accessibilityIdentifier }
+    open func accessibilityHelp() -> String? { _a11yOverrides.help }
+    open func setAccessibilityHelp(_ accessibilityHelp: String?) { _a11yOverrides.help = accessibilityHelp }
+    open func isAccessibilityElement() -> Bool { _a11yOverrides.isElement ?? true }
+    open func setAccessibilityElement(_ accessibilityElement: Bool) { _a11yOverrides.isElement = accessibilityElement }
+    open func isAccessibilityHidden() -> Bool { _a11yOverrides.isHidden }
+    open func setAccessibilityHidden(_ accessibilityHidden: Bool) { _a11yOverrides.isHidden = accessibilityHidden }
+    open func isAccessibilityEnabled() -> Bool { _a11yOverrides.isEnabled ?? true }
+    open func setAccessibilityEnabled(_ accessibilityEnabled: Bool) { _a11yOverrides.isEnabled = accessibilityEnabled }
+    /// The window frame in screen coordinates.
+    open func accessibilityFrame() -> NSRect { _a11yOverrides.frame ?? frame }
+    open func setAccessibilityFrame(_ accessibilityFrame: NSRect) { _a11yOverrides.frame = accessibilityFrame }
+    open func accessibilityParent() -> Any? { _a11yOverrides.parent ?? NSApplication.shared }
+    open func setAccessibilityParent(_ accessibilityParent: Any?) { _a11yOverrides.parent = accessibilityParent }
+    /// The content view's elements (the content view itself is ignored, like a plain view).
+    open func accessibilityChildren() -> [Any]? {
+        if let c = _a11yOverrides.children { return c }
+        guard let cv = _contentView else { return [] }
+        return cv.isAccessibilityElement() ? [cv] : cv.accessibilityChildren()
+    }
+    open func setAccessibilityChildren(_ accessibilityChildren: [Any]?) { _a11yOverrides.children = accessibilityChildren; _accessibilityNotify(.structure(_accessibilityElementID)) }
+    open func accessibilityVisibleChildren() -> [Any]? { accessibilityChildren() }
+    open func accessibilityChildrenInNavigationOrder() -> [any NSAccessibilityElementProtocol]? { accessibilityChildren()?.compactMap { $0 as? any NSAccessibilityElementProtocol } }
+    open func isAccessibilityFocused() -> Bool { _isKey }
+    open func setAccessibilityFocused(_ accessibilityFocused: Bool) { if accessibilityFocused { makeKeyAndOrderFront(nil) } }
+    open func isAccessibilityMain() -> Bool { isMainWindow }
+    open func isAccessibilityMinimized() -> Bool { isMiniaturized }
+    open func setAccessibilityMinimized(_ accessibilityMinimized: Bool) { if accessibilityMinimized { miniaturize(nil) } else { deminiaturize(nil) } }
+    open func isAccessibilityModal() -> Bool { NSApplication.shared.modalWindow === self }
+    open func accessibilityWindow() -> Any? { self }
+    open func accessibilityTopLevelUIElement() -> Any? { self }
+    open func accessibilityActivationPoint() -> NSPoint { NSPoint(x: frame.midX, y: frame.midY) }
+    open func accessibilityPerformRaise() -> Bool { makeKeyAndOrderFront(nil); return true }
+    /// The element with keyboard focus: the first responder view, or the text field a
+    /// focused field editor edits. Nil when focus is on a view that is not an element.
+    open func accessibilityApplicationFocusedUIElement() -> Any? {
+        guard let v = (firstResponder as? NSView)?._accessibilityFocusTarget else { return nil }
+        return v.isAccessibilityElement() && !v.isHiddenOrHasHiddenAncestor && !v.isAccessibilityHidden() ? v : nil
+    }
     // Required by the superclass (NSCoding).
     /// AppKit's plain initializer: a small titled window, as `NSWindow()` gives on macOS.
     @MainActor public override convenience init() {
@@ -1625,4 +1697,75 @@ import CoreText
 
 extension NSWindow: PlatformWindowOwner {
     public var platformWantsMenuBar: Bool { !(self is NSPanel) }
+    public var platformAccessibility: any PlatformAccessibilityProvider { self }
+}
+
+// MARK: - The platform's view of the window's accessibility tree (ADR-0013)
+
+extension NSWindow: PlatformAccessibilityProvider {
+    /// The window as the root of a snapshot: title, frame, key state and the content
+    /// view's elements below it.
+    public func accessibilityTree() -> PlatformAccessibilityElement {
+        var e = PlatformAccessibilityElement(id: _accessibilityElementID, role: (accessibilityRole() ?? .window).rawValue, frame: accessibilityFrame())
+        e.subrole = accessibilitySubrole()?.rawValue
+        e.title = accessibilityTitle()
+        e.label = accessibilityLabel()
+        e.help = accessibilityHelp()
+        let identifier = accessibilityIdentifier()
+        e.identifier = identifier.isEmpty ? nil : identifier
+        e.isEnabled = isAccessibilityEnabled()
+        e.isFocusable = canBecomeKey
+        e.isFocused = _isKey
+        e.actions = [.raise]
+        e.children = (accessibilityChildren() ?? []).compactMap { c -> PlatformAccessibilityElement? in
+            guard let v = c as? NSView, !v.isHidden, !v.isAccessibilityHidden() else { return nil }
+            return v._accessibilityElement()
+        }
+        return e
+    }
+
+    public var accessibilityFocusedElementID: Int? { (accessibilityApplicationFocusedUIElement() as? NSView)?._accessibilityElementID }
+
+    /// The view behind an element id, the window itself for its own id.
+    @MainActor internal func _accessibilityView(withID id: Int) -> NSView? { _contentView?._accessibilityView(withID: id) }
+
+    public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
+        if elementID == _accessibilityElementID { return action == .raise ? accessibilityPerformRaise() : false }
+        guard let v = _accessibilityView(withID: elementID) else {
+            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityPerform(action) ?? false
+        }
+        switch action {
+        case .press: return v.accessibilityPerformPress()
+        case .increment: return v.accessibilityPerformIncrement()
+        case .decrement: return v.accessibilityPerformDecrement()
+        case .showMenu: return v.accessibilityPerformShowMenu()
+        case .confirm: return v.accessibilityPerformConfirm()
+        case .cancel: return v.accessibilityPerformCancel()
+        case .pick: return v.accessibilityPerformPick()
+        case .raise: return v.accessibilityPerformRaise()
+        }
+    }
+
+    public func accessibilitySetValue(_ value: PlatformAccessibilityValue, on elementID: Int) -> Bool {
+        guard let v = _accessibilityView(withID: elementID), v.isAccessibilityEnabled() else { return false }
+        return v._accessibilitySetValue(value)
+    }
+
+    public func accessibilityFocus(_ elementID: Int) -> Bool {
+        if elementID == _accessibilityElementID { makeKeyAndOrderFront(nil); return true }
+        guard let v = _accessibilityView(withID: elementID) ?? _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityOwnerView else { return false }
+        if !_isKey { makeKeyAndOrderFront(nil) }
+        return makeFirstResponder(v)
+    }
+
+    public func accessibilitySetSelected(_ selected: Bool, on elementID: Int, extending: Bool) -> Bool {
+        guard let v = _accessibilityView(withID: elementID) else {
+            // A tab or a segment: selecting it is pressing it.
+            guard selected, let e = _contentView?._accessibilityVirtualElement(withID: elementID) else { return false }
+            return e._accessibilityPerform(.press)
+        }
+        if let row = v as? NSTableRowView { return row._accessibilitySetSelected(selected, extending: extending) }
+        v.setAccessibilitySelected(selected)
+        return true
+    }
 }

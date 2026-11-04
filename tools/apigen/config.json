@@ -1,5 +1,6 @@
 {
   "handwritten": [
+    "NSAccessibility",
     "NSActionCell",
     "NSAlert",
     "NSAnimationContext",

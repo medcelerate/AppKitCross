@@ -181,6 +181,25 @@ import CoreText
     }
     @MainActor open override func mouseDragged(with event: NSEvent) { }
     @MainActor open override func mouseUp(with event: NSEvent) { }
+
+    // MARK: Accessibility (ADR-0013)
+    // AXPopUpButton: the selected item's title is the value; press and showMenu open the menu.
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .popUpButton }
+    @MainActor open override func accessibilitySubrole() -> NSAccessibility.Subrole? { _a11y.subrole }
+    @MainActor open override func accessibilityLabel() -> String? { _a11y.label ?? toolTip }
+    @MainActor open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : titleOfSelectedItem }
+    @MainActor override func _accessibilityValueIsSettable() -> Bool { isEnabled }
+    /// Assistive technology picks an item by title (or index), as choosing it from the menu would.
+    @MainActor override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEnabled else { return false }
+        var index = indexOfItem(withTitle: value.stringValue)
+        if index < 0, let d = value.doubleValue, d >= 0, Int(d) < numberOfItems { index = Int(d) }
+        guard index >= 0 else { return false }
+        selectItem(at: index)
+        _fireAction()
+        return true
+    }
+    @MainActor open override func accessibilityPerformShowMenu() -> Bool { accessibilityPerformPress() }
     @MainActor open override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 49, 36, 76, 125, 126: performClick(self)      // space, return, enter, down, up

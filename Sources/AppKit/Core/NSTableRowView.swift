@@ -133,7 +133,7 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/view(atcolumn:)
     @MainActor open func view(atColumn column: Int) -> Any? { subviews.indices.contains(column) ? subviews[column] : nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilityindex()
-    open func accessibilityIndex() -> Int { MainActor.assumeIsolated { _row } }
+    open override func accessibilityIndex() -> Int { MainActor.assumeIsolated { _a11y.index ?? _row } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilitydisclosurelevel()
     open func accessibilityDisclosureLevel() -> Int { 0 }
 
@@ -161,4 +161,34 @@ import CoreGraphics
     @MainActor open override func mouseDown(with event: NSEvent) { superview?.mouseDown(with: event) }
     @MainActor open override func mouseDragged(with event: NSEvent) { superview?.mouseDragged(with: event) }
     @MainActor open override func mouseUp(with event: NSEvent) { superview?.mouseUp(with: event) }
+
+    // MARK: Accessibility (ADR-0013)
+    //
+    // AXRow (subrole AXTableRow) at its index in the table, selected or not, whose
+    // children are the cell views; its label is the cells' text joined, so a screen
+    // reader can read the row in one go.
+    @MainActor open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .row }
+    @MainActor open override func accessibilitySubrole() -> NSAccessibility.Subrole? { _a11y.subrole ?? .tableRow }
+    @MainActor open override func accessibilityLabel() -> String? {
+        if let l = _a11y.label { return l }
+        let texts = subviews.compactMap { ($0 as? NSTableCellView)?.textField?.stringValue ?? ($0 as? NSTextField)?.stringValue }.filter { !$0.isEmpty }
+        return texts.isEmpty ? nil : texts.joined(separator: ", ")
+    }
+    @MainActor open override func isAccessibilitySelected() -> Bool { _a11y.isSelected ?? _isSelected }
+    @MainActor open override func setAccessibilitySelected(_ accessibilitySelected: Bool) { _ = _accessibilitySetSelected(accessibilitySelected, extending: false) }
+    @MainActor open override func accessibilityParent() -> Any? { _a11y.parent ?? superview }
+    @MainActor override func _accessibilityIsFocusable() -> Bool { false }
+    /// Selects or deselects the row through the table, so the selection machinery runs.
+    @MainActor internal func _accessibilitySetSelected(_ selected: Bool, extending: Bool) -> Bool {
+        guard let table = superview as? NSTableView, _row >= 0 else { return false }
+        if selected {
+            table.selectRowIndexes(IndexSet(integer: _row), byExtendingSelection: extending && table.allowsMultipleSelection)
+        } else {
+            table.deselectRow(_row)
+        }
+        return true
+    }
+    /// Pressing a row selects it.
+    @MainActor open override func accessibilityPerformPress() -> Bool { _accessibilitySetSelected(true, extending: false) }
 }

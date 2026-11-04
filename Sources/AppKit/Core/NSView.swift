@@ -56,6 +56,8 @@ import CoreText
     private var _translatesAutoresizingMaskIntoConstraints = true
     private var _identifier: NSUserInterfaceItemIdentifier? = nil
     private var _toolTip: String? = nil
+    private var _accessibilityOverrides = _NSAccessibilityOverrides()
+    private var _accessibilityID = 0
     private var _clipsToBounds = false
     private var _postsFrameChangedNotifications = false
     private var _postsBoundsChangedNotifications = false
@@ -504,6 +506,7 @@ import CoreText
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
+        if _window != nil { view._accessibilityStructureChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtooltip(_:owner:userdata:)
     @MainActor open func addToolTip(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?) -> NSView.ToolTipTag { unimplemented() }
@@ -914,6 +917,7 @@ import CoreText
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
+            if _window != nil { _accessibilityStructureChanged() }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishiddenorhashiddenancestor
@@ -1197,6 +1201,7 @@ import CoreText
         }
         sup._setNeedsConstraintLayout(force: sup._engine != nil)
         viewWillMove(toSuperview: nil)
+        if _window != nil { _accessibilityStructureChanged() }
         _superview = nil
         nextResponder = nil
         if let w = _window, w.firstResponder === self { _ = w.makeFirstResponder(nil) }
@@ -1553,14 +1558,122 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
+    // MARK: Accessibility (ADR-0013)
+    //
+    // Every answer is derived from the view's state unless one of the
+    // `setAccessibility...` methods stored an override. Subclasses override the getters
+    // for their roles and values; `NSAccessibility.swift` turns the answers into the
+    // snapshot the platform seam hands to assistive technology.
+
+    /// Values stored through the `setAccessibility...` methods.
+    internal var _a11y: _NSAccessibilityOverrides {
+        get { _accessibilityOverrides }
+        set { _accessibilityOverrides = newValue }
+    }
+    /// Stable identity of the view in the platform accessibility tree.
+    public var _accessibilityElementID: Int {
+        if _accessibilityID == 0 { _accessibilityID = _NSAccessibilityIDs.next() }
+        return _accessibilityID
+    }
+    /// Whether the value can be set by assistive technology (editable text, sliders, ...).
+    @MainActor internal func _accessibilityValueIsSettable() -> Bool { false }
+    /// Assistive technology sets a new value; the control applies it and sends its action.
+    @MainActor internal func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
+    @MainActor internal func _accessibilityIsMultiline() -> Bool { false }
+    @MainActor internal func _accessibilityAllowsMultipleSelection() -> Bool { false }
+    @MainActor internal func _accessibilityIsFocusable() -> Bool { acceptsFirstResponder && isAccessibilityEnabled() && !isHiddenOrHasHiddenAncestor }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityelement()
+    ///
+    /// A plain view is ignored (its subviews stand in for it); controls and views with a
+    /// role are elements.
+    open func isAccessibilityElement() -> Bool { _a11y.isElement ?? (_a11y.role != nil) }
+    open func setAccessibilityElement(_ accessibilityElement: Bool) { _a11y.isElement = accessibilityElement; _accessibilityStructureChanged() }
+    open func accessibilityRole() -> NSAccessibility.Role? { _a11y.role }
+    open func setAccessibilityRole(_ accessibilityRole: NSAccessibility.Role?) { _a11y.role = accessibilityRole; _accessibilityStructureChanged() }
+    open func accessibilitySubrole() -> NSAccessibility.Subrole? { _a11y.subrole }
+    open func setAccessibilitySubrole(_ accessibilitySubrole: NSAccessibility.Subrole?) { _a11y.subrole = accessibilitySubrole }
+    open func accessibilityRoleDescription() -> String? { _a11y.roleDescription }
+    open func setAccessibilityRoleDescription(_ accessibilityRoleDescription: String?) { _a11y.roleDescription = accessibilityRoleDescription }
+    open func accessibilityLabel() -> String? { _a11y.label }
+    open func setAccessibilityLabel(_ accessibilityLabel: String?) { _a11y.label = accessibilityLabel; _accessibilityNameChanged() }
+    open func accessibilityTitle() -> String? { _a11y.title }
+    open func setAccessibilityTitle(_ accessibilityTitle: String?) { _a11y.title = accessibilityTitle; _accessibilityNameChanged() }
+    open func accessibilityValue() -> Any? { _a11y.value }
+    open func setAccessibilityValue(_ accessibilityValue: Any?) { _a11y.value = accessibilityValue; _a11y.hasValue = true; _accessibilityValueChanged() }
+    open func accessibilityHelp() -> String? { _a11y.help ?? toolTip }
+    open func setAccessibilityHelp(_ accessibilityHelp: String?) { _a11y.help = accessibilityHelp }
+    open func accessibilityPlaceholderValue() -> String? { _a11y.placeholder }
+    open func setAccessibilityPlaceholderValue(_ accessibilityPlaceholderValue: String?) { _a11y.placeholder = accessibilityPlaceholderValue }
+    open func isAccessibilityEnabled() -> Bool { _a11y.isEnabled ?? true }
+    open func setAccessibilityEnabled(_ accessibilityEnabled: Bool) { _a11y.isEnabled = accessibilityEnabled }
+    /// `accessibilityHidden` views and their subtrees leave the tree, as hidden views do.
+    open func isAccessibilityHidden() -> Bool { _a11y.isHidden }
+    open func setAccessibilityHidden(_ accessibilityHidden: Bool) { _a11y.isHidden = accessibilityHidden; _accessibilityStructureChanged() }
+    open func isAccessibilitySelected() -> Bool { _a11y.isSelected ?? false }
+    open func setAccessibilitySelected(_ accessibilitySelected: Bool) { _a11y.isSelected = accessibilitySelected }
+    /// The frame in screen coordinates (window content coordinates before the view is
+    /// in a window).
+    open func accessibilityFrame() -> NSRect {
+        if let f = _a11y.frame { return f }
+        let inWindow = convert(bounds, to: nil)
+        return window?.convertToScreen(inWindow) ?? inWindow
+    }
+    open func setAccessibilityFrame(_ accessibilityFrame: NSRect) { _a11y.frame = accessibilityFrame }
+    /// The nearest ancestor that is an element, else the window.
+    open func accessibilityParent() -> Any? {
+        if let p = _a11y.parent { return p }
+        var v = superview
+        while let cur = v { if cur.isAccessibilityElement() { return cur }; v = cur.superview }
+        return window
+    }
+    open func setAccessibilityParent(_ accessibilityParent: Any?) { _a11y.parent = accessibilityParent }
+    /// The subviews that are elements, with ignored subviews replaced by their own
+    /// children, in subview order. Hidden subviews are left out.
+    open func accessibilityChildren() -> [Any]? {
+        if let c = _a11y.children { return c }
+        var out: [Any] = []
+        for s in subviews where !s.isHidden && !s.isAccessibilityHidden() {
+            if s.isAccessibilityElement() { out.append(s) } else if let c = s.accessibilityChildren() { out.append(contentsOf: c) }
+        }
+        return out
+    }
+    open func setAccessibilityChildren(_ accessibilityChildren: [Any]?) { _a11y.children = accessibilityChildren; _accessibilityStructureChanged() }
+    open func accessibilityVisibleChildren() -> [Any]? { accessibilityChildren() }
+    open func accessibilityChildrenInNavigationOrder() -> [any NSAccessibilityElementProtocol]? { accessibilityChildren()?.compactMap { $0 as? any NSAccessibilityElementProtocol } }
+    open func accessibilityWindow() -> Any? { window }
+    open func accessibilityTopLevelUIElement() -> Any? { window }
+    /// Keyboard focus: the view is the window's first responder (or its field editor is).
+    open func isAccessibilityFocused() -> Bool {
+        guard let w = window, let r = w.firstResponder as? NSView else { return false }
+        return r === self || r._accessibilityFocusTarget === self
+    }
+    /// Moves keyboard focus to the view (`true`) or away from it.
+    open func setAccessibilityFocused(_ accessibilityFocused: Bool) {
+        guard let w = window else { return }
+        if accessibilityFocused { _ = w.makeFirstResponder(self) } else if isAccessibilityFocused() { _ = w.makeFirstResponder(nil) }
+    }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { _a11y.identifier ?? identifier?.rawValue ?? "" }
+    open func setAccessibilityIdentifier(_ accessibilityIdentifier: String?) { _a11y.identifier = accessibilityIdentifier }
+    open func accessibilityMinValue() -> Any? { _a11y.minValue }
+    open func setAccessibilityMinValue(_ accessibilityMinValue: Any?) { _a11y.minValue = accessibilityMinValue }
+    open func accessibilityMaxValue() -> Any? { _a11y.maxValue }
+    open func setAccessibilityMaxValue(_ accessibilityMaxValue: Any?) { _a11y.maxValue = accessibilityMaxValue }
+    /// The index among the siblings of the same kind (rows in a table); -1 when the view
+    /// has none.
+    open func accessibilityIndex() -> Int { _a11y.index ?? -1 }
+    open func setAccessibilityIndex(_ accessibilityIndex: Int) { _a11y.index = accessibilityIndex }
+    open func accessibilitySelectedTextRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    open func accessibilityActivationPoint() -> NSPoint { let f = accessibilityFrame(); return NSPoint(x: f.midX, y: f.midY) }
+    open func accessibilityPerformPress() -> Bool { false }
+    open func accessibilityPerformIncrement() -> Bool { false }
+    open func accessibilityPerformDecrement() -> Bool { false }
+    open func accessibilityPerformShowMenu() -> Bool { false }
+    open func accessibilityPerformConfirm() -> Bool { false }
+    open func accessibilityPerformCancel() -> Bool { false }
+    open func accessibilityPerformPick() -> Bool { false }
+    open func accessibilityPerformRaise() -> Bool { false }
 }
 
 

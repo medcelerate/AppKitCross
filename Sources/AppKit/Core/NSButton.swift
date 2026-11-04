@@ -223,7 +223,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/setbuttontype(_:)
     @MainActor open func setButtonType(_ type: NSButton.ButtonType) { _buttonCell?.setButtonType(type); needsDisplay = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/setnextstate()
-    @MainActor open func setNextState() { _cell?.setNextState(); needsDisplay = true }
+    @MainActor open func setNextState() { _cell?.setNextState(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/setperiodicdelay(_:interval:)
     @MainActor open func setPeriodicDelay(_ delay: Float, interval: Float) { _buttonCell?.setPeriodicDelay(delay, interval: interval) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/showsborderonlywhilemouseinside
@@ -239,7 +239,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/state
     @MainActor open var state: NSControl.StateValue {
         get { _buttonCell?.state ?? .off }
-        set { _buttonCell?.state = newValue; needsDisplay = true }
+        set { _buttonCell?.state = newValue; needsDisplay = true; _accessibilityValueChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/symbolconfiguration
     @available(macOS 11.0, *)
@@ -256,10 +256,46 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/title
     @MainActor open var title: String {
         get { _cell?.title ?? "" }
-        set { _cell?.title = newValue; needsDisplay = true }
+        set { _cell?.title = newValue; needsDisplay = true; _accessibilityNameChanged() }
+    }
+
+    // MARK: Accessibility (ADR-0013)
+    //
+    // Push buttons are AXButton, check boxes AXCheckBox, radio buttons AXRadioButton,
+    // all labelled by their title; the state is the value of the two-state kinds, and
+    // the press action clicks the button.
+    open override func accessibilityRole() -> NSAccessibility.Role? {
+        if let r = _a11y.role { return r }
+        switch _buttonCell?._buttonType {
+        case .switch?: return .checkBox
+        case .radio?: return .radioButton
+        default: return .button
+        }
+    }
+    open override func accessibilitySubrole() -> NSAccessibility.Subrole? {
+        if let s = _a11y.subrole { return s }
+        return (_buttonCell?._buttonType == .pushOnPushOff || _buttonCell?._buttonType == .toggle) ? .toggle : nil
     }
     // Requirement of NSAccessibilityButton
-    open func accessibilityLabel() -> String? { unimplemented() }
+    open override func accessibilityLabel() -> String? { _a11y.label ?? (title.isEmpty ? (toolTip ?? image?.name()) : title) }
+    open override func accessibilityTitle() -> String? { _a11y.title ?? title }
+    /// The state for check boxes, radio and toggle buttons; nil for a push button.
+    open override func accessibilityValue() -> Any? {
+        if _a11y.hasValue { return _a11y.value }
+        guard let cell = _buttonCell, cell._isSwitchLike || !cell.showsStateBy.isEmpty else { return nil }
+        return state.rawValue
+    }
+    override func _accessibilityValueIsSettable() -> Bool { (_buttonCell?._isSwitchLike ?? false) || !(_buttonCell?.showsStateBy.isEmpty ?? true) }
+    override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard _accessibilityValueIsSettable(), let d = value.doubleValue else { return false }
+        let wanted: NSControl.StateValue = d == 0 ? .off : (d == 2 ? .mixed : .on)
+        if state != wanted { performClick(nil) }
+        return state == wanted || wanted == .mixed
+    }
     // Requirement of NSAccessibilityButton
-    open func accessibilityPerformPress() -> Bool { unimplemented() }
+    open override func accessibilityPerformPress() -> Bool {
+        guard isEnabled, !isHiddenOrHasHiddenAncestor else { return false }
+        performClick(nil)
+        return true
+    }
 }

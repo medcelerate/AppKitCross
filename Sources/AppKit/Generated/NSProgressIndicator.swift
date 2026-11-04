@@ -81,6 +81,7 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
+    // Requirement of NSAccessibilityProgressIndicator (signature differs from the inherited member)
     // Requirement of NSAccessibilityProgressIndicator
     open func accessibilityValue() -> NSNumber? { unimplemented() }
 }

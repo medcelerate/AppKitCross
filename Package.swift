@@ -31,6 +31,12 @@ targets += [
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
+    // extern "C" shim over the UI Automation provider interfaces (ADR-0013).
+    .target(
+        name: "CUIAutomation",
+        path: "Sources/CUIAutomation",
+        linkerSettings: [.linkedLibrary("uiautomationcore"), .linkedLibrary("oleaut32"), .linkedLibrary("ole32")]
+    ),
 ]
 targets += [
     // extern "C" shim over DirectWrite (fonts, shaping, glyph runs) for the CoreText module.
@@ -58,18 +64,21 @@ targets += [
     .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CD2D"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
-appKitDependencies += ["CoreGraphics", "CD2D", "CoreText"]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
 let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
 let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
+let platformTestDependencies: [Target.Dependency] = ["CUIAutomation"]
 #elseif os(Linux)
 // Linux: Cairo + PangoCairo for CoreGraphics and text, Xlib or Wayland for windows (Milestone 8).
 targets += [
     .systemLibrary(name: "CCairo", path: "Sources/CCairo", pkgConfig: "pangocairo",
                    providers: [.apt(["libcairo2-dev", "libpango1.0-dev", "libx11-dev"])]),
     .systemLibrary(name: "CX11", path: "Sources/CX11", pkgConfig: "x11", providers: [.apt(["libx11-dev"])]),
+    // libdbus-1 for the AT-SPI2 accessibility bridge (ADR-0013).
+    .systemLibrary(name: "CDBus", path: "Sources/CDBus", pkgConfig: "dbus-1", providers: [.apt(["libdbus-1-dev"])]),
     // Wayland client + xkbcommon + wl_cursor, with the xdg-shell protocol tables compiled in
     // (wayland-scanner output, see tools/linux/gen-wayland-protocols.sh).
     .target(
@@ -108,12 +117,13 @@ targets += [
     .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CCairo"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
-appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText"]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
 let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
 let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers", "ImageIO"]
+let platformTestDependencies: [Target.Dependency] = ["CDBus"]
 #else
 // macOS: Apple's UniformTypeIdentifiers and ImageIO are the reference the tests run against.
 appKitExclude += ["Platform/Win32", "Platform/Linux"]
@@ -121,6 +131,7 @@ let quartzCoreDependencies: [Target.Dependency] = []
 let swiftUIDependencies: [Target.Dependency] = ["AppKit"]
 let leafModuleProducts: [Product] = []
 let leafModuleTestDependencies: [Target.Dependency] = []
+let platformTestDependencies: [Target.Dependency] = []
 #endif
 
 // QuartzCore is ours on every platform: the CALayer tree, animations and the software
@@ -187,7 +198,7 @@ targets += [
     ),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"] + combineTestDependencies + leafModuleTestDependencies,
+        dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"] + combineTestDependencies + leafModuleTestDependencies + platformTestDependencies,
         path: "Tests/AppKitTests"
     ),
 ]

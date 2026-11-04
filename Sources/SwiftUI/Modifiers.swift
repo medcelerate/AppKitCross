@@ -422,11 +422,92 @@ struct _OnChange<Content: View, V: Equatable>: View, _PrimitiveView {
 
 // MARK: No-op compatibility modifiers
 
+// MARK: Accessibility (ADR-0013)
+
+/// What the accessibility modifiers set on the content's backing AppKit views: the
+/// first backing view carries the label, value, identifier and hint; `hidden` applies
+/// to all of them, so a hidden stack hides every control in it.
+@MainActor
+final class _AccessibilityPrimitive: _Primitive {
+    struct Traits {
+        var label: String? = nil
+        var value: String? = nil
+        var hidden: Bool? = nil
+        var identifier: String? = nil
+        var hint: String? = nil
+        var isElement: Bool? = nil
+    }
+    var traits: Traits
+    init(traits: Traits, content: _AnyViewBox) {
+        self.traits = traits
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _AccessibilityPrimitive { traits = o.traits }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    override func didSyncBackingViews(node: _ViewNode) { apply() }
+    /// The backing views the content produced, in tree order.
+    var backingViews: [NSView] {
+        var views: [NSView] = []
+        for c in node?.children ?? [] { c.collectBackingViews(into: &views) }
+        return views
+    }
+    private func apply() {
+        for (i, v) in backingViews.enumerated() {
+            if let h = traits.hidden, v.isAccessibilityHidden() != h { v.setAccessibilityHidden(h) }
+            guard i == 0 else { continue }
+            if let l = traits.label, v.accessibilityLabel() != l { v.setAccessibilityLabel(l) }
+            if let value = traits.value, (v.accessibilityValue() as? String) != value { v.setAccessibilityValue(value) }
+            if let id = traits.identifier { v.setAccessibilityIdentifier(id) }
+            if let hint = traits.hint { v.setAccessibilityHelp(hint) }
+            if let e = traits.isElement { v.setAccessibilityElement(e) }
+        }
+    }
+}
+
+struct _AccessibilityModified<Content: View>: View, _PrimitiveView {
+    typealias Body = Never
+    let content: Content
+    var traits: _AccessibilityPrimitive.Traits
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _AccessibilityPrimitive(traits: traits, content: _ViewBox(content)) }
+}
+
 extension View {
+    private func _accessibility(_ change: (inout _AccessibilityPrimitive.Traits) -> Void) -> some View {
+        var t = _AccessibilityPrimitive.Traits()
+        change(&t)
+        return _AccessibilityModified(content: self, traits: t)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilitylabel(_:)-1d7jv
-    public func accessibilityLabel(_ label: String) -> some View { self }
+    public func accessibilityLabel<S: StringProtocol>(_ label: S) -> some View { _accessibility { $0.label = String(label) } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilitylabel(_:)-7i9lv
+    public func accessibilityLabel(_ label: Text) -> some View { _accessibility { $0.label = label._string } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilitylabel(_:)-8mc9b
+    public func accessibilityLabel(_ labelKey: LocalizedStringKey) -> some View { _accessibility { $0.label = Text(labelKey)._string } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityvalue(_:)-6q3vd
+    public func accessibilityValue<S: StringProtocol>(_ value: S) -> some View { _accessibility { $0.value = String(value) } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityvalue(_:)-7nxay
+    public func accessibilityValue(_ value: Text) -> some View { _accessibility { $0.value = value._string } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityvalue(_:)-4w8xl
+    public func accessibilityValue(_ valueKey: LocalizedStringKey) -> some View { _accessibility { $0.value = Text(valueKey)._string } }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityhidden(_:)
-    public func accessibilityHidden(_ hidden: Bool) -> some View { self }
+    public func accessibilityHidden(_ hidden: Bool) -> some View { _accessibility { $0.hidden = hidden } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityidentifier(_:)
+    public func accessibilityIdentifier(_ identifier: String) -> some View { _accessibility { $0.identifier = identifier } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityhint(_:)-1k7dv
+    public func accessibilityHint<S: StringProtocol>(_ hint: S) -> some View { _accessibility { $0.hint = String(hint) } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityhint(_:)-6fdn0
+    public func accessibilityHint(_ hint: Text) -> some View { _accessibility { $0.hint = hint._string } }
+}
+
+// MARK: No-op compatibility modifiers
+
+extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/buttonstyle(_:)-7qx1
     public func buttonStyle<S: PrimitiveButtonStyle>(_ style: S) -> some View { environment(\.buttonStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textfieldstyle(_:)

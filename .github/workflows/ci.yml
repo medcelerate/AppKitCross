@@ -43,7 +43,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
       - run: swift build
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
@@ -54,7 +54,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
       - run: swift build
       - name: Tests on the host backend with the validation layer
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test

@@ -13,7 +13,7 @@ import CCairo
 import CWayland
 
 @MainActor
-final class WaylandWindow: PlatformWindow {
+final class WaylandWindow: PlatformWindow, AtspiWindow {
     private unowned let backend: WaylandBackend
     private weak var owner: PlatformWindowOwner?
     private(set) var surface: OpaquePointer?      // wl_surface*
@@ -317,6 +317,12 @@ final class WaylandWindow: PlatformWindow {
     }
     var isMiniaturized: Bool { minimized }
     var isZoomed: Bool { maximized }
+
+    // MARK: Accessibility (ADR-0013)
+    var atspiOwner: PlatformWindowOwner? { owner }
+    var atspiIsVisible: Bool { isVisible }
+    var atspiIsKey: Bool { isKey }
+    func accessibilityDidChange(_ change: PlatformAccessibilityChange) { backend.atspi?.windowDidChange(self, change) }
 
     func close() {
         guard !destroying else { return }
