@@ -26,6 +26,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `tools/apigen` | Extraction, probing and stub generation scripts. |
 | `tools/linux` | Dockerfile, test and screenshot scripts for the Linux container. |
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
+| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
 
 ## Conventions
 
@@ -67,7 +68,7 @@ Cairo and Pango):
 ```bash
 docker build -t appkitwin-linux -f tools/linux/Dockerfile .
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash -c "swift build; APPKITWIN_HOST_BACKEND=1 swift test"
-docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard) and HelloWindow under Xvfb
+docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard), HelloWindow and the examples under Xvfb
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh --wayland  # the same under a headless sway
 ```
 
@@ -87,6 +88,26 @@ wl_cursor themes, server-side decorations through xdg-decoration) is preferred w
 bar:
 
 ![HelloWindow on Linux under a headless sway](images/hellowindow-linux-wayland.png)
+
+## Examples
+
+Each example under `Examples/` is an executable target in `Package.swift` with a README that
+says what it demonstrates. CI builds every one on macOS, Windows and both Linux jobs, and
+`tools/linux/run.sh` runs each under Xvfb and writes `/tmp/<name>-linux.png` (plus
+`Drawing --export`, the headless PNG path).
+
+| Example | Shows | Run |
+| --- | --- | --- |
+| `HelloWindow` | The big tour: drawing, controls, menus, the glass window, the Layout Demo and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`, `--screenshot <dir>`, `--metal-selftest`) |
+| `Calculator` | SwiftUI `App` + `WindowGroup`, button grid, `keyboardShortcut` keys, fixed-size window, `CommandMenu` | `swift run Calculator` |
+| `FramelessWindow` | `.fullSizeContentView` window with AppKit's window buttons, rounded non-opaque shape, movable by background, `NSVisualEffectView` backdrop, close/minimize/zoom, a `.borderless` panel | `swift run FramelessWindow` (`--panel`) |
+| `Animation` | `CABasicAnimation`, `CAKeyframeAnimation` along a path, 3D flip with perspective, `CAAnimationGroup`, implicit `CATransaction` animations, play/pause, SwiftUI `withAnimation` | `swift run Animation` (`--paused`) |
+| `Drawing` | `draw(_:)` with paths, gradient, text, images; sketch canvas with mouse tracking, undo/redo, PNG export through `NSSavePanel` | `swift run Drawing` (`--export file.png`) |
+| `Observable` | `ObservableObject`/`@Published` model, live `List`, detail pane over a `Binding`, Combine `Timer.publish` | `swift run Observable` |
+
+The port has no Observation framework (`@Observable`) and no `UndoManager` (not in
+swift-corelibs-foundation), so Observable uses `ObservableObject` and Drawing keeps its own
+undo stacks; the READMEs say so.
 
 ## Threading
 
