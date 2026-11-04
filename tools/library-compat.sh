@@ -12,7 +12,8 @@
 #     tools/library-compat.sh            # build the example
 #     tools/library-compat.sh --probe    # per-library build results, then the example
 #     tools/library-compat.sh --run      # build, then run it (on macOS: headless screenshot)
-set -e
+# pipefail: the greps that trim the build output must not hide a failed build (CI).
+set -eo pipefail
 cd "$(dirname "$0")/../Examples/LibraryCompat"
 PROBE=0; RUN=0
 for arg in "$@"; do case "$arg" in --probe) PROBE=1 ;; --run) RUN=1 ;; esac; done
@@ -20,13 +21,25 @@ for arg in "$@"; do case "$arg" in --probe) PROBE=1 ;; --run) RUN=1 ;; esac; don
 # which the compiler refuses to mix; raising every target's deployment target to 14 is the
 # only way to type-check them against AppKitWin's SwiftUI there (Windows and Linux have no
 # deployment targets).
-FLAGS=()
-if [ "$(uname)" = Darwin ]; then FLAGS=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
+# Plain diagnostics: swiftc colours them on Windows, which would hide "error:" from the greps.
+FLAGS=(-Xswiftc -no-color-diagnostics)
+if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
 # AppKitWin's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
-# dependency, so they are passed to every compile here.
-for m in ../../Sources/C*/module.modulemap .build/debug/C*.build/module.modulemap; do
-    [ -f "$m" ] && FLAGS+=(-Xcc -fmodule-map-file="$(cd "$(dirname "$m")" && pwd)/$(basename "$m")")
+# dependency, so they are passed to every compile here: the hand-written maps in Sources
+# and the ones SwiftPM synthesises for the other C targets in the build directory (after
+# step 1), plus the shims' include directories since the Windows shim headers include each
+# other (cdirectwrite.h includes cd2d.h).
+seen=""
+for m in ../../Sources/C*/module.modulemap .build/debug/C*.build/module.modulemap .build/*/debug/C*.build/module.modulemap; do
+    [ -f "$m" ] || continue
+    name=$(basename "$(dirname "$m")")
+    case " $seen " in *" $name "*) continue ;; esac
+    seen="$seen $name"
+    FLAGS+=(-Xcc -fmodule-map-file="$(cd "$(dirname "$m")" && pwd)/$(basename "$m")")
+done
+for d in ../../Sources/C*/include ../../Sources/C*; do
+    [ -d "$d" ] && FLAGS+=(-Xcc -I"$(cd "$d" && pwd)")
 done
 # ... and the system headers those maps include (Cairo, Pango, X11, D-Bus on Linux).
 if [ "$(uname)" = Linux ] && command -v pkg-config >/dev/null; then
@@ -34,11 +47,29 @@ if [ "$(uname)" = Linux ] && command -v pkg-config >/dev/null; then
 fi
 
 echo "== step 1: AppKitWin's SwiftUI (and AppKit) into the Modules directory"
-swift build --target SwiftUI "${FLAGS[@]}" 2>&1 | grep -E ": error:|Build complete|Compiling" | tail -3
+# Runs a build, printing its last lines on success and the whole log on failure.
+build() {
+    local out
+    if out=$(swift build "$@" "${FLAGS[@]}" 2>&1); then
+        echo "$out" | grep -E "error:|Build complete|Compiling" | tail -3 || true
+    else
+        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]" | tail -40
+        return 1
+    fi
+}
+build --target SwiftUI
 if [ "$(uname)" != Darwin ]; then
     # Apple's AppKit re-exports these; the libraries import them by name.
-    swift build --target ImageIO "${FLAGS[@]}" 2>&1 | grep -E ": error:|Build complete" | tail -2
+    build --target ImageIO
 fi
+# Step 1 synthesised the module maps of the C targets without one; collect them now.
+for m in .build/debug/C*.build/module.modulemap .build/*/debug/C*.build/module.modulemap; do
+    [ -f "$m" ] || continue
+    name=$(basename "$(dirname "$m")")
+    case " $seen " in *" $name "*) continue ;; esac
+    seen="$seen $name"
+    FLAGS+=(-Xcc -fmodule-map-file="$(cd "$(dirname "$m")" && pwd)/$(basename "$m")")
+done
 
 if [ "$PROBE" = 1 ]; then
     echo "== probe: each library on its own"
@@ -47,8 +78,10 @@ if [ "$PROBE" = 1 ]; then
         if swift build --target "$target" "${FLAGS[@]}" >"$log" 2>&1; then
             echo "$target: builds"
         else
-            errors=$(grep -c ": error: " "$log" || true)
-            first=$(grep -m1 ": error: " "$log" | sed -E 's|^.*/checkouts/||')
+            # Diagnostic lines start with a path; the source excerpts under them do not.
+            errors=$(grep -cE "^[^ |].*error: " "$log" || true)
+            first=$(grep -m1 -E "^[^ |].*:[0-9]+:[0-9]+: error: " "$log" || grep -m1 "error: " "$log" || true)
+            first=$(echo "$first" | sed -E 's|^.*/checkouts/||')
             echo "$target: FAILS ($errors errors); first: $first"
         fi
         rm -f "$log"
@@ -56,7 +89,7 @@ if [ "$PROBE" = 1 ]; then
 fi
 
 echo "== step 2: the libraries and the example"
-swift build "${FLAGS[@]}" 2>&1 | grep -E ": error:|Build complete|Compiling" | tail -5
+build
 if [ "$RUN" = 1 ]; then
     .build/debug/LibraryCompat "${APPKITWIN_LIBRARY_COMPAT_ARGS[@]}"
 fi
