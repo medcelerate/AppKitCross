@@ -196,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         main.addItem(editItem)
         NSApp.mainMenu = main
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 840, height: 420),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 420),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Drawing"
         let content = window.contentView!
@@ -207,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         divider.autoresizingMask = [.height]
         content.addSubview(divider)
 
-        sketch = SketchView(frame: NSRect(x: 341, y: 44, width: 499, height: 376))
+        sketch = SketchView(frame: NSRect(x: 341, y: 44, width: 579, height: 376))
         sketch.autoresizingMask = [.width, .height]
         sketch.onChange = { [unowned self] in self.updateButtons() }
         content.addSubview(sketch)
@@ -225,12 +225,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         let bar = NSStackView(views: [undoButton, redoButton, clear, export, colors, width])
         bar.orientation = .horizontal
         bar.spacing = 6
-        bar.frame = NSRect(x: 349, y: 8, width: 400, height: 28)
+        bar.frame = NSRect(x: 349, y: 8, width: 490, height: 28)
         content.addSubview(bar)
         status = NSTextField(labelWithString: "")
         status.textColor = .secondaryLabelColor
         status.alignment = .right
-        status.frame = NSRect(x: 740, y: 12, width: 92, height: 20)
+        status.frame = NSRect(x: 836, y: 12, width: 76, height: 20)
         status.autoresizingMask = [.minXMargin]
         content.addSubview(status)
         // A sample stroke, so undo and export have something to work on.
