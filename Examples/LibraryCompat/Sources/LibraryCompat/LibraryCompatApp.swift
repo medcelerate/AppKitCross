@@ -355,8 +355,10 @@ enum Screenshots {
         cv.cacheDisplay(in: cv.bounds, to: rep)
         let composed = NSImage(size: cv.bounds.size)
         composed.lockFocus()
-        w.backgroundColor.setFill()
-        NSBezierPath.fill(NSRect(origin: .zero, size: cv.bounds.size))
+        w.effectiveAppearance.performAsCurrentDrawingAppearance {
+            w.backgroundColor.setFill()
+            NSBezierPath.fill(NSRect(origin: .zero, size: cv.bounds.size))
+        }
         if let cg = rep.cgImage { NSGraphicsContext.current?.cgContext.draw(cg, in: NSRect(origin: .zero, size: cv.bounds.size)) }
         composed.unlockFocus()
         guard let final = composed.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }

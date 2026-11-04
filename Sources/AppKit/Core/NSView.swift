@@ -633,7 +633,12 @@ import CoreText
         let previous = NSGraphicsContext.current
         let wasCaching = NSView._cachingDisplay
         NSView._cachingDisplay = true
+        // Layer contents redrawn during the capture resolve dynamic colours under the
+        // view's appearance (a dark window stays dark in the bitmap).
+        let previousAppearance = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
         _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
         NSGraphicsContext.current = previous
         ctx.restoreGState()
