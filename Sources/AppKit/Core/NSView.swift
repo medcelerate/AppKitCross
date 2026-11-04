@@ -333,8 +333,9 @@ import CoreText
         guard !_isHidden, _alphaValue > 0 else { return }
         guard _frame.intersects(dirtyRect) else { return }
         if let l = _layer, _isLayerRoot {
-            if let w = _window, w._hostsLayersNatively, w.contentView === self {
-                // The platform composites the tree from the committed scene.
+            if let w = _window, w._hostsLayersNatively, w.contentView === self, !NSView._cachingDisplay {
+                // The platform composites the tree from the committed scene (an offscreen
+                // `cacheDisplay` still composes it here: screenshots on DirectComposition).
                 _clearNeedsDisplay()
                 return
             }
@@ -616,6 +617,9 @@ import CoreText
         get { _boundsRotation }
         set { _boundsRotation = newValue }
     }
+    /// True while `cacheDisplay(in:to:)` renders: a natively hosted layer tree is then
+    /// composed in software into the bitmap instead of being left to the platform.
+    @MainActor static var _cachingDisplay = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/cachedisplay(in:to:)
     /// Renders the view and its subviews (what the window would draw) into `bitmapImageRep`.
     @MainActor open func cacheDisplay(in rect: NSRect, to bitmapImageRep: NSBitmapImageRep) {
@@ -627,7 +631,10 @@ import CoreText
         // `_displayHierarchy` expects the superview's space; move `rect` to the origin.
         ctx.translateBy(x: -(_frame.minX + rect.minX), y: -(_frame.minY + rect.minY))
         let previous = NSGraphicsContext.current
+        let wasCaching = NSView._cachingDisplay
+        NSView._cachingDisplay = true
         _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        NSView._cachingDisplay = wasCaching
         NSGraphicsContext.current = previous
         ctx.restoreGState()
         if let image = surface.makeImage() { bitmapImageRep._setImage(image) }
