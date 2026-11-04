@@ -39,6 +39,7 @@ extension Win32Window {
         }
         let root = cuia_root_create(UnsafeMutableRawPointer(hwnd), &callbacks)
         cuia_set_trace(NSView._traceInvalidation)
+        cuia_set_use_com_threading(ProcessInfo.processInfo.environment["APPKITWIN_UIA_COM_THREADING"] != "0")
         uiaRoot = root
         return root
     }

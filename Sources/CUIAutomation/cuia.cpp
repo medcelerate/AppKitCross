@@ -19,6 +19,8 @@
 #include <cstdio>
 
 static bool g_trace = false;
+static bool g_useComThreading = true;
+void cuia_set_use_com_threading(bool enabled) { g_useComThreading = enabled; }
 void cuia_set_trace(bool enabled) { g_trace = enabled; }
 static void traceEvent(const char *what, int32_t id, HRESULT hr) {
     if (g_trace) fprintf(stderr, "[trace] uia raise %s on %d: hr 0x%08lx\n", what, id, static_cast<unsigned long>(hr));
@@ -120,7 +122,7 @@ public:
     // IRawElementProviderSimple
     STDMETHODIMP get_ProviderOptions(ProviderOptions *out) override {
         if (!out) return E_POINTER;
-        *out = static_cast<ProviderOptions>(ProviderOptions_ServerSideProvider | ProviderOptions_UseComThreading);
+        *out = static_cast<ProviderOptions>(ProviderOptions_ServerSideProvider | (g_useComThreading ? ProviderOptions_UseComThreading : 0));
         return S_OK;
     }
     STDMETHODIMP GetPatternProvider(PATTERNID patternId, IUnknown **out) override;

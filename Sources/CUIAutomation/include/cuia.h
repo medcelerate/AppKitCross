@@ -97,6 +97,9 @@ void cuia_root_destroy(CUIARoot *root);
 bool cuia_clients_are_listening(void);
 /// Prints every UiaRaise* call and its HRESULT to stderr (APPKITWIN_TRACE).
 void cuia_set_trace(bool enabled);
+/// Whether providers report ProviderOptions_UseComThreading (default true; the
+/// APPKITWIN_UIA_COM_THREADING=0 switch turns it off for comparison).
+void cuia_set_use_com_threading(bool enabled);
 
 /// Test hooks: a property through IRawElementProviderSimple::GetPropertyValue, rendered
 /// as text (numbers and booleans too); false when the provider has no value for it.

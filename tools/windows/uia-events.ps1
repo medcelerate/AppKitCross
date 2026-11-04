@@ -8,7 +8,10 @@
 # in order. Use it while pressing Tab through the window or typing into a field.
 param(
     [string]$Title = "Hello, AppKit on Windows",
-    [int]$Seconds = 30
+    [int]$Seconds = 30,
+    # "Window" scopes the handlers to the window's subtree; "Desktop" registers them on
+    # the desktop root (every application), which tells scoping problems apart.
+    [string]$Scope = "Window"
 )
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -28,6 +31,8 @@ $condition = New-Object System.Windows.Automation.PropertyCondition([System.Wind
 $window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
 if (-not $window) { Write-Error "no top-level window named '$Title'"; exit 2 }
 Write-Host "window: $(Describe $window) FrameworkId=$($window.Current.FrameworkId)"
+$scopeElement = if ($Scope -eq "Desktop") { $root } else { $window }
+Write-Host "handlers scoped to: $Scope"
 
 $focusHandler = [System.Windows.Automation.AutomationFocusChangedEventHandler] {
     param($sender, $e)
@@ -39,7 +44,7 @@ $propertyHandler = [System.Windows.Automation.AutomationPropertyChangedEventHand
     param($sender, $e)
     [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) property $($e.Property.ProgrammaticName) = '$($e.NewValue)' on $(Describe $sender)")
 }
-[System.Windows.Automation.Automation]::AddAutomationPropertyChangedEventHandler($window, [System.Windows.Automation.TreeScope]::Subtree, $propertyHandler,
+[System.Windows.Automation.Automation]::AddAutomationPropertyChangedEventHandler($scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $propertyHandler,
     @([System.Windows.Automation.ValuePattern]::ValueProperty, [System.Windows.Automation.AutomationElement]::NameProperty,
       [System.Windows.Automation.TogglePattern]::ToggleStateProperty, [System.Windows.Automation.RangeValuePattern]::ValueProperty,
       [System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty))
@@ -50,13 +55,13 @@ $eventHandler = [System.Windows.Automation.AutomationEventHandler] {
 }
 foreach ($id in @([System.Windows.Automation.TextPattern]::TextChangedEvent, [System.Windows.Automation.SelectionItemPattern]::ElementSelectedEvent,
                   [System.Windows.Automation.InvokePattern]::InvokedEvent)) {
-    [System.Windows.Automation.Automation]::AddAutomationEventHandler($id, $window, [System.Windows.Automation.TreeScope]::Subtree, $eventHandler)
+    [System.Windows.Automation.Automation]::AddAutomationEventHandler($id, $scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $eventHandler)
 }
 $structureHandler = [System.Windows.Automation.StructureChangedEventHandler] {
     param($sender, $e)
     [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) structure $($e.StructureChangeType) on $(Describe $sender)")
 }
-[System.Windows.Automation.Automation]::AddStructureChangedEventHandler($window, [System.Windows.Automation.TreeScope]::Subtree, $structureHandler)
+[System.Windows.Automation.Automation]::AddStructureChangedEventHandler($scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $structureHandler)
 
 Write-Host "listening for $Seconds s: press Tab through the window, toggle the check box, type into the edit..."
 $timer = New-Object System.Windows.Forms.Timer

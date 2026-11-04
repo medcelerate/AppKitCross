@@ -642,6 +642,7 @@ final class Win32Window: PlatformWindow {
 
     private func key(_ type: NSEvent.EventType, _ wParam: WPARAM, _ lParam: LPARAM) {
         let vk = Int32(truncatingIfNeeded: wParam)
+        if NSView._traceInvalidation { NSView._trace("win32 key \(type == .keyDown ? "down" : "up") vk \(vk) '\(title)' composing \(composing)") }
         // An active input method owns the keyboard: the keystrokes it consumes arrive as
         // VK_PROCESSKEY and come back as WM_IME_* messages, so they are not key events too.
         if vk == VK_PROCESSKEY || composing { return }
