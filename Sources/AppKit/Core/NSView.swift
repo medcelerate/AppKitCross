@@ -1580,6 +1580,7 @@ import CoreText
     /// Assistive technology sets a new value; the control applies it and sends its action.
     @MainActor internal func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
     @MainActor internal func _accessibilityIsMultiline() -> Bool { false }
+    @MainActor internal func _accessibilityAllowsMultipleSelection() -> Bool { false }
     @MainActor internal func _accessibilityIsFocusable() -> Bool { acceptsFirstResponder && isAccessibilityEnabled() && !isHiddenOrHasHiddenAncestor }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityelement()

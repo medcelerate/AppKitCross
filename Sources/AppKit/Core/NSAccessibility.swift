@@ -195,6 +195,7 @@ extension NSView {
         e.isSelected = isAccessibilitySelected()
         e.isSettable = _accessibilityValueIsSettable()
         e.isMultiline = _accessibilityIsMultiline()
+        e.allowsMultipleSelection = _accessibilityAllowsMultipleSelection()
         e.minValue = NSAccessibility._double(accessibilityMinValue())
         e.maxValue = NSAccessibility._double(accessibilityMaxValue())
         let range = accessibilitySelectedTextRange()

@@ -11,14 +11,29 @@ APPKITWIN_HOST_BACKEND=1 swift test 2>&1 | grep -E "Fatal error|error: -\[|Execu
 Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
 export DISPLAY=:99
 sleep 1
-echo "== tests on the X11 backend under Xvfb (XDND, CLIPBOARD, the event pump)"
-swift test --filter "X11DragDropTests|X11ClipboardTests|MainQueueTests" 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:" | tail -6
+# An accessibility bus (ADR-0013): a session bus for org.a11y.Bus, then the launcher starts
+# the registry (at-spi2-registryd) and publishes the bus address.
+if command -v dbus-daemon >/dev/null && [ -x /usr/libexec/at-spi-bus-launcher ]; then
+    export DBUS_SESSION_BUS_ADDRESS
+    DBUS_SESSION_BUS_ADDRESS=$(dbus-daemon --session --fork --print-address)
+    /usr/libexec/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
+    sleep 1
+    export AT_SPI_BUS_ADDRESS
+    AT_SPI_BUS_ADDRESS=$(dbus-send --session --print-reply=literal --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress 2>/dev/null | tr -d ' \n')
+    echo "accessibility bus: ${AT_SPI_BUS_ADDRESS:-none}"
+fi
+echo "== tests on the X11 backend under Xvfb (XDND, CLIPBOARD, the event pump, AT-SPI)"
+swift test --filter "X11DragDropTests|X11ClipboardTests|MainQueueTests|AtspiTests" 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:" | tail -6
 echo "== HelloWindow under Xvfb (X11 backend)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/HelloWindow &
 APP=$!
 sleep 3
 xwd -root -silent | convert xwd:- /tmp/hellowindow-linux.png
 echo "screenshot: /tmp/hellowindow-linux.png ($(stat -c %s /tmp/hellowindow-linux.png) bytes)"
+if [ -n "$AT_SPI_BUS_ADDRESS" ]; then
+    echo "== AT-SPI2 tree of HelloWindow (tools/linux/atspi-probe.py)"
+    python3 tools/linux/atspi-probe.py --expect-hello
+fi
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
 echo "== HelloWindow Metal tab under Xvfb (Vulkan device, ADR-0012)"

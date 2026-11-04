@@ -1086,6 +1086,7 @@ import CoreGraphics
         let rows: [any NSAccessibilityRow]? = accessibilitySelectedRows()
         return rows ?? []
     }
+    override func _accessibilityAllowsMultipleSelection() -> Bool { allowsMultipleSelection }
     open func accessibilityRowCount() -> Int { numberOfRows }
     open func accessibilityColumnCount() -> Int { numberOfColumns }
     /// The rows the table has views for (the visible rect), made now if the table has

@@ -3,7 +3,7 @@
 Milestones are ordered so that each one produces something runnable. "Done" criteria
 are concrete and testable.
 
-## Status at a glance (2026-10-29)
+## Status at a glance (2026-11-04)
 
 | Milestone | State |
 |---|---|
@@ -20,6 +20,7 @@ are concrete and testable.
 | M9 CoreText and the text system | done on all three platforms: CoreText module (ADR-0007) with Pango/HarfBuzz and DirectWrite engines (PR #7, DrawGlyphRun parity in PR #8); NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them; 98/98 tests on macOS, Linux and Windows |
 | M10 SwiftUI | first version on main (ADR-0010): View/ViewBuilder, State/Binding/ObservedObject/StateObject/Environment, node-tree runtime over the M6 hosting seam, proposal-based layout (stacks, Spacer, frame, padding), Text through the text system, AppKit-backed Button/TextField/Toggle/Slider/Image/ScrollView, shapes, decorations, App/WindowGroup, representables; 17 SwiftUI tests, HelloWindow `--swiftui` demo (Controls, Navigation and Presentation tabs); withAnimation/.animation/transitions and the animatable modifiers interpolate on the display link; NavigationStack/NavigationLink/navigationDestination with a path binding, TabView with tabItem/tag, Picker (segmented, radio group), sheets over NSWindow.beginSheet, alerts over NSAlert; GeometryReader, @AppStorage/@SceneStorage over UserDefaults, @FocusState with focused(_:) and onSubmit; Picker menu style over NSPopUpButton, Menu (nested, toggles, dividers), contextMenu; List selection (single/set bindings, mouse with Cmd/Shift, arrows, Cmd-A) over the list row model; Table (TableColumn, widths, selection, sortOrder) over `NSTableView` with cells hosted as SwiftUI views, segmented Picker and the TabView bar over `NSSegmentedControl`; onDrag/onDrop/DropDelegate over the AppKit dragging session; App scenes install the standard menu bar (app, File, Edit, View, Window, Help) with `.commands` (CommandMenu, CommandGroup before/after/replacing the standard placements, `.keyboardShortcut` on items) and a Settings scene opened from the app menu's Settings… (Cmd-,) |
 | M10 Combine | done: `Sources/Combine` ports OpenCombine 0.14.0 under Apple's module name (ADR-0008), plus Merge/CombineLatest which upstream lacks; 17 Combine tests pass on macOS (Apple's Combine) and Linux (the port); Windows by reading only |
+| M11 Accessibility | first version (ADR-0013): the NSAccessibility protocol answers on views, windows and the application (roles, labels, values, screen frames, parent/children with ignored plain views, focus, press/increment/decrement/showMenu actions, the `setAccessibility...` overrides, `NSAccessibility.post`), SwiftUI's accessibilityLabel/Value/Hidden/Identifier/Hint modifiers, one snapshot-tree seam to the platform window; Windows: UI Automation through the `CUIAutomation` shim (fragment providers on the HWND answering WM_GETOBJECT, Invoke/Toggle/Value/RangeValue/Selection/SelectionItem/Text patterns, focus/property/structure events), verification with Narrator and the UIA tree with the Windows session; Linux: AT-SPI2 over D-Bus (`AtspiBridge`: Accessible, Application, Component, Action, Value, Text, EditableText, events), `tools/linux/run.sh` runs an accessibility bus under Xvfb and `atspi-probe.py` walks and drives HelloWindow's tree; tests: 11 host-backend `AccessibilityTests`, `UIAutomationTests` (Windows) and `AtspiTests` (Linux with a bus), skipped elsewhere |
 | M10 UniformTypeIdentifiers and ImageIO | done on macOS and Linux (ADR-0009): `UTType` over the SDK's generated core-type table with Apple's `dyn.*` encoding; `CGImageSource`/`CGImageDestination` over Cairo PNG (Linux) and WIC through CD2D (Windows, awaiting Windows verification); 12 tests pass against Apple's modules on macOS and against ours in the Linux container |
 
 The macOS host build and the Linux container run the full test suite (110 tests); Windows verification is done by
@@ -369,6 +370,19 @@ is the specification: it passes against Apple's Combine on macOS and against the
 the Linux container. Not implemented: `Publishers.CollectByTime` (`collect(.byTime)`).
 Windows is unverified until the next Windows session (nothing platform-specific beyond
 `DebugBreak()` and corelibs Foundation).
+
+## M11: Accessibility
+
+Status (2026-11-04, ADR-0013): see the status table. The core builds a snapshot tree
+from the NSAccessibility answers of its views (`Platform/Accessibility.swift`), which
+`Win32Window` serves to UI Automation and the X11/Wayland backends serve to AT-SPI2.
+Verification: `AccessibilityTests` on the host backend (macOS and the Linux container),
+`AtspiTests` plus `tools/linux/atspi-probe.py` under Xvfb with an accessibility bus
+(the probe presses the check box, sets the slider and the text field over D-Bus), and
+Narrator / Accessibility Insights on the Windows machine. Not yet: menus and menu items
+in the tree, `NSAccessibilityElement` virtual elements, custom rotors and actions, the
+AT-SPI `Cache` interface, text granularities finer than the whole text on AT-SPI, and
+structure events naming the added or removed child.
 
 ## Reference projects
 

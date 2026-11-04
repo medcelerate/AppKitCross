@@ -21,6 +21,9 @@ final class Win32Window: PlatformWindow {
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
     private var dpi: UINT = 96
+    /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
+    var uiaRoot: OpaquePointer? = nil
+    var accessibilityOwner: PlatformWindowOwner? { owner }
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
 
@@ -161,7 +164,7 @@ final class Win32Window: PlatformWindow {
         // extendsContentIntoTitleBar, where the caption is not drawn at all.
     }
 
-    private var scale: CGFloat { CGFloat(dpi) / 96 }
+    var scale: CGFloat { CGFloat(dpi) / 96 }
 
     // MARK: PlatformWindow
 
@@ -854,8 +857,11 @@ final class Win32Window: PlatformWindow {
         case WM_COMMAND:
             if (wParam >> 16) & 0xFFFF == 0, lParam == 0, backend.menuBar.command(Int(wParam & 0xFFFF)) { return 0 }
             return nil
+        case WM_GETOBJECT:
+            return accessibilityHandleGetObject(wParam, lParam)
         case WM_DESTROY:
             if NSView._traceInvalidation { NSView._trace("win32 WM_DESTROY '\(title)' destroying \(destroying)") }
+            accessibilityWindowDestroyed()
             if let hwnd { backend.win32DragDrop.revoke(hwnd); backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
             tearDownLayerHosting()
