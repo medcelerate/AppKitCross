@@ -1,0 +1,6 @@
+// Hand-written so clients outside the package (Examples/LibraryCompat, whose third-party
+// packages do not depend on this target) can be handed the map by path.
+module CDirectWrite {
+    umbrella header "cdirectwrite.h"
+    export *
+}

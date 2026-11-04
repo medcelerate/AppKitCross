@@ -30,16 +30,22 @@ if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-
 # and the ones SwiftPM synthesises for the other C targets in the build directory (after
 # step 1), plus the shims' include directories since the Windows shim headers include each
 # other (cdirectwrite.h includes cd2d.h).
+# An absolute path clang accepts: on Windows (Git Bash) `pwd -W` gives C:/..., not /c/....
+abs() { (cd "$1" && (pwd -W 2>/dev/null || pwd)); }
 seen=""
-for m in ../../Sources/C*/module.modulemap .build/debug/C*.build/module.modulemap .build/*/debug/C*.build/module.modulemap; do
-    [ -f "$m" ] || continue
-    name=$(basename "$(dirname "$m")")
-    case " $seen " in *" $name "*) continue ;; esac
-    seen="$seen $name"
-    FLAGS+=(-Xcc -fmodule-map-file="$(cd "$(dirname "$m")" && pwd)/$(basename "$m")")
-done
+add_maps() {
+    local m name
+    for m in "$@"; do
+        [ -f "$m" ] || continue
+        name=$(basename "$(dirname "$m")"); [ "$name" = include ] && name=$(basename "$(dirname "$(dirname "$m")")")
+        case " $seen " in *" $name "*) continue ;; esac
+        seen="$seen $name"
+        FLAGS+=(-Xcc -fmodule-map-file="$(abs "$(dirname "$m")")/$(basename "$m")")
+    done
+}
+add_maps ../../Sources/C*/module.modulemap ../../Sources/C*/include/module.modulemap
 for d in ../../Sources/C*/include ../../Sources/C*; do
-    [ -d "$d" ] && FLAGS+=(-Xcc -I"$(cd "$d" && pwd)")
+    [ -d "$d" ] && FLAGS+=(-Xcc -I"$(abs "$d")")
 done
 # ... and the system headers those maps include (Cairo, Pango, X11, D-Bus on Linux).
 if [ "$(uname)" = Linux ] && command -v pkg-config >/dev/null; then
@@ -62,14 +68,9 @@ if [ "$(uname)" != Darwin ]; then
     # Apple's AppKit re-exports these; the libraries import them by name.
     build --target ImageIO
 fi
-# Step 1 synthesised the module maps of the C targets without one; collect them now.
-for m in .build/debug/C*.build/module.modulemap .build/*/debug/C*.build/module.modulemap; do
-    [ -f "$m" ] || continue
-    name=$(basename "$(dirname "$m")")
-    case " $seen " in *" $name "*) continue ;; esac
-    seen="$seen $name"
-    FLAGS+=(-Xcc -fmodule-map-file="$(cd "$(dirname "$m")" && pwd)/$(basename "$m")")
-done
+# Step 1 synthesised the module maps of the C targets without a hand-written one.
+add_maps .build/debug/C*.build/module.modulemap .build/*/debug/C*.build/module.modulemap
+echo "module maps: $seen"
 
 if [ "$PROBE" = 1 ]; then
     echo "== probe: each library on its own"
