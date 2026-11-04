@@ -6,6 +6,12 @@
 #include <oleauto.h>
 #include <uiautomation.h>
 
+// The runtime-id prefix for elements under an HWND provider: newer SDKs define it in
+// uiautomationcoreapi.h, the swift.org toolchain's SDK does not.
+#ifndef UiaAppendRuntimeIdConstant
+#define UiaAppendRuntimeIdConstant 3
+#endif
+
 #include <algorithm>
 #include <map>
 #include <string>
