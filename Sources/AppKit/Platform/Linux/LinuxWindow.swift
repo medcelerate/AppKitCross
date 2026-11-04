@@ -8,7 +8,7 @@ import CCairo
 import CX11
 
 @MainActor
-final class LinuxWindow: PlatformWindow {
+final class LinuxWindow: PlatformWindow, AtspiWindow {
     private unowned let backend: LinuxBackend
     private weak var owner: PlatformWindowOwner?
     private(set) var xid: Window = 0
@@ -198,6 +198,12 @@ final class LinuxWindow: PlatformWindow {
     }
     var isMiniaturized: Bool { minimized }
     var isZoomed: Bool { maximized }
+
+    // MARK: Accessibility (ADR-0013)
+    var atspiOwner: PlatformWindowOwner? { owner }
+    var atspiIsVisible: Bool { isVisible }
+    var atspiIsKey: Bool { isKey }
+    func accessibilityDidChange(_ change: PlatformAccessibilityChange) { backend.atspi?.windowDidChange(self, change) }
 
     func close() {
         guard !destroying else { return }

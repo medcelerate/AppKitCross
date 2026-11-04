@@ -96,7 +96,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/doublevalue
     @MainActor open var doubleValue: Double {
         get { _cell?.doubleValue ?? 0 }
-        set { _cell?.doubleValue = newValue; needsDisplay = true }
+        set { _cell?.doubleValue = newValue; needsDisplay = true; _accessibilityValueChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/draw(withexpansionframe:in:)
     @available(macOS 10.10, *)
@@ -171,7 +171,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/objectvalue
     @MainActor open var objectValue: Any? {
         get { _cell?.objectValue ?? nil }
-        set { _cell?.objectValue = newValue; needsDisplay = true }
+        set { _cell?.objectValue = newValue; needsDisplay = true; _accessibilityValueChanged() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/performclick(_:)
     @MainActor open func performClick(_ sender: Any?) { guard isEnabled else { return }; _fireAction() }
@@ -206,8 +206,17 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/stringvalue
     @MainActor open var stringValue: String {
         get { _cell?.stringValue ?? "" }
-        set { _cell?.stringValue = newValue; invalidateIntrinsicContentSize(); needsDisplay = true }
+        set { _cell?.stringValue = newValue; invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     }
+
+    // MARK: Accessibility (ADR-0013)
+    //
+    // Controls are elements; their enabled state is the control's. Subclasses give the
+    // role, label, value and actions.
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .unknown }
+    open override func isAccessibilityEnabled() -> Bool { _a11y.isEnabled ?? isEnabled }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : (stringValue.isEmpty ? nil : stringValue) }
     /// Controls take mouse downs, so they never drag a window that is movable by background.
     @MainActor open override var mouseDownCanMoveWindow: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/tag

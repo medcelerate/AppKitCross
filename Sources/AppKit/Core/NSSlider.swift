@@ -161,12 +161,46 @@ import CoreText
         set { MainActor.assumeIsolated { _sliderCell?.vertical = newValue; needsDisplay = true } }
     }
     // DUPLICATE: open var vertical: Bool
+    // MARK: Accessibility (ADR-0013)
+    //
+    // AXSlider: the value, its range, and increment/decrement by a tick (or a
+    // hundredth of the range), each sending the action as a drag would.
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .slider }
+    open func accessibilityOrientation() -> NSAccessibilityOrientation { vertical ? .vertical : .horizontal }
     // Requirement of NSAccessibilitySlider
-    open func accessibilityLabel() -> String? { unimplemented() }
+    open override func accessibilityLabel() -> String? { _a11y.label ?? toolTip }
     // Requirement of NSAccessibilitySlider
-    open func accessibilityValue() -> Any? { unimplemented() }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : doubleValue }
+    open override func accessibilityMinValue() -> Any? { _a11y.minValue ?? minValue }
+    open override func accessibilityMaxValue() -> Any? { _a11y.maxValue ?? maxValue }
+    override func _accessibilityValueIsSettable() -> Bool { isEnabled }
+    override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEnabled, let d = value.doubleValue else { return false }
+        _accessibilityApply(d)
+        return true
+    }
+    /// The step one increment moves: a tick mark's spacing, else a hundredth of the range.
+    internal var _accessibilityStep: Double {
+        let range = maxValue - minValue
+        if numberOfTickMarks > 1 { return range / Double(numberOfTickMarks - 1) }
+        return range > 0 ? range / 100 : 1
+    }
+    private func _accessibilityApply(_ value: Double) {
+        let clamped = min(max(value, minValue), maxValue)
+        guard clamped != doubleValue else { return }
+        doubleValue = clamped
+        _fireAction()
+    }
     // Requirement of NSAccessibilitySlider
-    open func accessibilityPerformIncrement() -> Bool { unimplemented() }
+    open override func accessibilityPerformIncrement() -> Bool {
+        guard isEnabled else { return false }
+        _accessibilityApply(doubleValue + _accessibilityStep)
+        return true
+    }
     // Requirement of NSAccessibilitySlider
-    open func accessibilityPerformDecrement() -> Bool { unimplemented() }
+    open override func accessibilityPerformDecrement() -> Bool {
+        guard isEnabled else { return false }
+        _accessibilityApply(doubleValue - _accessibilityStep)
+        return true
+    }
 }

@@ -104,6 +104,11 @@ import CoreText
         get { _symbolConfiguration }
         set { _symbolConfiguration = newValue }
     }
+    // MARK: Accessibility (ADR-0013)
+    // AXImage, labelled by `setAccessibilityLabel`, the tool tip or the image's name.
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .image }
     // Requirement of NSAccessibilityImage
-    open func accessibilityLabel() -> String? { unimplemented() }
+    open override func accessibilityLabel() -> String? { _a11y.label ?? toolTip ?? image?.name() }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : nil }
+    override func _accessibilityIsFocusable() -> Bool { false }
 }

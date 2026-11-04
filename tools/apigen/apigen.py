@@ -175,6 +175,7 @@ class Generator:
         self.values = values
         self.foundation_types = set(foundation_types)
         self.handwritten = set(config.get("handwritten", []))
+        self._handwritten_keys_cache = {}
         self.pending = set(config.get("pending", []))
         self.skip_types = set(config.get("skipTypes", []))
         self.skip_members = set(config.get("skipMembers", []))
@@ -357,12 +358,84 @@ class Generator:
             while sup and depth < 20:
                 for k, v in self.own_keys(sup, include_reqs).items():
                     keys.setdefault(k, []).extend(v)
+                if not include_reqs:
+                    kt = self.inv.known_types.get(sup)
+                    if kt and kt[1][0] in self.handwritten:
+                        for k, v in self.handwritten_keys(kt[1][0]).items():
+                            keys.setdefault(k, []).extend(v)
                 if sup == "c:objc(cs)NSObject":
                     break
                 sup = self.inv.superclass.get(sup)
                 depth += 1
         for k in self.NSOBJECT_KEYS:
             keys.setdefault(k, [None])
+        return keys
+
+    HANDWRITTEN_DECL_RE = re.compile(
+        r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:open|public)\s+(?:override\s+)?(?:required\s+)?(?:(?P<static>static|class)\s+)?"
+        r"(?:final\s+)?(?P<kind>func|var|let)\s+(?P<name>[A-Za-z_]\w*)(?P<rest>.*)$")
+
+    def handwritten_keys(self, type_name):
+        """Members a hand-written class declares in its own body (Sources/AppKit/Core), as
+        synthetic symbols keyed like SDK members. The SDK lists NSView's accessibility
+        methods only as protocol requirements, but the hand-written NSView declares them,
+        so a generated subclass's stub for the same requirement must say `override`
+        there (or stay a plain overload when the signature differs)."""
+        if type_name in self._handwritten_keys_cache:
+            return self._handwritten_keys_cache[type_name]
+        keys = {}
+        path = os.path.join(ROOT, "Sources", "AppKit", "Core", type_name + ".swift")
+        if os.path.exists(path):
+            depth = 0
+            container = None          # "class" while inside the type's own body
+            lines = open(path).read().split("\n")
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                stripped = line.strip()
+                if depth == 0:
+                    m = re.match(r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:open|public|internal|final|private)\s+)*(class|extension)\s+(\w+)", stripped)
+                    container = m.group(1) if m and m.group(2) == type_name else None
+                elif depth == 1 and container == "class" and not stripped.startswith("//"):
+                    m = self.HANDWRITTEN_DECL_RE.match(stripped)
+                    if m:
+                        name, kind, rest = m.group("name"), m.group("kind"), m.group("rest")
+                        if kind == "func":
+                            # Collect the signature up to the body (it may span lines).
+                            sig = rest
+                            j = i
+                            while sig.count("(") > sig.count(")") and j + 1 < len(lines):
+                                j += 1
+                                sig += " " + lines[j].strip()
+                            sig = re.sub(r"\s*\{.*$", "", sig).strip()
+                            params = sig[1:sig.rfind(")")] if sig.startswith("(") else ""
+                            labels = []
+                            level = 0
+                            cur = ""
+                            for ch in params + ",":
+                                if ch in "([<":
+                                    level += 1
+                                elif ch in ")]>":
+                                    level -= 1
+                                if ch == "," and level == 0:
+                                    tok = cur.strip()
+                                    if tok:
+                                        labels.append(tok.split(":")[0].split()[0] + ":")
+                                    cur = ""
+                                else:
+                                    cur += ch
+                            key = (("type.method" if m.group("static") else "method"), name + "(" + "".join(labels) + ")")
+                            decl = ("static " if m.group("static") else "") + "func " + name + sig
+                        else:
+                            key = (("type.property" if m.group("static") else "property"), name)
+                            decl = ("static " if m.group("static") else "") + "var " + name + re.sub(r"\s*(?:\{.*|=.*)$", "", rest)
+                        sym = {"kind": {"identifier": "swift." + key[0]}, "pathComponents": [type_name, key[1]],
+                               "identifier": {"precise": "handwritten:" + type_name + "." + key[1]},
+                               "declarationFragments": [{"kind": "text", "spelling": decl}]}
+                        keys.setdefault(key, []).append(sym)
+                depth += line.count("{") - line.count("}")
+                i += 1
+        self._handwritten_keys_cache[type_name] = keys
         return keys
 
     @staticmethod

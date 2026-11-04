@@ -67,6 +67,9 @@ final class WaylandBackend: PlatformBackend {
     /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
     private(set) var dataDevice: WaylandDataDevice!
     var dragDrop: (any PlatformDragDrop)? { dataDevice }
+    /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013). Wayland has no global
+    /// coordinates, so extents are reported against the primary output's logical size.
+    private(set) var atspi: AtspiBridge?
     private var pendingAxis = (x: CGFloat(0), y: CGFloat(0), time: UInt32(0), has: false)
 
     // Cursor
@@ -234,8 +237,20 @@ final class WaylandBackend: PlatformBackend {
         WaylandWindow(backend: self, owner: owner, contentRect: contentRect, styleMask: styleMask)
     }
 
-    func register(_ window: WaylandWindow) { windows.append(window) }
+    func register(_ window: WaylandWindow) {
+        windows.append(window)
+        if atspi == nil && !atspiTried {
+            atspiTried = true
+            atspi = AtspiBridge.connect(rootWindowProperty: { nil }) { [weak self] r in
+                let h = self?.displays.first?.frame.height ?? 0
+                return (Int32(r.minX.rounded()), Int32((h - r.maxY).rounded()), Int32(r.width.rounded()), Int32(r.height.rounded()))
+            }
+        }
+        atspi?.register(window)
+    }
+    private var atspiTried = false
     func unregister(_ window: WaylandWindow) {
+        if windows.contains(where: { $0 === window }) { atspi?.unregister(window) }
         windows.removeAll { $0 === window }
         if pointerFocus === window { pointerFocus = nil }
         if keyboardFocus === window { keyboardFocus = nil }
@@ -267,6 +282,7 @@ final class WaylandBackend: PlatformBackend {
         var fds = [pollfd(fd: wl_display_get_fd(display), events: Int16(POLLIN), revents: 0),
                    pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
                    pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
+        if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
         var timeout: Int32 = blocking ? -1 : 0
         if blocking {
             if let next = frameCallbacks.map(\.deadline).min() {
@@ -275,7 +291,7 @@ final class WaylandBackend: PlatformBackend {
             if let t = nextTimer { let ms = Int32(min(Double(Int32.max), t * 1000)); timeout = timeout < 0 ? ms : min(timeout, ms) }
             if !posted.isEmpty || windows.contains(where: { $0.needsPaint }) { timeout = 0 }
         }
-        _ = poll(&fds, 3, timeout)
+        _ = poll(&fds, nfds_t(fds.count), timeout)
         if fds[0].revents & Int16(POLLIN) != 0 { wl_display_read_events(display) } else { wl_display_cancel_read(display) }
         if fds[1].revents != 0 {
             var buf = [UInt8](repeating: 0, count: 64)
@@ -288,6 +304,7 @@ final class WaylandBackend: PlatformBackend {
             running = false
             return
         }
+        atspi?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }

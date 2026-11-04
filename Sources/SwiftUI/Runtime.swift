@@ -445,6 +445,25 @@ final class _ContainerView: NSView {
     override func mouseEntered(with event: NSEvent) { hoverHandler?(true) }
     override func mouseExited(with event: NSEvent) { hoverHandler?(false) }
     override var acceptsFirstResponder: Bool { false }
+    /// Set by a custom button: the container is then an AXButton that presses through it.
+    var accessibilityPress: (() -> Void)?
+    override func isAccessibilityElement() -> Bool { accessibilityPress != nil || super.isAccessibilityElement() }
+    override func accessibilityRole() -> NSAccessibility.Role? { super.accessibilityRole() ?? (accessibilityPress != nil ? .button : nil) }
+    /// A custom button is labelled by the text it contains.
+    override func accessibilityLabel() -> String? {
+        if let l = super.accessibilityLabel() { return l }
+        guard accessibilityPress != nil else { return nil }
+        func texts(_ v: NSView) -> [String] { (v as? _TextView).map { [$0.storage.string] } ?? v.subviews.flatMap(texts) }
+        let t = texts(self).filter { !$0.isEmpty }
+        return t.isEmpty ? nil : t.joined(separator: " ")
+    }
+    /// The label text is read through the button; it is not a separate element.
+    override func accessibilityChildren() -> [Any]? { accessibilityPress != nil ? [] : super.accessibilityChildren() }
+    override func accessibilityPerformPress() -> Bool {
+        guard let press = accessibilityPress, !isHiddenOrHasHiddenAncestor else { return false }
+        press()
+        return true
+    }
     var passesThroughHits = true
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)

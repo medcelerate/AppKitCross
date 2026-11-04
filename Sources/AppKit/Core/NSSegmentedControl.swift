@@ -99,7 +99,27 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/selectedsegment
     @MainActor open var selectedSegment: Int {
         get { _segmentedCell?.selectedSegment ?? -1 }
-        set { _segmentedCell?.selectedSegment = newValue; needsDisplay = true }
+        set { _segmentedCell?.selectedSegment = newValue; needsDisplay = true; _accessibilityValueChanged() }
+    }
+
+    // MARK: Accessibility (ADR-0013)
+    // AXRadioGroup: the selected segment's label is the value, and assistive technology
+    // picks a segment by label or index.
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .radioGroup }
+    @MainActor open override func accessibilityValue() -> Any? {
+        if _a11y.hasValue { return _a11y.value }
+        let i = selectedSegment
+        return i >= 0 ? (label(forSegment: i) ?? String(i)) : nil
+    }
+    @MainActor override func _accessibilityValueIsSettable() -> Bool { isEnabled }
+    @MainActor override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEnabled else { return false }
+        var index = (0..<segmentCount).first { label(forSegment: $0) == value.stringValue } ?? -1
+        if index < 0, let d = value.doubleValue, d >= 0, Int(d) < segmentCount { index = Int(d) }
+        guard index >= 0, index != selectedSegment else { return index >= 0 }
+        selectedSegment = index
+        _fireAction()
+        return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/selectedsegmentbezelcolor
     @MainActor open var selectedSegmentBezelColor: NSColor? {
@@ -188,6 +208,28 @@ import CoreGraphics
         _activate(pressed)
     }
 
+    // MARK: Accessibility (ADR-0013): the segments are AXRadioButton children, pressed as a click.
+    private var _segmentElements: [_NSSegmentAccessibilityElement] = []
+    @MainActor open override func accessibilityChildren() -> [Any]? {
+        if let c = _a11y.children { return c }
+        let n = segmentCount
+        while _segmentElements.count < n { _segmentElements.append(_NSSegmentAccessibilityElement(control: self, index: _segmentElements.count)) }
+        if _segmentElements.count > n { _segmentElements.removeLast(_segmentElements.count - n) }
+        return _segmentElements
+    }
+    @MainActor internal func _accessibilitySegmentFrame(_ i: Int) -> NSRect {
+        guard let c = _segmentedCell else { return .zero }
+        let rects = c._segmentRects(in: _cellFrame, distribution: segmentDistribution)
+        guard rects.indices.contains(i) else { return .zero }
+        let r = convert(rects[i], to: nil)
+        return window?.convertToScreen(r) ?? r
+    }
+    @MainActor internal func _accessibilityPressSegment(_ i: Int) -> Bool {
+        guard isEnabled, let c = _segmentedCell, c.isEnabled(forSegment: i) else { return false }
+        _activate(i)
+        return true
+    }
+
     /// A click (or the keyboard) on a segment: applies the tracking mode and fires the action.
     @MainActor private func _activate(_ i: Int) {
         guard let c = _segmentedCell else { return }
@@ -231,5 +273,30 @@ import CoreGraphics
         let ok = super.resignFirstResponder()
         needsDisplay = true
         return ok
+    }
+}
+
+/// One segment of an `NSSegmentedControl` in the accessibility tree (ADR-0013).
+@MainActor
+internal final class _NSSegmentAccessibilityElement: _NSAccessibilityVirtualElement {
+    private weak var control: NSSegmentedControl?
+    let index: Int
+    let _accessibilityElementID = _NSAccessibilityIDs.next()
+    init(control: NSSegmentedControl, index: Int) { self.control = control; self.index = index }
+    var _accessibilityOwnerView: NSView? { control }
+    func _accessibilityElement() -> PlatformAccessibilityElement {
+        var e = PlatformAccessibilityElement(id: _accessibilityElementID, role: NSAccessibility.Role.radioButton.rawValue, frame: control?._accessibilitySegmentFrame(index) ?? .zero)
+        let selected = control?.isSelected(forSegment: index) ?? false
+        e.label = control?.label(forSegment: index)
+        e.help = control?.toolTip(forSegment: index)
+        e.value = .number(selected ? 1 : 0)
+        e.isSelected = selected
+        e.isEnabled = (control?.isEnabled ?? false) && (control?.isEnabled(forSegment: index) ?? false)
+        e.actions = [.press]
+        return e
+    }
+    func _accessibilityPerform(_ action: PlatformAccessibilityAction) -> Bool {
+        guard action == .press else { return false }
+        return control?._accessibilityPressSegment(index) ?? false
     }
 }

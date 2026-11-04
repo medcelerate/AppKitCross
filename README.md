@@ -127,3 +127,9 @@ app.run()
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/decisions](docs/decisions): how
   the port is put together and why.
 - [docs/comparisons.md](docs/comparisons.md): the rendering comparisons in full size.
+
+## License
+
+AppKitWin is released under the Apache License, Version 2.0 (see [LICENSE](LICENSE)).
+Bundled third-party code is listed in [NOTICE](NOTICE). AppKit and SwiftUI are Apple's
+frameworks; this project implements their public API and is not affiliated with Apple.
