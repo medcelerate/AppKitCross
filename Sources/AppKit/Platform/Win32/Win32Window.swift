@@ -12,6 +12,15 @@ final class Win32Window: PlatformWindow {
     private unowned let backend: Win32Backend
     /// Timer that drives animation frames during the modal move/size loop.
     private static let sizeMoveTimer: UINT_PTR = 7
+    private static let wheelGestureTimer: UINT_PTR = 8
+    /// WM_GESTURE tracking: the previous zoom distance, rotation angle and pan point.
+    private var gestureZoomDistance: Double = 0
+    private var gestureAngle: Double = 0
+    private var gesturePanPoint = POINT()
+    private var gestureActive = false
+    /// A Ctrl+wheel magnify in progress (ends when no notch arrives for a while).
+    private var wheelGesturePoint = NSPoint.zero
+    private var wheelGestureActive = false
     private weak var owner: PlatformWindowOwner?
     private(set) var hwnd: HWND?
     private var renderTarget: OpaquePointer?        // CD2DTarget*
@@ -60,6 +69,7 @@ final class Win32Window: PlatformWindow {
             SetWindowPos(hwnd, nil, 0, 0, width, height, UINT(SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
         }
         backend.register(self)
+        cd2d_gestures_enable(UnsafeMutableRawPointer(hwnd))
         backend.win32DragDrop.register(hwnd)
         if usesCustomFrame {
             // CreateWindowExW sent WM_NCCALCSIZE before the window procedure knew this
@@ -752,6 +762,79 @@ final class Win32Window: PlatformWindow {
         _ = ImmSetCandidateWindow(himc, &candidates)
     }
 
+    // MARK: Gestures
+
+    /// Ctrl+wheel notches become a magnify gesture: beginGesture on the first notch, a
+    /// magnify per notch (10% each), endGesture once notches stop for 300 ms.
+    private func magnifyFromWheel(delta: CGFloat, at point: NSPoint, flags: NSEvent.ModifierFlags) {
+        if !wheelGestureActive {
+            wheelGestureActive = true
+            wheelGesturePoint = point
+            owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .beginGesture, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber()))
+        }
+        wheelGesturePoint = point
+        let e = NSEvent._gestureEvent(type: .magnify, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber(),
+                                      magnification: delta * 0.1, phase: .changed)
+        owner?.platformWindowDispatch(e)
+        if let hwnd { _ = SetTimer(hwnd, Win32Window.wheelGestureTimer, 300, nil) }
+    }
+
+    private func endWheelGesture() {
+        guard wheelGestureActive else { return }
+        wheelGestureActive = false
+        owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .endGesture, location: wheelGesturePoint, modifierFlags: modifierFlags(), timestamp: timestamp(), windowNumber: windowNumber()))
+    }
+
+    /// WM_GESTURE (touch screens): zoom → magnify, rotate → rotate, pan → precise scroll
+    /// events with phases; GF_BEGIN/GF_END bracket them with beginGesture/endGesture.
+    private func handleGesture(_ lParam: LPARAM) -> Bool {
+        var g = CD2DGesture()
+        guard cd2d_gesture_decode(Int(lParam), &g) else { return false }
+        let point = contentPoint(screenX: g.x, screenY: g.y)
+        let flags = modifierFlags()
+        let s = scale
+        func send(_ e: NSEvent) { owner?.platformWindowDispatch(e) }
+        switch g.id {
+        case 1: // GID_BEGIN
+            gestureActive = true
+            send(NSEvent._gestureEvent(type: .beginGesture, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber()))
+        case 2: // GID_END
+            gestureActive = false
+            send(NSEvent._gestureEvent(type: .endGesture, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber()))
+        case 3: // GID_ZOOM: ullArguments is the distance between the fingers
+            let distance = Double(g.argument)
+            if g.begin { gestureZoomDistance = distance; return true }
+            guard gestureZoomDistance > 0 else { gestureZoomDistance = distance; return true }
+            let magnification = CGFloat((distance - gestureZoomDistance) / gestureZoomDistance)
+            gestureZoomDistance = distance
+            send(NSEvent._gestureEvent(type: .magnify, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber(),
+                                       magnification: magnification, phase: g.end ? .ended : .changed))
+        case 5: // GID_ROTATE: cumulative angle in radians, counterclockwise positive
+            if g.begin { gestureAngle = g.angle; return true }
+            let delta = Float((g.angle - gestureAngle) * 180 / .pi)
+            gestureAngle = g.angle
+            send(NSEvent._gestureEvent(type: .rotate, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber(),
+                                       rotation: delta, phase: g.end ? .ended : .changed))
+        case 4: // GID_PAN: a touch scroll with precise deltas (finger down moves content down)
+            if g.begin {
+                gesturePanPoint = POINT(x: g.x, y: g.y)
+                send(NSEvent._scrollEvent(location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber(),
+                                          deltaX: 0, deltaY: 0, precise: true, phase: .began))
+                return true
+            }
+            let dx = CGFloat(g.x - gesturePanPoint.x) / s, dy = CGFloat(g.y - gesturePanPoint.y) / s
+            gesturePanPoint = POINT(x: g.x, y: g.y)
+            send(NSEvent._scrollEvent(location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber(),
+                                      deltaX: dx, deltaY: dy, precise: true, phase: g.end ? .ended : .changed,
+                                      momentumPhase: g.inertia ? .changed : []))
+        case 7: // GID_TWOFINGERTAP → smart magnify, as a two-finger double tap does on macOS
+            send(NSEvent._gestureEvent(type: .smartMagnify, location: point, modifierFlags: flags, timestamp: timestamp(), windowNumber: windowNumber()))
+        default:
+            return false     // GID_PRESSANDTAP and unknown ids: let DefWindowProc handle them
+        }
+        return true
+    }
+
     // MARK: Window procedure
 
     fileprivate func handle(_ msg: UINT, _ wParam: WPARAM, _ lParam: LPARAM) -> LRESULT? {
@@ -975,9 +1058,22 @@ final class Win32Window: PlatformWindow {
             var pt = POINT(x: Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF)), y: Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF)))
             if let hwnd { ScreenToClient(hwnd, &pt) }
             let horizontal = Int32(msg) == WM_MOUSEHWHEEL
-            let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: modifierFlags(), timestamp: timestamp(),
+            let flags = modifierFlags()
+            if !horizontal, flags.contains(.control) {
+                // Ctrl+wheel is how Windows delivers a precision-touchpad pinch (and what
+                // mouse users expect to zoom with): a magnify gesture, not a scroll.
+                magnifyFromWheel(delta: delta, at: contentPoint(x: pt.x, y: pt.y), flags: flags.subtracting(.control))
+                return 0
+            }
+            let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: flags, timestamp: timestamp(),
                                          windowNumber: windowNumber(), deltaX: horizontal ? -delta : 0, deltaY: horizontal ? 0 : delta, precise: false)
             owner?.platformWindowDispatch(e)
+            return 0
+        case WM_GESTURE:
+            return handleGesture(lParam) ? 0 : nil
+        case WM_TIMER where wParam == Win32Window.wheelGestureTimer:
+            if let hwnd { _ = KillTimer(hwnd, Win32Window.wheelGestureTimer) }
+            endWheelGesture()
             return 0
         case WM_IME_STARTCOMPOSITION:
             // The text view draws the composition (marked text) itself, so the input

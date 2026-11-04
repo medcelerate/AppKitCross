@@ -49,6 +49,17 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
                      KeyPressMask | KeyReleaseMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask)
         var protocols = [backend.wmDeleteWindow]
         XSetWMProtocols(d, xid, &protocols, 1)
+        if backend.xiGestureOpcode != nil {
+            // Touchpad pinch and swipe gestures from every master pointer (XI 2.4).
+            var bits = [UInt8](repeating: 0, count: Int(XI_LASTEVENT >> 3) + 1)
+            for ev in [XI_GesturePinchBegin, XI_GesturePinchUpdate, XI_GesturePinchEnd, XI_GestureSwipeBegin, XI_GestureSwipeUpdate, XI_GestureSwipeEnd] {
+                bits[Int(ev >> 3)] |= UInt8(1 << (ev & 7))
+            }
+            bits.withUnsafeMutableBufferPointer { buf in
+                var mask = XIEventMask(deviceid: XIAllMasterDevices, mask_len: Int32(buf.count), mask: buf.baseAddress)
+                _ = XISelectEvents(d, xid, &mask, 1)
+            }
+        }
         // Drags from other applications (XDND version 5).
         var xdndVersion: [UInt] = [5]
         xdndVersion.withUnsafeMutableBufferPointer { buf in

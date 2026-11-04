@@ -1024,6 +1024,30 @@ void cd2d_comp_tree_set_transform(CD2DCompTree *tree, int64_t id, float m11, flo
     if (v && v->visual) v->visual->SetTransform(D2D1::Matrix3x2F(m11, m12, m21, m22, dx, dy));
 }
 
+void cd2d_gestures_enable(void *hwnd) {
+    GESTURECONFIG config = {0, GC_ALLGESTURES, 0};
+    SetGestureConfig((HWND)hwnd, 0, 1, &config, sizeof(GESTURECONFIG));
+}
+
+bool cd2d_gesture_decode(intptr_t lParam, CD2DGesture *out) {
+    GESTUREINFO gi = {};
+    gi.cbSize = sizeof(GESTUREINFO);
+    HGESTUREINFO handle = (HGESTUREINFO)lParam;
+    BOOL ok = GetGestureInfo(handle, &gi);
+    if (ok && out) {
+        out->id = gi.dwID;
+        out->begin = (gi.dwFlags & GF_BEGIN) != 0;
+        out->end = (gi.dwFlags & GF_END) != 0;
+        out->inertia = (gi.dwFlags & GF_INERTIA) != 0;
+        out->x = gi.ptsLocation.x;
+        out->y = gi.ptsLocation.y;
+        out->argument = gi.ullArguments;
+        out->angle = gi.dwID == GID_ROTATE ? GID_ROTATE_ANGLE_FROM_ARGUMENT(LODWORD(gi.ullArguments)) : 0.0;
+    }
+    CloseGestureInfoHandle(handle);
+    return ok != FALSE;
+}
+
 void cd2d_comp_tree_set_transform3d(CD2DCompTree *tree, int64_t id, const float *m) {
     CD2DCompVisual *v = compVisual(tree, id);
     if (!v || !v->visual) return;

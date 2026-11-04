@@ -465,9 +465,11 @@ final class _ContainerView: NSView {
         return true
     }
     var passesThroughHits = true
+    /// Recognizers the decoration installed for `.gesture` modifiers.
+    var installedRecognizers: [NSGestureRecognizer] = []
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil { return nil }
+        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil, installedRecognizers.isEmpty { return nil }
         return hit
     }
 }

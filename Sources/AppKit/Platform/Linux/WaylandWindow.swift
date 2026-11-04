@@ -500,6 +500,41 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         }
     }
 
+    // MARK: Gestures (zwp_pointer_gestures_v1)
+
+    private var pinchScale = 1.0
+    private var swipeTotal = (x: 0.0, y: 0.0)
+
+    func pinchBegin(time: UInt32, position: NSPoint) {
+        pinchScale = 1
+        owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .beginGesture, location: contentPoint(position), modifierFlags: backend.modifierFlags, timestamp: seconds(time), windowNumber: windowNumber()))
+    }
+    /// `scale` is cumulative since the begin (1.0 at the start); `rotation` is this
+    /// update's change in degrees, clockwise positive (AppKit's is counterclockwise).
+    func pinchUpdate(time: UInt32, scale: Double, rotation: Double, position: NSPoint) {
+        let p = contentPoint(position)
+        let magnification = pinchScale > 0 ? CGFloat(scale / pinchScale - 1) : 0
+        pinchScale = scale
+        if magnification != 0 {
+            owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .magnify, location: p, modifierFlags: backend.modifierFlags, timestamp: seconds(time), windowNumber: windowNumber(), magnification: magnification, phase: .changed))
+        }
+        if rotation != 0 {
+            owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .rotate, location: p, modifierFlags: backend.modifierFlags, timestamp: seconds(time), windowNumber: windowNumber(), rotation: Float(-rotation), phase: .changed))
+        }
+    }
+    func pinchEnd(time: UInt32, cancelled: Bool, position: NSPoint) {
+        owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .endGesture, location: contentPoint(position), modifierFlags: backend.modifierFlags, timestamp: seconds(time), windowNumber: windowNumber(), phase: cancelled ? .cancelled : .ended))
+    }
+    func swipeBegin(time: UInt32) { swipeTotal = (0, 0) }
+    func swipeUpdate(time: UInt32, dx: Double, dy: Double) { swipeTotal.x += dx; swipeTotal.y += dy }
+    /// Reported once at the end with the dominant direction (deltaX 1 = swipe left, deltaY 1 = swipe up).
+    func swipeEnd(time: UInt32, cancelled: Bool, position: NSPoint) {
+        guard !cancelled, abs(swipeTotal.x) + abs(swipeTotal.y) > 20 else { return }
+        let horizontal = abs(swipeTotal.x) >= abs(swipeTotal.y)
+        owner?.platformWindowDispatch(NSEvent._gestureEvent(type: .swipe, location: contentPoint(position), modifierFlags: backend.modifierFlags, timestamp: seconds(time), windowNumber: windowNumber(),
+                                                            deltaX: horizontal ? (swipeTotal.x < 0 ? 1 : -1) : 0, deltaY: horizontal ? 0 : (swipeTotal.y < 0 ? 1 : -1)))
+    }
+
     func scroll(time: UInt32, deltaX: CGFloat, deltaY: CGFloat, position: NSPoint) {
         let e = NSEvent._scrollEvent(location: contentPoint(position), modifierFlags: backend.modifierFlags, timestamp: seconds(time),
                                      windowNumber: windowNumber(), deltaX: deltaX, deltaY: deltaY, precise: false)

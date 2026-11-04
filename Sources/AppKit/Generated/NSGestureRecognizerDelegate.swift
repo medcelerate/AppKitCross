@@ -35,13 +35,13 @@ public protocol NSGestureRecognizerDelegate: NSObjectProtocol {
 extension NSGestureRecognizerDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizerdelegate/gesturerecognizer(_:shouldattempttorecognizewith:)
     @available(macOS 10.11, *)
-    @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool { return false }
+    @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizerdelegate/gesturerecognizer(_:shouldberequiredtofailby:)
     @available(macOS 10.10, *)
     @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: NSGestureRecognizer) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizerdelegate/gesturerecognizer(_:shouldreceive:)
     @available(macOS 10.12, *)
-    @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive touch: NSTouch) -> Bool { return false }
+    @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive touch: NSTouch) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizerdelegate/gesturerecognizer(_:shouldrecognizesimultaneouslywith:)
     @available(macOS 10.10, *)
     @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: NSGestureRecognizer) -> Bool { return false }
@@ -50,6 +50,6 @@ extension NSGestureRecognizerDelegate {
     @MainActor public func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: NSGestureRecognizer) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizerdelegate/gesturerecognizershouldbegin(_:)
     @available(macOS 10.10, *)
-    @MainActor public func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool { return false }
+    @MainActor public func gestureRecognizerShouldBegin(_ gestureRecognizer: NSGestureRecognizer) -> Bool { return true }
 }
 

@@ -45,6 +45,10 @@ final class _DecorationPrimitive: _Primitive {
         var tap: (() -> Void)? = nil
         var tapCount = 1
         var hover: ((Bool) -> Void)? = nil
+        /// `.gesture`/`.highPriorityGesture`: recognizers installed on the decoration view.
+        var gestures: [_GestureInstaller] = []
+        var gesturesDelayEvents = false
+        var pressingChanged: ((Bool) -> Void)? = nil
         var helpText: String? = nil
         // Animatable geometry and the transition used on insertion/removal.
         var offset = CGSize.zero
@@ -189,6 +193,23 @@ final class _DecorationPrimitive: _Primitive {
             view.mouseDownHandler = nil
         }
         view.hoverHandler = style.hover
+        for r in view.installedRecognizers { view.removeGestureRecognizer(r) }
+        view.installedRecognizers = style.gestures.compactMap { $0.install(view) }
+        for r in view.installedRecognizers {
+            view.addGestureRecognizer(r)
+            r.delaysPrimaryMouseButtonEvents = style.gesturesDelayEvents
+            if let pressing = style.pressingChanged, let press = r as? NSPressGestureRecognizer {
+                let inner = press._actionHandler
+                press._actionHandler = { r in
+                    inner?(r)
+                    switch r.state {
+                    case .began: pressing(true)
+                    case .ended, .cancelled, .failed: pressing(false)
+                    default: break
+                    }
+                }
+            }
+        }
         view.drawHandler = { [weak self] _, v in self?.draw(in: v) }
         view.needsDisplay = true
     }
