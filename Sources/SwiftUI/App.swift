@@ -97,7 +97,7 @@ extension Scene {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scene/windowstyle(_:)
     public func windowStyle<S: WindowStyle>(_ style: S) -> some Scene { _StyledScene(base: self, hidesTitleBar: style.hidesTitleBar) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scene/windowresizability(_:)
-    public func windowResizability(_ resizability: WindowResizability) -> some Scene { self }
+    public func windowResizability(_ resizability: WindowResizability) -> some Scene { _ResizabilityScene(base: self, resizability: resizability) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scene/commands(content:)
     public func commands<C: Commands>(@CommandsBuilder content: () -> C) -> some Scene { _CommandsScene(base: self, commands: content()) }
 }
@@ -148,11 +148,26 @@ extension WindowStyle where Self == DefaultWindowStyle { public static var autom
 extension WindowStyle where Self == HiddenTitleBarWindowStyle { public static var hiddenTitleBar: HiddenTitleBarWindowStyle { HiddenTitleBarWindowStyle() } }
 extension WindowStyle where Self == TitleBarWindowStyle { public static var titleBar: TitleBarWindowStyle { TitleBarWindowStyle() } }
 
+struct _ResizabilityScene<Base: Scene>: Scene, _PrimitiveScene {
+    typealias Body = Never
+    let base: Base
+    let resizability: WindowResizability
+    var body: Never { fatalError() }
+    @MainActor func _makeWindows(app: _AppRunner) {
+        let previous = app.pendingResizability
+        app.pendingResizability = resizability
+        app.run(scene: base)
+        app.pendingResizability = previous
+    }
+}
+
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/windowresizability
-public struct WindowResizability: Sendable {
-    public static let automatic = WindowResizability()
-    public static let contentSize = WindowResizability()
-    public static let contentMinSize = WindowResizability()
+public struct WindowResizability: Sendable, Equatable {
+    enum Kind { case automatic, contentSize, contentMinSize }
+    let kind: Kind
+    public static let automatic = WindowResizability(kind: .automatic)
+    public static let contentSize = WindowResizability(kind: .contentSize)
+    public static let contentMinSize = WindowResizability(kind: .contentMinSize)
 }
 
 // MARK: App
@@ -184,6 +199,7 @@ public final class _AppRunner {
     public private(set) var windows: [NSWindow] = []
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
+    var pendingResizability: WindowResizability = .automatic
     private var delegate: AnyObject?
     /// The Settings scene's content, opened from the app menu.
     var settingsContent: (() -> AnyView)?
@@ -265,8 +281,16 @@ public final class _AppRunner {
         size.height = max(size.height, ideal.height)
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         if pendingHidesTitleBar { style.insert(.fullSizeContentView) }
+        // `.contentSize`: the window is fixed at its content's size (no resize frame, no
+        // zoom); `.contentMinSize`: it cannot shrink below the content's ideal size.
+        if pendingResizability == .contentSize { style.remove(.resizable) }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: style, backing: .buffered, defer: false)
         window.title = title
+        switch pendingResizability.kind {
+        case .contentSize: window.minSize = size; window.maxSize = size
+        case .contentMinSize: window.minSize = ideal
+        case .automatic: break
+        }
         if pendingHidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.autoresizingMask = [.width, .height]

@@ -84,6 +84,38 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The window system minimising or restoring the window on its own (taskbar, Win+D,
+    /// the window manager) reaches the delegate through the platform callbacks, and a
+    /// backend that also reports the `miniaturize()` it was asked for does not double up.
+    func testSystemMinimiseAndRestoreReachTheDelegateOnce() {
+        MainActor.assumeIsolated {
+            final class Delegate: NSObject, NSWindowDelegate {
+                var minis = 0, deminis = 0
+                func windowDidMiniaturize(_ n: Notification) { minis += 1 }
+                func windowDidDeminiaturize(_ n: Notification) { deminis += 1 }
+            }
+            let w = window([.titled, .closable, .miniaturizable])
+            let delegate = Delegate()
+            w.delegate = delegate
+            w.makeKeyAndOrderFront(nil)
+            w.platformWindowDidMiniaturize()          // the taskbar minimised it
+            XCTAssertEqual(delegate.minis, 1)
+            w.platformWindowDidMiniaturize()          // a repeated WM_SIZE while iconic
+            XCTAssertEqual(delegate.minis, 1)
+            w.platformWindowDidDeminiaturize()        // the taskbar restored it
+            XCTAssertEqual(delegate.deminis, 1)
+            w.deminiaturize(nil)                      // nothing to restore
+            XCTAssertEqual(delegate.deminis, 1)
+            w.miniaturize(nil)                        // the API path
+            w.platformWindowDidMiniaturize()          // and the backend's synchronous report of it
+            XCTAssertEqual(delegate.minis, 2)
+            w.deminiaturize(nil)
+            w.platformWindowDidDeminiaturize()
+            XCTAssertEqual(delegate.deminis, 2)
+            w.close()
+        }
+    }
+
     func testClassFactoryHonoursTheStyleMask() {
         MainActor.assumeIsolated {
             XCTAssertTrue(NSWindow.standardWindowButton(.closeButton, for: [.titled, .closable])!.isEnabled)

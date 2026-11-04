@@ -211,6 +211,9 @@ final class Win32Window: PlatformWindow {
     /// The frame before the window was minimised: a minimised HWND sits at
     /// (-32000, -32000) with a tiny rect, while AppKit keeps a miniaturised window's frame.
     private var frameBeforeMinimize: NSRect?
+    /// Whether the last WM_SIZE was SIZE_MINIMIZED, so a restore (from the taskbar or
+    /// `deminiaturize()`) is reported once.
+    private var reportedIconic = false
 
     var frame: NSRect {
         get {
@@ -783,13 +786,18 @@ final class Win32Window: PlatformWindow {
         case WM_SIZE:
             // Minimised (SIZE_MINIMIZED): the client area is 0x0 and the HWND moves off
             // screen; AppKit keeps the frame and content of a miniaturised window, so the
-            // owner is not told (and the content view does not collapse to zero).
-            if wParam == 1 { return 0 }
+            // frame is not changed (and the content view does not collapse to zero); the
+            // owner hears the minimise, whether `miniaturize()` or the taskbar asked for it.
+            if wParam == 1 {
+                if !reportedIconic { reportedIconic = true; owner?.platformWindowDidMiniaturize() }
+                return 0
+            }
             if let rt = renderTarget {
                 cd2d_target_resize(rt, UInt32(lParam & 0xFFFF), UInt32((lParam >> 16) & 0xFFFF))
             }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            if reportedIconic { reportedIconic = false; owner?.platformWindowDidDeminiaturize() }
             return 0
         case WM_MOVE:
             if let hwnd, IsIconic(hwnd) { return 0 }

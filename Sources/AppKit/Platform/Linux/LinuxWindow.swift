@@ -197,6 +197,18 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         maximized.toggle()
     }
     var isMiniaturized: Bool { minimized }
+
+    /// ICCCM WM_STATE: the window manager keeps the window's state in this property
+    /// (1 normal, 3 iconic).
+    private func wmStateIsIconic() -> Bool {
+        let atom = backend.atom("WM_STATE")
+        var actualType: Atom = 0, format: Int32 = 0, count: UInt = 0, after: UInt = 0
+        var data: UnsafeMutablePointer<UInt8>? = nil
+        guard XGetWindowProperty(backend.display, xid, atom, 0, 2, 0, atom, &actualType, &format, &count, &after, &data) == 0, let data else { return false }
+        defer { XFree(data) }
+        guard format == 32, count >= 1 else { return false }
+        return data.withMemoryRebound(to: Int.self, capacity: 1) { $0.pointee == 3 }
+    }
     var isZoomed: Bool { maximized }
 
     // MARK: Accessibility (ADR-0013)
@@ -396,8 +408,12 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
             isVisible = true
             if wantsKey { XSetInputFocus(backend.display, xid, RevertToParent, Time(CurrentTime)) }
             dirty = NSRect(origin: .zero, size: _frame.size)
+            if minimized { minimized = false; owner?.platformWindowDidDeminiaturize() }
         case UnmapNotify:
             isVisible = false
+            // The window manager iconified the window (its WM_STATE says so), or
+            // `miniaturize()` did: either way the owner hears it once.
+            if minimized || wmStateIsIconic() { minimized = true; owner?.platformWindowDidMiniaturize() }
         case DestroyNotify:
             backend.unregister(self)
             if !destroying { destroying = true; owner?.platformWindowWillClose() }
