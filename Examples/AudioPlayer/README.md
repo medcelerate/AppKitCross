@@ -21,7 +21,7 @@ Run it:
 
 ```bash
 swift run AudioPlayer
-swift run AudioPlayer path/to/file.wav
+swift run AudioPlayer path/to/file.wav              # or --open path/to/file.wav
 swift run AudioPlayer --render out.wav [file.wav]   # offline render, then exit
 ```
 

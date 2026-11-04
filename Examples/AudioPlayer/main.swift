@@ -377,7 +377,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
             NSApp.terminate(nil)
             return
         }
-        if args.count > 1, !args[1].hasPrefix("-") { open(URL(fileURLWithPath: args[1])) }
+        // `AudioPlayer file.wav` or `AudioPlayer --open file.wav` loads a file at launch.
+        if let i = args.firstIndex(of: "--open"), i + 1 < args.count { open(URL(fileURLWithPath: args[i + 1])) }
+        else if args.count > 1, !args[1].hasPrefix("-") { open(URL(fileURLWithPath: args[1])) }
         status.stringValue = model.startEngine()
         print("audio: \(status.stringValue)")
         fflush(nil)
@@ -388,6 +390,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Stops the device stream before the process exits (the render thread is joined).
+    func applicationWillTerminate(_ notification: Notification) {
+        timer?.invalidate()
+        model.engine.stop()
+    }
 }
 
 let delegate = AppDelegate()
