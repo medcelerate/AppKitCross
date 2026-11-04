@@ -1408,7 +1408,14 @@ import CoreText
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
             // Gestures go to the view under the pointer, or to the one tracking a press.
-            _dispatchMouse(event, to: _mouseDownView ?? _hitTest(event.locationInWindow) ?? self)
+            let target = _mouseDownView ?? _hitTest(event.locationInWindow) ?? self
+            if NSView._traceInvalidation {
+                var chain: [String] = []
+                var v = target as? NSView
+                while let view = v { if !view.gestureRecognizers.isEmpty { chain.append("\(type(of: view))×\(view.gestureRecognizers.count)") }; v = view.superview }
+                NSView._trace("gesture \(event.type) '\(_title)' at \(event.locationInWindow) -> \(type(of: target)) magnification \(event.magnification) recognizers [\(chain.joined(separator: ", "))]")
+            }
+            _dispatchMouse(event, to: target)
         case .keyDown:
             // An editing text field commits on Return before the default button sees it.
             if let editor = firstResponder as? NSTextView, editor._consumesReturnKey, event.charactersIgnoringModifiers == "\r",

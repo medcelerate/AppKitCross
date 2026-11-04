@@ -169,3 +169,55 @@ final class SwiftUIGestureCardTests: XCTestCase, @unchecked Sendable {
     }
     @MainActor private func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
 }
+
+final class SwiftUIGestureScaledCardTests: XCTestCase, @unchecked Sendable {
+    /// The demo card scales with a magnification gesture while it is already under
+    /// scale/rotation/offset effects driven by the same state.
+    func testMagnifyingACardUnderEffects() {
+        MainActor.assumeIsolated {
+            final class Model { var scale: CGFloat = 1; var scaleStart: CGFloat = 1; var angle = Angle.zero; var offset = CGSize.zero }
+            let m = Model()
+            struct Card: View {
+                let m: Model
+                @State private var tick = 0
+                var body: some View {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.15))
+                        RoundedRectangle(cornerRadius: 10).fill(Color.blue)
+                            .frame(width: 120, height: 80)
+                            .overlay(Text("x").foregroundColor(.white))
+                            .scaleEffect(m.scale)
+                            .rotationEffect(m.angle)
+                            .offset(m.offset)
+                            .gesture(DragGesture().onChanged { v in m.offset = v.translation; tick += 1 })
+                            .simultaneousGesture(MagnificationGesture().onChanged { m.scale = min(3, max(0.3, m.scaleStart * $0)); tick += 1 }.onEnded { _ in m.scaleStart = m.scale })
+                            .simultaneousGesture(RotationGesture().onChanged { m.angle = $0 })
+                    }
+                    .frame(width: 300, height: 200)
+                }
+            }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            let h = NSHostingView(rootView: Card(m: m))
+            h.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            @MainActor func g(_ type: NSEvent.EventType, magnification: CGFloat = 0, phase: NSEvent.Phase = []) {
+                w.sendEvent(NSEvent._gestureEvent(type: type, location: NSPoint(x: 150, y: 100), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, magnification: magnification, phase: phase))
+                h.layoutSubtreeIfNeeded()
+            }
+            g(.beginGesture)
+            g(.magnify, magnification: 0.1, phase: .changed)
+            XCTAssertEqual(m.scale, 1.1, accuracy: 1e-6)
+            g(.magnify, magnification: 0.1, phase: .changed)
+            XCTAssertEqual(m.scale, 1.2, accuracy: 1e-6)
+            g(.endGesture)
+            XCTAssertEqual(m.scaleStart, 1.2, accuracy: 1e-6)
+            g(.beginGesture)
+            g(.magnify, magnification: -0.1, phase: .changed)
+            XCTAssertEqual(m.scale, 1.2 * 0.9, accuracy: 1e-6)
+            g(.endGesture)
+            w.close()
+        }
+    }
+}
