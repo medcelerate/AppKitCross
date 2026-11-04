@@ -157,6 +157,47 @@ final class UIAutomationTests: XCTestCase, @unchecked Sendable {
         XCTAssertFalse(cuia_debug_toggle(root, 3), "gone")
         XCTAssertEqual(cuia_root_debug_child_count(root, 1), 1)
     }
+    /// Snapshots replace each other while providers for every node stay in use: the
+    /// vanished ones answer "not available", the survivors keep their identity, and
+    /// nothing is freed twice (the Windows job runs this under the debug CRT).
+    func testSnapshotsReplaceEachOtherUnderLiveProviders() {
+        let log = Log()
+        var callbacks = CUIACallbacks()
+        callbacks.context = Unmanaged.passUnretained(log).toOpaque()
+        callbacks.refresh = { ctx in Unmanaged<Log>.fromOpaque(ctx!).takeUnretainedValue().refreshes += 1 }
+        let root = cuia_root_create(nil, &callbacks)!
+        defer { cuia_root_destroy(root) }
+        let names = (0..<80).map { Self.utf16("Element \($0)") }
+        func push(_ count: Int32, offset: Int32 = 0) {
+            var nodes: [CUIANode] = []
+            var w = CUIANode(); w.id = 1; w.parent = -1; w.controlType = 50032; w.flags = UInt32(CUIA_ENABLED)
+            nodes.append(w)
+            for i in 0..<count {
+                var n = CUIANode(); n.id = 2 + offset + i; n.parent = i % 8 == 0 ? 1 : 2 + offset + (i / 8) * 8
+                n.controlType = i % 3 == 0 ? 50000 : 50020
+                n.flags = UInt32(CUIA_ENABLED | CUIA_HAS_INVOKE | CUIA_HAS_TEXT | CUIA_IS_CONTENT)
+                nodes.append(n)
+            }
+            names.withUnsafeBufferPointer { _ in
+                for i in 1..<nodes.count { nodes[i].name = UnsafePointer(names[(i - 1) % names.count].withUnsafeBufferPointer { $0.baseAddress! }) }
+                nodes.withUnsafeBufferPointer { cuia_root_set_nodes(root, $0.baseAddress, Int32($0.count)) }
+            }
+        }
+        for round in 0..<6 {
+            push(64, offset: Int32(round % 2) * 40)      // alternating, overlapping id ranges
+            for id in Int32(2)...Int32(2 + 64 + 40) {
+                _ = property(root, id, 30005)
+                _ = cuia_root_debug_child_count(root, id)
+                _ = cuia_root_debug_has_pattern(root, id, 10014)
+            }
+            XCTAssertEqual(cuia_root_debug_child_count(root, 1), 8)
+            cuia_root_invalidate(root)
+            _ = property(root, 1, 30005)
+        }
+        XCTAssertEqual(log.refreshes, 6)
+        XCTAssertNotNil(property(root, 2, 30005))
+        XCTAssertNil(property(root, 2 + 64 + 40, 30005), "the last id of the other range is gone")
+    }
     #else
     func testSkippedWithoutUIAutomation() throws {
         throw XCTSkip("UI Automation exists on Windows only")

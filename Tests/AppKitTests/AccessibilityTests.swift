@@ -402,6 +402,36 @@ final class AccessibilityTests: XCTestCase, @unchecked Sendable {
         func tableViewSelectionDidChange(_ notification: Notification) { selectionChanges += 1 }
     }
 
+    // MARK: Keyboard focus
+
+    func testTabMovesFocusBetweenControls() {
+        MainActor.assumeIsolated {
+            let f = Fixture()
+            let host = hostWindow(f.window)!
+            XCTAssertTrue(f.window.firstResponder === f.window, "a plain view refuses first responder, so the window has it")
+            @MainActor func press(_ key: String, shift: Bool = false) {
+                let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.shift] : [], timestamp: 0, windowNumber: f.window.windowNumber, context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: 48)!
+                NSApp.sendEvent(e)
+            }
+            host.clearAccessibilityChanges()
+            press("\t")
+            let first = f.window.firstResponder
+            XCTAssertFalse(first === f.window, "Tab left the window")
+            XCTAssertTrue(first is NSView && (first as? NSView)?.isAccessibilityElement() == true || first is NSTextView, "Tab lands on a control: \(String(describing: first))")
+            XCTAssertEqual(host.accessibilityChanges.last, .focus(f.window.accessibilityFocusedElementID), "the platform hears the focus move")
+            var stops: [NSView] = []
+            for _ in 0..<6 {
+                press("\t")
+                if let v = (f.window.firstResponder as? NSView)?._accessibilityFocusTarget { stops.append(v) }
+            }
+            XCTAssertTrue(stops.contains { $0 === f.clear } && stops.contains { $0 === f.grid } && stops.contains { $0 === f.field } && stops.contains { $0 === f.slider }, "Tab visits the button, check box, field and slider: \(stops.map { type(of: $0) })")
+            let before = f.window.firstResponder
+            press("\t", shift: true)
+            XCTAssertFalse(f.window.firstResponder === before, "Shift-Tab moves back")
+            f.window.close()
+        }
+    }
+
     // MARK: Tabs and segments (elements that are not views)
 
     func testTabsAndSegmentsAreVirtualElements() {

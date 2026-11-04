@@ -54,6 +54,7 @@ struct CUIARoot {
     int32_t rootId = -1;
     bool stale = true;
     bool refreshing = false;
+    bool settingNodes = false;
     bool destroyed = false;
 
     void ensureFresh();
@@ -82,7 +83,7 @@ public:
     int32_t id() const { return id_; }
     void detach() { root_ = nullptr; }
     bool isRoot() const { return root_ && root_->rootId == id_; }
-    Node *node() { return root_ ? root_->node(id_) : nullptr; }
+    Node *node() { return root_ && !root_->destroyed ? root_->node(id_) : nullptr; }
 
     // IUnknown
     STDMETHODIMP QueryInterface(REFIID riid, void **out) override {
@@ -750,6 +751,14 @@ CUIARoot *cuia_root_create(void *hwnd, const CUIACallbacks *callbacks) {
 
 void cuia_root_set_nodes(CUIARoot *root, const CUIANode *nodes, int32_t count) {
     if (!root || root->destroyed) return;
+    if (root->settingNodes) {
+        // Re-entered from a provider callback (UiaDisconnectProvider asks the provider for
+        // its runtime id, which may refresh): the outer call finishes with its snapshot
+        // and the next request refreshes again.
+        root->stale = true;
+        return;
+    }
+    root->settingNodes = true;
     std::map<int32_t, Node> fresh;
     int32_t newRoot = -1;
     for (int32_t i = 0; i < count; i++) {
@@ -783,13 +792,13 @@ void cuia_root_set_nodes(CUIARoot *root, const CUIANode *nodes, int32_t count) {
         auto &c = kv.second.children;
         std::sort(c.begin(), c.end(), [&](int32_t a, int32_t b) { return position[a] < position[b]; });
     }
-    // Providers of nodes that vanished are disconnected and dropped.
+    // Providers of nodes that vanished are taken out of the table first; they are
+    // disconnected and released only once the tables are consistent, since
+    // UiaDisconnectProvider calls back into the provider (and anything it reaches).
+    std::vector<Provider *> vanished;
     for (auto it = root->providers.begin(); it != root->providers.end();) {
         if (fresh.find(it->first) == fresh.end()) {
-            Provider *p = it->second;
-            if (root->hwnd) UiaDisconnectProvider(static_cast<IRawElementProviderSimple *>(p));
-            p->detach();
-            p->Release();
+            vanished.push_back(it->second);
             it = root->providers.erase(it);
         } else {
             ++it;
@@ -798,6 +807,12 @@ void cuia_root_set_nodes(CUIARoot *root, const CUIANode *nodes, int32_t count) {
     root->nodes.swap(fresh);
     root->rootId = newRoot;
     root->stale = false;
+    for (Provider *p : vanished) {
+        if (root->hwnd) UiaDisconnectProvider(static_cast<IRawElementProviderSimple *>(p));
+        p->detach();
+        p->Release();
+    }
+    root->settingNodes = false;
 }
 
 void cuia_root_invalidate(CUIARoot *root) { if (root) root->stale = true; }
@@ -864,12 +879,13 @@ void cuia_root_raise_structure_changed(CUIARoot *root, int32_t id) {
 void cuia_root_destroy(CUIARoot *root) {
     if (!root) return;
     root->destroyed = true;
-    for (auto &kv : root->providers) {
+    std::map<int32_t, Provider *> providers;
+    providers.swap(root->providers);
+    for (auto &kv : providers) {
         if (root->hwnd) UiaDisconnectProvider(static_cast<IRawElementProviderSimple *>(kv.second));
         kv.second->detach();
         kv.second->Release();
     }
-    root->providers.clear();
     if (root->hwnd) UiaReturnRawElementProvider(root->hwnd, 0, 0, nullptr);
     delete root;
 }

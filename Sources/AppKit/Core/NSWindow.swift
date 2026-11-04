@@ -1301,6 +1301,16 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectnextkeyview(_:)
     @MainActor open func selectNextKeyView(_ sender: Any?) { _selectKeyView(forward: true, from: nil) }
 
+    /// A key the responder chain did not use: Tab and Shift-Tab move the key view, as
+    /// AppKit's window does when a plain view is the first responder.
+    @MainActor open override func keyDown(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == "\t" || event.charactersIgnoringModifiers == "\u{19}" {
+            if event.modifierFlags.contains(.shift) || event.charactersIgnoringModifiers == "\u{19}" { selectPreviousKeyView(self) } else { selectNextKeyView(self) }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     /// Moves focus through the views that accept first responder, in hierarchy order
     /// (`nextKeyView` chains are not wired yet).
     private func _selectKeyView(forward: Bool, from start: NSView?) {
