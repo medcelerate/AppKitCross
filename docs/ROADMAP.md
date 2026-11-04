@@ -314,7 +314,13 @@ Windows (WARP on CI, the GPU on the test PC): `MetalD3D12DeviceTests` (every MSL
 of `MSLTranslatorTests` plus HelloWindow's HLSL and MSL compiled per stage, triangles from
 HLSL and MSL, blit regions and order, the composition swap chain presenting, keeping and
 resizing its buffers) and `MetalD3D12ParityTests` (the Vulkan parity scene and a
-presented `MTKView` frame against the reference device).
+presented `MTKView` frame against the reference device). Verified on the test PC (RTX
+2070 SUPER, DISPLAY1 150%, DISPLAY2 100%) at 405241c: the Windows suite 242 tests, 0
+failures; HelloWindow's Metal tab presents through the swap chain on both monitors
+(657x411 pixels at 150%, 438x274 at 100%, the device name in `--metal-log`), crisp
+edges; a real corner drag at 150% printed four new sizes during the drag with the
+triangle drawing throughout and no black flashes; `SetWindowPos` resizes at 100% and
+the DPI re-size on a cross-monitor move each rendered crisp at the new size.
 
 ## M8: Linux backend
 
