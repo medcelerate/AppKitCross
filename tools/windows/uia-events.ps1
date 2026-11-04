@@ -1,74 +1,94 @@
 # Listens to UI Automation events from an AppKitWin window and prints them (ADR-0013).
 #
 #   powershell -ExecutionPolicy Bypass -File tools\windows\uia-events.ps1 -Title "Hello, AppKit on Windows" -Seconds 30
+#   powershell -ExecutionPolicy Bypass -File tools\windows\uia-events.ps1 -SelfTest
 #
-# Subscribes to focus changes, Value.Value and Name property changes, Text changes and
-# structure changes on the window's subtree, then pumps a WinForms message loop for
-# `-Seconds` so handlers (which arrive on UIA's own threads) are collected and printed
-# in order. Use it while pressing Tab through the window or typing into a field.
+# The handlers are C# (compiled here with Add-Type): UI Automation delivers events on
+# its own threads, where a PowerShell script block has no runspace and fails silently,
+# so the collection happens in C# and PowerShell only prints the list at the end.
+# -Scope Desktop registers the property, event and structure handlers on the desktop
+# root instead of the window's subtree. -SelfTest opens Notepad, focuses it and checks
+# that a focus-changed event arrives, as a known-good baseline for the machine.
 param(
     [string]$Title = "Hello, AppKit on Windows",
     [int]$Seconds = 30,
-    # "Window" scopes the handlers to the window's subtree; "Desktop" registers them on
-    # the desktop root (every application), which tells scoping problems apart.
-    [string]$Scope = "Window"
+    [string]$Scope = "Window",
+    [switch]$SelfTest
 )
-Add-Type -AssemblyName UIAutomationClient
-Add-Type -AssemblyName UIAutomationTypes
-Add-Type -AssemblyName System.Windows.Forms
+$source = @"
+using System;
+using System.Collections.Generic;
+using System.Windows.Automation;
 
-$events = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
-function Describe($element) {
-    try {
-        $name = $element.Current.Name
-        $type = $element.Current.ControlType.ProgrammaticName -replace '^ControlType\.', ''
-        return "$type '$name'"
-    } catch { return "<gone>" }
+public static class UiaEventLog {
+    public static readonly List<string> Lines = new List<string>();
+    static readonly object Gate = new object();
+    static AutomationFocusChangedEventHandler focus;
+    static AutomationPropertyChangedEventHandler property;
+    static AutomationEventHandler plain;
+    static StructureChangedEventHandler structure;
+
+    static string Describe(object sender) {
+        try {
+            var e = sender as AutomationElement;
+            if (e == null) return "<not an element>";
+            var type = e.Current.ControlType.ProgrammaticName.Replace("ControlType.", "");
+            return type + " '" + e.Current.Name + "' [" + e.Current.FrameworkId + "]";
+        } catch (Exception ex) { return "<gone: " + ex.GetType().Name + ">"; }
+    }
+    static void Add(string line) {
+        lock (Gate) { Lines.Add(DateTime.Now.ToString("HH:mm:ss.fff") + " " + line); }
+    }
+    public static AutomationElement FindWindow(string title) {
+        var condition = new PropertyCondition(AutomationElement.NameProperty, title);
+        return AutomationElement.RootElement.FindFirst(TreeScope.Children, condition);
+    }
+    public static void Start(AutomationElement scope) {
+        focus = (sender, e) => Add("focus -> " + Describe(sender));
+        Automation.AddAutomationFocusChangedEventHandler(focus);
+        property = (sender, e) => Add("property " + e.Property.ProgrammaticName + " = '" + e.NewValue + "' on " + Describe(sender));
+        Automation.AddAutomationPropertyChangedEventHandler(scope, TreeScope.Subtree, property,
+            ValuePattern.ValueProperty, AutomationElement.NameProperty, TogglePattern.ToggleStateProperty,
+            RangeValuePattern.ValueProperty, SelectionItemPattern.IsSelectedProperty);
+        plain = (sender, e) => Add("event " + e.EventId.ProgrammaticName + " on " + Describe(sender));
+        foreach (var id in new[] { TextPattern.TextChangedEvent, SelectionItemPattern.ElementSelectedEvent, InvokePattern.InvokedEvent }) {
+            Automation.AddAutomationEventHandler(id, scope, TreeScope.Subtree, plain);
+        }
+        structure = (sender, e) => Add("structure " + e.StructureChangeType + " on " + Describe(sender));
+        Automation.AddStructureChangedEventHandler(scope, TreeScope.Subtree, structure);
+    }
+    public static void Stop() { Automation.RemoveAllEventHandlers(); }
+    public static string[] Snapshot() { lock (Gate) { return Lines.ToArray(); } }
+}
+"@
+Add-Type -TypeDefinition $source -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase
+
+if ($SelfTest) {
+    Write-Host "self-test: listening on the desktop, then focusing Notepad"
+    [UiaEventLog]::Start([System.Windows.Automation.AutomationElement]::RootElement)
+    $notepad = Start-Process notepad -PassThru
+    Start-Sleep -Seconds 2
+    Add-Type -AssemblyName Microsoft.VisualBasic
+    [Microsoft.VisualBasic.Interaction]::AppActivate($notepad.Id)
+    Start-Sleep -Seconds 2
+    [UiaEventLog]::Stop()
+    $lines = [UiaEventLog]::Snapshot()
+    Stop-Process -Id $notepad.Id -ErrorAction SilentlyContinue
+    Write-Host "$($lines.Count) event(s):"
+    $lines | ForEach-Object { Write-Host "  $_" }
+    if ($lines -match "focus") { Write-Host "self-test: PASS (focus events arrive on this machine)" } else { Write-Host "self-test: FAIL (no focus event even for Notepad)" }
+    exit 0
 }
 
-$root = [System.Windows.Automation.AutomationElement]::RootElement
-$condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Title)
-$window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+$window = [UiaEventLog]::FindWindow($Title)
 if (-not $window) { Write-Error "no top-level window named '$Title'"; exit 2 }
-Write-Host "window: $(Describe $window) FrameworkId=$($window.Current.FrameworkId)"
-$scopeElement = if ($Scope -eq "Desktop") { $root } else { $window }
+Write-Host "window: $($window.Current.ControlType.ProgrammaticName) '$($window.Current.Name)' FrameworkId=$($window.Current.FrameworkId)"
+$scopeElement = if ($Scope -eq "Desktop") { [System.Windows.Automation.AutomationElement]::RootElement } else { $window }
 Write-Host "handlers scoped to: $Scope"
-
-$focusHandler = [System.Windows.Automation.AutomationFocusChangedEventHandler] {
-    param($sender, $e)
-    [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) focus -> $(Describe $sender)")
-}
-[System.Windows.Automation.Automation]::AddAutomationFocusChangedEventHandler($focusHandler)
-
-$propertyHandler = [System.Windows.Automation.AutomationPropertyChangedEventHandler] {
-    param($sender, $e)
-    [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) property $($e.Property.ProgrammaticName) = '$($e.NewValue)' on $(Describe $sender)")
-}
-[System.Windows.Automation.Automation]::AddAutomationPropertyChangedEventHandler($scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $propertyHandler,
-    @([System.Windows.Automation.ValuePattern]::ValueProperty, [System.Windows.Automation.AutomationElement]::NameProperty,
-      [System.Windows.Automation.TogglePattern]::ToggleStateProperty, [System.Windows.Automation.RangeValuePattern]::ValueProperty,
-      [System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty))
-
-$eventHandler = [System.Windows.Automation.AutomationEventHandler] {
-    param($sender, $e)
-    [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) event $($e.EventId.ProgrammaticName) on $(Describe $sender)")
-}
-foreach ($id in @([System.Windows.Automation.TextPattern]::TextChangedEvent, [System.Windows.Automation.SelectionItemPattern]::ElementSelectedEvent,
-                  [System.Windows.Automation.InvokePattern]::InvokedEvent)) {
-    [System.Windows.Automation.Automation]::AddAutomationEventHandler($id, $scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $eventHandler)
-}
-$structureHandler = [System.Windows.Automation.StructureChangedEventHandler] {
-    param($sender, $e)
-    [void]$events.Add("$(Get-Date -Format HH:mm:ss.fff) structure $($e.StructureChangeType) on $(Describe $sender)")
-}
-[System.Windows.Automation.Automation]::AddStructureChangedEventHandler($scopeElement, [System.Windows.Automation.TreeScope]::Subtree, $structureHandler)
-
+[UiaEventLog]::Start($scopeElement)
 Write-Host "listening for $Seconds s: press Tab through the window, toggle the check box, type into the edit..."
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = $Seconds * 1000
-$timer.Add_Tick({ [System.Windows.Forms.Application]::Exit() })
-$timer.Start()
-[System.Windows.Forms.Application]::Run()
-[System.Windows.Automation.Automation]::RemoveAllEventHandlers()
-Write-Host "$($events.Count) event(s):"
-$events | ForEach-Object { Write-Host "  $_" }
+Start-Sleep -Seconds $Seconds
+[UiaEventLog]::Stop()
+$lines = [UiaEventLog]::Snapshot()
+Write-Host "$($lines.Count) event(s):"
+$lines | ForEach-Object { Write-Host "  $_" }
