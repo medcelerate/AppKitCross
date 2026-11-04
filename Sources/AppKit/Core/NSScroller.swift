@@ -147,6 +147,9 @@ import CoreText
     @MainActor open var hitPart: NSScroller.Part { _hitPart }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/iscompatiblewithoverlayscrollers
     @MainActor class public var isCompatibleWithOverlayScrollers: Bool { unimplemented() }
+    /// Scrollers are not in the key loop (macOS puts them there only with Full Keyboard Access).
+    @MainActor open override var acceptsFirstResponder: Bool { false }
+
     // MARK: Accessibility (ADR-0013)
     // AXScrollBar: the knob position (0...1) is the value.
     @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .scrollBar }

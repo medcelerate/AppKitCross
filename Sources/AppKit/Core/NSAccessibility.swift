@@ -257,8 +257,10 @@ extension NSView {
     @MainActor internal func _accessibilityNameChanged() { if window != nil { _accessibilityNotify(.name(_accessibilityElementID)) } }
     @MainActor internal func _accessibilityStructureChanged() {
         // The parent element's children changed; an ignored view's parent is the
-        // nearest element above it.
+        // nearest element above it. A field editor coming and going is not a change:
+        // the text field stands for it.
         guard let w = window else { return }
+        if let t = self as? NSText, t.isFieldEditor { return }
         var v: NSView? = superview
         while let cur = v, !cur.isAccessibilityElement() { v = cur.superview }
         _accessibilityNotify(.structure(v?._accessibilityElementID ?? w._accessibilityElementID))

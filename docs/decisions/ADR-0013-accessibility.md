@@ -78,8 +78,10 @@ nothing reached the platform: screen readers saw empty windows.
 
 ## Consequences
 
-- Narrator reads HelloWindow's controls on Windows and the UI Automation tree shows them
-  with the right control types; `tools/linux/run.sh` runs an accessibility bus under
+- On Windows the UI Automation tree shows HelloWindow's controls with the right control
+  types and rectangles, every pattern acts on the window, and clients receive the focus,
+  toggle, value and text events (`tools/windows/uia-events.ps1`); Narrator itself was not
+  run by the remote session; `tools/linux/run.sh` runs an accessibility bus under
   Xvfb and `tools/linux/atspi-probe.py` walks HelloWindow's AT-SPI tree, presses the
   check box, sets the slider and the text field through D-Bus.
 - Tests: `AccessibilityTests` (host backend) cover the tree, overrides, focus, actions,

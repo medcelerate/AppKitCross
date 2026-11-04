@@ -68,15 +68,18 @@ if ($SelfTest) {
     [UiaEventLog]::Start([System.Windows.Automation.AutomationElement]::RootElement)
     $notepad = Start-Process notepad -PassThru
     Start-Sleep -Seconds 2
+    # Windows 11's Notepad launcher exits and the window belongs to another process:
+    # activate by title, not by the started PID.
     Add-Type -AssemblyName Microsoft.VisualBasic
-    [Microsoft.VisualBasic.Interaction]::AppActivate($notepad.Id)
+    try { [Microsoft.VisualBasic.Interaction]::AppActivate("Notepad") } catch { Write-Host "self-test: AppActivate failed ($($_.Exception.Message)); relying on the launch focus" }
     Start-Sleep -Seconds 2
     [UiaEventLog]::Stop()
     $lines = [UiaEventLog]::Snapshot()
-    Stop-Process -Id $notepad.Id -ErrorAction SilentlyContinue
+    Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
     Write-Host "$($lines.Count) event(s):"
     $lines | ForEach-Object { Write-Host "  $_" }
     if ($lines -match "focus") { Write-Host "self-test: PASS (focus events arrive on this machine)" } else { Write-Host "self-test: FAIL (no focus event even for Notepad)" }
+    # (Windows 11 Notepad reports its editor as Document 'Text editor', not the window title.)
     exit 0
 }
 
