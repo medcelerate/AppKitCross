@@ -1032,20 +1032,65 @@ import CoreText
     }
     // Requirement of NSTextLayoutOrientationProvider
     open var layoutOrientation: NSLayoutManager.TextLayoutOrientation { unimplemented() }
+    // MARK: Accessibility (ADR-0013)
+    //
+    // A text view is AXTextArea with its string as value and its selection; a field
+    // editor is not an element of its own (the text field it edits stands for it).
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? !isFieldEditor }
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .textArea }
+    open override func isAccessibilityEnabled() -> Bool { _a11y.isEnabled ?? (isEditable || isSelectable) }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : string }
+    override func _accessibilityValueIsSettable() -> Bool { isEditable }
+    override func _accessibilityIsMultiline() -> Bool { !isFieldEditor }
+    override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEditable else { return false }
+        string = value.stringValue
+        didChangeText()
+        return true
+    }
+    open override func accessibilitySelectedTextRange() -> NSRange { selectedRange }
+    open func setAccessibilitySelectedTextRange(_ accessibilitySelectedTextRange: NSRange) { setSelectedRange(accessibilitySelectedTextRange) }
+    open func accessibilitySelectedText() -> String? { (string as NSString)._accessibilitySubstring(selectedRange) }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityString(for range: NSRange) -> String? { unimplemented() }
+    open func accessibilityString(for range: NSRange) -> String? { (string as NSString)._accessibilitySubstring(range) }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityLine(for index: Int) -> Int { unimplemented() }
+    open func accessibilityLine(for index: Int) -> Int {
+        let s = string as NSString
+        guard index <= s.length else { return -1 }
+        var line = 0
+        var i = 0
+        while i < min(index, s.length) { if s.character(at: i) == 0x0A { line += 1 }; i += 1 }
+        return line
+    }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityRange(forLine lineNumber: Int) -> NSRange { unimplemented() }
+    open func accessibilityRange(forLine lineNumber: Int) -> NSRange {
+        let s = string as NSString
+        var line = 0
+        var start = 0
+        var i = 0
+        while i < s.length {
+            if s.character(at: i) == 0x0A {
+                if line == lineNumber { return NSRange(location: start, length: i + 1 - start) }
+                line += 1
+                start = i + 1
+            }
+            i += 1
+        }
+        return line == lineNumber ? NSRange(location: start, length: s.length - start) : NSRange(location: NSNotFound, length: 0)
+    }
     // Requirement of NSAccessibilityNavigableStaticText
-    open func accessibilityFrame(for range: NSRange) -> NSRect { unimplemented() }
+    open func accessibilityFrame(for range: NSRange) -> NSRect { accessibilityFrame() }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityValue() -> String? { unimplemented() }
+    open func accessibilityValue() -> String? { string }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? { unimplemented() }
+    open func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+        guard let storage = textStorage, range.location != NSNotFound, NSMaxRange(range) <= storage.length else { return nil }
+        return storage.attributedSubstring(from: range)
+    }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityVisibleCharacterRange() -> NSRange { unimplemented() }
+    open func accessibilityVisibleCharacterRange() -> NSRange { NSRange(location: 0, length: (string as NSString).length) }
+    open func accessibilityNumberOfCharacters() -> Int { (string as NSString).length }
+    open func accessibilityInsertionPointLineNumber() -> Int { accessibilityLine(for: selectedRange.location) }
     // Requirement of NSTextContent
     open var contentType: NSTextContentType? {
         get { unimplemented() }

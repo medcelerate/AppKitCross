@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 75 |
-| Types generated | 463 |
+| Types handwritten | 76 |
+| Types generated | 462 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10213 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1467 |
+| Members unimplemented-calls | 1128 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -33,7 +33,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | NSATSTypesetter | class | generated | 15 | 2 | 0 |  |
-| NSAccessibility | struct | generated | 339 | 0 | 13 |  |
+| NSAccessibility | struct | handwritten | 339 | 0 | 13 | 10 |
 | NSAccessibilityAnnotationPosition | enum | generated | 3 | 0 | 0 |  |
 | NSAccessibilityButton | protocol | generated | 2 | 0 | 0 |  |
 | NSAccessibilityCheckBox | protocol | generated | 1 | 0 | 0 |  |
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 48 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 42 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -99,7 +99,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBrowser | class | generated | 95 | 1 | 3 |  |
 | NSBrowserCell | class | generated | 12 | 0 | 0 |  |
 | NSBrowserDelegate | protocol | generated | 34 | 0 | 0 |  |
-| NSButton | class | handwritten | 77 | 0 | 3 | 17 |
+| NSButton | class | handwritten | 77 | 0 | 3 | 15 |
 | NSButtonCell | class | handwritten | 32 | 1 | 0 | 9 |
 | NSButtonTouchBarItem | class | generated | 9 | 1 | 0 |  |
 | NSCIImageRep | class | generated | 0 | 2 | 0 |  |
@@ -263,7 +263,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSImageInterpolation | enum | generated | 5 | 0 | 0 |  |
 | NSImageRep | class | handwritten | 40 | 0 | 1 | 20 |
 | NSImageScaling | enum | generated | 7 | 0 | 0 |  |
-| NSImageView | class | handwritten | 18 | 8 | 1 | 3 |
+| NSImageView | class | handwritten | 18 | 8 | 1 | 2 |
 | NSInputServerMouseTracker | protocol | generated | 0 | 0 | 0 |  |
 | NSInputServiceProvider | protocol | generated | 0 | 0 | 0 |  |
 | NSItemBadge | struct | generated | 5 | 0 | 0 |  |
@@ -379,8 +379,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSearchToolbarItem | class | generated | 5 | 0 | 0 |  |
 | NSSecureTextField | class | generated | 0 | 0 | 0 |  |
 | NSSecureTextFieldCell | class | generated | 1 | 0 | 0 |  |
-| NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 32 |
-| NSSegmentedControl | class | handwritten | 54 | 0 | 3 | 47 |
+| NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 1 |
+| NSSegmentedControl | class | handwritten | 54 | 0 | 3 | 2 |
 | NSSeguePerforming | protocol | generated | 3 | 0 | 0 |  |
 | NSSelectionAffinity | enum | generated | 2 | 0 | 0 |  |
 | NSSelectionGranularity | enum | generated | 3 | 0 | 0 |  |
@@ -396,7 +396,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSharingServicePickerToolbarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSSharingServicePickerTouchBarItem | class | generated | 4 | 0 | 0 |  |
 | NSSharingServicePickerTouchBarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSlider | class | handwritten | 25 | 0 | 2 | 6 |
+| NSSlider | class | handwritten | 25 | 0 | 2 | 2 |
 | NSSliderAccessory | class | generated | 5 | 0 | 1 |  |
 | NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |
 | NSSliderCell | class | handwritten | 21 | 0 | 0 | 3 |
@@ -436,12 +436,12 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTabViewController | class | handwritten | 22 | 0 | 1 | 3 |
 | NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |
 | NSTabViewItem | class | handwritten | 17 | 0 | 1 | 2 |
-| NSTableCellView | class | handwritten | 6 | 0 | 0 | 12 |
-| NSTableColumn | class | handwritten | 19 | 0 | 1 | 32 |
-| NSTableHeaderCell | class | handwritten | 2 | 0 | 0 | 3 |
-| NSTableHeaderView | class | handwritten | 6 | 0 | 0 | 9 |
-| NSTableRowView | class | handwritten | 18 | 0 | 0 | 32 |
-| NSTableView | class | handwritten | 154 | 0 | 10 | 157 |
+| NSTableCellView | class | handwritten | 6 | 0 | 0 | 2 |
+| NSTableColumn | class | handwritten | 19 | 0 | 1 | 3 |
+| NSTableHeaderCell | class | handwritten | 2 | 0 | 0 | 1 |
+| NSTableHeaderView | class | handwritten | 6 | 0 | 0 | 2 |
+| NSTableRowView | class | handwritten | 18 | 0 | 0 | 2 |
+| NSTableView | class | handwritten | 154 | 0 | 10 | 4 |
 | NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |
 | NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |
 | NSTableViewDiffableDataSource | class | generated | 14 | 0 | 3 |  |
@@ -473,7 +473,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSTextElement | class | generated | 6 | 0 | 0 |  |
 | NSTextElementProvider | protocol | generated | 7 | 0 | 0 |  |
-| NSTextField | class | handwritten | 37 | 1 | 1 | 19 |
+| NSTextField | class | handwritten | 37 | 1 | 1 | 12 |
 | NSTextFieldCell | class | handwritten | 11 | 0 | 0 | 2 |
 | NSTextFieldDelegate | protocol | generated | 3 | 0 | 0 |  |
 | NSTextFinder | class | generated | 30 | 0 | 2 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | generated | 8 | 0 | 1 |  |
 | NSTextTable | class | generated | 9 | 0 | 1 |  |
 | NSTextTableBlock | class | generated | 6 | 0 | 0 |  |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 169 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 162 |
 | NSTextViewDelegate | protocol | generated | 27 | 3 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 143 |
+| NSView | class | handwritten | 361 | 3 | 19 | 139 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 167 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 156 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

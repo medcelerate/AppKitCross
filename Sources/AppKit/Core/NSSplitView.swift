@@ -36,6 +36,13 @@ import CoreText
 
     open override var isFlipped: Bool { true }
 
+    // MARK: Accessibility (ADR-0013)
+    // AXSplitGroup whose children are the panes.
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .splitGroup }
+    open func accessibilityOrientation() -> NSAccessibilityOrientation { isVertical ? .vertical : .horizontal }
+    override func _accessibilityIsFocusable() -> Bool { false }
+
     /// Lays the arranged views out along the axis using the current thicknesses, giving
     /// any difference to the view with the lowest holding priority.
     private func _layoutArranged(oldLength: CGFloat?) {

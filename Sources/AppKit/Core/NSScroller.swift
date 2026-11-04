@@ -147,6 +147,14 @@ import CoreText
     @MainActor open var hitPart: NSScroller.Part { _hitPart }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/iscompatiblewithoverlayscrollers
     @MainActor class public var isCompatibleWithOverlayScrollers: Bool { unimplemented() }
+    // MARK: Accessibility (ADR-0013)
+    // AXScrollBar: the knob position (0...1) is the value.
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .scrollBar }
+    @MainActor open func accessibilityOrientation() -> NSAccessibilityOrientation { frame.height > frame.width ? .vertical : .horizontal }
+    @MainActor open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : doubleValue }
+    @MainActor open override func accessibilityMinValue() -> Any? { _a11y.minValue ?? 0.0 }
+    @MainActor open override func accessibilityMaxValue() -> Any? { _a11y.maxValue ?? 1.0 }
+    @MainActor override func _accessibilityIsFocusable() -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/knobproportion
     @MainActor open var knobProportion: CGFloat {
         get { _knobProportion }

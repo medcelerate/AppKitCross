@@ -198,6 +198,13 @@ import Foundation
 
     open override var isFlipped: Bool { true }
 
+    // MARK: Accessibility (ADR-0013)
+    // A stack is an AXGroup only when something names it; otherwise its arranged views
+    // stand in for it, as on macOS.
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? (_a11y.role != nil || _a11y.label != nil) }
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .group }
+    open func accessibilityOrientation() -> NSAccessibilityOrientation { orientation == .vertical ? .vertical : .horizontal }
+
     /// Views that take part in the layout: hidden or low-visibility ones are detached.
     private var _visibleArranged: [NSView] {
         _arranged.filter { v in

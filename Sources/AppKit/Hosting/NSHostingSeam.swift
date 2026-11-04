@@ -243,6 +243,22 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
         return super.hitTest(point)
     }
 
+    // MARK: Accessibility (ADR-0013)
+
+    /// The hosting view is transparent to assistive technology: the hosted views'
+    /// backing AppKit views are its parent's children.
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? (_a11y.role != nil) }
+    /// Focus goes to the first focusable hosted control, as Tab would.
+    open override func setAccessibilityFocused(_ accessibilityFocused: Bool) {
+        guard accessibilityFocused, let w = window else { super.setAccessibilityFocused(accessibilityFocused); return }
+        func firstFocusable(_ v: NSView) -> NSView? {
+            if v !== self, v.canBecomeKeyView, v.isAccessibilityElement() { return v }
+            for s in v.subviews { if let f = firstFocusable(s) { return f } }
+            return nil
+        }
+        if let v = firstFocusable(self) { _ = w.makeFirstResponder(v) } else { _ = w.makeFirstResponder(self) }
+    }
+
     // MARK: NSHostingRootHost
 
     public var hostView: NSView { self }

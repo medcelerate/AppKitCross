@@ -111,6 +111,9 @@ public protocol PlatformWindow: AnyObject {
     /// tears the hosting down when `scene` is nil. Returns false when the platform cannot;
     /// the window then composites layers in software inside `platformWindowDraw`.
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool
+    /// The accessibility tree changed (focus, a value, structure); platforms with
+    /// assistive technology forward it (Accessibility.swift, ADR-0013).
+    func accessibilityDidChange(_ change: PlatformAccessibilityChange)
 }
 
 /// A layer tree flattened for the platform compositor; see `_CALayerScene` in QuartzCore.
@@ -160,6 +163,8 @@ public protocol PlatformWindowOwner: AnyObject {
     func platformDragExited()
     /// The drag was released here; returns the operation performed ([] when refused).
     func platformDrop(_ drag: PlatformDragInfo) -> NSDragOperation
+    /// The window's accessibility tree and actions (Accessibility.swift, ADR-0013).
+    var platformAccessibility: any PlatformAccessibilityProvider { get }
 }
 
 public struct PlatformFileDialogOptions: Sendable {

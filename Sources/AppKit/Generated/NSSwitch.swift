@@ -23,14 +23,7 @@ import CoreText
         get { unimplemented() }
         set { unimplemented() }
     }
+    // Requirement of NSAccessibilitySwitch (signature differs from the inherited member)
     // Requirement of NSAccessibilitySwitch
     open func accessibilityValue() -> String? { unimplemented() }
-    // Requirement of NSAccessibilitySwitch
-    open func accessibilityPerformIncrement() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilitySwitch
-    open func accessibilityPerformDecrement() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityButton
-    open func accessibilityLabel() -> String? { unimplemented() }
-    // Requirement of NSAccessibilityButton
-    open func accessibilityPerformPress() -> Bool { unimplemented() }
 }

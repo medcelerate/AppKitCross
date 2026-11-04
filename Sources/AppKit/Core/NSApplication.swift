@@ -29,6 +29,7 @@ import CoreText
     private var _windows: [NSWindow] = []
     private var _isRunning = false
     private var _isActive = false
+    private var _accessibilityLabel: String? = nil
     private var _isHidden = false
     private var _finishedLaunching = false
     private var _currentEvent: NSEvent? = nil
@@ -566,12 +567,42 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/yieldactivation(toapplicationwithbundleidentifier:)
     @available(macOS 14.0, *)
     @MainActor open func yieldActivation(toApplicationWithBundleIdentifier bundleIdentifier: String) { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
-    // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    // MARK: Accessibility (ADR-0013)
+    //
+    // The application is the root of the tree: its children are the windows, its
+    // focused window the key window.
+    open func accessibilityRole() -> NSAccessibility.Role? { .application }
+    open func accessibilityRoleDescription() -> String? { "application" }
+    open func accessibilityLabel() -> String? { MainActor.assumeIsolated { _accessibilityLabel } }
+    open func setAccessibilityLabel(_ accessibilityLabel: String?) { MainActor.assumeIsolated { _accessibilityLabel = accessibilityLabel } }
+    open func accessibilityTitle() -> String? { accessibilityLabel() ?? ProcessInfo.processInfo.processName }
+    open func isAccessibilityElement() -> Bool { true }
+    /// The union of the windows' frames.
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _windows.filter(\.isVisible).map(\.frame).reduce(NSRect.null) { $0.union($1) } } }
+    open func accessibilityParent() -> Any? { nil }
+    open func isAccessibilityFocused() -> Bool { MainActor.assumeIsolated { _isActive } }
+    open func isAccessibilityFrontmost() -> Bool { MainActor.assumeIsolated { _isActive } }
+    open func setAccessibilityFrontmost(_ accessibilityFrontmost: Bool) { if accessibilityFrontmost { MainActor.assumeIsolated { activate(ignoringOtherApps: true) } } }
+    open func accessibilityIdentifier() -> String { Bundle.main.bundleIdentifier ?? "" }
+    /// The visible windows, key window first.
+    open func accessibilityChildren() -> [Any]? { accessibilityWindows() }
+    open func accessibilityVisibleChildren() -> [Any]? { accessibilityWindows() }
+    open func accessibilityWindows() -> [Any]? {
+        MainActor.assumeIsolated {
+            let visible = _windows.filter { $0.isVisible && !$0.isAccessibilityHidden() }
+            guard let key = _keyWindow, let i = visible.firstIndex(where: { $0 === key }) else { return visible }
+            var ordered = visible
+            ordered.remove(at: i)
+            return [key] + ordered
+        }
+    }
+    open func accessibilityFocusedWindow() -> Any? { MainActor.assumeIsolated { _keyWindow } }
+    open func accessibilityMainWindow() -> Any? { MainActor.assumeIsolated { _mainWindow } }
+    /// The focused element of the key window.
+    open func accessibilityApplicationFocusedUIElement() -> Any? { MainActor.assumeIsolated { _keyWindow?.accessibilityApplicationFocusedUIElement() ?? _keyWindow } }
+    open func accessibilityMenuBar() -> Any? { MainActor.assumeIsolated { mainMenu } }
+    open func isAccessibilityHidden() -> Bool { MainActor.assumeIsolated { isHidden } }
+    open func isAccessibilityEnabled() -> Bool { true }
+    open func accessibilityWindow() -> Any? { nil }
+    open func accessibilityTopLevelUIElement() -> Any? { nil }
 }

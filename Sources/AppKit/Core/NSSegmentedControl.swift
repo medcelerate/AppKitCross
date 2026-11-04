@@ -99,7 +99,27 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/selectedsegment
     @MainActor open var selectedSegment: Int {
         get { _segmentedCell?.selectedSegment ?? -1 }
-        set { _segmentedCell?.selectedSegment = newValue; needsDisplay = true }
+        set { _segmentedCell?.selectedSegment = newValue; needsDisplay = true; _accessibilityValueChanged() }
+    }
+
+    // MARK: Accessibility (ADR-0013)
+    // AXRadioGroup: the selected segment's label is the value, and assistive technology
+    // picks a segment by label or index.
+    @MainActor open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .radioGroup }
+    @MainActor open override func accessibilityValue() -> Any? {
+        if _a11y.hasValue { return _a11y.value }
+        let i = selectedSegment
+        return i >= 0 ? (label(forSegment: i) ?? String(i)) : nil
+    }
+    @MainActor override func _accessibilityValueIsSettable() -> Bool { isEnabled }
+    @MainActor override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEnabled else { return false }
+        var index = (0..<segmentCount).first { label(forSegment: $0) == value.stringValue } ?? -1
+        if index < 0, let d = value.doubleValue, d >= 0, Int(d) < segmentCount { index = Int(d) }
+        guard index >= 0, index != selectedSegment else { return index >= 0 }
+        selectedSegment = index
+        _fireAction()
+        return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/selectedsegmentbezelcolor
     @MainActor open var selectedSegmentBezelColor: NSColor? {

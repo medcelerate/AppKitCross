@@ -32,6 +32,15 @@ import CoreText
 
     open override var isFlipped: Bool { true }
 
+    // MARK: Accessibility (ADR-0013)
+    // AXTabGroup: the selected tab's label is the value; the children are the tab bar
+    // (a segmented control, when drawn) and the selected page's views.
+    open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
+    open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .tabGroup }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : selectedTabViewItem?.label }
+    open func accessibilityTabs() -> [Any]? { tabViewItems }
+    override func _accessibilityIsFocusable() -> Bool { false }
+
     /// Tab strip rects per item (in bounds coordinates), laid out centred along the top edge.
     private func _tabRects() -> [NSRect] {
         guard _tabPosition != .none else { return _items.map { _ in .zero } }
