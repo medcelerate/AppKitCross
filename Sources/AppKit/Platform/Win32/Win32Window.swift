@@ -478,6 +478,8 @@ final class Win32Window: PlatformWindow {
     private var hostedScene: PlatformLayerScene?
     /// What each content node's surface holds: redrawn when any of these change.
     private var surfaceRasters: [Int: (version: Int, width: Int, height: Int, scale: CGFloat)] = [:]
+    /// Nodes whose visual shows a swap chain instead of a surface (MTKView, M7).
+    private var nativeContents: [Int: UnsafeMutableRawPointer] = [:]
     private var painting = false
 
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
@@ -513,6 +515,7 @@ final class Win32Window: PlatformWindow {
         cd2d_comp_tree_release(tree)
         compositionTree = nil
         surfaceRasters.removeAll()
+        nativeContents.removeAll()
     }
 
     /// Mirrors the scene into the visual tree on `rt`: one visual per node, placed by its
@@ -524,6 +527,7 @@ final class Win32Window: PlatformWindow {
         if compositionTree == nil {
             compositionTree = cd2d_comp_tree_create(rt)
             surfaceRasters.removeAll()
+            nativeContents.removeAll()
         }
         guard let tree = compositionTree else { return false }
         let s = scale
@@ -540,7 +544,7 @@ final class Win32Window: PlatformWindow {
             }
             let t = node.transform
             if NSView._traceInvalidation, Win32Window.traceScene {
-                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) content \(node.content != nil) \(node.name ?? "")")
+                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) content \(node.content != nil) native \(node.nativeContent != nil) \(node.name ?? "")")
             }
             if let m = node.transform3D {
                 // The whole placement goes through the 3D effect; the 2D transform stays identity.
@@ -570,6 +574,16 @@ final class Win32Window: PlatformWindow {
             } else {
                 cd2d_comp_tree_set_clip(tree, id, false, 0, 0, 0, 0, 0, 0, 0, 0)
             }
+            if let native = node.nativeContent {
+                // A swap chain presented by its owner (MTKView): the visual shows it directly,
+                // sized by the chain itself, so only a changed chain touches the visual.
+                if nativeContents[node.id] != native {
+                    surfaceRasters[node.id] = nil
+                    if cd2d_comp_tree_set_swapchain(tree, id, native) { nativeContents[node.id] = native } else { nativeContents[node.id] = nil }
+                }
+                continue
+            }
+            if nativeContents.removeValue(forKey: node.id) != nil { _ = cd2d_comp_tree_set_swapchain(tree, id, nil) }
             guard let content = node.content else {
                 if surfaceRasters.removeValue(forKey: node.id) != nil { cd2d_comp_tree_remove_surface(tree, id) }
                 continue
@@ -593,6 +607,7 @@ final class Win32Window: PlatformWindow {
         }
         cd2d_comp_tree_end_update(tree)
         surfaceRasters = surfaceRasters.filter { live.contains($0.key) }
+        nativeContents = nativeContents.filter { live.contains($0.key) }
         return true
     }
 

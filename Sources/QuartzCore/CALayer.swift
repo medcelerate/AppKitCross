@@ -234,6 +234,12 @@ open class CALayer: NSObject, CAMediaTiming {
     /// Bumped whenever this layer's own rasterised content changes (not its placement).
     /// Native layer hosts re-rasterise a layer only when this moves.
     public private(set) var _rasterVersion = 0
+    /// Platform content a native host shows in place of this layer's raster (Windows: the
+    /// `IDXGISwapChain1` a `CAMetalLayer` presents through). Not part of Apple's API: the
+    /// seam MetalKit uses; the software compositor ignores it and draws the layer as usual.
+    public var _nativeContent: UnsafeMutableRawPointer? {
+        didSet { if oldValue != _nativeContent { _rasterVersion += 1; _setNeedsRedraw() } }
+    }
     /// Bumped when the border's appearance changes (it is composited as its own node).
     public private(set) var _borderVersion = 0
     static let borderKeys: Set<String> = ["borderWidth", "borderColor", "cornerRadius", "bounds"]

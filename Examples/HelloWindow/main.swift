@@ -1011,7 +1011,8 @@ final class ColorViewController: NSViewController {
 /// device does not rasterize, so there only the clear shows). With `--metal-log` the
 /// device is named on start (with the reason no Vulkan device was made, on Linux) and the
 /// centre and corner pixels of every 30th frame are read back and printed after the
-/// frame's command buffer completes.
+/// frame's command buffer completes, with the drawable size and whether the frame went
+/// through a swap chain (Windows, DirectComposition) or the readback path.
 final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     private var frame = 0
     private let label = NSTextField(labelWithString: "")
@@ -1148,7 +1149,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             tex.getBytes(&corner, bytesPerRow: 4, from: MTLRegionMake2D(2, 2, 1, 1), mipmapLevel: 0)
             let c = view.clearColor
             let expected = [Int(c.blue * 255 + 0.5), Int(c.green * 255 + 0.5), Int(c.red * 255 + 0.5), 255]
-            print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre)")
+            print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre) size \(tex.width)x\(tex.height) presentation=\(view._presentsThroughSwapChain ? "swap chain" : "readback")")
             fflush(nil)
         }
     }

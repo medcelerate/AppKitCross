@@ -1,7 +1,8 @@
 // Direct3D 12 device for the Metal module (Windows), over the CMetalD3D12 C interface.
-// Command buffers record closures and replay them into a D3D12 command list on commit;
-// drawables are D3D12 textures read back on present (swap-chain presentation arrives
-// with DirectComposition hosting). See ADR-0004.
+// Command buffers record closures and replay them into a D3D12 command list on commit.
+// Drawables come from `MTLD3D12SwapChain`, a flip-model DXGI swap chain whose buffers are
+// rendered into directly and shown by a DirectComposition visual (MTKView on a hosted
+// window); elsewhere MTKView renders into plain textures and reads them back. See ADR-0004.
 
 #if os(Windows)
 import Foundation
@@ -359,11 +360,14 @@ final class MTLD3D12Texture: MTLTexture, @unchecked Sendable {
     var hazardTrackingMode: MTLHazardTrackingMode { .tracked }
     var allocatedSize: Int { width * height * pixelFormat.bytesPerPixel }
     let d3dDevice: MTLD3D12Device
+    /// False for swap-chain back buffers, which the swap chain creates and destroys.
+    private let ownsHandle: Bool
 
-    init(device: MTLD3D12Device, handle: OpaquePointer, descriptor d: MTLTextureDescriptor) {
+    init(device: MTLD3D12Device, handle: OpaquePointer, descriptor d: MTLTextureDescriptor, ownsHandle: Bool = true) {
         self.device = device
         d3dDevice = device
         self.handle = handle
+        self.ownsHandle = ownsHandle
         textureType = d.textureType; pixelFormat = d.pixelFormat
         width = d.width; height = d.height; depth = d.depth
         mipmapLevelCount = d.mipmapLevelCount; sampleCount = d.sampleCount; arrayLength = d.arrayLength
@@ -372,7 +376,7 @@ final class MTLD3D12Texture: MTLTexture, @unchecked Sendable {
     }
 
     deinit {
-        cm_texture_release(handle)
+        if ownsHandle { cm_texture_release(handle) }
         d3dDevice.allocated(-allocatedSize)
     }
 
@@ -557,9 +561,28 @@ final class MTLD3D12CommandBuffer: MTLCommandBuffer {
     private var drawables: [any MTLDrawable] = []
     private var fenceValue: UInt64 = 0
 
+    private var pendingGPUWork = false
+
     init(queue: MTLD3D12CommandQueue) { device = queue.device; commandQueue = queue }
 
-    func record(_ block: @escaping (OpaquePointer) -> Void) { work.append(block) }
+    func record(_ block: @escaping (OpaquePointer) -> Void) {
+        work.append { [weak self] list in self?.pendingGPUWork = true; block(list) }
+    }
+
+    /// Work the CPU does in encoder order (buffer fills, uploads and readbacks that go through
+    /// the staging paths): the commands recorded before it are executed and awaited first, so
+    /// a readback after a GPU copy sees the copy. Only legal outside a render pass.
+    func recordCPU(_ block: @escaping () -> Void) {
+        work.append { [weak self] list in self?.flush(list); block() }
+    }
+
+    private func flush(_ list: OpaquePointer) {
+        guard pendingGPUWork, let q = (commandQueue as? MTLD3D12CommandQueue)?.handle else { return }
+        pendingGPUWork = false
+        let fence = cm_commandlist_execute(list, q)
+        cm_queue_wait(q, fence)
+        cm_commandlist_reset(list)
+    }
 
     func enqueue() { if status == .notEnqueued { status = .enqueued } }
 
@@ -573,6 +596,7 @@ final class MTLD3D12CommandBuffer: MTLCommandBuffer {
             return
         }
         cm_commandlist_reset(list)
+        pendingGPUWork = false
         for w in work { w(list) }
         work.removeAll()
         status = .scheduled
@@ -699,25 +723,118 @@ final class MTLD3D12BlitCommandEncoder: MTLD3D12Encoder, MTLBlitCommandEncoder {
         buffer.record { cm_commandlist_copy_texture($0, s.handle, d.handle) }
     }
     func copy(from sourceTexture: any MTLTexture, sourceSlice: Int, sourceLevel: Int, sourceOrigin: MTLOrigin, sourceSize: MTLSize, to destinationTexture: any MTLTexture, destinationSlice: Int, destinationLevel: Int, destinationOrigin: MTLOrigin) {
-        copy(from: sourceTexture, to: destinationTexture)
+        guard let s = sourceTexture as? MTLD3D12Texture, let d = destinationTexture as? MTLD3D12Texture else { return }
+        if sourceOrigin.x == 0, sourceOrigin.y == 0, destinationOrigin.x == 0, destinationOrigin.y == 0,
+           sourceSize.width == s.width, sourceSize.height == s.height, s.width == d.width, s.height == d.height {
+            copy(from: s, to: d)
+            return
+        }
+        buffer.record { cm_commandlist_copy_texture_region($0, s.handle, UInt32(sourceOrigin.x), UInt32(sourceOrigin.y), d.handle, UInt32(destinationOrigin.x), UInt32(destinationOrigin.y), UInt32(sourceSize.width), UInt32(sourceSize.height)) }
     }
     func copy(from sourceBuffer: any MTLBuffer, sourceOffset: Int, sourceBytesPerRow: Int, sourceBytesPerImage: Int, sourceSize: MTLSize, to destinationTexture: any MTLTexture, destinationSlice: Int, destinationLevel: Int, destinationOrigin: MTLOrigin) {
-        buffer.record { _ in
+        buffer.recordCPU {
             destinationTexture.replace(region: MTLRegion(origin: destinationOrigin, size: sourceSize), mipmapLevel: destinationLevel, withBytes: sourceBuffer.contents().advanced(by: sourceOffset), bytesPerRow: sourceBytesPerRow)
         }
     }
     func copy(from sourceTexture: any MTLTexture, sourceSlice: Int, sourceLevel: Int, sourceOrigin: MTLOrigin, sourceSize: MTLSize, to destinationBuffer: any MTLBuffer, destinationOffset: Int, destinationBytesPerRow: Int, destinationBytesPerImage: Int) {
-        buffer.record { _ in
+        buffer.recordCPU {
             sourceTexture.getBytes(destinationBuffer.contents().advanced(by: destinationOffset), bytesPerRow: destinationBytesPerRow, from: MTLRegion(origin: sourceOrigin, size: sourceSize), mipmapLevel: sourceLevel)
         }
     }
     func fill(buffer target: any MTLBuffer, range: Range<Int>, value: UInt8) {
-        buffer.record { _ in
+        buffer.recordCPU {
             let r = range.clamped(to: 0..<target.length)
             target.contents().advanced(by: r.lowerBound).initializeMemory(as: UInt8.self, repeating: value, count: r.count)
         }
     }
     func generateMipmaps(for texture: any MTLTexture) {}
     func synchronize(resource: any MTLResource) {}
+}
+// MARK: Presentation
+
+/// A flip-model DXGI swap chain created for DirectComposition: the window shows
+/// `nativeHandle` (an `IDXGISwapChain1`) as the content of the view's layer visual, and
+/// each frame renders into `nextDrawable()`'s texture, which `present()` flips on screen.
+/// Sized in pixels; `resize` follows the drawable size (window resizes, DPI changes).
+public final class MTLD3D12SwapChain {
+    let device: MTLD3D12Device
+    let handle: OpaquePointer
+    public let pixelFormat: MTLPixelFormat
+    public private(set) var width: Int
+    public private(set) var height: Int
+    /// Present at the next vertical blank (`CAMetalLayer.displaySyncEnabled`).
+    public var displaySyncEnabled = true
+    /// Frames presented so far.
+    public private(set) var presentCount = 0
+
+    public init?(device: MTLD3D12Device, width: Int, height: Int, pixelFormat: MTLPixelFormat, opaque: Bool = true) {
+        guard width > 0, height > 0, let format = MTLD3D12.dxgiFormat(pixelFormat),
+              let h = cm_swapchain_create_composition(device.handle, device.utilityQueue, UInt32(width), UInt32(height), format, 2, opaque) else { return nil }
+        self.device = device
+        handle = h
+        self.pixelFormat = pixelFormat
+        self.width = width
+        self.height = height
+    }
+
+    deinit { cm_swapchain_release(handle) }
+
+    /// The `IDXGISwapChain1`, for `IDCompositionVisual::SetContent` (not retained).
+    public var nativeHandle: UnsafeMutableRawPointer? { cm_swapchain_native(handle) }
+
+    /// Resizes the buffers; drawables handed out earlier must have been dropped.
+    @discardableResult
+    public func resize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        guard width != self.width || height != self.height else { return true }
+        guard cm_swapchain_resize(handle, UInt32(width), UInt32(height)) else { return false }
+        self.width = width
+        self.height = height
+        return true
+    }
+
+    /// The current back buffer as a drawable.
+    public func nextDrawable() -> MTLD3D12Drawable? {
+        guard let t = cm_swapchain_acquire(handle) else { return nil }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: pixelFormat, width: width, height: height, mipmapped: false)
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .private
+        let texture = MTLD3D12Texture(device: device, handle: t, descriptor: desc, ownsHandle: false)
+        return MTLD3D12Drawable(swapChain: self, texture: texture)
+    }
+
+    fileprivate func present() -> Bool {
+        let ok = cm_swapchain_present(handle, displaySyncEnabled)
+        if ok { presentCount += 1 }
+        return ok
+    }
+}
+
+/// A back buffer of an `MTLD3D12SwapChain`; `present()` is called by the command buffer
+/// that drew into it, after its work completed.
+public final class MTLD3D12Drawable: MTLDrawable {
+    public let drawableID: Int
+    public private(set) var presentedTime: TimeInterval = 0
+    public let texture: any MTLTexture
+    public let swapChain: MTLD3D12SwapChain
+    private var handlers: [(any MTLDrawable) -> Void] = []
+    nonisolated(unsafe) private static var counter = 0
+
+    init(swapChain: MTLD3D12SwapChain, texture: any MTLTexture) {
+        MTLD3D12Drawable.counter += 1
+        drawableID = MTLD3D12Drawable.counter
+        self.swapChain = swapChain
+        self.texture = texture
+    }
+
+    public func present() {
+        guard presentedTime == 0 else { return }
+        _ = swapChain.present()
+        presentedTime = ProcessInfo.processInfo.systemUptime
+        for h in handlers { h(self) }
+    }
+
+    public func present(atTime presentationTime: TimeInterval) { present() }
+    public func addPresentedHandler(_ block: @escaping (any MTLDrawable) -> Void) { handlers.append(block) }
 }
 #endif

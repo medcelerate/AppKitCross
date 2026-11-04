@@ -1412,6 +1412,42 @@ void cm_commandlist_copy_texture(CMCommandList *l, CMTexture *src, CMTexture *ds
     list->CopyTextureRegion(&d, 0, 0, 0, &s, &box);
 }
 
+void cm_commandlist_copy_texture_region(CMCommandList *l, CMTexture *src, uint32_t srcX, uint32_t srcY, CMTexture *dst, uint32_t dstX, uint32_t dstY, uint32_t width, uint32_t height) {
+    if (!l || !l->open || !src || !dst || width == 0 || height == 0) return;
+    if (srcX + width > src->width || srcY + height > src->height || dstX + width > dst->width || dstY + height > dst->height) return;
+    retain(l->textureRefs, src);
+    retain(l->textureRefs, dst);
+    ID3D12GraphicsCommandList *list = l->list.get();
+    auto location = [](CMTexture *t) {
+        D3D12_TEXTURE_COPY_LOCATION loc{};
+        loc.pResource = t->resource.get();
+        loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        return loc;
+    };
+    D3D12_BOX box{srcX, srcY, 0, srcX + width, srcY + height, 1};
+    if (src != dst) {
+        transition(list, src->resource.get(), src->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        transition(list, dst->resource.get(), dst->state, D3D12_RESOURCE_STATE_COPY_DEST);
+        D3D12_TEXTURE_COPY_LOCATION s = location(src), d = location(dst);
+        list->CopyTextureRegion(&d, dstX, dstY, 0, &s, &box);
+        return;
+    }
+    // D3D12 forbids copying within one resource: stage the region in a transient texture
+    // that the list's references keep alive until it has executed.
+    CMTexture *tmp = cm_texture_create(l->device, width, height, 1, static_cast<uint32_t>(src->format), false, false);
+    if (!tmp) return;
+    retain(l->textureRefs, tmp);
+    tmp->released = true;
+    D3D12_TEXTURE_COPY_LOCATION s = location(src), t = location(tmp);
+    transition(list, src->resource.get(), src->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    transition(list, tmp->resource.get(), tmp->state, D3D12_RESOURCE_STATE_COPY_DEST);
+    list->CopyTextureRegion(&t, 0, 0, 0, &s, &box);
+    transition(list, tmp->resource.get(), tmp->state, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    transition(list, dst->resource.get(), dst->state, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_BOX whole{0, 0, 0, width, height, 1};
+    list->CopyTextureRegion(&s, dstX, dstY, 0, &t, &whole);
+}
+
 uint64_t cm_commandlist_execute(CMCommandList *l, CMQueue *queue) {
     if (!l || !queue) return 0;
     if (l->open) {
@@ -1427,12 +1463,13 @@ uint64_t cm_commandlist_execute(CMCommandList *l, CMQueue *queue) {
 
 // MARK: - Swap chain
 
-CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount) {
-    if (!d || !queue || !hwnd || width == 0 || height == 0 || dxgiFormat == 0) return nullptr;
+/// Shared body of cm_swapchain_create (HWND) and cm_swapchain_create_composition (no HWND).
+static CMSwapChain *createSwapChain(CMDevice *d, CMQueue *queue, HWND hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool composition, bool opaque) {
+    if (!d || !queue || width == 0 || height == 0 || dxgiFormat == 0) return nullptr;
     CMSwapChain *sc = new CMSwapChain;
     sc->device = d;
     sc->queue = queue;
-    sc->hwnd = static_cast<HWND>(hwnd);
+    sc->hwnd = hwnd;
     sc->format = static_cast<DXGI_FORMAT>(dxgiFormat);
     sc->bufferCount = std::max(2u, std::min(bufferCount, 16u));
     sc->width = width;
@@ -1445,16 +1482,33 @@ CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32
     desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     desc.BufferCount = sc->bufferCount;
     desc.Scaling = DXGI_SCALING_STRETCH;
-    desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    // A composition chain is read back after presenting (MTKView's pixel logging and the
+    // parity tests), so its buffers keep their contents: FLIP_SEQUENTIAL.
+    desc.SwapEffect = composition ? DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL : DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    desc.AlphaMode = composition ? (opaque ? DXGI_ALPHA_MODE_IGNORE : DXGI_ALPHA_MODE_PREMULTIPLIED) : DXGI_ALPHA_MODE_UNSPECIFIED;
     Com<IDXGISwapChain1> sc1;
-    HRESULT hr = d->factory->CreateSwapChainForHwnd(queue->queue.get(), sc->hwnd, &desc, nullptr, nullptr, sc1.put());
-    if (FAILED(hr) || FAILED(sc1->QueryInterface(IID_PPV_ARGS(sc->swapChain.put())))) { logf("swap chain creation failed 0x%08lX", hr); delete sc; return nullptr; }
-    d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
+    HRESULT hr = composition
+        ? d->factory->CreateSwapChainForComposition(queue->queue.get(), &desc, nullptr, sc1.put())
+        : d->factory->CreateSwapChainForHwnd(queue->queue.get(), sc->hwnd, &desc, nullptr, nullptr, sc1.put());
+    if (FAILED(hr) || FAILED(sc1->QueryInterface(IID_PPV_ARGS(sc->swapChain.put())))) { logf("swap chain creation failed 0x%08lX", hr); drainMessages(d); delete sc; return nullptr; }
+    if (hwnd) d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
     char error[256] = {};
     if (!acquireSwapChainBuffers(sc, error, sizeof error)) { logf("%s", error); cm_swapchain_release(sc); return nullptr; }
     d->liveSwapChains++;
     return sc;
+}
+
+CMSwapChain *cm_swapchain_create(CMDevice *d, CMQueue *queue, void *hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount) {
+    if (!hwnd) return nullptr;
+    return createSwapChain(d, queue, static_cast<HWND>(hwnd), width, height, dxgiFormat, bufferCount, false, true);
+}
+
+CMSwapChain *cm_swapchain_create_composition(CMDevice *d, CMQueue *queue, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool opaque) {
+    return createSwapChain(d, queue, nullptr, width, height, dxgiFormat, bufferCount, true, opaque);
+}
+
+void *cm_swapchain_native(CMSwapChain *sc) {
+    return sc ? static_cast<IDXGISwapChain1 *>(sc->swapChain.get()) : nullptr;
 }
 
 void cm_swapchain_release(CMSwapChain *sc) {

@@ -179,6 +179,10 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
 void cd2d_comp_tree_surface_end_draw(CD2DCompTree *tree, int64_t id);
 /// Drops the visual's content surface (a node that no longer draws).
 void cd2d_comp_tree_remove_surface(CD2DCompTree *tree, int64_t id);
+/// Shows `dxgiSwapChain` (an IDXGISwapChain1 created for composition, by any device) as the
+/// visual's content at its native pixel size, dropping any surface; NULL removes it.
+/// Returns false when SetContent fails.
+bool cd2d_comp_tree_set_swapchain(CD2DCompTree *tree, int64_t id, void *dxgiSwapChain);
 /// Destroys a visual and its surface outside an update (end_update does this for every
 /// visual the update did not ensure).
 void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id);
