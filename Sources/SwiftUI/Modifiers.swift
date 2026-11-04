@@ -183,20 +183,33 @@ final class _DecorationPrimitive: _Primitive {
         }
         view.toolTip = style.helpText
         if let tap = style.tap {
+            // A tap fires on release, as in SwiftUI (and like an AppKit click); the press
+            // arms it, and moving away or a long press taking the release disarms it.
             let count = style.tapCount
+            var armed: NSPoint? = nil
             view.mouseDownHandler = { event in
-                guard event.clickCount >= count else { return count == 1 }
-                tap()
+                armed = event.clickCount >= count ? event.locationInWindow : nil
                 return true
+            }
+            view.mouseUpHandler = { [weak view] event in
+                guard let view, let start = armed else { return }
+                armed = nil
+                let p = event.locationInWindow
+                guard abs(p.x - start.x) <= 4, abs(p.y - start.y) <= 4, view.bounds.contains(view.convert(p, from: nil)) else { return }
+                tap()
             }
         } else {
             view.mouseDownHandler = nil
+            view.mouseUpHandler = nil
         }
         view.hoverHandler = style.hover
-        for r in view.installedRecognizers { view.removeGestureRecognizer(r) }
-        view.installedRecognizers = style.gestures.compactMap { $0.install(view) }
+        // Recognizers survive re-renders (a drag that moves the view re-renders every
+        // event): each installer reuses the recognizer at its index when the kind matches.
+        let previous = view.installedRecognizers
+        view.installedRecognizers = style.gestures.enumerated().compactMap { i, g in g.install(view, i < previous.count ? previous[i] : nil) }
+        for r in previous where !view.installedRecognizers.contains(where: { $0 === r }) { view.removeGestureRecognizer(r) }
         for r in view.installedRecognizers {
-            view.addGestureRecognizer(r)
+            if r.view !== view { view.addGestureRecognizer(r) }
             r.delaysPrimaryMouseButtonEvents = style.gesturesDelayEvents
             if let pressing = style.pressingChanged, let press = r as? NSPressGestureRecognizer {
                 let inner = press._actionHandler

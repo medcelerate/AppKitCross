@@ -437,10 +437,14 @@ final class _ContainerView: NSView {
     override var isFlipped: Bool { true }
     var drawHandler: ((NSRect, NSView) -> Void)?
     var mouseDownHandler: ((NSEvent) -> Bool)?
+    var mouseUpHandler: ((NSEvent) -> Void)?
     var hoverHandler: ((Bool) -> Void)?
     override func draw(_ dirtyRect: NSRect) { drawHandler?(dirtyRect, self) }
     override func mouseDown(with event: NSEvent) {
         if mouseDownHandler?(event) != true { super.mouseDown(with: event) }
+    }
+    override func mouseUp(with event: NSEvent) {
+        if let h = mouseUpHandler { h(event) } else { super.mouseUp(with: event) }
     }
     override func mouseEntered(with event: NSEvent) { hoverHandler?(true) }
     override func mouseExited(with event: NSEvent) { hoverHandler?(false) }

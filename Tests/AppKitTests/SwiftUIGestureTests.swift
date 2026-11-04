@@ -102,3 +102,70 @@ final class SwiftUIGestureTests: XCTestCase, @unchecked Sendable {
     }
 }
 
+
+final class SwiftUIGestureCardTests: XCTestCase, @unchecked Sendable {
+    /// The HelloWindow Gestures tab: a card under offset/scale/rotation modifiers with a
+    /// drag gesture that moves it. The translation must not shrink as the card moves.
+    func testDraggingACardThatMovesWithTheDrag() {
+        MainActor.assumeIsolated {
+            final class Model { var offset = CGSize.zero; var start = CGSize.zero; var pressed = false; var presses = 0; var taps = 0 }
+            let m = Model()
+            struct Card: View {
+                let m: Model
+                @State private var tick = 0
+                var body: some View {
+                    VStack(spacing: 0) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.15))
+                            RoundedRectangle(cornerRadius: 10).fill(Color.blue)
+                                .frame(width: 120, height: 80)
+                                .scaleEffect(1)
+                                .rotationEffect(.zero)
+                                .offset(m.offset)
+                                .gesture(DragGesture().onChanged { v in m.offset = CGSize(width: m.start.width + v.translation.width, height: m.start.height + v.translation.height); tick += 1 }
+                                                      .onEnded { _ in m.start = m.offset })
+                        }
+                        .frame(width: 300, height: 150)
+                        Text("Taps: \(m.taps)")
+                            .padding(8)
+                            .onTapGesture { m.taps += 1 }
+                            .onLongPressGesture(minimumDuration: 0.6, perform: { m.presses += 1 }, onPressingChanged: { m.pressed = $0 })
+                    }
+                }
+            }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            let h = NSHostingView(rootView: Card(m: m))
+            h.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            @MainActor func mouse(_ type: NSEvent.EventType, _ p: NSPoint, t: TimeInterval) {
+                w.sendEvent(NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: t, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
+                h.layoutSubtreeIfNeeded()
+            }
+            // The card is centred in the 300x150 stage at the top: window x 90...210, y 85...165.
+            let c = NSPoint(x: 150, y: 125)
+            mouse(.leftMouseDown, c, t: 0)
+            for i in 1...10 { mouse(.leftMouseDragged, NSPoint(x: c.x + CGFloat(i) * 10, y: c.y), t: Double(i) * 0.02) }
+            XCTAssertEqual(m.offset.width, 100, accuracy: 0.5, "the full 100-point drag reaches the card even though it moves under the pointer")
+            XCTAssertEqual(m.offset.height, 0, accuracy: 0.5)
+            mouse(.leftMouseUp, NSPoint(x: c.x + 100, y: c.y), t: 0.3)
+            XCTAssertEqual(m.start.width, 100, accuracy: 0.5)
+            // Tap and long press on the label below the stage (window y 0...50 band).
+            let label = NSPoint(x: 150, y: 30)
+            mouse(.leftMouseDown, label, t: 1); mouse(.leftMouseUp, label, t: 1.05)
+            XCTAssertEqual(m.taps, 1)
+            mouse(.leftMouseDown, label, t: 2)
+            let press = (w.contentView!.subviews.flatMap { all($0) }).flatMap(\.gestureRecognizers).compactMap { $0 as? NSPressGestureRecognizer }.first
+            XCTAssertNotNil(press)
+            press?._pressTimerFired()
+            XCTAssertEqual(m.pressed, true)
+            XCTAssertEqual(m.presses, 1)
+            mouse(.leftMouseUp, label, t: 2.8)
+            XCTAssertEqual(m.pressed, false)
+            XCTAssertEqual(m.taps, 1, "the release that ends a long press is not a tap")
+            w.close()
+        }
+    }
+    @MainActor private func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
+}

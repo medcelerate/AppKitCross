@@ -391,6 +391,55 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         owner?.platformWindowDispatch(e)
     }
 
+    // MARK: Gestures (XInput 2.4)
+
+    private var pinchScale = 1.0
+    private var swipeTotal = (x: 0.0, y: 0.0)
+
+    /// A touchpad pinch: begin/end bracket the gesture; each update carries the
+    /// cumulative scale (1 at the start) and the angle change in degrees (clockwise
+    /// positive in XI, counterclockwise in AppKit).
+    func gesturePinch(evtype: Int32, time: Time, x: Double, y: Double, scale s: Double, deltaAngle: Double, state: UInt32, cancelled: Bool) {
+        let p = contentPoint(x: Int32(x), y: Int32(y))
+        let flags = LinuxBackend.modifierFlags(fromState: state)
+        func send(_ e: NSEvent) { owner?.platformWindowDispatch(e) }
+        switch evtype {
+        case XI_GesturePinchBegin:
+            pinchScale = 1
+            send(NSEvent._gestureEvent(type: .beginGesture, location: p, modifierFlags: flags, timestamp: seconds(time), windowNumber: windowNumber()))
+        case XI_GesturePinchUpdate:
+            let magnification = pinchScale > 0 ? CGFloat(s / pinchScale - 1) : 0
+            pinchScale = s
+            if magnification != 0 {
+                send(NSEvent._gestureEvent(type: .magnify, location: p, modifierFlags: flags, timestamp: seconds(time), windowNumber: windowNumber(),
+                                           magnification: magnification, phase: .changed))
+            }
+            if deltaAngle != 0 {
+                send(NSEvent._gestureEvent(type: .rotate, location: p, modifierFlags: flags, timestamp: seconds(time), windowNumber: windowNumber(),
+                                           rotation: Float(-deltaAngle), phase: .changed))
+            }
+        default:
+            send(NSEvent._gestureEvent(type: .endGesture, location: p, modifierFlags: flags, timestamp: seconds(time), windowNumber: windowNumber(),
+                                       phase: cancelled ? .cancelled : .ended))
+        }
+    }
+
+    /// A three-finger swipe: reported once, at the end, as AppKit's swipe event with the
+    /// dominant direction (deltaX 1 for a swipe to the left, deltaY 1 for a swipe up).
+    func gestureSwipe(evtype: Int32, time: Time, x: Double, y: Double, dx: Double, dy: Double, state: UInt32, cancelled: Bool) {
+        switch evtype {
+        case XI_GestureSwipeBegin: swipeTotal = (0, 0)
+        case XI_GestureSwipeUpdate: swipeTotal.x += dx; swipeTotal.y += dy
+        default:
+            guard !cancelled, abs(swipeTotal.x) + abs(swipeTotal.y) > 20 else { return }
+            let horizontal = abs(swipeTotal.x) >= abs(swipeTotal.y)
+            let e = NSEvent._gestureEvent(type: .swipe, location: contentPoint(x: Int32(x), y: Int32(y)), modifierFlags: LinuxBackend.modifierFlags(fromState: state),
+                                          timestamp: seconds(time), windowNumber: windowNumber(),
+                                          deltaX: horizontal ? (swipeTotal.x < 0 ? 1 : -1) : 0, deltaY: horizontal ? 0 : (swipeTotal.y < 0 ? 1 : -1))
+            owner?.platformWindowDispatch(e)
+        }
+    }
+
     func handle(_ event: inout XEvent) {
         switch Int32(event.type) {
         case Expose:

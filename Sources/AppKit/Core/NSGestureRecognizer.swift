@@ -30,6 +30,8 @@ import CoreGraphics
     /// Additive hook for hosts without a selector target (SwiftUI): called on every state
     /// change that would send the action, before the action itself.
     public var _actionHandler: ((NSGestureRecognizer) -> Void)?
+    /// Additive: per-gesture state a host keeps across handler rebinds (SwiftUI re-renders).
+    public var _hostState: Any?
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgesturerecognizer/init(target:action:)
     @MainActor public init(target: Any?, action: Selector?) {

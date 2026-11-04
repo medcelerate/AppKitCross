@@ -19,20 +19,22 @@ extension Never: Gesture {
 
 /// Gestures the hosting layer knows how to install on a view.
 protocol _PrimitiveGesture: Gesture {
-    /// Creates the recognizer for `view` and wires `changed`/`ended` to its states.
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer
+    /// Creates (or, when `reusing` is one of the right kind, rebinds) the recognizer for
+    /// `view` and wires `changed`/`ended` to its states. Reuse keeps a gesture in progress
+    /// across SwiftUI re-renders, which replace the closures but not the recognizer.
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer
 }
 
 extension Gesture {
-    @MainActor func _installAny(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer? {
+    @MainActor func _installAny(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer? {
         if let p = self as? any _PrimitiveGesture {
             func open<P: _PrimitiveGesture>(_ p: P) -> NSGestureRecognizer? {
-                p._install(on: view, changed: { changed($0 as! Value) }, ended: { ended($0 as! Value) })
+                p._install(on: view, reusing: reusing, changed: { changed($0 as! Value) }, ended: { ended($0 as! Value) })
             }
             return open(p)
         }
         if Body.self == Never.self { return nil }
-        return body._installAny(on: view, changed: { changed($0 as! Value) }, ended: { ended($0 as! Value) })
+        return body._installAny(on: view, reusing: reusing, changed: { changed($0 as! Value) }, ended: { ended($0 as! Value) })
     }
 }
 
@@ -45,8 +47,8 @@ public struct _ChangedGesture<Content: Gesture>: Gesture, _PrimitiveGesture {
     let content: Content
     let action: (Value) -> Void
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        content._installAny(on: view, changed: { [action] v in action(v); changed(v) }, ended: ended) ?? NSGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        content._installAny(on: view, reusing: reusing, changed: { [action] v in action(v); changed(v) }, ended: ended) ?? NSGestureRecognizer(target: nil, action: nil)
     }
 }
 
@@ -57,8 +59,8 @@ public struct _EndedGesture<Content: Gesture>: Gesture, _PrimitiveGesture {
     let content: Content
     let action: (Value) -> Void
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        content._installAny(on: view, changed: changed, ended: { [action] v in action(v); ended(v) }) ?? NSGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        content._installAny(on: view, reusing: reusing, changed: changed, ended: { [action] v in action(v); ended(v) }) ?? NSGestureRecognizer(target: nil, action: nil)
     }
 }
 
@@ -68,8 +70,8 @@ public struct _MapGesture<Content: Gesture, Value>: Gesture, _PrimitiveGesture {
     let content: Content
     let transform: (Content.Value) -> Value
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        content._installAny(on: view, changed: { [transform] v in changed(transform(v)) }, ended: { [transform] v in ended(transform(v)) }) ?? NSGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        content._installAny(on: view, reusing: reusing, changed: { [transform] v in changed(transform(v)) }, ended: { [transform] v in ended(transform(v)) }) ?? NSGestureRecognizer(target: nil, action: nil)
     }
 }
 
@@ -91,8 +93,8 @@ public struct TapGesture: Gesture, _PrimitiveGesture {
     public var count: Int
     public init(count: Int = 1) { self.count = count }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Void) -> Void, ended: @escaping (Void) -> Void) -> NSGestureRecognizer {
-        let r = NSClickGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Void) -> Void, ended: @escaping (Void) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSClickGestureRecognizer) ?? NSClickGestureRecognizer(target: nil, action: nil)
         r.numberOfClicksRequired = count
         r._actionHandler = { r in if r.state == .ended { ended(()) } }
         return r
@@ -110,8 +112,8 @@ public struct LongPressGesture: Gesture, _PrimitiveGesture {
         self.maximumDistance = maximumDistance
     }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Bool) -> Void, ended: @escaping (Bool) -> Void) -> NSGestureRecognizer {
-        let r = NSPressGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Bool) -> Void, ended: @escaping (Bool) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSPressGestureRecognizer) ?? NSPressGestureRecognizer(target: nil, action: nil)
         r.minimumPressDuration = minimumDuration
         r.allowableMovement = maximumDistance
         r._actionHandler = { r in
@@ -144,28 +146,36 @@ public struct DragGesture: Gesture, _PrimitiveGesture {
         self.coordinateSpace = coordinateSpace
     }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        let r = NSPanGestureRecognizer(target: nil, action: nil)
-        var start = CGPoint.zero
+    final class _State { var startLocation = CGPoint.zero }
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSPanGestureRecognizer) ?? NSPanGestureRecognizer(target: nil, action: nil)
+        // The view may move with the drag (`.offset` driven by this gesture), so the
+        // translation comes from window space, where the press point stays put; locations
+        // are the start point in the view's space plus that translation. The start point
+        // lives on the recognizer so a re-render mid-drag keeps it.
+        let state = (r._hostState as? _State) ?? _State()
+        r._hostState = state
         let space = coordinateSpace
         r._actionHandler = { [weak view] r in
             guard let view, let pan = r as? NSPanGestureRecognizer else { return }
-            let local = pan.location(in: view)
-            let location: CGPoint
-            switch space {
-            case .global: location = view.convert(local, to: nil)
-            default: location = local
-            }
-            let v = pan.velocity(in: view)
+            let t = pan.translation(in: nil)
+            let flipped = view.isFlipped
+            let translation = CGSize(width: t.x, height: flipped ? -t.y : t.y)
             if pan.state == .began {
-                let t = pan.translation(in: view)
-                start = CGPoint(x: location.x - t.x, y: location.y - t.y)
+                let local = pan.location(in: view)
+                let origin = CGPoint(x: local.x - translation.width, y: local.y - translation.height)
+                switch space {
+                case .global: state.startLocation = view.convert(origin, to: nil)
+                default: state.startLocation = origin
+                }
             }
+            let start = state.startLocation
+            let location = CGPoint(x: start.x + translation.width, y: start.y + translation.height)
+            let v = pan.velocity(in: view)
             let value = Value(time: Date(), location: location, startLocation: start, velocity: CGSize(width: v.x, height: v.y))
             switch pan.state {
             case .began, .changed: changed(value)
-            case .ended: ended(value)
-            case .cancelled: ended(value)
+            case .ended, .cancelled: ended(value)
             default: break
             }
         }
@@ -188,23 +198,25 @@ public struct MagnifyGesture: Gesture, _PrimitiveGesture {
     public var minimumScaleDelta: CGFloat
     public init(minimumScaleDelta: CGFloat = 0.01) { self.minimumScaleDelta = minimumScaleDelta }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        let r = NSMagnificationGestureRecognizer(target: nil, action: nil)
-        var start = CGPoint.zero, anchor = UnitPoint.center, last: (CGFloat, Date)? = nil
+    final class _State { var start = CGPoint.zero; var anchor = UnitPoint.center; var last: (CGFloat, Date)? = nil }
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSMagnificationGestureRecognizer) ?? NSMagnificationGestureRecognizer(target: nil, action: nil)
+        let st = (r._hostState as? _State) ?? _State()
+        r._hostState = st
         r._actionHandler = { [weak view] r in
             guard let view, let m = r as? NSMagnificationGestureRecognizer else { return }
             let scale = 1 + m.magnification
             let now = Date()
             if m.state == .began {
-                start = m.location(in: view)
+                st.start = m.location(in: view)
                 let b = view.bounds
-                anchor = UnitPoint(x: b.width > 0 ? start.x / b.width : 0.5, y: b.height > 0 ? start.y / b.height : 0.5)
-                last = nil
+                st.anchor = UnitPoint(x: b.width > 0 ? st.start.x / b.width : 0.5, y: b.height > 0 ? st.start.y / b.height : 0.5)
+                st.last = nil
             }
             var velocity: CGFloat = 0
-            if let (s, t) = last, now.timeIntervalSince(t) > 0 { velocity = (scale - s) / now.timeIntervalSince(t) }
-            last = (scale, now)
-            let value = Value(time: now, magnification: scale, velocity: velocity, startAnchor: anchor, startLocation: start)
+            if let (s, t) = st.last, now.timeIntervalSince(t) > 0 { velocity = (scale - s) / now.timeIntervalSince(t) }
+            st.last = (scale, now)
+            let value = Value(time: now, magnification: scale, velocity: velocity, startAnchor: st.anchor, startLocation: st.start)
             switch m.state {
             case .began, .changed: changed(value)
             case .ended, .cancelled: ended(value)
@@ -222,8 +234,8 @@ public struct MagnificationGesture: Gesture, _PrimitiveGesture {
     public var minimumScaleDelta: CGFloat
     public init(minimumScaleDelta: CGFloat = 0.01) { self.minimumScaleDelta = minimumScaleDelta }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (CGFloat) -> Void, ended: @escaping (CGFloat) -> Void) -> NSGestureRecognizer {
-        let r = NSMagnificationGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (CGFloat) -> Void, ended: @escaping (CGFloat) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSMagnificationGestureRecognizer) ?? NSMagnificationGestureRecognizer(target: nil, action: nil)
         r._actionHandler = { r in
             guard let m = r as? NSMagnificationGestureRecognizer else { return }
             switch m.state {
@@ -251,24 +263,26 @@ public struct RotateGesture: Gesture, _PrimitiveGesture {
     public var minimumAngleDelta: Angle
     public init(minimumAngleDelta: Angle = .degrees(1)) { self.minimumAngleDelta = minimumAngleDelta }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
-        let r = NSRotationGestureRecognizer(target: nil, action: nil)
-        var start = CGPoint.zero, anchor = UnitPoint.center, last: (Double, Date)? = nil
+    final class _State { var start = CGPoint.zero; var anchor = UnitPoint.center; var last: (Double, Date)? = nil }
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Value) -> Void, ended: @escaping (Value) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSRotationGestureRecognizer) ?? NSRotationGestureRecognizer(target: nil, action: nil)
+        let st = (r._hostState as? _State) ?? _State()
+        r._hostState = st
         r._actionHandler = { [weak view] r in
             guard let view, let g = r as? NSRotationGestureRecognizer else { return }
             // SwiftUI's angle is clockwise-positive in its y-down space; AppKit's rotation is counterclockwise.
             let radians = -Double(g.rotation)
             let now = Date()
             if g.state == .began {
-                start = g.location(in: view)
+                st.start = g.location(in: view)
                 let b = view.bounds
-                anchor = UnitPoint(x: b.width > 0 ? start.x / b.width : 0.5, y: b.height > 0 ? start.y / b.height : 0.5)
-                last = nil
+                st.anchor = UnitPoint(x: b.width > 0 ? st.start.x / b.width : 0.5, y: b.height > 0 ? st.start.y / b.height : 0.5)
+                st.last = nil
             }
             var velocity = 0.0
-            if let (s, t) = last, now.timeIntervalSince(t) > 0 { velocity = (radians - s) / now.timeIntervalSince(t) }
-            last = (radians, now)
-            let value = Value(time: now, rotation: .radians(radians), velocity: .radians(velocity), startAnchor: anchor, startLocation: start)
+            if let (s, t) = st.last, now.timeIntervalSince(t) > 0 { velocity = (radians - s) / now.timeIntervalSince(t) }
+            st.last = (radians, now)
+            let value = Value(time: now, rotation: .radians(radians), velocity: .radians(velocity), startAnchor: st.anchor, startLocation: st.start)
             switch g.state {
             case .began, .changed: changed(value)
             case .ended, .cancelled: ended(value)
@@ -286,8 +300,8 @@ public struct RotationGesture: Gesture, _PrimitiveGesture {
     public var minimumAngleDelta: Angle
     public init(minimumAngleDelta: Angle = .degrees(1)) { self.minimumAngleDelta = minimumAngleDelta }
     public var body: Never { fatalError() }
-    @MainActor func _install(on view: NSView, changed: @escaping (Angle) -> Void, ended: @escaping (Angle) -> Void) -> NSGestureRecognizer {
-        let r = NSRotationGestureRecognizer(target: nil, action: nil)
+    @MainActor func _install(on view: NSView, reusing: NSGestureRecognizer?, changed: @escaping (Angle) -> Void, ended: @escaping (Angle) -> Void) -> NSGestureRecognizer {
+        let r = (reusing as? NSRotationGestureRecognizer) ?? NSRotationGestureRecognizer(target: nil, action: nil)
         r._actionHandler = { r in
             guard let g = r as? NSRotationGestureRecognizer else { return }
             let angle = Angle.radians(-Double(g.rotation))
@@ -315,10 +329,11 @@ public struct GestureMask: OptionSet, Sendable {
 
 /// A gesture the decoration view installs: type-erased to its installer.
 struct _GestureInstaller {
-    let install: @MainActor (NSView) -> NSGestureRecognizer?
+    /// Installs on the view, reusing the given recognizer (from the previous render) when it fits.
+    let install: @MainActor (NSView, NSGestureRecognizer?) -> NSGestureRecognizer?
     let mask: GestureMask
     init<G: Gesture>(_ gesture: G, mask: GestureMask) {
-        install = { view in gesture._installAny(on: view, changed: { _ in }, ended: { _ in }) }
+        install = { view, reusing in gesture._installAny(on: view, reusing: reusing, changed: { _ in }, ended: { _ in }) }
         self.mask = mask
     }
 }
@@ -345,6 +360,7 @@ extension View {
     public func onLongPressGesture(minimumDuration: Double = 0.5, maximumDistance: CGFloat = 10, perform action: @escaping () -> Void, onPressingChanged: ((Bool) -> Void)? = nil) -> some View {
         var d = _Decorated(content: self)
         d.style.gestures = [_GestureInstaller(LongPressGesture(minimumDuration: minimumDuration, maximumDistance: maximumDistance).onEnded { _ in action() }, mask: .all)]
+        d.style.gesturesDelayEvents = true     // the release that ends the press is not a tap for the content
         d.style.pressingChanged = onPressingChanged
         return d
     }

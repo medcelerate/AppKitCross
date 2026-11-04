@@ -1059,10 +1059,10 @@ final class Win32Window: PlatformWindow {
             if let hwnd { ScreenToClient(hwnd, &pt) }
             let horizontal = Int32(msg) == WM_MOUSEHWHEEL
             let flags = modifierFlags()
-            if !horizontal, flags.contains(.control) {
+            if !horizontal, flags.contains(.command) {   // the Ctrl key (reported as Command on this port)
                 // Ctrl+wheel is how Windows delivers a precision-touchpad pinch (and what
                 // mouse users expect to zoom with): a magnify gesture, not a scroll.
-                magnifyFromWheel(delta: delta, at: contentPoint(x: pt.x, y: pt.y), flags: flags.subtracting(.control))
+                magnifyFromWheel(delta: delta, at: contentPoint(x: pt.x, y: pt.y), flags: flags.subtracting(.command))
                 return 0
             }
             let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: flags, timestamp: timestamp(),

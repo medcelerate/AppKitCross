@@ -15,7 +15,8 @@ import CoreGraphics
     private var _allowableMovement: CGFloat = 10
     private var _numberOfTouchesRequired = 1
     private var _downPoint: NSPoint?
-    private var _timer: Timer?
+    /// Identifies the pending press timer; a reset or a new press invalidates older ones.
+    private var _pressGeneration = 0
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspressgesturerecognizer/buttonmask
     @MainActor open var buttonMask: Int { get { _buttonMask } set { _buttonMask = newValue } }
@@ -28,13 +29,11 @@ import CoreGraphics
 
     open override func reset() {
         _downPoint = nil
-        _timer?.invalidate()
-        _timer = nil
+        _pressGeneration &+= 1
     }
 
-    /// Tests and the window call this when the press duration has elapsed.
+    /// Tests and the timer call this when the press duration has elapsed.
     internal func _pressTimerFired() {
-        _timer = nil
         guard _downPoint != nil, state == .possible else { return }
         guard _mayBegin() else { _downPoint = nil; state = .failed; return }
         state = .began
@@ -43,15 +42,17 @@ import CoreGraphics
     private func _down(_ event: NSEvent) {
         guard _NSGestureButtons.mask(for: event) & _buttonMask != 0 else { return }
         _downPoint = event.locationInWindow
-        _timer?.invalidate()
+        _pressGeneration &+= 1
         if _minimumPressDuration <= 0 {
             _pressTimerFired()
         } else {
-            let t = Timer(timeInterval: _minimumPressDuration, repeats: false) { [weak self] _ in
-                MainActor.assumeIsolated { self?._pressTimerFired() }
+            // The main dispatch queue, not a RunLoop timer: every backend's pump wakes for
+            // blocks queued on it, which is not guaranteed for Foundation timers on Windows.
+            let generation = _pressGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + _minimumPressDuration) { [weak self] in
+                guard let self, self._pressGeneration == generation else { return }
+                self._pressTimerFired()
             }
-            RunLoop.main.add(t, forMode: .default)
-            _timer = t
         }
     }
     private func _drag(_ event: NSEvent) {
