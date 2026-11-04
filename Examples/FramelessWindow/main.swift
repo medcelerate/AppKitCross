@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let title = NSTextField(labelWithString: "Frameless window")
         title.font = NSFont.boldSystemFont(ofSize: 22)
         title.textColor = .white
-        let hint = NSTextField(labelWithString: "Drag anywhere to move. Top-left: AppKit's standard window buttons.")
+        let hint = NSTextField(labelWithString: "Drag anywhere to move. Top-left: the standard window buttons.")
         hint.textColor = NSColor.white.withAlphaComponent(0.8)
         hint.lineBreakMode = .byWordWrapping
         hint.maximumNumberOfLines = 2

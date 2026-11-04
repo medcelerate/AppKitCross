@@ -222,14 +222,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         let width = NSSlider(value: 3, minValue: 1, maxValue: 16, target: self, action: Selector(("widthChanged:")))
         width.frame.size.width = 80
         width.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        status = NSTextField(labelWithString: "")
-        status.textColor = .secondaryLabelColor
-        let bar = NSStackView(views: [undoButton, redoButton, clear, export, colors, width, status])
+        let bar = NSStackView(views: [undoButton, redoButton, clear, export, colors, width])
         bar.orientation = .horizontal
         bar.spacing = 6
-        bar.frame = NSRect(x: 349, y: 8, width: 483, height: 28)
-        bar.autoresizingMask = [.width]
+        bar.frame = NSRect(x: 349, y: 8, width: 400, height: 28)
         content.addSubview(bar)
+        status = NSTextField(labelWithString: "")
+        status.textColor = .secondaryLabelColor
+        status.alignment = .right
+        status.frame = NSRect(x: 740, y: 12, width: 92, height: 20)
+        status.autoresizingMask = [.minXMargin]
+        content.addSubview(status)
         // A sample stroke, so undo and export have something to work on.
         sketch.push(SketchView.Stroke(points: (0...40).map { NSPoint(x: 40 + CGFloat($0) * 8, y: 180 + 60 * sin(CGFloat($0) / 4)) }, color: .systemBlue, width: 4))
 

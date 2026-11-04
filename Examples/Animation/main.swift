@@ -34,12 +34,14 @@ final class Stage {
         dot.fillColor = NSColor.systemOrange.cgColor
         dot.position = CGPoint(x: 40, y: 90)
         root.addSublayer(dot)
+        // A layer rasterises within its bounds: the track covers the stage.
         let track = CAShapeLayer()
+        track.frame = root.bounds
         track.path = Stage.trackPath
         track.fillColor = nil
-        track.strokeColor = NSColor.separatorColor.cgColor
-        track.lineWidth = 1
-        track.lineDashPattern = [4, 4]
+        track.strokeColor = NSColor.systemGray.cgColor
+        track.lineWidth = 2
+        track.lineDashPattern = [6, 4]
         root.insertSublayer(track, below: dot)
 
         // The card flips about its vertical axis under a perspective sublayerTransform.
@@ -82,7 +84,7 @@ final class Stage {
 
         let along = CAKeyframeAnimation(keyPath: "position")
         along.path = Stage.trackPath
-        along.duration = 4; along.repeatCount = .infinity
+        along.duration = 5; along.repeatCount = .infinity
         along.calculationMode = .paced
 
         let flip = CABasicAnimation(keyPath: "transform.rotation.y")
