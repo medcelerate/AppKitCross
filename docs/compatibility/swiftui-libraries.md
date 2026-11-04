@@ -15,8 +15,8 @@ mix), not Apple's SwiftUI, where all of them build by definition. Results as of
 
 | Library | Version | Builds: macOS / Windows / Linux | Runs | What is wrong |
 | --- | --- | --- | --- | --- |
-| [SwiftUI-Shimmer](https://github.com/markiv/SwiftUI-Shimmer) | 1.5.1 | yes / pending / yes | yes | The band animates over the masked content on Linux and macOS (`.mask` of an animated `LinearGradient`); the `.overlay(blendMode:)` mode draws the gradient over the text because compositing blend modes are not applied yet. |
-| [ConfettiSwiftUI](https://github.com/simibac/ConfettiSwiftUI) | 3.0.0 | yes / pending / yes | yes | Confetti bursts, falls, spins (`.rotation3DEffect`) and fades (Linux screenshot below; the macOS host is headless and its capture only shows the counter). Haptics are `#if canImport(UIKit)` and skipped. |
+| [SwiftUI-Shimmer](https://github.com/markiv/SwiftUI-Shimmer) | 1.5.1 | yes / yes / yes | yes | The band animates over the masked content on Windows, Linux and macOS (4.5 % of a 12-core Windows machine while it runs) (`.mask` of an animated `LinearGradient`); the `.overlay(blendMode:)` mode draws the gradient over the text because compositing blend modes are not applied yet. |
+| [ConfettiSwiftUI](https://github.com/simibac/ConfettiSwiftUI) | 3.0.0 | yes / yes / yes | yes | Confetti bursts, falls, spins (`.rotation3DEffect`) and fades on Windows and Linux (Linux screenshot below; the macOS host is headless and its capture only shows the counter). Haptics are `#if canImport(UIKit)` and skipped. |
 | [WrappingHStack](https://github.com/dkk/WrappingHStack) | 2.2.11 | yes / no / no | yes (macOS) | `#if os(macOS)` … `#else UIHostingController`: on Windows and Linux the first error is `cannot find 'UIHostingController' in scope` (WrappingHStack.swift:78). Needs an upstream `canImport(AppKit)` check. On macOS the tag cloud wraps correctly once `Text` stopped breaking inside words. |
 | [Defaults](https://github.com/sindresorhus/Defaults) | 9.0.9 | yes / no / no | yes (macOS) | Same `#if os(macOS)` / `#else import UIKit` (Defaults+Bridge.swift:5). The macOS build stores and reads keys through `@Default` and `Defaults.Toggle`; on Windows and Linux it would also meet corelibs Foundation without KVO on `UserDefaults`. |
 | [swift-markdown-ui](https://github.com/gonzalezreal/swift-markdown-ui) | 2.4.1 | no / no / no | — | Its `NetworkImage` dependency now builds (it needed `.task`, `.redacted`, `Image(decorative:scale:)`, `StateObject` isolation) but on Linux first fails on `URLResponse` being in `FoundationNetworking` (NetworkImageLoader.swift:21); `MarkdownUI` itself has 656 errors on macOS: `Font.Width`, `Text.LineStyle`, the `Layout` protocol (`Subviews`), `AnyShapeStyle`, `AttributeContainer` SwiftUI attributes, `@ScaledMetric`, `Grid`, … (the gap list). |
@@ -38,8 +38,13 @@ macOS (`LibraryCompat --screenshot`, `tools/linux/run.sh`):
   </tr>
 </table>
 
-Windows: pending the Windows machine's run of the checklist (build, run, one screenshot per
-tab); this table is updated with its report.
+Windows (Swift 6.4.1, 150 % DPI): the root build and 255 host-backend tests pass, the probe
+gives the same per-library verdicts, the example runs with the shimmer sweeping and the
+confetti bursting, and the six excluded tabs show their reason; live captures of the
+Shimmer and Confetti tabs were taken on the machine. First errors there: WrappingHStack
+`UIHostingController` (WrappingHStack.swift), Defaults in Observation+Combine.swift, Nuke in
+ImageProcessing.swift, SwiftUICharts in SharedEnums.swift, MarkdownUI in
+URLSession+NetworkImage.swift (corelibs `FoundationNetworking`, as on Linux).
 
 ## How the example is built
 
