@@ -29,6 +29,14 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
         return out
     }
 
+    /// Equal within one step per channel: an RTX 2070 rounds a 0.5 clear to 127 where WARP
+    /// and the reference device give 128.
+    static func assertPixel(_ texture: any MTLTexture, _ x: Int, _ y: Int, _ expected: [UInt8], _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        let actual = pixel(texture, x, y)
+        let close = actual.count == expected.count && zip(actual, expected).allSatisfy { abs(Int($0) - Int($1)) <= 1 }
+        XCTAssertTrue(close, "\(actual) is not within 1 of \(expected)\(message.isEmpty ? "" : " - \(message)")", file: file, line: line)
+    }
+
     func testDeviceIsTheSystemDefaultOnWindows() throws {
         let device = try Self.d3d12Device()
         XCTAssertTrue(device.supportsRasterization)
@@ -193,7 +201,7 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
             clear.waitUntilCompleted()
             XCTAssertEqual(clear.status, .completed)
             XCTAssertFalse(device.isDeviceRemoved, "clearing the back buffer removed the device")
-            XCTAssertEqual(Self.pixel(drawable.texture, 1, 1), pixel, "the clear landed in the back buffer before presenting")
+            Self.assertPixel(drawable.texture, 1, 1, pixel, "the clear landed in the back buffer before presenting")
             // Then an empty command buffer that presents it.
             let cb = try XCTUnwrap(queue.makeCommandBuffer())
             cb.present(drawable)
@@ -207,17 +215,17 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(first.width, 32)
         XCTAssertEqual(first.height, 16)
         XCTAssertEqual(swapChain.presentCount, 1, "Present succeeded: \(swapChain.lastError)")
-        XCTAssertEqual(Self.pixel(first, 3, 2), [255, 128, 64, 255], "a presented buffer keeps its pixels")
+        Self.assertPixel(first, 3, 2, [255, 128, 64, 255], "a presented buffer keeps its pixels")
         let (second, secondHandle) = try clearAndPresent(MTLClearColorMake(0, 1, 0, 1), expecting: [0, 255, 0, 255])
         XCTAssertNotEqual(firstHandle, secondHandle, "the chain flipped to its other buffer")
-        XCTAssertEqual(Self.pixel(second, 0, 0), [0, 255, 0, 255])
-        XCTAssertEqual(Self.pixel(first, 3, 2), [255, 128, 64, 255], "the earlier buffer is untouched")
+        Self.assertPixel(second, 0, 0, [0, 255, 0, 255])
+        Self.assertPixel(first, 3, 2, [255, 128, 64, 255], "the earlier buffer is untouched")
         XCTAssertTrue(swapChain.resize(width: 48, height: 24), "resize: \(swapChain.lastError)")
         XCTAssertEqual(swapChain.width, 48)
         let (third, _) = try clearAndPresent(MTLClearColorMake(1, 1, 1, 1), expecting: [255, 255, 255, 255])
         XCTAssertEqual(third.width, 48)
         XCTAssertEqual(third.height, 24)
-        XCTAssertEqual(Self.pixel(third, 47, 23), [255, 255, 255, 255])
+        Self.assertPixel(third, 47, 23, [255, 255, 255, 255])
         XCTAssertEqual(swapChain.presentCount, 3)
         #else
         throw XCTSkip("the Direct3D 12 backend is Windows-only")
