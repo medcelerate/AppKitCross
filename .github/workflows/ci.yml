@@ -16,6 +16,13 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # The image's default Xcode 16 ships Swift 6.1; the package wants 6.2 (Examples/
+      # LibraryCompat's dependencies declare tools version 6.2).
+      - name: Select the newest Xcode 26
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
+          xcode-select -p
       - run: swift --version
       - run: swift build
       - name: Build every example
