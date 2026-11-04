@@ -8,6 +8,9 @@ import Foundation
 #endif
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view
+/// Main-actor isolated as Apple's is: a conforming type's stored property initialisers
+/// and members run on the main actor (`@StateObject var model = MainActorModel()`).
+@MainActor @preconcurrency
 public protocol View: NSHostingContent {
     associatedtype Body: View
     @ViewBuilder @MainActor var body: Self.Body { get }

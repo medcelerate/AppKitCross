@@ -55,7 +55,17 @@ final class _DecorationPrimitive: _Primitive {
         var scale = CGSize(width: 1, height: 1)
         var rotation = Angle.zero
         var anchor = UnitPoint.center
+        var rotation3D: _Rotation3D? = nil
+        var blendMode: BlendMode = .normal
         var transition: AnyTransition? = nil
+    }
+    /// `.rotation3DEffect`: a rotation about `axis` through `anchor`, with perspective.
+    struct _Rotation3D: Equatable {
+        var angle: Angle
+        var axisX: CGFloat, axisY: CGFloat, axisZ: CGFloat
+        var anchor: UnitPoint
+        var anchorZ: CGFloat
+        var perspective: CGFloat
     }
     var style: Style
     /// Children: [background?, content, overlay?]; these flags say which are present.
@@ -96,6 +106,7 @@ final class _DecorationPrimitive: _Primitive {
         node.presentation.offset = style.offset
         node.presentation.scale = style.scale
         node.presentation.rotation = CGFloat(style.rotation.radians)
+        node.presentation.rotation3D = CGFloat(style.rotation3D?.angle.radians ?? 0)
         apply()
     }
 
@@ -122,6 +133,11 @@ final class _DecorationPrimitive: _Primitive {
             if let anim { node.animate(.rotation, from: [node.presentation.rotation], to: [CGFloat(new.rotation.radians)], with: anim) }
             else { node.presentation.rotation = CGFloat(new.rotation.radians) }
         } else if !running(.rotation) { node.presentation.rotation = CGFloat(new.rotation.radians) }
+        let angle3D = CGFloat(new.rotation3D?.angle.radians ?? 0)
+        if new.rotation3D?.angle != style.rotation3D?.angle {
+            if let anim { node.animate(.rotation3D, from: [node.presentation.rotation3D], to: [angle3D], with: anim) }
+            else { node.presentation.rotation3D = angle3D }
+        } else if !running(.rotation3D) { node.presentation.rotation3D = angle3D }
     }
 
     /// Applies the node's presentation (animated values and transition state) to the view.
@@ -150,11 +166,26 @@ final class _DecorationPrimitive: _Primitive {
             .concatenating(CGAffineTransform(translationX: ax + offset.width, y: ay + offset.height))
         if abs(transform.a - 1) < 1e-9, abs(transform.d - 1) < 1e-9, abs(transform.b) < 1e-9, abs(transform.c) < 1e-9, abs(transform.tx) < 1e-9, abs(transform.ty) < 1e-9 { transform = .identity }
         if view.alphaValue != opacity { view.alphaValue = opacity }
-        if transform != .identity || view.layer != nil {
+        if transform != .identity || style.rotation3D != nil || view.layer != nil {
             if view.layer == nil { view.wantsLayer = true }
-            if let l = view.layer, l.affineTransform() != transform {
+            var t3 = CATransform3DMakeAffineTransform(transform)
+            if let r = style.rotation3D {
+                // Rotate about the anchor first (with the vanishing point in front of it),
+                // then apply the 2D offset/scale/rotation.
+                let rx = size.width * r.anchor.x, ry = size.height * r.anchor.y
+                var m = CATransform3DMakeTranslation(-rx, -ry, -r.anchorZ)
+                m = CATransform3DConcat(m, CATransform3DMakeRotation(p.rotation3D, r.axisX, r.axisY, r.axisZ))
+                if r.perspective != 0 {
+                    var persp = CATransform3DIdentity
+                    persp.m34 = -r.perspective / max(1, max(size.width, size.height) * 2.5)
+                    m = CATransform3DConcat(m, persp)
+                }
+                m = CATransform3DConcat(m, CATransform3DMakeTranslation(rx, ry, r.anchorZ))
+                t3 = CATransform3DConcat(m, t3)
+            }
+            if let l = view.layer, !CATransform3DEqualToTransform(l.transform, t3) {
                 CATransaction.begin(); CATransaction.setDisableActions(true)
-                l.setAffineTransform(transform)
+                l.transform = t3
                 CATransaction.commit()
             }
         }
@@ -182,6 +213,12 @@ final class _DecorationPrimitive: _Primitive {
             l.shadowOpacity = 0
         }
         view.toolTip = style.helpText
+        if let name = style.blendMode.compositingFilterName {
+            view.wantsLayer = true
+            view.layer?.compositingFilter = name
+        } else if let l = view.layer, l.compositingFilter != nil {
+            l.compositingFilter = nil
+        }
         if let tap = style.tap {
             // A tap fires on release, as in SwiftUI (and like an AppKit click); the press
             // arms it, and moving away or a long press taking the release disarms it.
@@ -367,6 +404,87 @@ extension View {
         d.style.shadow = (color, radius, x, y)
         return d
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/rotation3deffect(_:axis:anchor:anchorz:perspective:)
+    public func rotation3DEffect(_ angle: Angle, axis: (x: CGFloat, y: CGFloat, z: CGFloat), anchor: UnitPoint = .center, anchorZ: CGFloat = 0, perspective: CGFloat = 1) -> some View {
+        var d = _Decorated(content: self)
+        d.style.rotation3D = _DecorationPrimitive._Rotation3D(angle: angle, axisX: axis.x, axisY: axis.y, axisZ: axis.z, anchor: anchor, anchorZ: anchorZ, perspective: perspective)
+        return d
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/blendmode(_:)
+    /// The mode is set as the backing layer's compositing filter; the software and
+    /// DirectComposition compositors do not apply it yet (docs/ROADMAP.md).
+    public func blendMode(_ blendMode: BlendMode) -> some View {
+        var d = _Decorated(content: self)
+        d.style.blendMode = blendMode
+        return d
+    }
+}
+
+// MARK: Tasks
+
+/// `.task`: an asynchronous task started when the view appears and cancelled when it
+/// disappears or its id changes.
+@MainActor
+final class _TaskPrimitive: _Primitive {
+    var id: AnyHashable?
+    var priority: TaskPriority
+    var action: @Sendable () async -> Void
+    private var task: Task<Void, Never>?
+    private var running = false
+    init(id: AnyHashable?, priority: TaskPriority, action: @escaping @Sendable () async -> Void, content: _AnyViewBox) {
+        self.id = id; self.priority = priority; self.action = action
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    private func start() {
+        task?.cancel()
+        let action = action
+        task = Task(priority: priority) { await action() }
+        running = true
+    }
+    private func stop() { task?.cancel(); task = nil; running = false }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        node.onAppear = [{ [weak self] in self?.start() }]
+        node.onDisappear = [{ [weak self] in self?.stop() }]
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _TaskPrimitive else { return }
+        let changed = o.id != id
+        id = o.id; priority = o.priority; action = o.action
+        if changed, running { start() }
+    }
+    override func detach() { super.detach(); stop() }
+}
+
+struct _TaskView<Content: View>: View, _PrimitiveView {
+    typealias Body = Never
+    let content: Content
+    let id: AnyHashable?
+    let priority: TaskPriority
+    let action: @Sendable () async -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _TaskPrimitive(id: id, priority: priority, action: action, content: _ViewBox(content)) }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/task(priority:_:)
+    public func task(priority: TaskPriority = .userInitiated, @_inheritActorContext _ action: @escaping @Sendable () async -> Void) -> some View {
+        _TaskView(content: self, id: nil, priority: priority, action: action)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/task(id:priority:_:)
+    public func task<T: Equatable>(id value: T, priority: TaskPriority = .userInitiated, @_inheritActorContext _ action: @escaping @Sendable () async -> Void) -> some View {
+        _TaskView(content: self, id: _EquatableBox(value), priority: priority, action: action)
+    }
+}
+
+/// An `Equatable` value as `AnyHashable` (for change detection only).
+struct _EquatableBox<T: Equatable>: Hashable {
+    let value: T
+    init(_ value: T) { self.value = value }
+    static func == (a: _EquatableBox, b: _EquatableBox) -> Bool { a.value == b.value }
+    func hash(into h: inout Hasher) { h.combine(ObjectIdentifier(T.self)) }
 }
 
 // MARK: Lifecycle hooks

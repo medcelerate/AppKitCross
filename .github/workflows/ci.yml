@@ -16,6 +16,13 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # The image's default Xcode 16 ships Swift 6.1; the package wants 6.2 (Examples/
+      # LibraryCompat's dependencies declare tools version 6.2).
+      - name: Select the newest Xcode 26
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
+          xcode-select -p
       - run: swift --version
       - run: swift build
       - name: Build every example
@@ -24,6 +31,8 @@ jobs:
       - name: Drawing example headless PNG export
         run: .build/debug/Drawing --export drawing-macos.png
       - run: swift test
+      - name: Third-party SwiftUI library compatibility example
+        run: tools/library-compat.sh
 
   windows:
     name: Windows build and tests
@@ -47,6 +56,8 @@ jobs:
           # The Direct3D 12 shim's log (device, shader compiler, swap-chain and readback
           # failures with HRESULTs) on stderr, without the debug layer.
           APPKITWIN_D3D12_LOG: "1"
+      - name: Third-party SwiftUI library compatibility example
+        run: bash tools/library-compat.sh
 
   linux:
     name: Linux build (X11 + Wayland, Cairo)
@@ -63,6 +74,8 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
+      - name: Third-party SwiftUI library compatibility example
+        run: tools/library-compat.sh
 
   linux-vulkan:
     name: Linux build and tests on lavapipe (Vulkan backend, ADR-0012)

@@ -130,20 +130,22 @@ final class SwiftUITests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    final class ItemsModel: ObservableObject {
+        @Published var items = ["a", "b", "c"]
+    }
+    struct ItemsListView: View {
+        @ObservedObject var model: ItemsModel
+        var body: some View {
+            VStack {
+                ForEach(model.items, id: \.self) { Text($0) }
+            }
+        }
+    }
+
     func testForEachReconcilesByIdentity() {
         MainActor.assumeIsolated {
-            final class Model: ObservableObject {
-                @Published var items = ["a", "b", "c"]
-            }
-            struct ListView: View {
-                @ObservedObject var model: Model
-                var body: some View {
-                    VStack {
-                        ForEach(model.items, id: \.self) { Text($0) }
-                    }
-                }
-            }
-            let model = Model()
+            typealias ListView = ItemsListView
+            let model = ItemsModel()
             let (w, h) = host(ListView(model: model))
             var texts = allViews(h).compactMap { $0 as? _TextView }
             XCTAssertEqual(texts.map { $0.storage.string }, ["a", "b", "c"])

@@ -37,6 +37,14 @@ if [ -n "$AT_SPI_BUS_ADDRESS" ]; then
 fi
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
+echo "== LibraryCompat under Xvfb (third-party SwiftUI libraries, docs/compatibility/swiftui-libraries.md)"
+# Built by tools/library-compat.sh (its own package); one screenshot per library tab.
+if [ -x Examples/LibraryCompat/.build/debug/LibraryCompat ]; then
+    APPKITWIN_LINUX_BACKEND=x11 timeout 60 Examples/LibraryCompat/.build/debug/LibraryCompat --screenshot /tmp/library-compat 2>&1 | grep -E "^screenshot|rror" | head -10
+    cp /tmp/library-compat/*.png /tmp/ 2>/dev/null || true
+else
+    echo "skipped: run tools/library-compat.sh first"
+fi
 echo "== HelloWindow Metal tab under Xvfb (Vulkan device, ADR-0012)"
 # The Metal tab names its device, then logs the drawable's corner and centre pixels every
 # 30 frames after that frame's command buffer completes. The corner follows the clear

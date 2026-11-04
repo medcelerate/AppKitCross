@@ -148,7 +148,7 @@ final class _ObservedBox<ObjectType: ObservableObject> {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/observedobject
-@propertyWrapper
+@MainActor @preconcurrency @propertyWrapper
 public struct ObservedObject<ObjectType>: DynamicProperty where ObjectType: ObservableObject {
     let box: _ObservedBox<ObjectType>
     public init(wrappedValue: ObjectType) { box = _ObservedBox(wrappedValue) }
@@ -180,10 +180,10 @@ final class _StateObjectBox<ObjectType: ObservableObject> {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/stateobject
-@propertyWrapper
+@MainActor @preconcurrency @propertyWrapper
 public struct StateObject<ObjectType>: DynamicProperty where ObjectType: ObservableObject {
     let box: _StateObjectBox<ObjectType>
-    public init(wrappedValue thunk: @autoclosure @escaping () -> ObjectType) { box = _StateObjectBox(thunk) }
+    nonisolated public init(wrappedValue thunk: @autoclosure @escaping () -> ObjectType) { box = _StateObjectBox(thunk) }
     public var wrappedValue: ObjectType {
         box.observed?.object ?? {
             // Read before installation (previews, tests): create and keep the object.
@@ -351,6 +351,9 @@ func _installDynamicProperties(in value: Any, node: _ViewNode, slot: inout Int) 
         if let property = child.value as? DynamicProperty {
             property._install(in: node, slot: slot)
             slot += 1
+            // A custom DynamicProperty owns dynamic properties of its own (a library's
+            // wrapper around @ObservedObject): they are installed too, as Apple's are.
+            if Mirror(reflecting: child.value).displayStyle == .struct { _installDynamicProperties(in: child.value, node: node, slot: &slot) }
         } else {
             let m = Mirror(reflecting: child.value)
             if m.displayStyle == .struct, !(child.value is any View) { _installDynamicProperties(in: child.value, node: node, slot: &slot) }

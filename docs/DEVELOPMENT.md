@@ -27,6 +27,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `tools/linux` | Dockerfile, test and screenshot scripts for the Linux container. |
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
 | `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
+| `Examples/LibraryCompat` | A package of its own: third-party SwiftUI libraries as dependencies, one tab each, with the per-library verdicts and API gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Built by `tools/library-compat.sh` (see below). |
 
 ## Conventions
 
@@ -78,6 +79,28 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash -c "swift build; APP
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard), HelloWindow and the examples under Xvfb
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh --wayland  # the same under a headless sway
 ```
+
+### The library compatibility example
+
+`Examples/LibraryCompat` is a separate SwiftPM package (so the core package has no
+dependencies) that pulls in third-party SwiftUI libraries and builds them against this
+`SwiftUI`. Those packages do not declare a dependency on AppKitWin, so its modules must be in
+the build's `Modules` directory before they compile, and a client of `AppKit` needs the C
+shim module maps (`CCairo`, `CD2D`, …) that SwiftPM only passes to declared dependents;
+`tools/library-compat.sh` does both, on every platform:
+
+```bash
+tools/library-compat.sh            # build the example (step 1: SwiftUI, step 2: the libraries and the app)
+tools/library-compat.sh --probe    # also build each library on its own and print its first error
+tools/library-compat.sh --run      # build, then run it
+Examples/LibraryCompat/.build/debug/LibraryCompat --screenshot /tmp/shots   # one PNG per tab, then exit
+```
+
+On macOS the script raises every target's deployment target to 14.0 (the libraries declare
+10.15–12 and the host build's modules 14), which is what lets the host build type-check the
+libraries against this SwiftUI rather than Apple's. Which libraries are linked into the app
+on each platform is decided in `Examples/LibraryCompat/Package.swift`; a library that does
+not compile stays declared there so the probe can re-check it.
 
 The container has no GPU: Mesa's lavapipe (`mesa-vulkan-drivers`) is the Vulkan device the
 Metal module runs on there, so the Metal tests and `HelloWindow --metal-selftest` exercise the
@@ -139,6 +162,7 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
 | `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |
 | `APPKITWIN_LAYOUT_TAB=table` | Opens the HelloWindow Layout Demo on that tab (form, split, table, metal); screenshots are named by tab. |
+| `APPKITWIN_COMPAT_TAB=confetti` | Opens `LibraryCompat` on that library's tab (shimmer, confetti, wrapping, defaults, markdown, introspect, charts, nuke). |
 | `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
 | `APPKITWIN_IME_LAYOUT=00000411` | Windows: activates that keyboard layout for the process and opens its IME in native mode on focus (00000411 is Japanese), for testing composition without changing the system's input settings. |
 | (gestures) | No switch: on Windows, Ctrl+wheel is delivered as a magnify gesture (a precision touchpad's pinch arrives that way) and touch screens send WM_GESTURE; on X11 gestures need XInput 2.4 (libinput); on Wayland the compositor must offer `zwp_pointer_gestures_v1`. |
