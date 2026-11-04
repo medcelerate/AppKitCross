@@ -1,0 +1,13 @@
+AppKitWin
+Copyright 2026 Evan Clark
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This distribution bundles third-party work under its own terms:
+
+- Sources/Combine is a port of OpenCombine (https://github.com/OpenCombine/OpenCombine),
+  Copyright (c) 2019 Sergej Jaskiewicz, under the MIT License. See Sources/Combine/LICENSE
+  and Sources/Combine/NOTICE.
+- Sources/CWayland/include contains client protocol headers generated from the
+  wayland-protocols XML (xdg-shell, xdg-decoration), copyright their respective authors as
+  stated in each header, under the MIT License.
