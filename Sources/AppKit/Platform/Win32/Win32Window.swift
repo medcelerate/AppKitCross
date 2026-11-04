@@ -24,6 +24,10 @@ final class Win32Window: PlatformWindow {
     /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
     var uiaRoot: OpaquePointer? = nil
     var accessibilityOwner: PlatformWindowOwner? { owner }
+    var accessibilityBackend: Win32Backend { backend }
+    /// Changes waiting for the next turn of the event loop (Win32Accessibility.swift).
+    var pendingAccessibilityChanges: [PlatformAccessibilityChange] = []
+    var accessibilityFlushScheduled = false
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
 

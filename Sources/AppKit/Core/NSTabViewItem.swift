@@ -15,7 +15,33 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewitem
-@MainActor open class NSTabViewItem: NSObject, NSCoding {
+@MainActor open class NSTabViewItem: NSObject, NSCoding, _NSAccessibilityVirtualElement {
+    // MARK: Accessibility (ADR-0013): a tab is an AXRadioButton (subrole AXTabButton) of
+    // its tab view's tab group, selected when it is the current tab; pressing it selects it.
+    private var _accessibilityID = 0
+    var _accessibilityElementID: Int {
+        if _accessibilityID == 0 { _accessibilityID = _NSAccessibilityIDs.next() }
+        return _accessibilityID
+    }
+    var _accessibilityOwnerView: NSView? { _tabView }
+    func _accessibilityElement() -> PlatformAccessibilityElement {
+        let selected = _tabView?.selectedTabViewItem === self
+        var e = PlatformAccessibilityElement(id: _accessibilityElementID, role: NSAccessibility.Role.radioButton.rawValue, frame: _tabView?._accessibilityTabFrame(self) ?? .zero)
+        e.subrole = NSAccessibility.Subrole.tabButtonSubrole.rawValue
+        e.label = label
+        e.help = _toolTip
+        e.value = .number(selected ? 1 : 0)
+        e.isSelected = selected
+        e.isEnabled = true
+        e.actions = [.press]
+        return e
+    }
+    func _accessibilityPerform(_ action: PlatformAccessibilityAction) -> Bool {
+        guard action == .press, let tv = _tabView else { return false }
+        tv.selectTabViewItem(self)
+        return true
+    }
+
     // MARK: Storage
     private var _identifier: Any? = nil
     private var _label = ""

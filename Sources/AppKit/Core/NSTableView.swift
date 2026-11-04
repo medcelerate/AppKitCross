@@ -646,7 +646,11 @@ import CoreGraphics
     }
 
     /// Makes row views for the visible rows and recycles the rest.
+    private var _updatingVisibleRows = false
     private func _updateVisibleRows() {
+        guard !_updatingVisibleRows else { return }
+        _updatingVisibleRows = true
+        defer { _updatingVisibleRows = false }
         _reloadIfNeeded()
         let visible = visibleRect
         let range = rows(in: visible.isEmpty ? bounds : visible)

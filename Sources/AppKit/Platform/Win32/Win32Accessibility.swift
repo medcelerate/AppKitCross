@@ -70,20 +70,40 @@ extension Win32Window {
         uiaRoot = nil
     }
 
-    /// PlatformWindow: the core's change becomes a UIA event when a client listens.
+    /// PlatformWindow: the core's change becomes a UIA event when a client listens. The
+    /// snapshot is marked stale at once; the events go out on the next turn of the event
+    /// loop, coalesced, so a tree is never pushed while the view hierarchy is mid-change
+    /// or from inside a provider call (a press that changes views).
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) {
         guard let root = uiaRoot else { return }
         cuia_root_invalidate(root)
         guard cuia_clients_are_listening() else { return }
+        pendingAccessibilityChanges.append(change)
+        guard !accessibilityFlushScheduled else { return }
+        accessibilityFlushScheduled = true
+        accessibilityBackend.post { [weak self] in self?.flushAccessibilityChanges() }
+    }
+
+    private func flushAccessibilityChanges() {
+        accessibilityFlushScheduled = false
+        let changes = pendingAccessibilityChanges
+        pendingAccessibilityChanges.removeAll()
+        guard let root = uiaRoot, !changes.isEmpty else { return }
         pushAccessibilityTree()
-        switch change {
-        case .focus(let id):
-            cuia_root_raise_focus(root, Int32(id ?? (accessibilityOwner?.platformAccessibility.accessibilityTree().id ?? 0)))
-        case .value(let id): cuia_root_raise_property_changed(root, Int32(id), 0)
-        case .name(let id): cuia_root_raise_property_changed(root, Int32(id), 1)
-        case .selection(let id): cuia_root_raise_property_changed(root, Int32(id), 2)
-        case .structure(let id): cuia_root_raise_structure_changed(root, Int32(id))
+        var raised = Set<String>()
+        for change in changes {
+            let key = "\(change)"
+            guard raised.insert(key).inserted else { continue }
+            switch change {
+            case .focus(let id):
+                cuia_root_raise_focus(root, Int32(id ?? (accessibilityOwner?.platformAccessibility.accessibilityTree().id ?? 0)))
+            case .value(let id): cuia_root_raise_property_changed(root, Int32(id), 0)
+            case .name(let id): cuia_root_raise_property_changed(root, Int32(id), 1)
+            case .selection(let id): cuia_root_raise_property_changed(root, Int32(id), 2)
+            case .structure(let id): cuia_root_raise_structure_changed(root, Int32(id))
+            }
         }
+        if NSView._traceInvalidation { NSView._trace("uia events '\(title)': \(raised.count) raised from \(changes.count) changes") }
     }
 
     // MARK: Snapshot → nodes
@@ -127,12 +147,12 @@ extension Win32Window {
             let role = e.role
             switch role {
             case "AXCheckBox": flags |= UInt32(CUIA_HAS_TOGGLE)
-            case "AXRadioButton": flags |= UInt32(CUIA_HAS_INVOKE) | UInt32(CUIA_HAS_SELECTION_ITEM); if e.value?.doubleValue == 1 { flags |= UInt32(CUIA_SELECTED) }
+            case "AXRadioButton": flags |= UInt32(CUIA_HAS_SELECTION_ITEM); if e.subrole != "AXTabButton" { flags |= UInt32(CUIA_HAS_INVOKE) }; if e.value?.doubleValue == 1 { flags |= UInt32(CUIA_SELECTED) }
             case "AXTextField", "AXTextArea": flags |= UInt32(CUIA_HAS_VALUE) | UInt32(CUIA_HAS_TEXT)
             case "AXStaticText": flags |= UInt32(CUIA_HAS_TEXT)
-            case "AXPopUpButton", "AXComboBox", "AXRadioGroup", "AXTabGroup": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
+            case "AXPopUpButton", "AXComboBox": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             case "AXSlider", "AXScrollBar", "AXIncrementor", "AXLevelIndicator", "AXProgressIndicator": flags |= UInt32(CUIA_HAS_RANGE)
-            case "AXTable", "AXList", "AXOutline": flags |= UInt32(CUIA_HAS_SELECTION)
+            case "AXTable", "AXList", "AXOutline", "AXTabGroup", "AXRadioGroup": flags |= UInt32(CUIA_HAS_SELECTION)
             case "AXRow": flags |= UInt32(CUIA_HAS_SELECTION_ITEM)
             default: if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             }
@@ -150,6 +170,7 @@ extension Win32Window {
             for c in e.children { visit(c, parent: n.id) }
         }
         visit(tree, parent: -1)
+        if pool.isEmpty { pool.append(0) }      // keeps a base address for the (empty) string table
         pool.withUnsafeBufferPointer { base in
             for s in strings {
                 let p = base.baseAddress! + s.offset
@@ -176,6 +197,7 @@ extension Win32Window {
 
     /// AppKit roles → UIA control types (the UIA_*ControlTypeId constants).
     private static func controlType(for e: PlatformAccessibilityElement) -> Int32 {
+        if e.subrole == "AXTabButton" { return 50019 }      // TabItem
         switch e.role {
         case "AXButton", "AXMenuButton": return 50000
         case "AXCheckBox": return 50002
@@ -189,7 +211,8 @@ extension Win32Window {
         case "AXRow": return 50007
         case "AXScrollArea": return 50033
         case "AXScrollBar": return 50014
-        case "AXGroup", "AXSplitGroup", "AXRadioGroup", "AXCell": return 50026
+        case "AXGroup", "AXSplitGroup", "AXCell": return 50026
+        case "AXRadioGroup": return 50008      // List of radio-button items (a segmented control)
         case "AXTabGroup": return 50018
         case "AXWindow", "AXSheet", "AXDrawer": return 50032
         case "AXMenu", "AXMenuBar": return 50009

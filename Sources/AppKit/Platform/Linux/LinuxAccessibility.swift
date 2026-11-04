@@ -636,7 +636,7 @@ final class AtspiBridge {
         case "AXSheet": return (16, "dialog")
         case "AXButton", "AXMenuButton": return (43, "push button")
         case "AXCheckBox": return (7, "check box")
-        case "AXRadioButton": return (44, "radio button")
+        case "AXRadioButton": return subrole == "AXTabButton" ? (37, "page tab") : (44, "radio button")
         case "AXStaticText": return (29, "label")
         case "AXTextField", "AXTextArea": return (61, "text")
         case "AXSlider": return (51, "slider")
@@ -683,8 +683,9 @@ final class AtspiBridge {
             if e.isFocusable { bits.append(11) }
             if e.isFocused { bits.append(12) }
             if e.isSettable && ["AXTextField", "AXTextArea"].contains(e.role) { bits.append(7) } else if ["AXTextField", "AXTextArea", "AXStaticText"].contains(e.role) { bits.append(43) }
-            if e.role == "AXRow" || e.role == "AXCell" { bits.append(22); if e.isSelected { bits.append(23) } }
-            if e.role == "AXCheckBox" || e.role == "AXRadioButton" { bits.append(41); if (e.value?.doubleValue ?? 0) != 0 { bits.append(4) } }
+            let isTab = e.subrole == "AXTabButton"
+            if e.role == "AXRow" || e.role == "AXCell" || isTab { bits.append(22); if e.isSelected { bits.append(23) } }
+            if (e.role == "AXCheckBox" || e.role == "AXRadioButton") && !isTab { bits.append(41); if (e.value?.doubleValue ?? 0) != 0 { bits.append(4) } }
             if e.isMultiline { bits.append(17) } else if e.role == "AXTextField" { bits.append(26) }
             if e.allowsMultipleSelection { bits.append(18) }
             if l.isWindow { bits.append(21); if l.entry.window?.atspiIsKey == true { bits.append(1) } }

@@ -402,6 +402,58 @@ final class AccessibilityTests: XCTestCase, @unchecked Sendable {
         func tableViewSelectionDidChange(_ notification: Notification) { selectionChanges += 1 }
     }
 
+    // MARK: Tabs and segments (elements that are not views)
+
+    func testTabsAndSegmentsAreVirtualElements() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            let tabs = NSTabView(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
+            let form = NSTabViewItem(identifier: "form"); form.label = "Form"; form.view = NSView(frame: .zero)
+            let table = NSTabViewItem(identifier: "table"); table.label = "Table"
+            let page = NSView(frame: .zero)
+            page.addSubview(NSButton(title: "On the table page", target: nil, action: nil))
+            table.view = page
+            tabs.addTabViewItem(form)
+            tabs.addTabViewItem(table)
+            w.contentView!.addSubview(tabs)
+            let seg = NSSegmentedControl(labels: ["Left", "Right"], trackingMode: .selectOne, target: nil, action: nil)
+            seg.frame = NSRect(x: 10, y: 250, width: 200, height: 24)
+            seg.selectedSegment = 0
+            w.contentView!.addSubview(seg)
+            w.makeKeyAndOrderFront(nil)
+            tabs.layoutSubtreeIfNeeded()
+
+            var tree = w.accessibilityTree()
+            let group = element(tree, role: .tabGroup)!
+            XCTAssertEqual(group.value, .string("Form"))
+            let tabElements = group.children.filter { $0.subrole == "AXTabButton" }
+            XCTAssertEqual(tabElements.map(\.label), ["Form", "Table"], "the tabs come first")
+            XCTAssertEqual(tabElements.map(\.isSelected), [true, false])
+            XCTAssertEqual(tabElements[0].role, "AXRadioButton")
+            XCTAssertTrue(tabElements[1].frame.width > 0 && tree.frame.contains(tabElements[1].frame), "a tab has a screen frame inside the window")
+            XCTAssertNil(element(tree, role: .button, label: "On the table page"), "only the selected page's views are in the tree")
+            // Pressing (or selecting) a tab selects it; the page's views follow.
+            XCTAssertTrue(w.accessibilityPerform(.press, on: tabElements[1].id))
+            XCTAssertTrue(tabs.selectedTabViewItem === table)
+            tree = w.accessibilityTree()
+            XCTAssertNotNil(element(tree, role: .button, label: "On the table page"))
+            XCTAssertTrue(w.accessibilitySetSelected(true, on: tabElements[0].id, extending: false))
+            XCTAssertTrue(tabs.selectedTabViewItem === form)
+            XCTAssertEqual(tabElements[1].id, element(w.accessibilityTree(), role: .tabGroup)!.children[1].id, "tab ids are stable across snapshots")
+            // Segments.
+            let radio = element(tree, role: .radioGroup)!
+            XCTAssertEqual(radio.children.map(\.label), ["Left", "Right"])
+            XCTAssertEqual(radio.children.map(\.isSelected), [true, false])
+            XCTAssertTrue(radio.children[1].frame.minX > radio.children[0].frame.minX)
+            XCTAssertTrue(w.accessibilityPerform(.press, on: radio.children[1].id))
+            XCTAssertEqual(seg.selectedSegment, 1)
+            XCTAssertEqual(element(w.accessibilityTree(), role: .radioGroup)!.children.map(\.isSelected), [false, true])
+            XCTAssertTrue(w.accessibilityFocus(radio.children[0].id), "focusing a segment focuses its control")
+            XCTAssertTrue(w.firstResponder === seg)
+            w.close()
+        }
+    }
+
     // MARK: The application
 
     func testApplicationListsWindowsKeyFirst() {

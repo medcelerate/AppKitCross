@@ -87,12 +87,19 @@ nothing reached the platform: screen readers saw empty windows.
   `UIAutomationTests` drive the shim's COM objects without a window (Windows);
   `AtspiTests` play an assistive technology over a second bus connection (Linux with a
   bus). Each platform test skips where its platform is absent.
+- Elements that are not views (the tabs of an `NSTabView`, the segments of an
+  `NSSegmentedControl`) take part through an internal virtual-element protocol: the
+  owning view lists them among its children with stable ids, and actions reach them by
+  id. On Windows the core's change notifications are queued and raised on the next turn
+  of the event loop, coalesced, so a snapshot is never pushed while the view hierarchy
+  is mid-change or from inside a provider call.
 - Limitations: the `org.a11y.atspi.Cache` interface is not served (clients that insist
   on it, as some versions of libatspi do for interface lists, fall back to the
   `GetInterfaces` method, which is served); AT-SPI text granularities (word, line) report
   the whole text; UIA text ranges carry no formatting attributes; structure changes are
   reported as "children invalidated" without the added or removed child; menus and menu
   items are not in the tree yet; `NSAccessibilityElement` (virtual elements for custom
-  views) and custom rotors and actions are still stubs; and the Wayland bridge reports
+  views) and custom rotors and actions are still stubs; the native Win32 menu bar is served by the system's own UIA proxy, whose ExpandCollapse
+  does not open our menus (mouse and Alt do); and the Wayland bridge reports
   extents against the primary output's logical size because Wayland has no global
   coordinates.

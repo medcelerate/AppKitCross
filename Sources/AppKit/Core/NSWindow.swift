@@ -1719,7 +1719,9 @@ extension NSWindow: PlatformAccessibilityProvider {
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
         if elementID == _accessibilityElementID { return action == .raise ? accessibilityPerformRaise() : false }
-        guard let v = _accessibilityView(withID: elementID) else { return false }
+        guard let v = _accessibilityView(withID: elementID) else {
+            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityPerform(action) ?? false
+        }
         switch action {
         case .press: return v.accessibilityPerformPress()
         case .increment: return v.accessibilityPerformIncrement()
@@ -1739,13 +1741,17 @@ extension NSWindow: PlatformAccessibilityProvider {
 
     public func accessibilityFocus(_ elementID: Int) -> Bool {
         if elementID == _accessibilityElementID { makeKeyAndOrderFront(nil); return true }
-        guard let v = _accessibilityView(withID: elementID) else { return false }
+        guard let v = _accessibilityView(withID: elementID) ?? _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityOwnerView else { return false }
         if !_isKey { makeKeyAndOrderFront(nil) }
         return makeFirstResponder(v)
     }
 
     public func accessibilitySetSelected(_ selected: Bool, on elementID: Int, extending: Bool) -> Bool {
-        guard let v = _accessibilityView(withID: elementID) else { return false }
+        guard let v = _accessibilityView(withID: elementID) else {
+            // A tab or a segment: selecting it is pressing it.
+            guard selected, let e = _contentView?._accessibilityVirtualElement(withID: elementID) else { return false }
+            return e._accessibilityPerform(.press)
+        }
         if let row = v as? NSTableRowView { return row._accessibilitySetSelected(selected, extending: extending) }
         v.setAccessibilitySelected(selected)
         return true

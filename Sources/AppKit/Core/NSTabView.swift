@@ -40,6 +40,18 @@ import CoreText
     open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : selectedTabViewItem?.label }
     open func accessibilityTabs() -> [Any]? { tabViewItems }
     override func _accessibilityIsFocusable() -> Bool { false }
+    /// The tabs (as virtual elements) first, then the selected page's elements.
+    open override func accessibilityChildren() -> [Any]? {
+        if let c = _a11y.children { return c }
+        let tabs: [Any] = _tabPosition == .none ? [] : _items
+        return tabs + (super.accessibilityChildren() ?? [])
+    }
+    /// A tab's rect in screen coordinates, for its virtual element.
+    internal func _accessibilityTabFrame(_ item: NSTabViewItem) -> NSRect {
+        guard let i = _items.firstIndex(where: { $0 === item }) else { return .zero }
+        let r = convert(_tabRects()[i], to: nil)
+        return window?.convertToScreen(r) ?? r
+    }
 
     /// Tab strip rects per item (in bounds coordinates), laid out centred along the top edge.
     private func _tabRects() -> [NSRect] {

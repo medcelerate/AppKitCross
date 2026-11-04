@@ -152,7 +152,28 @@ extension NSAccessibility {
     }
 }
 
+/// An element that is not a view: a tab of an `NSTabView`, a segment of an
+/// `NSSegmentedControl`. The owning view lists it among its `accessibilityChildren()`;
+/// the snapshot, the id lookups and the actions reach it through this protocol.
+@MainActor
+internal protocol _NSAccessibilityVirtualElement: AnyObject {
+    var _accessibilityElementID: Int { get }
+    /// The view that draws it (focus goes there).
+    var _accessibilityOwnerView: NSView? { get }
+    func _accessibilityElement() -> PlatformAccessibilityElement
+    func _accessibilityPerform(_ action: PlatformAccessibilityAction) -> Bool
+}
+
 extension NSView {
+    /// The virtual element with an id among this subtree's children, if any.
+    @MainActor internal func _accessibilityVirtualElement(withID id: Int) -> (any _NSAccessibilityVirtualElement)? {
+        for c in accessibilityChildren() ?? [] {
+            if let v = c as? any _NSAccessibilityVirtualElement, v._accessibilityElementID == id { return v }
+        }
+        for s in subviews { if let v = s._accessibilityVirtualElement(withID: id) { return v } }
+        return nil
+    }
+
     /// The accessibility tree below this view, as the platform sees it: the view itself
     /// when it is an element, otherwise its children stand in for it (AppKit's "ignored"
     /// elements). Hidden views and `accessibilityHidden` views contribute nothing.
@@ -169,6 +190,8 @@ extension NSView {
         for c in children {
             if let v = c as? NSView {
                 if v.isHidden || v.isAccessibilityHidden() { continue }
+                out.append(v._accessibilityElement())
+            } else if let v = c as? any _NSAccessibilityVirtualElement {
                 out.append(v._accessibilityElement())
             }
         }
