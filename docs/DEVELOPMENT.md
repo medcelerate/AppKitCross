@@ -25,8 +25,9 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `api-inventory` | Condensed public API inventory extracted from the macOS SDK. Source of truth for stubs and coverage. |
 | `tools/apigen` | Extraction, probing and stub generation scripts. |
 | `tools/linux` | Dockerfile, test and screenshot scripts for the Linux container. |
+| `Sources/AVFAudio`, `Sources/AVFoundation` | The audio engine under Apple's module names (ADR-0014), with the WASAPI, PipeWire and ALSA shims in `Sources/CWASAPI`, `CPipeWire`, `CALSA`. |
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
-| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
+| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable`, `AudioPlayer` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
 
 ## Conventions
 
@@ -111,6 +112,7 @@ says what it demonstrates. CI builds every one on macOS, Windows and both Linux 
 | `Animation` | `CABasicAnimation`, `CAKeyframeAnimation` along a path, 3D flip with perspective, `CAAnimationGroup`, implicit `CATransaction` animations, play/pause, SwiftUI `withAnimation` | `swift run Animation` (`--paused`) |
 | `Drawing` | `draw(_:)` with paths, gradient, text, images; sketch canvas with mouse tracking, undo/redo, PNG export through `NSSavePanel` | `swift run Drawing` (`--export file.png`) |
 | `Observable` | `ObservableObject`/`@Published` model, live `List`, detail pane over a `Binding`, Combine `Timer.publish` | `swift run Observable` |
+| `AudioPlayer` | `AVAudioEngine`, two `AVAudioPlayerNode`s (file, generated sine), play/pause/loop, `installTap` level meter, output device and latency, offline render through `AVAudioFile` | `swift run AudioPlayer` (`file.wav`, `--render out.wav`) |
 
 The port has no Observation framework (`@Observable`) and no `UndoManager` (not in
 swift-corelibs-foundation), so Observable uses `ObservableObject` and Drawing keeps its own
@@ -142,6 +144,37 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
 | `APPKITWIN_IME_LAYOUT=00000411` | Windows: activates that keyboard layout for the process and opens its IME in native mode on focus (00000411 is Japanese), for testing composition without changing the system's input settings. |
 | `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |
+
+## Audio backends and the offline render switch
+
+`Sources/AVFAudio` (ADR-0014) is the audio engine, built on Windows and Linux; on macOS the
+package uses Apple's AVFAudio so `NSSound`, the AudioPlayer example and `AudioTests` are
+checked against the real API. `APPKITWIN_HOST_AVFAUDIO=1 swift test --filter AudioTests`
+builds ours on the Mac as well (shadowing Apple's inside the package) and runs the engine
+tests against it; the macOS CI job does both.
+
+The engine talks to the device through `PlatformAudio` (`Sources/AVFAudio/Platform`):
+
+| Backend | Platform | Shim | Notes |
+| --- | --- | --- | --- |
+| WASAPI | Windows | `Sources/CWASAPI` (C++ over COM) | Shared mode, event driven; `IAudioClient3` low-latency period when the driver offers one, `IAudioClient` default period otherwise; render thread on the "Pro Audio" MMCSS task; the device's mix format and rate. |
+| PipeWire | Linux | `Sources/CPipeWire` (dlopen) | Needs `libpipewire-0.3-dev` at build time (the `CPipeWireSystem` target supplies the include paths); without the headers the shim is a stub. `pw_stream` with `RT_PROCESS`; PipeWire resamples to the graph rate. |
+| ALSA | Linux | `Sources/CALSA` (dlopen) | Fallback when PipeWire is absent at runtime; `default` PCM, 10 ms periods, blocking writes. Needs `libasound2-dev` at build time. |
+| Null | all | none | A timer thread rendering into a scratch buffer: the engine runs with no device (CI, the container, tests). |
+
+`APPKITWIN_AUDIO_BACKEND=wasapi|pipewire|alsa|null` picks one; otherwise the platform's
+native backend, falling through PipeWire to ALSA on Linux. `AVAudioEngine.start()` throws
+when no device stream opens, and `APPKITWIN_AUDIO_LOG=1` prints why a Linux backend was
+skipped. The engine logs nothing itself; `AVAudioEngine._outputDescription` (port only)
+names the backend, device, rate, period and latency, and the AudioPlayer example shows it
+in its status line.
+
+Machines without a sound device (CI runners, the Linux container) verify the engine
+through `AVAudioEngine`'s manual rendering mode: `swift run AudioPlayer --render out.wav`
+renders two seconds of the example's mix through `AVAudioFile` and exits, which every CI
+job and `tools/linux/run.sh` do, and `AudioTests` render offline and compare sample for
+sample. Real playback is checked on the Windows machine (device name, latency, pause and
+loop, a window drag without glitches) and recorded in the pull request.
 
 ## Regenerating the API inventory and stubs
 

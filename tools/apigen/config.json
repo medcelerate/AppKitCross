@@ -52,6 +52,7 @@
     "NSSegmentedControl",
     "NSSlider",
     "NSSliderCell",
+    "NSSound",
     "NSSplitView",
     "NSSplitViewController",
     "NSSplitViewItem",

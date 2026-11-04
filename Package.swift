@@ -1,5 +1,6 @@
 // swift-tools-version:6.0
 import PackageDescription
+import Foundation
 
 // Windows-only modules. On macOS these are NOT declared: Apple's Foundation re-exports
 // the real CoreGraphics, and a local module with the same name shadows the overlay and
@@ -64,6 +65,12 @@ targets += [
     .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CD2D"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
+targets += [
+    // extern "C" shim over WASAPI (IMMDeviceEnumerator, IAudioClient3, IAudioRenderClient)
+    // for the AVFAudio output stream (ADR-0014).
+    .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
+]
+let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
@@ -117,6 +124,17 @@ targets += [
     .target(name: "UniformTypeIdentifiers", path: "Sources/UniformTypeIdentifiers", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "ImageIO", dependencies: ["CoreGraphics", "CoreText", "CCairo"], path: "Sources/ImageIO", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
+targets += [
+    // PipeWire and ALSA output streams for AVFAudio (ADR-0014). Both shims dlopen their
+    // library at runtime; CPipeWireSystem only supplies the PipeWire include paths through
+    // pkg-config (without libpipewire-0.3-dev the shim compiles to stubs, as CMetalVulkan
+    // does without the Vulkan headers).
+    .systemLibrary(name: "CPipeWireSystem", path: "Sources/CPipeWireSystem", pkgConfig: "libpipewire-0.3",
+                   providers: [.apt(["libpipewire-0.3-dev"])]),
+    .target(name: "CPipeWire", dependencies: ["CPipeWireSystem"], path: "Sources/CPipeWire", linkerSettings: [.linkedLibrary("dl")]),
+    .target(name: "CALSA", path: "Sources/CALSA", linkerSettings: [.linkedLibrary("dl")]),
+]
+let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
@@ -126,6 +144,7 @@ let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers",
 let platformTestDependencies: [Target.Dependency] = ["CDBus"]
 #else
 // macOS: Apple's UniformTypeIdentifiers and ImageIO are the reference the tests run against.
+let audioShimDependencies: [Target.Dependency] = []
 appKitExclude += ["Platform/Win32", "Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = []
 let swiftUIDependencies: [Target.Dependency] = ["AppKit"]
@@ -168,6 +187,35 @@ targets += [
     .target(name: "Metal", dependencies: metalDependencies, path: "Sources/Metal", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
 
+// AVFAudio and AVFoundation (ADR-0014): the audio API under Apple's module names, over a
+// pure-Swift engine and the WASAPI / PipeWire / ALSA streams. Built on Windows and Linux;
+// on macOS the package uses Apple's AVFAudio (the tests then run against the real one),
+// unless APPKITWIN_HOST_AVFAUDIO=1 shadows it with ours so the engine's own tests run on
+// the Mac too (the null output backend only; no CoreAudio stream). The engine's lock-free
+// queues use the CAudioAtomics inline C atomics (the Synchronization module needs macOS
+// 15); AVFAudio imports them as an implementation detail, so no client of the module
+// needs the clang module map (the XCTest interface build, which loads our AppKit, would
+// otherwise fail to find it).
+#if os(Windows) || os(Linux)
+let buildsAVFAudio = true
+#else
+let buildsAVFAudio = ProcessInfo.processInfo.environment["APPKITWIN_HOST_AVFAUDIO"] == "1"
+#endif
+var avfAudioProducts: [Product] = []
+var avfAudioDependencies: [Target.Dependency] = []
+var avfAudioTestSettings: [SwiftSetting] = []
+if buildsAVFAudio {
+    targets += [
+        .target(name: "CAudioAtomics", path: "Sources/CAudioAtomics"),
+        .target(name: "AVFAudio", dependencies: ["CAudioAtomics"] + audioShimDependencies, path: "Sources/AVFAudio", swiftSettings: [.swiftLanguageMode(.v5)]),
+        .target(name: "AVFoundation", dependencies: ["AVFAudio"], path: "Sources/AVFoundation", swiftSettings: [.swiftLanguageMode(.v5)]),
+    ]
+    avfAudioProducts = [.library(name: "AVFAudio", targets: ["AVFAudio"]), .library(name: "AVFoundation", targets: ["AVFoundation"])]
+    avfAudioDependencies = ["AVFAudio", "AVFoundation"]
+    avfAudioTestSettings = [.define("APPKITWIN_AVFAUDIO")]
+    appKitDependencies += ["AVFAudio"]
+}
+
 // On macOS the tests import Apple's Combine; on Windows and Linux they need our target.
 #if os(Windows) || os(Linux)
 let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
@@ -176,6 +224,14 @@ let combineTestDependencies: [Target.Dependency] = ["Combine"]
 let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
+
+var appKitTestDependencies: [Target.Dependency] = ["AppKit", "Metal", "MetalKit", "SwiftUI"]
+appKitTestDependencies += combineTestDependencies
+appKitTestDependencies += leafModuleTestDependencies
+appKitTestDependencies += platformTestDependencies
+appKitTestDependencies += avfAudioDependencies
+var audioPlayerDependencies: [Target.Dependency] = ["AppKit"]
+audioPlayerDependencies += avfAudioDependencies
 
 targets += [
     // SwiftUI over this AppKit (ADR-0010), on every platform.
@@ -202,10 +258,12 @@ targets += [
     .executableTarget(name: "Animation", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Animation", exclude: ["README.md"]),
     .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
+    .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
-        dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"] + combineTestDependencies + leafModuleTestDependencies + platformTestDependencies,
-        path: "Tests/AppKitTests"
+        dependencies: appKitTestDependencies,
+        path: "Tests/AppKitTests",
+        swiftSettings: avfAudioTestSettings
     ),
 ]
 
@@ -218,7 +276,7 @@ let package = Package(
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
-    ] + combineProducts + leafModuleProducts,
+    ] + combineProducts + leafModuleProducts + avfAudioProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )

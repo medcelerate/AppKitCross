@@ -82,6 +82,7 @@ README. All of them build and run with the same source on macOS, Windows and Lin
 | [Animation](Examples/Animation) | Core Animation: explicit `CABasicAnimation`s (position, opacity, 3D flip under a perspective transform), a `CAKeyframeAnimation` along a path, implicit animations in a `CATransaction`, play/pause/reset, and a SwiftUI `withAnimation` pane | `swift run Animation` (`--paused`) |
 | [Drawing](Examples/Drawing) | An `NSView` `draw(_:)` with paths, a gradient, text and images; a freehand sketch canvas with mouse tracking, undo/redo and export to PNG through `NSSavePanel` | `swift run Drawing` (`--export file.png`) |
 | [Observable](Examples/Observable) | SwiftUI driven by an `ObservableObject` with `@Published` properties, a live-updating `List`, a detail pane editing through a `Binding`, and a Combine `Timer` publisher feeding the model | `swift run Observable` |
+| [AudioPlayer](Examples/AudioPlayer) | `AVAudioEngine` with two `AVAudioPlayerNode`s (a WAV or AIFF from `NSOpenPanel`, a generated sine), play/pause/loop/stop, a level meter from a mixer tap, the output device and its latency in the status line; `--render` writes two seconds offline through `AVAudioFile` | `swift run AudioPlayer` (`file.wav`, `--render out.wav`) |
 
 Add the package to your own app and import the modules by their Apple names:
 

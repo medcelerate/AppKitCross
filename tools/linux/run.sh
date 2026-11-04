@@ -53,7 +53,7 @@ echo "screenshot: /tmp/hellowindow-linux-metal.png ($(stat -c %s /tmp/hellowindo
 # The small examples (Examples/<Name>): each runs under Xvfb for a screenshot, and its log
 # is checked for a trap (an `unimplemented()` stub or a crash); Drawing also exports its
 # canvas headlessly, which checks the PNG path.
-for example in Calculator FramelessWindow Animation Drawing Observable; do
+for example in Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do
     lower=$(echo "$example" | tr '[:upper:]' '[:lower:]')
     echo "== $example under Xvfb (X11 backend)"
     args=""
@@ -71,6 +71,9 @@ for example in Calculator FramelessWindow Animation Drawing Observable; do
     fi
     grep -E "Fatal error|not implemented" /tmp/$lower-linux.log | head -3
 done
+echo "== AudioPlayer --render (offline render, no sound device: ADR-0014)"
+APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/AudioPlayer --render /tmp/audioplayer-render-linux.wav 2>&1 | tail -2
+ls -la /tmp/audioplayer-render-linux.wav 2>/dev/null | awk '{print "wav:", $5, "bytes"}'
 echo "== Drawing --export (headless PNG export)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/Drawing --export /tmp/drawing-export-linux.png 2>&1 | tail -2
 file /tmp/drawing-export-linux.png 2>/dev/null || ls -la /tmp/drawing-export-linux.png
