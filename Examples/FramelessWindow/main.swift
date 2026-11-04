@@ -9,8 +9,10 @@ import AppKit
 /// Paints a rounded card with a border; everything outside the card stays clear, so the
 /// (non-opaque) window takes the card's shape.
 final class CardView: NSView {
+    static let solidTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92)
+    static let glassTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.35)
     var cornerRadius: CGFloat = 22
-    var tint: NSColor = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92)
+    var tint: NSColor = CardView.glassTint
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { true }
 
@@ -30,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     var status: NSTextField!
     var panel: NSPanel?
     var backdrop: NSVisualEffectView!
+    var card: CardView!
+    private var wasMinimized = false
 
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action {
@@ -37,7 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         case Selector(("minimizeWindow:")): window.performMiniaturize(sender); return true
         case Selector(("zoomWindow:")): window.performZoom(sender); return true
         case Selector(("toggleBackdrop:")):
+            // With the backdrop on, the card paints only a faint tint so the system backdrop
+            // shows through the window; off, it paints a solid card.
             backdrop.isHidden = (sender as? NSButton)?.state != .on
+            card.tint = backdrop.isHidden ? CardView.solidTint : CardView.glassTint
+            card.needsDisplay = true
             report(backdrop.isHidden ? "backdrop off" : "backdrop on")
             return true
         case Selector(("showPanel:")): showPanel(); return true
@@ -81,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         window.minSize = NSSize(width: 320, height: 200)
         window.delegate = self
 
-        let card = CardView(frame: NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size))
+        card = CardView(frame: NSRect(origin: .zero, size: window.contentRect(forFrameRect: window.frame).size))
         card.autoresizingMask = [.width, .height]
         window.contentView = card
 
@@ -147,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         p.isMovableByWindowBackground = true
         p.isFloatingPanel = true
         let card = CardView(frame: NSRect(origin: .zero, size: p.frame.size))
-        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 0.95)
+        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 0.95)   // the panel has no backdrop view
         card.cornerRadius = 30
         p.contentView = card
         let label = NSTextField(labelWithString: "Borderless panel: no title bar, no buttons.")
@@ -175,10 +183,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         status.stringValue = "\(what): \(Int(f.width))×\(Int(f.height)) at \(Int(f.origin.x)),\(Int(f.origin.y))"
     }
 
-    func windowDidResize(_ notification: Notification) { report(window.isZoomed ? "zoomed" : "resized") }
-    func windowDidMove(_ notification: Notification) { report("moved") }
-    func windowDidMiniaturize(_ notification: Notification) { report("minimized") }
-    func windowDidDeminiaturize(_ notification: Notification) { report("restored") }
+    // Zoom and restore arrive as frame changes (a resize, then a move), so the wording comes
+    // from the window's state rather than from which callback fired.
+    private func reportFrameChange(_ what: String) {
+        if wasMinimized && !window.isMiniaturized { wasMinimized = false; report("restored"); return }
+        report(window.isZoomed ? "zoomed" : what)
+    }
+    func windowDidResize(_ notification: Notification) { reportFrameChange("resized") }
+    func windowDidMove(_ notification: Notification) { reportFrameChange("moved") }
+    func windowDidMiniaturize(_ notification: Notification) { wasMinimized = true; report("minimized") }
+    func windowDidDeminiaturize(_ notification: Notification) { wasMinimized = false; report("restored") }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 

@@ -133,13 +133,12 @@ struct CalculatorView: View {
 
     func key(_ label: String, shortcut: KeyEquivalent?) -> some View {
         let isOperator = ["÷", "×", "−", "+", "="].contains(label)
-        let button = Button(action: { model.press(label) }) {
-            Text(label)
-                .font(.system(size: 18))
-                .frame(width: 52, height: 40)
-        }
-        .foregroundColor(isOperator ? .accentColor : .primary)
-        // A plain key (no modifiers) presses the button, as on macOS; `Group` keeps one type.
+        // Title buttons are NSButton-backed, so a plain key (no modifiers) presses them
+        // through the window's key-equivalent dispatch, as on macOS; `Group` keeps one type.
+        let button = Button(label) { model.press(label) }
+            .font(.system(size: 18))
+            .frame(width: 52, height: 40)
+            .foregroundColor(isOperator ? .accentColor : .primary)
         return Group {
             if let shortcut { button.keyboardShortcut(shortcut, modifiers: []) } else { button }
         }
