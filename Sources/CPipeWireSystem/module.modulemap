@@ -1,0 +1,4 @@
+module CPipeWireSystem [system] {
+    header "shim.h"
+    export *
+}

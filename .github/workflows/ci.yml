@@ -27,12 +27,16 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build --product $p; done
       - name: Drawing example headless PNG export
         run: .build/debug/Drawing --export drawing-macos.png
+      - name: AudioPlayer example offline render (Apple's AVFoundation)
+        run: .build/debug/AudioPlayer --render audio-macos.wav && ls -la audio-macos.wav
       - run: swift test
       - name: Third-party SwiftUI library compatibility example
         run: tools/library-compat.sh
+      - name: Audio engine tests against the port's AVFAudio (ADR-0014)
+        run: APPKITWIN_HOST_AVFAUDIO=1 swift test --filter AudioTests
 
   windows:
     name: Windows build and tests
@@ -48,7 +52,9 @@ jobs:
       - run: swift build -c debug
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build --product $p; done
+      - name: AudioPlayer example offline render (WASAPI absent on the runner)
+        run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: Tests on the host backend
         run: swift test
         env:
@@ -65,13 +71,15 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build --product $p; done
       - name: Drawing example headless PNG export on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
+      - name: AudioPlayer example offline render (no sound device on the runner)
+        run: APPKITWIN_HOST_BACKEND=1 .build/debug/AudioPlayer --render audio-linux.wav && ls -la audio-linux.wav
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
       - name: Third-party SwiftUI library compatibility example
@@ -83,11 +91,11 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools libpipewire-0.3-dev libasound2-dev
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build --product $p; done
       - name: Tests on the host backend with the validation layer
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device

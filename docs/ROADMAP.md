@@ -24,6 +24,7 @@ are concrete and testable.
 | M11 Accessibility | first version (ADR-0013): the NSAccessibility protocol answers on views, windows and the application (roles, labels, values, screen frames, parent/children with ignored plain views, focus, press/increment/decrement/showMenu actions, the `setAccessibility...` overrides, `NSAccessibility.post`), SwiftUI's accessibilityLabel/Value/Hidden/Identifier/Hint modifiers, one snapshot-tree seam to the platform window; Windows: UI Automation through the `CUIAutomation` shim (fragment providers on the HWND answering WM_GETOBJECT, Invoke/Toggle/Value/RangeValue/Selection/SelectionItem/Text patterns, focus/property/structure events), verified on the Windows machine with UI Automation clients (tree, rectangles on a 150% monitor, Invoke/Toggle/RangeValue/Value and SelectionItem on table rows all act; focus, toggle-state, value and text-changed events arrive while tabbing and typing, `tools/windows/uia-events.ps1`), Narrator itself not run (the remote session cannot hear it); tabs of an `NSTabView` and segments of an `NSSegmentedControl` are elements of their own (TabItem / radio-button items), the native Win32 menu bar's own UIA proxy refuses ExpandCollapse (menus open by mouse or Alt); Linux: AT-SPI2 over D-Bus (`AtspiBridge`: Accessible, Application, Component, Action, Value, Text, EditableText, events), `tools/linux/run.sh` runs an accessibility bus under Xvfb and `atspi-probe.py` walks and drives HelloWindow's tree; tests: 11 host-backend `AccessibilityTests`, `UIAutomationTests` (Windows) and `AtspiTests` (Linux with a bus), skipped elsewhere |
 | M10 Third-party SwiftUI libraries | `Examples/LibraryCompat` (its own package, `tools/library-compat.sh`): Shimmer and ConfettiSwiftUI build and run on all three platforms, WrappingHStack and Defaults on the macOS host build (they assume UIKit elsewhere), swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts and Nuke do not compile; verdicts and the gap list in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md) |
 | M10 UniformTypeIdentifiers and ImageIO | done on macOS and Linux (ADR-0009): `UTType` over the SDK's generated core-type table with Apple's `dyn.*` encoding; `CGImageSource`/`CGImageDestination` over Cairo PNG (Linux) and WIC through CD2D (Windows, awaiting Windows verification); 12 tests pass against Apple's modules on macOS and against ours in the Linux container |
+| M12 Audio | first version (ADR-0014): `AVFAudio` and `AVFoundation` under Apple's module names on Windows and Linux (macOS uses Apple's): `AVAudioFormat`/`AVAudioPCMBuffer`/`AVAudioTime`/`AVAudioChannelLayout`, `AVAudioFile` reading and writing WAV and AIFF/AIFF-C, `AVAudioEngine` with player, mixer, output and EQ nodes, taps, manual rendering, `AVAudioPlayer`, the error domain, `NSSound` over `AVAudioPlayer`; a pure-Swift pull-model mixer (Apple's measured pan and gain laws, Kaiser-sinc rate conversion, lock-free command and completion rings, a delivery thread) over the `PlatformAudio` seam with WASAPI (IAudioClient3 low-latency shared mode, IAudioClient fallback, MMCSS render thread), PipeWire (dlopen'ed, `pw_stream` with RT process), ALSA (dlopen'ed fallback) and a null backend; `Examples/AudioPlayer` (file and sine players, loop, level meter, output device and latency in the status line, `--render` offline); 15 `AudioTests` run against Apple's AVFAudio on macOS and against the port on macOS (`APPKITWIN_HOST_AVFAUDIO=1`), Windows and Linux; Windows playback verification on the PC is recorded in the pull request |
 
 The macOS host build and the Linux container run the full test suite (110 tests); Windows verification is done by
 a remote session on a Windows 11 machine from the checklists in the commit history.
@@ -448,6 +449,15 @@ remotely, and Narrator could not be heard by the remote session). Not yet: menus
 in the tree, `NSAccessibilityElement` virtual elements, custom rotors and actions, the
 AT-SPI `Cache` interface, text granularities finer than the whole text on AT-SPI, and
 structure events naming the added or removed child.
+
+## M12: Audio
+
+Status (2026-11-04, ADR-0014): see the status table. Follow-ups: `AVAudioUnitTimePitch`
+and `AVAudioUnitVarispeed` (time stretching, which `AVAudioPlayer.rate` also needs),
+`AVAudioConverter`, `AVAudioSourceNode`/`AVAudioSinkNode`, streaming scheduled files from
+disk instead of decoding them whole, CAF, device-change tracking
+(`AVAudioEngineConfigurationChange`), device selection (`PlatformAudio` enumerates; the
+engine opens the default), input capture (`AVAudioInputNode`, `AVAudioRecorder`).
 
 ## Reference projects
 
