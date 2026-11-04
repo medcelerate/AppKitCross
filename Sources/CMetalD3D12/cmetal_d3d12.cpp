@@ -381,6 +381,13 @@ void drainMessages(CMDevice *d) {
     if (removed != S_OK) logf("device removed: 0x%08lX", static_cast<unsigned long>(removed));
 }
 
+// Verbose: the device-removed reason at a named step (S_OK prints nothing).
+void logDeviceState(CMDevice *d, const char *step) {
+    if (!gVerbose || !d || !d->device) return;
+    HRESULT removed = d->device->GetDeviceRemovedReason();
+    if (removed != S_OK) logf("%s: device removed 0x%08lX", step, static_cast<unsigned long>(removed));
+}
+
 void queueWait(CMQueue *q, uint64_t value) {
     if (!q || value == 0) return;
     if (q->fence->GetCompletedValue() < value && SUCCEEDED(q->fence->SetEventOnCompletion(value, q->event))) WaitForSingleObject(q->event, INFINITE);
@@ -1455,11 +1462,14 @@ void cm_commandlist_copy_texture_region(CMCommandList *l, CMTexture *src, uint32
 uint64_t cm_commandlist_execute(CMCommandList *l, CMQueue *queue) {
     if (!l || !queue) return 0;
     if (l->open) {
-        if (FAILED(l->list->Close())) { l->open = false; return 0; }
+        HRESULT hr = l->list->Close();
         l->open = false;
+        if (FAILED(hr)) { logf("ID3D12GraphicsCommandList::Close failed 0x%08lX", static_cast<unsigned long>(hr)); drainMessages(l->device); return 0; }
     }
+    logDeviceState(l->device, "before ExecuteCommandLists");
     ID3D12CommandList *lists[] = {l->list.get()};
     queue->queue->ExecuteCommandLists(1, lists);
+    logDeviceState(l->device, "after ExecuteCommandLists");
     l->executedOn = queue;
     l->fenceValue = queueSignal(queue);
     return l->fenceValue;
@@ -1496,9 +1506,11 @@ static CMSwapChain *createSwapChain(CMDevice *d, CMQueue *queue, HWND hwnd, uint
         : d->factory->CreateSwapChainForHwnd(queue->queue.get(), sc->hwnd, &desc, nullptr, nullptr, sc1.put());
     if (FAILED(hr) || FAILED(sc1->QueryInterface(IID_PPV_ARGS(sc->swapChain.put())))) { logf("swap chain creation failed 0x%08lX (%s, %ux%u, format %u)", hr, composition ? "composition" : "hwnd", width, height, dxgiFormat); drainMessages(d); delete sc; return nullptr; }
     logf("swap chain created (%s, %ux%u, format %u, %u buffers)", composition ? "composition" : "hwnd", width, height, dxgiFormat, sc->bufferCount);
+    logDeviceState(d, "after swap chain creation");
     if (hwnd) d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
     char error[256] = {};
     if (!acquireSwapChainBuffers(sc, error, sizeof error)) { logf("%s", error); cm_swapchain_release(sc); return nullptr; }
+    logDeviceState(d, "after acquiring the back buffers");
     d->liveSwapChains++;
     return sc;
 }
@@ -1544,7 +1556,10 @@ bool cm_swapchain_resize(CMSwapChain *sc, uint32_t width, uint32_t height) {
 
 CMTexture *cm_swapchain_acquire(CMSwapChain *sc) {
     if (!sc || sc->buffers.empty()) { if (sc) setError(sc->lastError, sizeof sc->lastError, "no back buffers (a resize failed)"); return nullptr; }
-    return sc->buffers[sc->swapChain->GetCurrentBackBufferIndex()];
+    UINT index = sc->swapChain->GetCurrentBackBufferIndex();
+    logDeviceState(sc->device, "at acquire");
+    if (index >= sc->buffers.size()) { setError(sc->lastError, sizeof sc->lastError, "back buffer index out of range"); return nullptr; }
+    return sc->buffers[index];
 }
 
 bool cm_swapchain_present(CMSwapChain *sc, bool vsync) {

@@ -1149,7 +1149,7 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
             tex.getBytes(&corner, bytesPerRow: 4, from: MTLRegionMake2D(2, 2, 1, 1), mipmapLevel: 0)
             let c = view.clearColor
             let expected = [Int(c.blue * 255 + 0.5), Int(c.green * 255 + 0.5), Int(c.red * 255 + 0.5), 255]
-            print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre) size \(tex.width)x\(tex.height) presentation=\(view._presentsThroughSwapChain ? "swap chain" : "readback")")
+            print("frame \(frame) clear BGRA=\(expected) corner BGRA=\(corner) centre BGRA=\(centre) size \(tex.width)x\(tex.height) presentation=\(view._presentsThroughSwapChain ? "swap chain" : "readback")\(view._presentationError.isEmpty ? "" : " error=\(view._presentationError)")")
             fflush(nil)
         }
     }

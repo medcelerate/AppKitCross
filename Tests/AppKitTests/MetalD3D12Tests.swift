@@ -158,7 +158,27 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
             return XCTFail("composition swap chain creation failed on \(device.name)")
         }
         XCTAssertNotNil(swapChain.nativeHandle)
+        XCTAssertFalse(device.isDeviceRemoved, "creating the swap chain removed the device")
         let queue = try XCTUnwrap(device.makeCommandQueue())
+        // An empty command buffer, then a clear of an ordinary texture: the device survives
+        // work that does not touch a back buffer.
+        let empty = try XCTUnwrap(queue.makeCommandBuffer())
+        empty.commit()
+        empty.waitUntilCompleted()
+        XCTAssertFalse(device.isDeviceRemoved, "an empty command buffer removed the device")
+        let plain = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 32, height: 16, mipmapped: false)
+        plain.usage = [.renderTarget, .shaderRead]
+        let plainTexture = try XCTUnwrap(device.makeTexture(descriptor: plain))
+        let plainPass = MTLRenderPassDescriptor()
+        plainPass.colorAttachments[0].texture = plainTexture
+        plainPass.colorAttachments[0].loadAction = .clear
+        plainPass.colorAttachments[0].clearColor = MTLClearColorMake(1, 0, 0, 1)
+        let plainClear = try XCTUnwrap(queue.makeCommandBuffer())
+        try XCTUnwrap(plainClear.makeRenderCommandEncoder(descriptor: plainPass)).endEncoding()
+        plainClear.commit()
+        plainClear.waitUntilCompleted()
+        XCTAssertEqual(Self.pixel(plainTexture, 1, 1), [0, 0, 255, 255], "a plain texture clears while the swap chain exists")
+        XCTAssertFalse(device.isDeviceRemoved, "clearing a plain texture removed the device")
         func clearAndPresent(_ colour: MTLClearColor, expecting pixel: [UInt8]) throws -> (any MTLTexture, OpaquePointer) {
             let drawable = try XCTUnwrap(swapChain.nextDrawable(), "nextDrawable: \(swapChain.lastError)")
             let pass = MTLRenderPassDescriptor()
@@ -172,6 +192,7 @@ final class MetalD3D12DeviceTests: XCTestCase, @unchecked Sendable {
             clear.commit()
             clear.waitUntilCompleted()
             XCTAssertEqual(clear.status, .completed)
+            XCTAssertFalse(device.isDeviceRemoved, "clearing the back buffer removed the device")
             XCTAssertEqual(Self.pixel(drawable.texture, 1, 1), pixel, "the clear landed in the back buffer before presenting")
             // Then an empty command buffer that presents it.
             let cb = try XCTUnwrap(queue.makeCommandBuffer())

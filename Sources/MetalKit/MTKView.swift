@@ -71,6 +71,16 @@ public protocol MTKViewDelegate: AnyObject {
         #endif
     }
 
+    /// The swap chain's last present/resize failure ("" when none, or on the readback path).
+    /// Not part of Apple's API (tooling and tests).
+    public var _presentationError: String {
+        #if os(Windows)
+        return _swapChain?.lastError ?? ""
+        #else
+        return ""
+        #endif
+    }
+
     #if os(Windows)
     /// The swap chain sized to the drawable, while the window hosts its layers natively and
     /// the device is Direct3D 12; otherwise nil, any chain dropped, and frames are read back.

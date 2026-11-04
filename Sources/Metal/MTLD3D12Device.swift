@@ -24,6 +24,8 @@ public final class MTLD3D12Device: MTLDevice, @unchecked Sendable {
     public let supportsRasterization = true
     /// A queue used for synchronous uploads and readbacks.
     let utilityQueue: OpaquePointer
+    /// True once D3D12 removed the device (`GetDeviceRemovedReason` not S_OK); diagnostics.
+    var isDeviceRemoved: Bool { cm_device_lost(handle) }
 
     /// Nil when D3D12 is unavailable (or the backend is still the placeholder).
     public init?() {
