@@ -11,6 +11,7 @@ void *appkitwin_wl_registry_bind(struct wl_registry *registry, uint32_t name, co
     else if (strcmp(interface, "xdg_wm_base") == 0) iface = &xdg_wm_base_interface;
     else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0) iface = &zxdg_decoration_manager_v1_interface;
     else if (strcmp(interface, "wl_data_device_manager") == 0) iface = &wl_data_device_manager_interface;
+    else if (strcmp(interface, "zwp_pointer_gestures_v1") == 0) iface = &zwp_pointer_gestures_v1_interface;
     if (!iface) return NULL;
     return wl_registry_bind(registry, name, iface, version);
 }

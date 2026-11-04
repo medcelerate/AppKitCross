@@ -16,6 +16,8 @@ final class CanvasView: NSView {
     var showsGrid = true { didSet { needsDisplay = true } }
     var circleSize: CGFloat = 120 { didSet { needsDisplay = true } }
     var circleColor: NSColor = .systemBlue { didSet { needsDisplay = true } }
+    /// Rotation of the needle in the circle, driven by the rotate gesture (radians, counterclockwise).
+    var needleAngle: CGFloat = 0 { didSet { needsDisplay = true } }
 
     func clearDots() {
         clicks.removeAll()
@@ -52,10 +54,16 @@ final class CanvasView: NSView {
         box.lineWidth = 3
         box.stroke()
 
-        // A circle
+        // A circle (pinch to resize it, rotate to turn its needle: trackpad, touch screen or Ctrl+wheel)
         let circle = NSBezierPath(ovalIn: NSRect(x: 360 - circleSize / 2, y: 120 - circleSize / 2, width: circleSize, height: circleSize))
         NSColor.systemOrange.setFill()
         circle.fill()
+        let needle = NSBezierPath()
+        needle.move(to: NSPoint(x: 360, y: 120))
+        needle.line(to: NSPoint(x: 360 + cos(needleAngle) * circleSize * 0.45, y: 120 + sin(needleAngle) * circleSize * 0.45))
+        needle.lineWidth = 3
+        NSColor.white.setStroke()
+        needle.stroke()
 
         // A dashed curve
         let curve = NSBezierPath()
@@ -92,6 +100,13 @@ final class CanvasView: NSView {
         } else {
             super.keyDown(with: event)
         }
+    }
+
+    override func magnify(with event: NSEvent) {
+        circleSize = min(200, max(40, circleSize * (1 + event.magnification)))
+    }
+    override func rotate(with event: NSEvent) {
+        needleAngle += CGFloat(event.rotation) * .pi / 180
     }
 }
 
@@ -1172,6 +1187,7 @@ struct SwiftUIDemo: View {
             NavigationDemo().tabItem { Text("Navigation") }.tag("navigation")
             PresentationDemo().tabItem { Text("Presentation") }.tag("presentation")
             DataDemo().tabItem { Text("Data") }.tag("data")
+            GesturesDemo().tabItem { Text("Gestures") }.tag("gestures")
         }
         .padding(12)
         .frame(minWidth: 420, minHeight: 360)
@@ -1179,6 +1195,49 @@ struct SwiftUIDemo: View {
 }
 
 enum Fruit: String, CaseIterable, Hashable { case apple, pear, plum }
+
+/// A card that drags, pinches and rotates (trackpad, touch screen, or Ctrl+wheel to zoom),
+/// plus a tap counter and a long press.
+struct GesturesDemo: View {
+    @State private var offset = CGSize.zero
+    @State private var dragStart = CGSize.zero
+    @State private var scale: CGFloat = 1
+    @State private var scaleStart: CGFloat = 1
+    @State private var angle = Angle.zero
+    @State private var angleStart = Angle.zero
+    @State private var taps = 0
+    @State private var pressed = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Drag, pinch, rotate the card; tap or hold the button.").font(.headline)
+            ZStack {
+                RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.15))
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(pressed ? Color.orange : Color.blue)
+                    .frame(width: 120, height: 80)
+                    .overlay(Text(String(format: "%.2fx  %.0f°", scale, angle.degrees)).foregroundColor(.white))
+                    .scaleEffect(scale)
+                    .rotationEffect(angle)
+                    .offset(offset)
+                    .gesture(DragGesture().onChanged { v in offset = CGSize(width: dragStart.width + v.translation.width, height: dragStart.height + v.translation.height) }
+                                          .onEnded { _ in dragStart = offset })
+                    .simultaneousGesture(MagnificationGesture().onChanged { scale = min(3, max(0.3, scaleStart * $0)) }.onEnded { _ in scaleStart = scale })
+                    .simultaneousGesture(RotationGesture().onChanged { angle = .radians(angleStart.radians + $0.radians) }.onEnded { _ in angleStart = angle })
+            }
+            .frame(minHeight: 220)
+            HStack {
+                Text("Taps: \(taps)")
+                    .padding(8)
+                    .background(Color.gray.opacity(0.2))
+                    .onTapGesture { taps += 1 }
+                    .onLongPressGesture(minimumDuration: 0.6, perform: { taps = 0 }, onPressingChanged: { pressed = $0 })
+                Text(pressed ? "holding (release to reset)" : "hold to reset").foregroundColor(.secondary)
+                Spacer()
+                Button("Reset card") { offset = .zero; dragStart = .zero; scale = 1; scaleStart = 1; angle = .zero; angleStart = .zero }
+            }
+        }
+    }
+}
 
 struct Planet: Identifiable {
     let id: Int

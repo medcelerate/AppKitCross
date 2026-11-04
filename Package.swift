@@ -83,7 +83,7 @@ let platformTestDependencies: [Target.Dependency] = ["CUIAutomation"]
 targets += [
     .systemLibrary(name: "CCairo", path: "Sources/CCairo", pkgConfig: "pangocairo",
                    providers: [.apt(["libcairo2-dev", "libpango1.0-dev", "libx11-dev"])]),
-    .systemLibrary(name: "CX11", path: "Sources/CX11", pkgConfig: "x11", providers: [.apt(["libx11-dev"])]),
+    .systemLibrary(name: "CX11", path: "Sources/CX11", pkgConfig: "x11", providers: [.apt(["libx11-dev", "libxi-dev"])]),
     // libdbus-1 for the AT-SPI2 accessibility bridge (ADR-0013).
     .systemLibrary(name: "CDBus", path: "Sources/CDBus", pkgConfig: "dbus-1", providers: [.apt(["libdbus-1-dev"])]),
     // Wayland client + xkbcommon + wl_cursor, with the xdg-shell protocol tables compiled in

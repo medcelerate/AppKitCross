@@ -58,6 +58,10 @@ final class WaylandBackend: PlatformBackend {
 
     // Pointer
     private(set) var pointerFocus: WaylandWindow?
+    private var pointerGestures: OpaquePointer?       // zwp_pointer_gestures_v1*
+    private var pinchGesture: OpaquePointer?          // zwp_pointer_gesture_pinch_v1*
+    private var swipeGesture: OpaquePointer?          // zwp_pointer_gesture_swipe_v1*
+    private var gestureFocus: WaylandWindow?
     private(set) var pointerPosition = NSPoint.zero     // surface-local, points, y down
     private var pointerEnterSerial: UInt32 = 0
     /// Serials the data device needs: the last button press (start_drag) and the last
@@ -132,6 +136,9 @@ final class WaylandBackend: PlatformBackend {
             compositor = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, compositorVersion))
         case "wl_shm":
             shm = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
+        case "zwp_pointer_gestures_v1":
+            pointerGestures = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
+            attachPointerGestures()
         case "wl_seat" where seat == nil:
             seat = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, min(version, 5)))
             let seatListener = WaylandBackend.listener(wl_seat_listener(
@@ -202,7 +209,10 @@ final class WaylandBackend: PlatformBackend {
         if hasPointer && pointer == nil {
             pointer = wl_seat_get_pointer(seat)
             wl_pointer_add_listener(pointer, WaylandBackend.pointerListener, opaque)
+            attachPointerGestures()
         } else if !hasPointer, let p = pointer {
+            if let g = pinchGesture { zwp_pointer_gesture_pinch_v1_destroy(g); pinchGesture = nil }
+            if let g = swipeGesture { zwp_pointer_gesture_swipe_v1_destroy(g); swipeGesture = nil }
             wl_pointer_release(p)
             pointer = nil
         }
@@ -505,6 +515,50 @@ final class WaylandBackend: PlatformBackend {
     private func pointerButton(time: UInt32, button: UInt32, pressed: Bool) {
         pointerFocus?.pointerButton(time: time, button: button, pressed: pressed, position: pointerPosition)
     }
+
+    // MARK: Pointer gestures (zwp_pointer_gestures_v1: touchpad pinch and swipe)
+
+    private func attachPointerGestures() {
+        guard let pointerGestures, let pointer, pinchGesture == nil else { return }
+        pinchGesture = zwp_pointer_gestures_v1_get_pinch_gesture(pointerGestures, pointer)
+        zwp_pointer_gesture_pinch_v1_add_listener(pinchGesture, WaylandBackend.pinchListener, opaque)
+        swipeGesture = zwp_pointer_gestures_v1_get_swipe_gesture(pointerGestures, pointer)
+        zwp_pointer_gesture_swipe_v1_add_listener(swipeGesture, WaylandBackend.swipeListener, opaque)
+    }
+
+    private static let pinchListener = WaylandBackend.listener(zwp_pointer_gesture_pinch_v1_listener(
+        begin: { data, _, _, time, surface, _ in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated {
+                backend.gestureFocus = backend.window(for: surface)
+                backend.gestureFocus?.pinchBegin(time: time, position: backend.pointerPosition)
+            }
+        },
+        update: { data, _, time, _, _, scale, rotation in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated { backend.gestureFocus?.pinchUpdate(time: time, scale: wl_fixed_to_double(scale), rotation: wl_fixed_to_double(rotation), position: backend.pointerPosition) }
+        },
+        end: { data, _, _, time, cancelled in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated { backend.gestureFocus?.pinchEnd(time: time, cancelled: cancelled != 0, position: backend.pointerPosition) }
+        }))
+
+    private static let swipeListener = WaylandBackend.listener(zwp_pointer_gesture_swipe_v1_listener(
+        begin: { data, _, _, time, surface, _ in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated {
+                backend.gestureFocus = backend.window(for: surface)
+                backend.gestureFocus?.swipeBegin(time: time)
+            }
+        },
+        update: { data, _, time, dx, dy in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated { backend.gestureFocus?.swipeUpdate(time: time, dx: wl_fixed_to_double(dx), dy: wl_fixed_to_double(dy)) }
+        },
+        end: { data, _, _, time, cancelled in
+            guard let backend = WaylandBackend.from(data) else { return }
+            MainActor.assumeIsolated { backend.gestureFocus?.swipeEnd(time: time, cancelled: cancelled != 0, position: backend.pointerPosition) }
+        }))
 
     private func pointerAxis(time: UInt32, axis: UInt32, value: Double) {
         // Wayland: positive is down/right; AppKit: positive deltaY scrolls content down
