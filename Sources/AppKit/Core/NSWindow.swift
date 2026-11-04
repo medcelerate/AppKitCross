@@ -768,8 +768,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/deminiaturize(_:)
     @MainActor open func deminiaturize(_ sender: Any?) {
         _platform?.deminiaturize()
-        post(NSWindow.didDeminiaturizeNotification)
-        delegate?.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification, object: self))
+        _noteDeminiaturized()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/depthlimit
     @MainActor open var depthLimit: NSWindow.Depth {
@@ -1101,9 +1100,26 @@ import CoreText
     @MainActor open func miniaturize(_ sender: Any?) {
         post(NSWindow.willMiniaturizeNotification)
         _platform?.miniaturize()
+        _noteMiniaturized()
+    }
+    /// Whether the did-miniaturize notification is outstanding: the backend may report the
+    /// system's minimise synchronously inside `miniaturize()` or on its own later, and the
+    /// delegate hears each change once either way.
+    private var _miniaturizedNoted = false
+    private func _noteMiniaturized() {
+        guard !_miniaturizedNoted else { return }
+        _miniaturizedNoted = true
         post(NSWindow.didMiniaturizeNotification)
         delegate?.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification, object: self))
     }
+    private func _noteDeminiaturized() {
+        guard _miniaturizedNoted else { return }
+        _miniaturizedNoted = false
+        post(NSWindow.didDeminiaturizeNotification)
+        delegate?.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification, object: self))
+    }
+    public func platformWindowDidMiniaturize() { _noteMiniaturized() }
+    public func platformWindowDidDeminiaturize() { _noteDeminiaturized() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/miniwindowimage
     @MainActor open var miniwindowImage: NSImage? {
         get { unimplemented() }
