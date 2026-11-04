@@ -15,7 +15,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Sources/CoreGraphics` (Windows and Linux only) | `CGContext`, `CGPath`, `CGColor`, `CGImage` over Direct2D or Cairo. |
 | `Sources/CoreText` (Windows and Linux only) | CoreText's API over DirectWrite or Pango/HarfBuzz (ADR-0007). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. On Windows `MTKView` presents through a DXGI composition swap chain shown by the window's DirectComposition tree; on the host backend (tests) frames are read back and drawn. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/UniformTypeIdentifiers`, `Sources/ImageIO` (Windows and Linux only) | `UTType` over a table generated from the macOS SDK (`tools/uttypes`); `CGImageSource`/`CGImageDestination` over WIC or Cairo (ADR-0009). |
 | `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
@@ -26,6 +26,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `tools/apigen` | Extraction, probing and stub generation scripts. |
 | `tools/linux` | Dockerfile, test and screenshot scripts for the Linux container. |
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
+| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
 | `Examples/LibraryCompat` | A package of its own: third-party SwiftUI libraries as dependencies, one tab each, with the per-library verdicts and API gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Built by `tools/library-compat.sh` (see below). |
 
 ## Conventions
@@ -62,13 +63,20 @@ swift run HelloWindow
 APPKITWIN_HOST_BACKEND=1 swift test
 ```
 
+On Windows the test suite also runs the Direct3D 12 device (`MetalD3D12DeviceTests`,
+`MetalD3D12ParityTests`): on a machine without a GPU, and on CI, that is WARP. HelloWindow's
+Metal tab (`APPKITWIN_LAYOUT_TAB=metal`, or `--metal`) is where swap-chain presentation is
+exercised; `--metal-log` prints the device, and every 30th frame's clear colour, read-back
+pixels, drawable size and presentation path (`swap chain` on a DirectComposition-hosted
+window, `readback` otherwise).
+
 Linux, in the container from `tools/linux/Dockerfile` (`swift:6.2-noble` with X11, Wayland,
 Cairo and Pango):
 
 ```bash
 docker build -t appkitwin-linux -f tools/linux/Dockerfile .
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash -c "swift build; APPKITWIN_HOST_BACKEND=1 swift test"
-docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard) and HelloWindow under Xvfb
+docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh            # host tests, then the X11 backend tests (XDND, clipboard), HelloWindow and the examples under Xvfb
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh --wayland  # the same under a headless sway
 ```
 
@@ -110,6 +118,26 @@ wl_cursor themes, server-side decorations through xdg-decoration) is preferred w
 bar:
 
 ![HelloWindow on Linux under a headless sway](images/hellowindow-linux-wayland.png)
+
+## Examples
+
+Each example under `Examples/` is an executable target in `Package.swift` with a README that
+says what it demonstrates. CI builds every one on macOS, Windows and both Linux jobs, and
+`tools/linux/run.sh` runs each under Xvfb and writes `/tmp/<name>-linux.png` (plus
+`Drawing --export`, the headless PNG path).
+
+| Example | Shows | Run |
+| --- | --- | --- |
+| `HelloWindow` | The big tour: drawing, controls, menus, the glass window, the Layout Demo and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`, `--screenshot <dir>`, `--metal-selftest`) |
+| `Calculator` | SwiftUI `App` + `WindowGroup`, button grid, `keyboardShortcut` keys, fixed-size window, `CommandMenu` | `swift run Calculator` |
+| `FramelessWindow` | `.fullSizeContentView` window with AppKit's window buttons, rounded non-opaque shape, movable by background, `NSVisualEffectView` backdrop, close/minimize/zoom, a `.borderless` panel | `swift run FramelessWindow` (`--panel`) |
+| `Animation` | `CABasicAnimation`, `CAKeyframeAnimation` along a path, 3D flip with perspective, `CAAnimationGroup`, implicit `CATransaction` animations, play/pause, SwiftUI `withAnimation` | `swift run Animation` (`--paused`) |
+| `Drawing` | `draw(_:)` with paths, gradient, text, images; sketch canvas with mouse tracking, undo/redo, PNG export through `NSSavePanel` | `swift run Drawing` (`--export file.png`) |
+| `Observable` | `ObservableObject`/`@Published` model, live `List`, detail pane over a `Binding`, Combine `Timer.publish` | `swift run Observable` |
+
+The port has no Observation framework (`@Observable`) and no `UndoManager` (not in
+swift-corelibs-foundation), so Observable uses `ObservableObject` and Drawing keeps its own
+undo stacks; the READMEs say so.
 
 ## Threading
 

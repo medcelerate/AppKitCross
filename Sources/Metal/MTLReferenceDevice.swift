@@ -272,7 +272,10 @@ public final class MTLReferenceLibrary: MTLLibrary {
                 let name = tokens[i - 1]
                 let returnType = tokens[i - 2]
                 let keywords: Set<String> = ["if", "for", "while", "switch", "return", "sizeof"]
-                if !keywords.contains(name), name.first!.isLetter || name.first == "_", returnType != "=" {
+                let identifier = name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+                let returnsType = returnType.first.map { $0.isLetter || $0 == "_" } == true && !keywords.contains(returnType)
+                // `float4 f(` declares; `return image.Sample(` and `= foo(` call.
+                if !keywords.contains(name), identifier, name.first!.isLetter || name.first == "_", returnsType {
                     let type: MTLFunctionType = name.lowercased().contains("vert") || name.lowercased().hasPrefix("vs") ? .vertex : name.lowercased().contains("frag") || name.lowercased().contains("pixel") || name.lowercased().hasPrefix("ps") ? .fragment : .kernel
                     if !out.contains(where: { $0.0 == name }) { out.append((name, type)) }
                 }

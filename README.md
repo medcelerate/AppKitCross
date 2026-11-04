@@ -70,10 +70,20 @@ swift run HelloWindow --swiftui  # opens the SwiftUI demo window too
 tools/library-compat.sh --run    # Examples/LibraryCompat: third-party SwiftUI packages on this port
 ```
 
-| Example | What it shows |
-| --- | --- |
-| `Examples/HelloWindow` | AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
-| `Examples/LibraryCompat` | Popular third-party SwiftUI packages (Shimmer, ConfettiSwiftUI, WrappingHStack, Defaults, swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts, Nuke) built against this SwiftUI, one tab each; the verdicts and the API gaps they found are in [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md). |
+## Examples
+
+Small, self-contained programs under `Examples/`, each an executable target with its own
+README. All of them build and run with the same source on macOS, Windows and Linux.
+
+| Example | Shows | Run |
+| --- | --- | --- |
+| [HelloWindow](Examples/HelloWindow) | The big tour: AppKit drawing, controls, menus, a glass window, the Layout Demo (form, split view, table, Metal) and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`) |
+| [Calculator](Examples/Calculator) | A SwiftUI `App` with a `WindowGroup`, a button grid, keyboard input through `keyboardShortcut`, a fixed-size window and the standard menu bar with a `CommandMenu` | `swift run Calculator` |
+| [FramelessWindow](Examples/FramelessWindow) | A title-bar-less `.fullSizeContentView` window with the standard window buttons, a rounded non-opaque shape, movable by background, the system backdrop through `NSVisualEffectView`, close/minimize/zoom, and a `.borderless` panel | `swift run FramelessWindow` (`--panel`) |
+| [Animation](Examples/Animation) | Core Animation: explicit `CABasicAnimation`s (position, opacity, 3D flip under a perspective transform), a `CAKeyframeAnimation` along a path, implicit animations in a `CATransaction`, play/pause/reset, and a SwiftUI `withAnimation` pane | `swift run Animation` (`--paused`) |
+| [Drawing](Examples/Drawing) | An `NSView` `draw(_:)` with paths, a gradient, text and images; a freehand sketch canvas with mouse tracking, undo/redo and export to PNG through `NSSavePanel` | `swift run Drawing` (`--export file.png`) |
+| [Observable](Examples/Observable) | SwiftUI driven by an `ObservableObject` with `@Published` properties, a live-updating `List`, a detail pane editing through a `Binding`, and a Combine `Timer` publisher feeding the model | `swift run Observable` |
+| [LibraryCompat](Examples/LibraryCompat) | Popular third-party SwiftUI packages (Shimmer, ConfettiSwiftUI, WrappingHStack, Defaults, swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts, Nuke) built against this SwiftUI, one tab each; a package of its own, with the verdicts and the API gaps they found in [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md) | `tools/library-compat.sh --run` (`--screenshot dir`) |
 
 Add the package to your own app and import the modules by their Apple names:
 

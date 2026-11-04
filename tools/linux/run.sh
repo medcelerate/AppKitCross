@@ -1,5 +1,6 @@
 #!/bin/bash
-# Runs the test suite on the host backend, then HelloWindow under Xvfb for a screenshot.
+# Runs the test suite on the host backend, then HelloWindow and the small examples under
+# Xvfb for screenshots.
 # With --wayland it also runs HelloWindow under a headless sway and screenshots it with
 # grim (see run-wayland.sh). Screenshots land in /tmp, and in $APPKITWIN_OUT when set.
 set -e
@@ -57,6 +58,30 @@ xwd -root -silent | convert xwd:- /tmp/hellowindow-linux-metal.png
 wait $APP 2>/dev/null || true
 grep -E "^device|Vulkan|pipeline failed|^frame" /tmp/hellowindow-linux-metal.log | head -5
 echo "screenshot: /tmp/hellowindow-linux-metal.png ($(stat -c %s /tmp/hellowindow-linux-metal.png) bytes)"
+# The small examples (Examples/<Name>): each runs under Xvfb for a screenshot, and its log
+# is checked for a trap (an `unimplemented()` stub or a crash); Drawing also exports its
+# canvas headlessly, which checks the PNG path.
+for example in Calculator FramelessWindow Animation Drawing Observable; do
+    lower=$(echo "$example" | tr '[:upper:]' '[:lower:]')
+    echo "== $example under Xvfb (X11 backend)"
+    args=""
+    case "$example" in FramelessWindow) args="--panel" ;; esac
+    APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/$example $args >/tmp/$lower-linux.log 2>&1 &
+    APP=$!
+    sleep 4
+    xwd -root -silent | convert xwd:- /tmp/$lower-linux.png
+    if kill -0 $APP 2>/dev/null; then
+        kill $APP 2>/dev/null || true
+        wait $APP 2>/dev/null || true
+        echo "screenshot: /tmp/$lower-linux.png ($(stat -c %s /tmp/$lower-linux.png) bytes)"
+    else
+        echo "$example exited early:"; tail -3 /tmp/$lower-linux.log
+    fi
+    grep -E "Fatal error|not implemented" /tmp/$lower-linux.log | head -3
+done
+echo "== Drawing --export (headless PNG export)"
+APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/Drawing --export /tmp/drawing-export-linux.png 2>&1 | tail -2
+file /tmp/drawing-export-linux.png 2>/dev/null || ls -la /tmp/drawing-export-linux.png
 if [ "$WAYLAND" = 1 ]; then
     echo "== HelloWindow under headless sway (Wayland backend)"
     # sway refuses to run as root; the image has an unprivileged user for it.
@@ -67,6 +92,6 @@ if [ "$WAYLAND" = 1 ]; then
     fi
 fi
 if [ -n "$APPKITWIN_OUT" ] && [ -d "$APPKITWIN_OUT" ]; then
-    cp /tmp/hellowindow-linux*.png /tmp/library-compat-*.png "$APPKITWIN_OUT"/ 2>/dev/null || true
+    cp /tmp/hellowindow-linux*.png /tmp/*-linux.png "$APPKITWIN_OUT"/
 fi
 echo "done"

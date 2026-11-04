@@ -117,12 +117,23 @@ void cm_commandlist_draw(CMCommandList *list, uint32_t topology, uint32_t vertex
 void cm_commandlist_draw_indexed(CMCommandList *list, uint32_t topology, uint32_t indexCount, bool index32, CMBuffer *indexBuffer, uint64_t indexOffset, uint32_t instanceCount);
 void cm_commandlist_copy_buffer(CMCommandList *list, CMBuffer *src, uint64_t srcOffset, CMBuffer *dst, uint64_t dstOffset, uint64_t size);
 void cm_commandlist_copy_texture(CMCommandList *list, CMTexture *src, CMTexture *dst);
+/// Copies a `width` x `height` region of level 0 from (`srcX`, `srcY`) to (`dstX`, `dstY`).
+void cm_commandlist_copy_texture_region(CMCommandList *list, CMTexture *src, uint32_t srcX, uint32_t srcY, CMTexture *dst, uint32_t dstX, uint32_t dstY, uint32_t width, uint32_t height);
 /// Closes the list and executes it on `queue`; returns the fence value that completes it.
 uint64_t cm_commandlist_execute(CMCommandList *list, CMQueue *queue);
 
 /// Swap chain on an HWND for CAMetalLayer: `cm_swapchain_acquire` returns the current
 /// back buffer as a texture, `cm_swapchain_present` presents it (vsync when `vsync`).
 CMSwapChain *cm_swapchain_create(CMDevice *device, CMQueue *queue, void *hwnd, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount);
+/// Flip-model swap chain for DirectComposition (`CreateSwapChainForComposition`,
+/// FLIP_SEQUENTIAL so a presented buffer keeps its pixels for readback): no HWND, the
+/// caller shows `cm_swapchain_native` as the content of a composition visual. `opaque`
+/// picks DXGI_ALPHA_MODE_IGNORE over PREMULTIPLIED.
+CMSwapChain *cm_swapchain_create_composition(CMDevice *device, CMQueue *queue, uint32_t width, uint32_t height, uint32_t dxgiFormat, uint32_t bufferCount, bool opaque);
+/// The IDXGISwapChain1 (not AddRef'd) for IDCompositionVisual::SetContent.
+void *cm_swapchain_native(CMSwapChain *swapChain);
+/// The last failure of present/resize/acquire on this chain ("" when none), with its HRESULT.
+void cm_swapchain_last_error(CMSwapChain *swapChain, char *errorOut, uint32_t errorCapacity);
 void cm_swapchain_release(CMSwapChain *swapChain);
 bool cm_swapchain_resize(CMSwapChain *swapChain, uint32_t width, uint32_t height);
 CMTexture *cm_swapchain_acquire(CMSwapChain *swapChain);

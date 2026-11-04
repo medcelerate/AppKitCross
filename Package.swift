@@ -190,12 +190,18 @@ targets += [
             .enableUpcomingFeature("StrictConcurrency"),
         ]
     ),
-    .target(name: "MetalKit", dependencies: ["AppKit", "Metal"], path: "Sources/MetalKit", swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("StrictConcurrency")]),
+    .target(name: "MetalKit", dependencies: ["AppKit", "QuartzCore", "Metal"], path: "Sources/MetalKit", swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("StrictConcurrency")]),
     .executableTarget(
         name: "HelloWindow",
         dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"],
         path: "Examples/HelloWindow"
     ),
+    // Small, self-contained examples (Examples/<Name>/README.md says what each shows).
+    .executableTarget(name: "Calculator", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Calculator", exclude: ["README.md"]),
+    .executableTarget(name: "FramelessWindow", dependencies: ["AppKit"], path: "Examples/FramelessWindow", exclude: ["README.md"]),
+    .executableTarget(name: "Animation", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Animation", exclude: ["README.md"]),
+    .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
+    .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
         dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"] + combineTestDependencies + leafModuleTestDependencies + platformTestDependencies,

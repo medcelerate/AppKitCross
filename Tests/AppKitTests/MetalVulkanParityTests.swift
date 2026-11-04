@@ -3,6 +3,7 @@
 // reference device does not rasterize or run compute, so the shared scene is clears in
 // several formats, uploads, texture and buffer copies, fills, and a presented MTKView
 // frame; rasterization is covered by MetalVulkanRenderTests against known pixels.
+// `MetalD3D12ParityTests` runs the same scene against the Direct3D 12 device on Windows.
 
 import XCTest
 @testable import AppKit
@@ -103,7 +104,7 @@ final class MetalVulkanParityTests: XCTestCase, @unchecked Sendable {
         return out
     }
 
-    static func compare(_ reference: Readbacks, _ vulkan: Readbacks) {
+    static func compare(_ reference: Readbacks, _ vulkan: Readbacks, backend: String = "Vulkan") {
         XCTAssertEqual(reference.count, vulkan.count)
         for (r, v) in zip(reference, vulkan) {
             XCTAssertEqual(r.label, v.label)
@@ -114,7 +115,7 @@ final class MetalVulkanParityTests: XCTestCase, @unchecked Sendable {
                 if d > r.tolerance { bad += 1; if firstBad < 0 { firstBad = i } }
                 worst = max(worst, d)
             }
-            XCTAssertEqual(bad, 0, "\(r.label): \(bad) bytes differ by more than \(r.tolerance) (worst \(worst), first at byte \(firstBad): reference \(firstBad >= 0 ? Int(r.bytes[firstBad]) : -1) vs Vulkan \(firstBad >= 0 ? Int(v.bytes[firstBad]) : -1))")
+            XCTAssertEqual(bad, 0, "\(r.label): \(bad) bytes differ by more than \(r.tolerance) (worst \(worst), first at byte \(firstBad): reference \(firstBad >= 0 ? Int(r.bytes[firstBad]) : -1) vs \(backend) \(firstBad >= 0 ? Int(v.bytes[firstBad]) : -1))")
         }
     }
 
@@ -137,39 +138,48 @@ final class MetalVulkanParityTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(fill[2], 0); XCTAssertEqual(fill[3], 0x5A); XCTAssertEqual(fill[40], 0x5A); XCTAssertEqual(fill[41], 0)
     }
 
+    /// One cleared MTKView frame on `device` in a host-backend window, as the window's pixels
+    /// (the readback presentation path: the host backend does not host layers natively).
+    static func presentedMTKViewFrame(on device: any MTLDevice) throws -> Data {
+        nonisolated(unsafe) let device = device   // used on the main actor only, like the test's own devices
+        return try MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 64, height: 48), styleMask: [.titled], backing: .buffered, defer: false)
+            let view = MTKView(frame: NSRect(x: 0, y: 0, width: 64, height: 48), device: device)
+            final class Renderer: MTKViewDelegate {
+                func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+                func draw(in view: MTKView) {
+                    view.clearColor = MTLClearColorMake(0.2, 0.6, 0.9, 1)
+                    guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable, let cb = view.device?.makeCommandQueue()?.makeCommandBuffer() else { return }
+                    cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+                    cb.present(drawable)
+                    cb.commit()
+                }
+            }
+            let renderer = Renderer()
+            view.delegate = renderer
+            view.enableSetNeedsDisplay = true
+            w.contentView!.addSubview(view)
+            w.makeKeyAndOrderFront(nil)
+            view.draw()
+            XCTAssertFalse(view._presentsThroughSwapChain, "the host backend has no DirectComposition tree: frames are read back")
+            w.display()
+            let platform = Mirror(reflecting: w).descendant("_platform") as! HostWindow
+            let image = _pixels(try XCTUnwrap(platform.lastImage))
+            w.close()
+            return image
+        }
+    }
+
+    static func compareFrames(_ reference: Data, _ other: Data, backend: String) {
+        XCTAssertEqual(reference.count, other.count)
+        var worst = 0
+        for (a, b) in zip(reference, other) { worst = max(worst, abs(Int(a) - Int(b))) }
+        XCTAssertLessThanOrEqual(worst, 1, "the \(backend) frame differs from the reference device's by at most one level per channel")
+    }
+
     func testMTKViewFrameMatchesReferenceDevice() throws {
         let vulkan = try MetalVulkanDeviceTests.vulkanDevice()
-        var images: [Data] = []
-        let devices: [any MTLDevice] = [MTLReferenceDevice(), vulkan]
-        try MainActor.assumeIsolated {
-            for device in devices {
-                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 64, height: 48), styleMask: [.titled], backing: .buffered, defer: false)
-                let view = MTKView(frame: NSRect(x: 0, y: 0, width: 64, height: 48), device: device)
-                final class Renderer: MTKViewDelegate {
-                    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
-                    func draw(in view: MTKView) {
-                        view.clearColor = MTLClearColorMake(0.2, 0.6, 0.9, 1)
-                        guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable, let cb = view.device?.makeCommandQueue()?.makeCommandBuffer() else { return }
-                        cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
-                        cb.present(drawable)
-                        cb.commit()
-                    }
-                }
-                let renderer = Renderer()
-                view.delegate = renderer
-                view.enableSetNeedsDisplay = true
-                w.contentView!.addSubview(view)
-                w.makeKeyAndOrderFront(nil)
-                view.draw()
-                w.display()
-                let platform = Mirror(reflecting: w).descendant("_platform") as! HostWindow
-                images.append(_pixels(try XCTUnwrap(platform.lastImage)))
-                w.close()
-            }
-        }
-        XCTAssertEqual(images[0].count, images[1].count)
-        var worst = 0
-        for (a, b) in zip(images[0], images[1]) { worst = max(worst, abs(Int(a) - Int(b))) }
-        XCTAssertLessThanOrEqual(worst, 1, "the presented frame differs from the reference device's by at most one level per channel")
+        let reference = try Self.presentedMTKViewFrame(on: MTLReferenceDevice())
+        Self.compareFrames(reference, try Self.presentedMTKViewFrame(on: vulkan), backend: "Vulkan")
     }
 }

@@ -1,10 +1,13 @@
 // MetalKit: MTKView over AppKit's NSView and the Core Animation frame clock.
 // With the reference device the presented drawable is drawn through CoreGraphics, so a
-// cleared (or CPU-filled) texture shows on every platform; GPU devices present through
-// their swap chain.
+// cleared (or CPU-filled) texture shows on every platform. On Windows, in a window whose
+// layer tree DirectComposition hosts, the Direct3D 12 device renders into a flip-model DXGI
+// swap chain that is the content of the view's layer visual (`CAMetalLayer`); anywhere
+// else (the host backend, software layers) a GPU drawable is read back and drawn.
 
 import Foundation
 import AppKit
+import QuartzCore
 import Metal
 
 /// - SeeAlso: https://developer.apple.com/documentation/metalkit/mtkviewdelegate
@@ -18,8 +21,11 @@ public protocol MTKViewDelegate: AnyObject {
 @MainActor open class MTKView: NSView {
     private var _device: (any MTLDevice)?
     private var _drawableSize = CGSize.zero
-    private var _currentDrawable: MTLReferenceDrawable?
+    private var _currentDrawable: (any MTLDrawable)?
     private var _currentTexture: (any MTLTexture)?
+    #if os(Windows)
+    private var _swapChain: MTLD3D12SwapChain?
+    #endif
     private var _presented: (any MTLTexture)?
     private var _displayLink: CADisplayLink?
     private var _depthTexture: (any MTLTexture)?
@@ -50,6 +56,62 @@ public protocol MTKViewDelegate: AnyObject {
 
     public convenience override init(frame frameRect: NSRect) { self.init(frame: frameRect, device: nil) }
     public required init?(coder: NSCoder) { return nil }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/makebackinglayer()
+    open override func makeBackingLayer() -> CALayer { CAMetalLayer() }
+
+    /// True while frames go straight to a DXGI swap chain shown by the window's
+    /// DirectComposition tree (Windows); false on the CoreGraphics readback path.
+    /// Not part of Apple's API (tooling and tests).
+    public var _presentsThroughSwapChain: Bool {
+        #if os(Windows)
+        return _swapChain != nil
+        #else
+        return false
+        #endif
+    }
+
+    /// The swap chain's last present/resize failure ("" when none, or on the readback path).
+    /// Not part of Apple's API (tooling and tests).
+    public var _presentationError: String {
+        #if os(Windows)
+        return _swapChain?.lastError ?? ""
+        #else
+        return ""
+        #endif
+    }
+
+    #if os(Windows)
+    /// The swap chain sized to the drawable, while the window hosts its layers natively and
+    /// the device is Direct3D 12; otherwise nil, any chain dropped, and frames are read back.
+    private func _ensureSwapChain() -> MTLD3D12SwapChain? {
+        guard let d3d = _device as? MTLD3D12Device, let w = window, w._hostsLayersNatively, let l = layer else {
+            _dropSwapChain()
+            return nil
+        }
+        let width = max(1, Int(_drawableSize.width)), height = max(1, Int(_drawableSize.height))
+        if let sc = _swapChain, sc.pixelFormat == colorPixelFormat {
+            if (sc.width != width || sc.height != height), !sc.resize(width: width, height: height) {
+                _dropSwapChain()
+                return nil
+            }
+            return sc
+        }
+        _dropSwapChain()
+        guard let sc = MTLD3D12SwapChain(device: d3d, width: width, height: height, pixelFormat: colorPixelFormat, opaque: true) else { return nil }
+        _swapChain = sc
+        l._nativeContent = sc.nativeHandle
+        _presented = nil
+        return sc
+    }
+
+    private func _dropSwapChain() {
+        guard _swapChain != nil else { return }
+        _swapChain = nil
+        layer?._nativeContent = nil
+        needsDisplay = true
+    }
+    #endif
 
     open var device: (any MTLDevice)? {
         get { _device }
@@ -86,6 +148,14 @@ public protocol MTKViewDelegate: AnyObject {
     /// - SeeAlso: https://developer.apple.com/documentation/metalkit/mtkview/currentdrawable
     open var currentDrawable: (any MTLDrawable)? {
         if let d = _currentDrawable { return d }
+        #if os(Windows)
+        if let sc = _ensureSwapChain() {
+            guard let d = sc.nextDrawable() else { return nil }
+            _currentTexture = d.texture
+            _currentDrawable = d
+            return d
+        }
+        #endif
         guard let tex = _makeTexture(colorPixelFormat, usage: [.renderTarget, .shaderRead]) else { return nil }
         _currentTexture = tex
         let d = MTLReferenceDrawable(texture: tex) { [weak self] drawable in
@@ -172,14 +242,36 @@ public protocol MTKViewDelegate: AnyObject {
 
     open override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        if autoResizeDrawable {
-            let scale = window?.backingScaleFactor ?? 1
-            drawableSize = CGSize(width: newSize.width * scale, height: newSize.height * scale)
-        }
+        _resizeDrawable(to: newSize)
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/viewdidchangebackingproperties()
+    open override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        _resizeDrawable(to: bounds.size)
+    }
+
+    /// Follows the view's size and the window's backing scale, then renders a frame at the
+    /// new size at once when presenting through a swap chain, so a resize never shows a
+    /// stretched or stale frame.
+    private func _resizeDrawable(to size: NSSize) {
+        guard autoResizeDrawable else { return }
+        let scale = window?.backingScaleFactor ?? 1
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        guard newSize != _drawableSize else { return }
+        drawableSize = newSize
+        #if os(Windows)
+        if _swapChain != nil, !isPaused, delegate != nil { draw() }
+        #endif
     }
 
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        #if os(Windows)
+        // Presentation through DirectComposition needs the whole window layer-backed, as it
+        // is on macOS; a window that stays in software still shows read-back frames.
+        if _device is MTLD3D12Device, let cv = window?.contentView, !cv.wantsLayer { cv.wantsLayer = true }
+        #endif
         if autoResizeDrawable, let w = window {
             drawableSize = CGSize(width: bounds.width * w.backingScaleFactor, height: bounds.height * w.backingScaleFactor)
         }
@@ -202,7 +294,12 @@ public protocol MTKViewDelegate: AnyObject {
     }
 
     deinit {
-        MainActor.assumeIsolated { _displayLink?.invalidate() }
+        MainActor.assumeIsolated {
+            _displayLink?.invalidate()
+            #if os(Windows)
+            layer?._nativeContent = nil
+            #endif
+        }
     }
 }
 

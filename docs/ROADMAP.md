@@ -15,7 +15,7 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translation on macOS, awaiting Windows verification; swap-chain presentation unexercised); Linux Vulkan backend (ADR-0012): device, queues, buffers, textures, blits, compute, render pipelines with depth, stencil and blending, and `MTKView` presentation on X11 and Wayland, all verified on lavapipe in the container (`tools/linux/run.sh` captures the Metal tab on both backends), with `MetalVulkanParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device byte for byte; swap-chain presentation is the follow-up |
+| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translations compiled through the shim's HLSL compiler by `MetalD3D12DeviceTests` on Windows; `MTKView` presents through a flip-model DXGI composition swap chain on DirectComposition-hosted windows, with `MetalD3D12ParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device); Linux Vulkan backend (ADR-0012): device, queues, buffers, textures, blits, compute, render pipelines with depth, stencil and blending, and `MTKView` presentation on X11 and Wayland, all verified on lavapipe in the container (`tools/linux/run.sh` captures the Metal tab on both backends), with `MetalVulkanParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device byte for byte; swap-chain presentation is the follow-up |
 | M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 98/98 tests pass in the `swift:6.2-noble` container |
 | M9 CoreText and the text system | done on all three platforms: CoreText module (ADR-0007) with Pango/HarfBuzz and DirectWrite engines (PR #7, DrawGlyphRun parity in PR #8); NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them; 98/98 tests on macOS, Linux and Windows |
 | M10 SwiftUI | first version on main (ADR-0010): View/ViewBuilder, State/Binding/ObservedObject/StateObject/Environment, node-tree runtime over the M6 hosting seam, proposal-based layout (stacks, Spacer, frame, padding), Text through the text system, AppKit-backed Button/TextField/Toggle/Slider/Image/ScrollView, shapes, decorations, App/WindowGroup, representables; 17 SwiftUI tests, HelloWindow `--swiftui` demo (Controls, Navigation and Presentation tabs); withAnimation/.animation/transitions and the animatable modifiers interpolate on the display link; NavigationStack/NavigationLink/navigationDestination with a path binding, TabView with tabItem/tag, Picker (segmented, radio group), sheets over NSWindow.beginSheet, alerts over NSAlert; GeometryReader, @AppStorage/@SceneStorage over UserDefaults, @FocusState with focused(_:) and onSubmit; Picker menu style over NSPopUpButton, Menu (nested, toggles, dividers), contextMenu; List selection (single/set bindings, mouse with Cmd/Shift, arrows, Cmd-A) over the list row model; Table (TableColumn, widths, selection, sortOrder) over `NSTableView` with cells hosted as SwiftUI views, segmented Picker and the TabView bar over `NSSegmentedControl`; onDrag/onDrop/DropDelegate over the AppKit dragging session; App scenes install the standard menu bar (app, File, Edit, View, Window, Help) with `.commands` (CommandMenu, CommandGroup before/after/replacing the standard placements, `.keyboardShortcut` on items) and a Settings scene opened from the app menu's Settings… (Cmd-,) |
@@ -292,6 +292,36 @@ detects the dialect on every device so MSL function names work unchanged. Covere
 `MSLTranslatorTests` on macOS; `HelloWindow --metal-msl` draws the triangle from MSL and
 `--metal-selftest` renders an MSL pipeline. Open on the shim: pointer-style buffer
 arguments (`StructuredBuffer` tables in `space1`) and compute dispatch.
+
+Windows presentation (2026-11-04): `MTKView`'s backing layer is a `CAMetalLayer`, and on a
+window whose layer tree DirectComposition hosts (`NSWindow._hostsLayersNatively`; the view
+asks the content view for `wantsLayer`, as every macOS window is layer-backed) the D3D12
+device renders into `MTLD3D12SwapChain`, a flip-model DXGI swap chain created for
+composition (`CreateSwapChainForComposition`, FLIP_SEQUENTIAL, two buffers, vsync
+present). Its `IDXGISwapChain1` travels as the layer's `_nativeContent` into the scene node
+and becomes the content of the node's visual (`cd2d_comp_tree_set_swapchain`), so the
+frame is shown pixel for pixel at the visual's origin and the label subview composites
+above it. The chain follows `drawableSize` (window resizes, `viewDidChangeBackingProperties`
+on a DPI change) and a resize renders a frame at the new size at once. Elsewhere (the host
+backend, `APPKITWIN_SOFTWARE_LAYERS=1`, the reference device) the drawable is a texture
+read back and drawn through CoreGraphics, as before; `--metal-log` prints which path a
+frame took. Every Metal command queue executes on the device's one direct queue, the
+queue the chain is created on: a composition back buffer written from any other D3D12
+queue removes the device with DXGI_ERROR_ACCESS_DENIED (seen on WARP and the RTX 2070),
+and commit is synchronous anyway. The shim gained region texture copies (`cm_commandlist_copy_texture_region`),
+and CPU-side blit work (fills, buffer ↔ texture copies through staging) now executes the
+GPU commands recorded before it first, so a readback after a copy sees the copy. Tests on
+Windows (WARP on CI, the GPU on the test PC): `MetalD3D12DeviceTests` (every MSL sample
+of `MSLTranslatorTests` plus HelloWindow's HLSL and MSL compiled per stage, triangles from
+HLSL and MSL, blit regions and order, the composition swap chain presenting, keeping and
+resizing its buffers) and `MetalD3D12ParityTests` (the Vulkan parity scene and a
+presented `MTKView` frame against the reference device). Verified on the test PC (RTX
+2070 SUPER, DISPLAY1 150%, DISPLAY2 100%) at 405241c: the Windows suite 242 tests, 0
+failures; HelloWindow's Metal tab presents through the swap chain on both monitors
+(657x411 pixels at 150%, 438x274 at 100%, the device name in `--metal-log`), crisp
+edges; a real corner drag at 150% printed four new sizes during the drag with the
+triangle drawing throughout and no black flashes; `SetWindowPos` resizes at 100% and
+the DPI re-size on a cross-monitor move each rendered crisp at the new size.
 
 ## M8: Linux backend
 
