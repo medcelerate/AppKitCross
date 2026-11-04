@@ -304,7 +304,10 @@ above it. The chain follows `drawableSize` (window resizes, `viewDidChangeBackin
 on a DPI change) and a resize renders a frame at the new size at once. Elsewhere (the host
 backend, `APPKITWIN_SOFTWARE_LAYERS=1`, the reference device) the drawable is a texture
 read back and drawn through CoreGraphics, as before; `--metal-log` prints which path a
-frame took. The shim gained region texture copies (`cm_commandlist_copy_texture_region`),
+frame took. Every Metal command queue executes on the device's one direct queue, the
+queue the chain is created on: a composition back buffer written from any other D3D12
+queue removes the device with DXGI_ERROR_ACCESS_DENIED (seen on WARP and the RTX 2070),
+and commit is synchronous anyway. The shim gained region texture copies (`cm_commandlist_copy_texture_region`),
 and CPU-side blit work (fills, buffer ↔ texture copies through staging) now executes the
 GPU commands recorded before it first, so a readback after a copy sees the copy. Tests on
 Windows (WARP on CI, the GPU on the test PC): `MetalD3D12DeviceTests` (every MSL sample

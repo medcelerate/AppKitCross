@@ -538,15 +538,19 @@ final class MTLD3D12RenderPipelineState: MTLRenderPipelineState {
 
 // MARK: Commands
 
+/// Every Metal command queue executes on the device's one direct queue: commit is
+/// synchronous (execute, then wait), so separate D3D12 queues would buy nothing, and a
+/// composition swap chain's back buffers may only be written from the queue the chain
+/// was created on. Work from any other queue removes the device with
+/// DXGI_ERROR_ACCESS_DENIED (seen on WARP and on an RTX 2070).
 final class MTLD3D12CommandQueue: MTLCommandQueue {
     var label: String?
     let device: any MTLDevice
     let handle: OpaquePointer?
     init(device: MTLD3D12Device) {
         self.device = device
-        handle = cm_queue_create(device.handle)
+        handle = device.utilityQueue
     }
-    deinit { cm_queue_release(handle) }
     func makeCommandBuffer() -> (any MTLCommandBuffer)? { MTLD3D12CommandBuffer(queue: self) }
     func makeCommandBufferWithUnretainedReferences() -> (any MTLCommandBuffer)? { makeCommandBuffer() }
 }
@@ -591,15 +595,12 @@ final class MTLD3D12CommandBuffer: MTLCommandBuffer {
     func commit() {
         guard status.rawValue < MTLCommandBufferStatus.committed.rawValue else { return }
         status = .committed
-        guard let d3d = device as? MTLD3D12Device, let ownQueue = (commandQueue as? MTLD3D12CommandQueue)?.handle, let list = cm_commandlist_create(d3d.handle) else {
+        guard let d3d = device as? MTLD3D12Device, let q = (commandQueue as? MTLD3D12CommandQueue)?.handle, let list = cm_commandlist_create(d3d.handle) else {
             status = .error
             error = MTLCommandBufferError.internal
             for h in completedHandlers { h(self) }
             return
         }
-        // A frame that presents a swap-chain drawable is executed on the queue the chain was
-        // created with: DXGI synchronises Present against that queue's work.
-        let q = drawables.contains(where: { $0 is MTLD3D12Drawable }) ? (drawables.first { $0 is MTLD3D12Drawable } as! MTLD3D12Drawable).swapChain.queue : ownQueue
         cm_commandlist_reset(list)
         pendingGPUWork = false
         for w in work { w(list) }
