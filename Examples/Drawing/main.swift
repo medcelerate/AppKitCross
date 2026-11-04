@@ -16,6 +16,8 @@ final class GalleryView: NSView {
         // same arithmetic CAGradientLayer uses on the software backends).
         let band = NSRect(x: 16, y: 16, width: bounds.width - 32, height: 60)
         let from = NSColor(calibratedRed: 0.2, green: 0.5, blue: 1, alpha: 1), to = NSColor(calibratedRed: 0.9, green: 0.3, blue: 0.6, alpha: 1)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: band, xRadius: 8, yRadius: 8).addClip()
         let strips = 64
         for i in 0..<strips {
             let t = CGFloat(i) / CGFloat(strips - 1)
@@ -25,7 +27,7 @@ final class GalleryView: NSView {
             let w = band.width / CGFloat(strips)
             NSBezierPath.fill(NSRect(x: band.minX + w * CGFloat(i), y: band.minY, width: w + 0.5, height: band.height))
         }
-        NSBezierPath(roundedRect: band, xRadius: 8, yRadius: 8).addClip()
+        NSGraphicsContext.restoreGraphicsState()
 
         // Paths: a star, a dashed curve and a thick stroked circle.
         let star = NSBezierPath()
@@ -194,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         main.addItem(editItem)
         NSApp.mainMenu = main
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 420),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 420),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Drawing"
         let content = window.contentView!
@@ -205,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         divider.autoresizingMask = [.height]
         content.addSubview(divider)
 
-        sketch = SketchView(frame: NSRect(x: 341, y: 44, width: 419, height: 376))
+        sketch = SketchView(frame: NSRect(x: 341, y: 44, width: 579, height: 376))
         sketch.autoresizingMask = [.width, .height]
         sketch.onChange = { [unowned self] in self.updateButtons() }
         content.addSubview(sketch)
@@ -220,14 +222,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         let width = NSSlider(value: 3, minValue: 1, maxValue: 16, target: self, action: Selector(("widthChanged:")))
         width.frame.size.width = 80
         width.widthAnchor.constraint(equalToConstant: 80).isActive = true
-        status = NSTextField(labelWithString: "")
-        status.textColor = .secondaryLabelColor
-        let bar = NSStackView(views: [undoButton, redoButton, clear, export, colors, width, status])
+        let bar = NSStackView(views: [undoButton, redoButton, clear, export, colors, width])
         bar.orientation = .horizontal
         bar.spacing = 6
-        bar.frame = NSRect(x: 349, y: 8, width: 404, height: 28)
-        bar.autoresizingMask = [.width]
+        bar.frame = NSRect(x: 349, y: 8, width: 490, height: 28)
         content.addSubview(bar)
+        status = NSTextField(labelWithString: "")
+        status.textColor = .secondaryLabelColor
+        status.alignment = .right
+        status.frame = NSRect(x: 836, y: 12, width: 76, height: 20)
+        status.autoresizingMask = [.minXMargin]
+        content.addSubview(status)
         // A sample stroke, so undo and export have something to work on.
         sketch.push(SketchView.Stroke(points: (0...40).map { NSPoint(x: 40 + CGFloat($0) * 8, y: 180 + 60 * sin(CGFloat($0) / 4)) }, color: .systemBlue, width: 4))
 

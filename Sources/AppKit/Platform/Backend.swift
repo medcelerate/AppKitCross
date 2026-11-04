@@ -150,6 +150,11 @@ public protocol PlatformWindowOwner: AnyObject {
     func platformWindowDidBecomeKey()
     func platformWindowDidResignKey()
     func platformWindowDidChangeBackingScaleFactor(_ scale: CGFloat)
+    /// The window system minimised or restored the window on its own (taskbar, Win+D, the
+    /// window manager); a backend may also report the `miniaturize()`/`deminiaturize()` it
+    /// was asked for, the owner posts each change once.
+    func platformWindowDidMiniaturize()
+    func platformWindowDidDeminiaturize()
     /// Draw the content area. `context` is in content coordinates (points, bottom-left
     /// origin, already scaled for the backing store). `dirtyRect` is in content coordinates.
     func platformWindowDraw(into context: CGContext, dirtyRect: NSRect)

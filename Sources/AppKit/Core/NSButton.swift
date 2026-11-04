@@ -35,7 +35,14 @@ import CoreText
 
     private func _modifierMatch(_ event: NSEvent) -> Bool {
         let relevant: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        return event.modifierFlags.intersection(relevant) == keyEquivalentModifierMask.intersection(relevant)
+        var pressed = event.modifierFlags.intersection(relevant)
+        // A key equivalent that is itself a shifted character ("*", "+", "?") implies Shift,
+        // as in AppKit: the typed character already proves the shift state.
+        if pressed.contains(.shift), !keyEquivalentModifierMask.contains(.shift),
+           keyEquivalent.count == 1, !keyEquivalent.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) {
+            pressed.remove(.shift)
+        }
+        return pressed == keyEquivalentModifierMask.intersection(relevant)
     }
 
     @MainActor open override var acceptsFirstResponder: Bool { isEnabled && !refusesFirstResponder }

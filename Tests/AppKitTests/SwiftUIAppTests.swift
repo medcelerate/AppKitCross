@@ -8,6 +8,22 @@ import XCTest
 final class SwiftUIAppTests: XCTestCase, @unchecked Sendable {
     @MainActor private func items(_ menu: NSMenu?) -> [String] { (menu?.items ?? []).map { $0.isSeparatorItem ? "-" : $0.title } }
 
+    func testWindowResizabilityContentSize() {
+        MainActor.assumeIsolated {
+            struct Fixed: View { var body: some View { Text("Fixed").frame(width: 240, height: 120) } }
+            let runner = _AppRunner(name: "Fixed")
+            runner.run(scene: WindowGroup("Fixed") { Fixed() }.windowResizability(.contentSize))
+            let w = runner.windows.last!
+            XCTAssertFalse(w.styleMask.contains(.resizable), "contentSize: no resize frame or zoom")
+            XCTAssertEqual(w.minSize, w.maxSize)
+            XCTAssertEqual(w.minSize, w.frame.size)
+            let open = _AppRunner(name: "Open")
+            open.run(scene: WindowGroup("Open") { Fixed() })
+            XCTAssertTrue(open.windows.last!.styleMask.contains(.resizable), "automatic: resizable")
+            w.close(); open.windows.last!.close()
+        }
+    }
+
     func testMenuBarCommandsAndSettings() {
         MainActor.assumeIsolated {
             final class Log { var added = 0 }
