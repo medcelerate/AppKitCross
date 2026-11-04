@@ -312,7 +312,25 @@ import CoreText
         _platform?.setNeedsDisplay(r)
     }
 
+    /// Feeds the event to the gesture recognizers of the target view and its ancestors
+    /// (AppKit routes to every recognizer up the hit view's chain). Returns true when a
+    /// tracking recognizer asked for the view not to see this event.
+    private func _routeToGestureRecognizers(_ event: NSEvent, target: NSResponder) -> Bool {
+        var view: NSView? = target as? NSView
+        var delayed = false
+        while let v = view {
+            for r in v.gestureRecognizers {
+                let tracking = r.state == .began || r.state == .changed
+                r._receive(event)
+                if r._delays(event, tracking: tracking) { delayed = true }
+            }
+            view = v.superview
+        }
+        return delayed
+    }
+
     private func _dispatchMouse(_ event: NSEvent, to target: NSResponder) {
+        if _routeToGestureRecognizers(event, target: target) { return }
         switch event.type {
         case .leftMouseDown: target.mouseDown(with: event)
         case .leftMouseUp: target.mouseUp(with: event)
@@ -327,6 +345,13 @@ import CoreText
         case .scrollWheel: target.scrollWheel(with: event)
         case .mouseEntered: target.mouseEntered(with: event)
         case .mouseExited: target.mouseExited(with: event)
+        case .magnify: target.magnify(with: event)
+        case .rotate: target.rotate(with: event)
+        case .swipe: target.swipe(with: event)
+        case .smartMagnify: target.smartMagnify(with: event)
+        case .beginGesture: target.beginGesture(with: event)
+        case .endGesture: target.endGesture(with: event)
+        case .pressure: target.pressureChange(with: event)
         default: break
         }
     }
@@ -1381,6 +1406,16 @@ import CoreText
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
+        case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
+            // Gestures go to the view under the pointer, or to the one tracking a press.
+            let target = _mouseDownView ?? _hitTest(event.locationInWindow) ?? self
+            if NSView._traceInvalidation {
+                var chain: [String] = []
+                var v = target as? NSView
+                while let view = v { if !view.gestureRecognizers.isEmpty { chain.append("\(type(of: view))×\(view.gestureRecognizers.count)") }; v = view.superview }
+                NSView._trace("gesture \(event.type) '\(_title)' at \(event.locationInWindow) -> \(type(of: target)) magnification \(event.magnification) recognizers [\(chain.joined(separator: ", "))]")
+            }
+            _dispatchMouse(event, to: target)
         case .keyDown:
             // An editing text field commits on Return before the default button sees it.
             if let editor = firstResponder as? NSTextView, editor._consumesReturnKey, event.charactersIgnoringModifiers == "\r",

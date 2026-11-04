@@ -45,6 +45,10 @@ final class _DecorationPrimitive: _Primitive {
         var tap: (() -> Void)? = nil
         var tapCount = 1
         var hover: ((Bool) -> Void)? = nil
+        /// `.gesture`/`.highPriorityGesture`: recognizers installed on the decoration view.
+        var gestures: [_GestureInstaller] = []
+        var gesturesDelayEvents = false
+        var pressingChanged: ((Bool) -> Void)? = nil
         var helpText: String? = nil
         // Animatable geometry and the transition used on insertion/removal.
         var offset = CGSize.zero
@@ -216,16 +220,46 @@ final class _DecorationPrimitive: _Primitive {
             l.compositingFilter = nil
         }
         if let tap = style.tap {
+            // A tap fires on release, as in SwiftUI (and like an AppKit click); the press
+            // arms it, and moving away or a long press taking the release disarms it.
             let count = style.tapCount
+            var armed: NSPoint? = nil
             view.mouseDownHandler = { event in
-                guard event.clickCount >= count else { return count == 1 }
-                tap()
+                armed = event.clickCount >= count ? event.locationInWindow : nil
                 return true
+            }
+            view.mouseUpHandler = { [weak view] event in
+                guard let view, let start = armed else { return }
+                armed = nil
+                let p = event.locationInWindow
+                guard abs(p.x - start.x) <= 4, abs(p.y - start.y) <= 4, view.bounds.contains(view.convert(p, from: nil)) else { return }
+                tap()
             }
         } else {
             view.mouseDownHandler = nil
+            view.mouseUpHandler = nil
         }
         view.hoverHandler = style.hover
+        // Recognizers survive re-renders (a drag that moves the view re-renders every
+        // event): each installer reuses the recognizer at its index when the kind matches.
+        let previous = view.installedRecognizers
+        view.installedRecognizers = style.gestures.enumerated().compactMap { i, g in g.install(view, i < previous.count ? previous[i] : nil) }
+        for r in previous where !view.installedRecognizers.contains(where: { $0 === r }) { view.removeGestureRecognizer(r) }
+        for r in view.installedRecognizers {
+            if r.view !== view { view.addGestureRecognizer(r) }
+            r.delaysPrimaryMouseButtonEvents = style.gesturesDelayEvents
+            if let pressing = style.pressingChanged, let press = r as? NSPressGestureRecognizer {
+                let inner = press._actionHandler
+                press._actionHandler = { r in
+                    inner?(r)
+                    switch r.state {
+                    case .began: pressing(true)
+                    case .ended, .cancelled, .failed: pressing(false)
+                    default: break
+                    }
+                }
+            }
+        }
         view.drawHandler = { [weak self] _, v in self?.draw(in: v) }
         view.needsDisplay = true
     }

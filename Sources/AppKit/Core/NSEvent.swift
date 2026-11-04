@@ -40,6 +40,8 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
     private var _userData: UnsafeMutableRawPointer? = nil
     private var _phase: NSEvent.Phase = []
     private var _momentumPhase: NSEvent.Phase = []
+    private var _magnification: CGFloat = 0
+    private var _rotation: Float = 0
 
     /// Backend-facing state. Mirrors the OS so the class properties can answer without a query.
     nonisolated(unsafe) static var _currentModifierFlags: NSEvent.ModifierFlags = []
@@ -58,13 +60,33 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
 
     /// Backend helper: a scroll-wheel event.
     internal static func _scrollEvent(location: NSPoint, modifierFlags: NSEvent.ModifierFlags, timestamp: TimeInterval,
-                                      windowNumber: Int, deltaX: CGFloat, deltaY: CGFloat, precise: Bool) -> NSEvent {
+                                      windowNumber: Int, deltaX: CGFloat, deltaY: CGFloat, precise: Bool,
+                                      phase: NSEvent.Phase = [], momentumPhase: NSEvent.Phase = []) -> NSEvent {
         let e = NSEvent(type: .scrollWheel, location: location, modifierFlags: modifierFlags, timestamp: timestamp, windowNumber: windowNumber)
         e._deltaX = deltaX
         e._deltaY = deltaY
         e._scrollingDeltaX = deltaX
         e._scrollingDeltaY = deltaY
         e._hasPreciseScrollingDeltas = precise
+        e._phase = phase
+        e._momentumPhase = momentumPhase
+        return e
+    }
+
+    /// Backend helper: a gesture event (magnify, rotate, swipe, beginGesture, endGesture,
+    /// smartMagnify, pressure). `magnification` and `rotation` (degrees) are this event's
+    /// change; `deltaX`/`deltaY` carry a swipe's direction; `phase` marks the first and
+    /// last event of a gesture where the platform reports one.
+    internal static func _gestureEvent(type: NSEvent.EventType, location: NSPoint, modifierFlags: NSEvent.ModifierFlags,
+                                       timestamp: TimeInterval, windowNumber: Int, magnification: CGFloat = 0, rotation: Float = 0,
+                                       deltaX: CGFloat = 0, deltaY: CGFloat = 0, phase: NSEvent.Phase = [], pressure: Float = 0) -> NSEvent {
+        let e = NSEvent(type: type, location: location, modifierFlags: modifierFlags, timestamp: timestamp, windowNumber: windowNumber)
+        e._magnification = magnification
+        e._rotation = rotation
+        e._deltaX = deltaX
+        e._deltaY = deltaY
+        e._phase = phase
+        e._pressure = pressure
         return e
     }
 
@@ -187,7 +209,7 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/locationinwindow
     open var locationInWindow: NSPoint { _location }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/magnification
-    open var magnification: CGFloat { unimplemented() }
+    open var magnification: CGFloat { _magnification }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/modifierflags
     open var modifierFlags: NSEvent.ModifierFlags { _modifierFlags }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/modifierflags
@@ -235,7 +257,7 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/removemonitor(_:)
     public class func removeMonitor(_ eventMonitor: Any) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/rotation
-    open var rotation: Float { unimplemented() }
+    open var rotation: Float { _rotation }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/scrollingdeltax
     open var scrollingDeltaX: CGFloat { _scrollingDeltaX }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/scrollingdeltay

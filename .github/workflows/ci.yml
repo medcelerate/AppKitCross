@@ -65,7 +65,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev
       - run: swift build
       - name: Build every example
         shell: bash
@@ -83,7 +83,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools
       - run: swift build
       - name: Build every example
         shell: bash

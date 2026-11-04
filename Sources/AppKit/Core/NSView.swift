@@ -56,6 +56,7 @@ import CoreText
     private var _translatesAutoresizingMaskIntoConstraints = true
     private var _identifier: NSUserInterfaceItemIdentifier? = nil
     private var _toolTip: String? = nil
+    private var _gestureRecognizers: [NSGestureRecognizer] = []
     private var _accessibilityOverrides = _NSAccessibilityOverrides()
     private var _accessibilityID = 0
     private var _clipsToBounds = false
@@ -466,7 +467,12 @@ import CoreText
     @MainActor open func addCursorRect(_ rect: NSRect, cursor object: NSCursor) { _cursorRects.append((rect, object)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addgesturerecognizer(_:)
     @available(macOS 10.10, *)
-    @MainActor open func addGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) { unimplemented() }
+    @MainActor open func addGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) {
+        if let old = gestureRecognizer.view, old !== self { old.removeGestureRecognizer(gestureRecognizer) }
+        guard !_gestureRecognizers.contains(where: { $0 === gestureRecognizer }) else { return }
+        _gestureRecognizers.append(gestureRecognizer)
+        gestureRecognizer._setView(self)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addlayoutguide(_:)
     @available(macOS 10.11, *)
     @MainActor open func addLayoutGuide(_ guide: NSLayoutGuide) {
@@ -871,8 +877,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/gesturerecognizers
     @available(macOS 10.10, *)
     @MainActor open var gestureRecognizers: [NSGestureRecognizer] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _gestureRecognizers }
+        set {
+            for r in _gestureRecognizers where !newValue.contains(where: { $0 === r }) { r._setView(nil) }
+            _gestureRecognizers = []
+            for r in newValue { addGestureRecognizer(r) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/getrectsbeingdrawn(_:count:)
     @MainActor open func getRectsBeingDrawn(_ rects: UnsafeMutablePointer<UnsafePointer<NSRect>?>?, count: UnsafeMutablePointer<Int>?) { unimplemented() }
@@ -1223,7 +1233,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removegesturerecognizer(_:)
     @available(macOS 10.10, *)
-    @MainActor open func removeGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) { unimplemented() }
+    @MainActor open func removeGestureRecognizer(_ gestureRecognizer: NSGestureRecognizer) {
+        guard let i = _gestureRecognizers.firstIndex(where: { $0 === gestureRecognizer }) else { return }
+        _gestureRecognizers.remove(at: i)
+        gestureRecognizer._setView(nil)
+        if gestureRecognizer.state == .began || gestureRecognizer.state == .changed { gestureRecognizer.state = .cancelled }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removelayoutguide(_:)
     @available(macOS 10.11, *)
     @MainActor open func removeLayoutGuide(_ guide: NSLayoutGuide) {
