@@ -19,6 +19,8 @@ jobs:
       - run: swift --version
       - run: swift build
       - run: swift test
+      - name: Third-party SwiftUI library compatibility example
+        run: tools/library-compat.sh
 
   windows:
     name: Windows build and tests
@@ -36,6 +38,8 @@ jobs:
         run: swift test
         env:
           APPKITWIN_HOST_BACKEND: "1"
+      - name: Third-party SwiftUI library compatibility example
+        run: bash tools/library-compat.sh
 
   linux:
     name: Linux build (X11 + Wayland, Cairo)
@@ -47,6 +51,8 @@ jobs:
       - run: swift build
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
+      - name: Third-party SwiftUI library compatibility example
+        run: tools/library-compat.sh
 
   linux-vulkan:
     name: Linux build and tests on lavapipe (Vulkan backend, ADR-0012)

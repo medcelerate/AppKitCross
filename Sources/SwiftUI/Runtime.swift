@@ -419,6 +419,9 @@ open class _Primitive {
     open func didSyncBackingViews(node: _ViewNode) {}
     /// Where the children's backing views go; nil puts them inside `nsView` itself.
     open var childContainer: NSView? { nil }
+    /// Node trees the primitive owns outside `node.children` (a mask's hierarchy); the
+    /// root advances their animations and tooling can find them.
+    open var extraNodes: [_ViewNode] { [] }
 }
 
 /// A structural group: its children are the stack's items.
@@ -552,6 +555,7 @@ public final class _ViewRoot: NSHostingRoot {
             if n.advanceAnimations(now: now) { still = true }
             for c in n.children { visit(c) }
             for e in n.exiting { visit(e) }
+            for x in n.primitive?.extraNodes ?? [] { visit(x) }
         }
         if let r = rootNode { visit(r) }
         if let r = rootNode, let host { r.syncBackingViews(in: host.hostView, containerFrame: .zero) }
@@ -567,6 +571,8 @@ public final class _ViewRoot: NSHostingRoot {
     public var isAnimating: Bool { displayLink != nil }
 
     private var dirty = false
+    /// Set once a preference primitive attaches; the tree is then walked after layout.
+    var usesPreferences = false
 
     func scheduleUpdate() {
         dirty = true
@@ -597,13 +603,16 @@ public final class _ViewRoot: NSHostingRoot {
         updateIfNeeded()
         guard let node = rootNode, let host else { return }
         node.place(in: bounds)
-        // Bodies may feed state back during a pass (a page setting its navigation title):
-        // settle such updates now rather than a display cycle later.
+        deliverPreferences()
+        // Bodies may feed state back during a pass (a page setting its navigation title,
+        // an onPreferenceChange handler storing a height): settle such updates now rather
+        // than a display cycle later.
         var passes = 0
         while dirty && passes < 4 {
             passes += 1
             updateIfNeeded()
             node.place(in: bounds)
+            deliverPreferences()
         }
         if NSView._traceInvalidation { NSView._trace("root layout in \(bounds): \(passes) settle passes, still dirty: \(dirty)") }
         node.syncBackingViews(in: host.hostView, containerFrame: .zero)
@@ -632,6 +641,7 @@ public final class _ViewRoot: NSHostingRoot {
         func visit(_ n: _ViewNode) -> _ViewNode? {
             if predicate(n) { return n }
             for c in n.children { if let f = visit(c) { return f } }
+            for x in n.primitive?.extraNodes ?? [] { if let f = visit(x) { return f } }
             return nil
         }
         return rootNode.flatMap(visit)
@@ -643,13 +653,16 @@ public final class _ViewRoot: NSHostingRoot {
 
 /// The values a node is currently shown with (its model values while nothing animates).
 public struct _Presentation {
-    public enum Property: Equatable { case frame, opacity, offset, scale, rotation, transition }
+    public enum Property: Equatable { case frame, opacity, offset, scale, rotation, rotation3D, transition, custom }
     public var frame: CGRect? = nil
     public var opacity: CGFloat = 1
     public var offset = CGSize.zero
     public var scale = CGSize(width: 1, height: 1)
     public var rotation: CGFloat = 0           // radians
+    public var rotation3D: CGFloat = 0         // radians, about the `.rotation3DEffect` axis
     public var transition: CGFloat = 1         // 1 = fully present, 0 = removed state
+    /// A primitive's own animatable vector (a gradient's end points); nil when at rest.
+    public var custom: [CGFloat]? = nil
 
     mutating func set(_ p: Property, _ v: [CGFloat]) {
         switch p {
@@ -658,7 +671,9 @@ public struct _Presentation {
         case .offset: if v.count == 2 { offset = CGSize(width: v[0], height: v[1]) }
         case .scale: if v.count == 2 { scale = CGSize(width: v[0], height: v[1]) }
         case .rotation: rotation = v[0]
+        case .rotation3D: rotation3D = v[0]
         case .transition: transition = v[0]
+        case .custom: custom = v
         }
     }
 }

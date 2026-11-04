@@ -129,6 +129,11 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardreading/init(pasteboardpropertylist:oftype:)
     public required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
     // SKIPPED (DeveloperToolsSupport.ImageResource): convenience init(resource: ImageResource)
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/init()
+    public override init() {
+        _size = .zero
+        super.init()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/init(size:)
     public init(size: NSSize) {
         _size = size

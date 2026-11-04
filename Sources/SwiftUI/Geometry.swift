@@ -23,13 +23,24 @@ public struct GeometryProxy {
         case .global, .named: return globalFrame
         }
     }
-    public subscript<T>(anchor: Anchor<T>) -> T { anchor.value }
+    /// The anchor's geometry in this reader's coordinate space.
+    public subscript<T>(anchor: Anchor<T>) -> T {
+        if let r = anchor.value as? CGRect { return r.offsetBy(dx: -globalFrame.minX, dy: -globalFrame.minY) as! T }
+        if let p = anchor.value as? CGPoint { return CGPoint(x: p.x - globalFrame.minX, y: p.y - globalFrame.minY) as! T }
+        return anchor.value
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/anchor
+/// The value is resolved in host coordinates once the anchored view has a frame
+/// (Preferences.swift); `GeometryProxy[anchor]` converts it into the reader's space.
 public struct Anchor<Value> {
     let value: Value
-    public struct Source {}
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/anchor/source
+    public struct Source {
+        let resolve: (CGRect) -> Value
+        init(_ resolve: @escaping (CGRect) -> Value) { self.resolve = resolve }
+    }
 }
 
 @MainActor

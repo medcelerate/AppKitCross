@@ -129,6 +129,54 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
     }
     public init(_ name: String, bundle: Bundle? = nil) { storage = .named(name) }
     public init(nsColor: NSColor) { storage = .ns(_NSColorBox(nsColor)) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/init(_:)-4pf3
+    public init(_ color: NSColor) { self.init(nsColor: color) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/init(cgcolor:)
+    public init(cgColor: CGColor) { self.init(nsColor: NSColor(cgColor: cgColor) ?? .clear) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/init(_:)-7rkxx
+    public init(_ cgColor: CGColor) { self.init(cgColor: cgColor) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/init(_:)-57v2
+    public init(_ resolved: Color.Resolved) {
+        storage = .rgb(Double(resolved.red), Double(resolved.green), Double(resolved.blue), Double(resolved.opacity))
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/cgcolor
+    /// Nil for dynamic (named and system) colours, as on macOS.
+    public var cgColor: CGColor? {
+        switch storage {
+        case .rgb(let r, let g, let b, let a): return NSColor(red: r, green: g, blue: b, alpha: a * opacityMultiplier).cgColor
+        case .ns(let box): return opacityMultiplier == 1 ? box.color.cgColor : box.color.withAlphaComponent(box.color.alphaComponent * opacityMultiplier).cgColor
+        case .named: return nil
+        }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/resolve(in:)
+    @MainActor public func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+        let c = storage == .named("primary") ? (environment.foregroundColor ?? self) : self
+        let ns = c.nsColor
+        return Resolved(red: Float(ns.redComponent), green: Float(ns.greenComponent), blue: Float(ns.blueComponent), opacity: Float(ns.alphaComponent))
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/color/resolved
+    public struct Resolved: Hashable, Codable, Sendable, ShapeStyle {
+        public var linearRed: Float
+        public var linearGreen: Float
+        public var linearBlue: Float
+        public var opacity: Float
+        public init(colorLinearRed: Float, green: Float, blue: Float, opacity: Float = 1) {
+            linearRed = colorLinearRed; linearGreen = green; linearBlue = blue; self.opacity = opacity
+        }
+        public init(red: Float, green: Float, blue: Float, opacity: Float = 1) {
+            linearRed = Resolved.linear(red); linearGreen = Resolved.linear(green); linearBlue = Resolved.linear(blue); self.opacity = opacity
+        }
+        public var red: Float { get { Resolved.gamma(linearRed) } set { linearRed = Resolved.linear(newValue) } }
+        public var green: Float { get { Resolved.gamma(linearGreen) } set { linearGreen = Resolved.linear(newValue) } }
+        public var blue: Float { get { Resolved.gamma(linearBlue) } set { linearBlue = Resolved.linear(newValue) } }
+        public var cgColor: CGColor { NSColor(red: CGFloat(red), green: CGFloat(green), blue: CGFloat(blue), alpha: CGFloat(opacity)).cgColor }
+        static func linear(_ v: Float) -> Float { v <= 0.04045 ? v / 12.92 : powf((v + 0.055) / 1.055, 2.4) }
+        static func gamma(_ v: Float) -> Float { v <= 0.0031308 ? v * 12.92 : 1.055 * powf(v, 1 / 2.4) - 0.055 }
+        @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
+            Color(self)._fill(context, path: path, in: rect, environment: environment)
+        }
+    }
     init(named: String) { storage = .named(named) }
 
     public static let clear = Color(named: "clear")
@@ -153,7 +201,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
 
     public func opacity(_ opacity: Double) -> Color { var c = self; c.opacityMultiplier *= opacity; return c }
 
-    @MainActor public var nsColor: NSColor {
+    public var nsColor: NSColor {
         let base: NSColor
         switch storage {
         case .rgb(let r, let g, let b, let a): base = NSColor(red: r, green: g, blue: b, alpha: a)
@@ -183,10 +231,34 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
     public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, stroke: nil, lineWidth: 0, isColorFill: true) }
 }
 
-extension Color: ShapeStyle {}
+extension NSColor {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(_:)-3l8e8
+    /// Dynamic SwiftUI colours resolve against the current appearance at creation.
+    public convenience init(_ color: Color) {
+        let ns = color.nsColor
+        self.init(red: ns.redComponent, green: ns.greenComponent, blue: ns.blueComponent, alpha: ns.alphaComponent)
+    }
+}
+
+extension Color: ShapeStyle {
+    @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
+        let c = storage == .named("primary") ? (environment.foregroundColor ?? self) : self
+        context.setFillColor(c.nsColor.cgColor)
+        context.addPath(path)
+        context.fillPath()
+    }
+}
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle
-public protocol ShapeStyle {}
+public protocol ShapeStyle: Sendable {
+    /// Fills `path` (laid out in `rect`) with this style; the hook `Shape.fill(_:style:)`
+    /// and the shape-drawing primitives draw through.
+    @MainActor func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues)
+}
+
+extension ShapeStyle {
+    @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) { unimplemented("\(Self.self)._fill") }
+}
 
 // MARK: Text
 
@@ -222,6 +294,9 @@ final class _TextView: NSView {
         else { layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range) }
     }
 
+    /// `.redacted(reason: .placeholder)`: the text is drawn as a grey bar instead of glyphs.
+    var isRedacted = false { didSet { if isRedacted != oldValue { needsDisplay = true } } }
+
     func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode) {
         if !storage.isEqual(to: text) { storage.setAttributedString(text); if isInSelectedRow { applySelection() } }
         container.maximumNumberOfLines = lineLimit ?? 0
@@ -235,8 +310,30 @@ final class _TextView: NSView {
         storage.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: storage.length))
     }
 
+    /// The width of the widest word: a proposal narrower than this is answered with it, as
+    /// SwiftUI's `Text` wraps between words and never inside one (a stack that offers a
+    /// text less than it needs gets the word width back rather than a column of letters).
+    private var longestWord: (key: String, width: CGFloat)?
+    private func longestWordWidth() -> CGFloat {
+        let key = storage.string
+        if let l = longestWord, l.key == key { return l.width }
+        var widest: CGFloat = 0
+        let ns = key as NSString
+        var location = 0
+        for word in key.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace || $0.isNewline }) {
+            let range = ns.range(of: String(word), options: [], range: NSRange(location: location, length: ns.length - location))
+            guard range.location != NSNotFound else { continue }
+            location = range.location + range.length
+            widest = max(widest, storage.attributedSubstring(from: range).size().width)
+        }
+        longestWord = (key, widest.rounded(.up))
+        return longestWord!.width
+    }
+
     func size(for width: CGFloat?) -> CGSize {
-        container.size = NSSize(width: width ?? CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        var w = width ?? CGFloat.greatestFiniteMagnitude
+        if let width, container.maximumNumberOfLines != 1 { w = max(width, longestWordWidth()) }
+        container.size = NSSize(width: w, height: CGFloat.greatestFiniteMagnitude)
         let used = layoutManager.usedRect(for: container)
         return CGSize(width: used.width.rounded(.up), height: used.height.rounded(.up))
     }
@@ -244,6 +341,12 @@ final class _TextView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         container.size = NSSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
         let range = layoutManager.glyphRange(for: container)
+        if isRedacted {
+            let used = layoutManager.usedRect(for: container)
+            NSColor.secondaryLabelColor.withAlphaComponent(0.25).setFill()
+            NSBezierPath(roundedRect: used.insetBy(dx: 0, dy: used.height * 0.12), xRadius: 3, yRadius: 3).fill()
+            return
+        }
         layoutManager.drawGlyphs(forGlyphRange: range, at: .zero)
     }
 }
@@ -264,6 +367,7 @@ final class _TextPrimitive: _Primitive {
     private func refresh() {
         guard let node else { return }
         let env = node.environment
+        view.isRedacted = env.redactionReasons.contains(.placeholder)
         view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail)
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
@@ -431,6 +535,7 @@ extension Shape {
     public var body: some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(_:style:)
     public func fill(_ color: Color, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: color, stroke: nil, lineWidth: 0) }
+    public func fill<S: ShapeStyle>(_ content: S, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: nil, lineWidth: 0, fillStyle: content) }
     public func fill() -> some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:)
     public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth) }
@@ -515,26 +620,31 @@ final class _ShapeViewPrimitive: _Primitive {
     var stroke: Color?
     var lineWidth: CGFloat
     var inset = false
+    /// A fill that is not a plain colour (a gradient).
+    var fillStyle: (any ShapeStyle)?
     let isColorFill: Bool
     let view = _ShapeDrawingView(frame: .zero)
 
-    init(shape: AnyShape, fill: Color?, stroke: Color?, lineWidth: CGFloat, inset: Bool = false, isColorFill: Bool = false) {
-        self.shape = shape; self.fill = fill; self.stroke = stroke; self.lineWidth = lineWidth; self.inset = inset; self.isColorFill = isColorFill
+    init(shape: AnyShape, fill: Color?, stroke: Color?, lineWidth: CGFloat, inset: Bool = false, isColorFill: Bool = false, fillStyle: (any ShapeStyle)? = nil) {
+        self.shape = shape; self.fill = fill; self.stroke = stroke; self.lineWidth = lineWidth; self.inset = inset; self.isColorFill = isColorFill; self.fillStyle = fillStyle
         super.init()
     }
     override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ShapeViewPrimitive else { return }
-        shape = o.shape; fill = o.fill; stroke = o.stroke; lineWidth = o.lineWidth; inset = o.inset
+        shape = o.shape; fill = o.fill; stroke = o.stroke; lineWidth = o.lineWidth; inset = o.inset; fillStyle = o.fillStyle
         install()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); install() }
     private func install() {
-        let fill = fill, stroke = stroke, lineWidth = lineWidth, shape = shape, inset = inset
+        let fill = fill, stroke = stroke, lineWidth = lineWidth, shape = shape, inset = inset, fillStyle = fillStyle
         let env = node?.environment ?? EnvironmentValues()
         view.draw = { ctx, bounds in
             let rect = inset ? bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2) : bounds
+            if let style = fillStyle {
+                style._fill(ctx, path: shape.path(in: rect).cgPath, in: rect, environment: env)
+            }
             if let f = fill {
                 let c = f.storage == .named("primary") ? (env.foregroundColor ?? f) : f
                 ctx.setFillColor(c.nsColor.cgColor)
@@ -566,7 +676,8 @@ struct _ShapeView: View, _PrimitiveView {
     let stroke: Color?
     let lineWidth: CGFloat
     var inset = false
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, stroke: stroke, lineWidth: lineWidth, inset: inset) }
+    var fillStyle: (any ShapeStyle)? = nil
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, stroke: stroke, lineWidth: lineWidth, inset: inset, fillStyle: fillStyle) }
 }
 
 // MARK: Divider
@@ -893,6 +1004,24 @@ public struct Image: View, _PrimitiveView, Equatable {
     public init(systemName: String) { name = systemName; image = nil }
     public init(nsImage: NSImage) { name = ""; image = nsImage }
     public init(decorative name: String, bundle: Bundle? = nil) { self.init(name, bundle: bundle) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/init(_:scale:orientation:label:)
+    public init(_ cgImage: CGImage, scale: CGFloat, orientation: Image.Orientation = .up, label: Text) {
+        self.init(decorative: cgImage, scale: scale, orientation: orientation)
+        accessibilityLabel = label._string
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/init(decorative:scale:orientation:)
+    public init(decorative cgImage: CGImage, scale: CGFloat, orientation: Image.Orientation = .up) {
+        let s = max(scale, 0.01)
+        let size = orientation.swapsAxes ? CGSize(width: CGFloat(cgImage.height) / s, height: CGFloat(cgImage.width) / s) : CGSize(width: CGFloat(cgImage.width) / s, height: CGFloat(cgImage.height) / s)
+        name = ""
+        image = NSImage(cgImage: cgImage, size: size)
+    }
+    var accessibilityLabel: String? = nil
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/orientation
+    public enum Orientation: UInt8, CaseIterable, Hashable, Sendable {
+        case up, upMirrored, down, downMirrored, left, leftMirrored, right, rightMirrored
+        var swapsAxes: Bool { self == .left || self == .leftMirrored || self == .right || self == .rightMirrored }
+    }
     public func resizable(capInsets: EdgeInsets = EdgeInsets(), resizingMode: ResizingMode = .stretch) -> Image { var i = self; i.resizable = true; return i }
     public func renderingMode(_ mode: TemplateRenderingMode?) -> Image { self }
     public func interpolation(_ interpolation: Interpolation) -> Image { self }
@@ -945,8 +1074,10 @@ public struct Label<Title: View, Icon: View>: View {
 }
 
 extension Label where Title == Text, Icon == Image {
-    public init(_ title: String, systemImage: String) { self.init(title: { Text(title) }, icon: { Image(systemName: systemImage) }) }
-    public init(_ title: String, image: String) { self.init(title: { Text(title) }, icon: { Image(image) }) }
+    public init(_ titleKey: LocalizedStringKey, systemImage: String) { self.init(title: { Text(titleKey) }, icon: { Image(systemName: systemImage) }) }
+    public init(_ titleKey: LocalizedStringKey, image: String) { self.init(title: { Text(titleKey) }, icon: { Image(image) }) }
+    public init<S: StringProtocol>(_ title: S, systemImage: String) { self.init(title: { Text(title) }, icon: { Image(systemName: systemImage) }) }
+    public init<S: StringProtocol>(_ title: S, image: String) { self.init(title: { Text(title) }, icon: { Image(image) }) }
 }
 
 // MARK: ScrollView and List

@@ -67,7 +67,13 @@ cd AppKitWin
 swift build
 swift run HelloWindow            # the AppKit sample: drawing, controls, menus, a glass window
 swift run HelloWindow --swiftui  # opens the SwiftUI demo window too
+tools/library-compat.sh --run    # Examples/LibraryCompat: third-party SwiftUI packages on this port
 ```
+
+| Example | What it shows |
+| --- | --- |
+| `Examples/HelloWindow` | AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
+| `Examples/LibraryCompat` | Popular third-party SwiftUI packages (Shimmer, ConfettiSwiftUI, WrappingHStack, Defaults, swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts, Nuke) built against this SwiftUI, one tab each; the verdicts and the API gaps they found are in [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md). |
 
 Add the package to your own app and import the modules by their Apple names:
 
