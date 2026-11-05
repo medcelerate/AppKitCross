@@ -64,8 +64,10 @@ build() {
         # The diagnostics first (the tail alone can be all warnings): lines of the form
         # path:line:col: error:, <unknown>:0: error: or a bare error:, not the source
         # snippets the compiler prints under them (which may contain "error:" as text).
-        echo "$out" | grep -E "^([^ |]+:[0-9]+:[0-9]+: )?error:|^<unknown>:[0-9]+: error:|^error:" | head -20
-        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\|" | tail -40
+        # `|| true`: under `set -eo pipefail` a grep with no match would end the script
+        # before the log is shown.
+        echo "$out" | grep -E "^([^ |]+:[0-9]+:[0-9]+: )?error:|^<unknown>:[0-9]+: error:|^error:" | head -20 || true
+        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\|" | tail -40 || true
         return 1
     fi
 }
