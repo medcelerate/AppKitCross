@@ -75,13 +75,14 @@ public enum PlatformAudio {
     static func makeDefaultBackend() -> any PlatformAudioBackend {
         let requested = ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_BACKEND"]?.lowercased()
         if requested == "null" { return NullAudioBackend() }
-        #if canImport(CWASAPI)
+        // Platform checks, not canImport: a client built with every shim's module map on
+        // the search path (tools/library-compat.sh) would otherwise compile the other
+        // platform's backend and fail to link it.
+        #if os(Windows)
         if requested == nil || requested == "wasapi" { return WASAPIAudioBackend() }
         #endif
-        #if canImport(CPipeWire)
+        #if os(Linux)
         if requested == nil || requested == "pipewire", let pw = PipeWireAudioBackend.makeIfAvailable() { return pw }
-        #endif
-        #if canImport(CALSA)
         if requested == nil || requested == "alsa", let alsa = ALSAAudioBackend.makeIfAvailable() { return alsa }
         #endif
         if let requested, requested != "null" {
