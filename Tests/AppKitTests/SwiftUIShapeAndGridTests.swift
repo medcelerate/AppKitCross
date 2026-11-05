@@ -225,7 +225,12 @@ final class SwiftUIShapeAndGridTests: XCTestCase, @unchecked Sendable {
         let key: LocalizedStringKey = "v=\(value, specifier: "%.2f") n=\(7) s=\("x")"
         XCTAssertEqual(key.key, "v=3.14 n=7 s=x")
         XCTAssertEqual(Text("\(42, specifier: "%03d")")._string, "042")
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 1
+        XCTAssertEqual(Text("\(NSNumber(value: 3), formatter: formatter)")._string, "3.0")
+        #if canImport(Darwin)   // Date is ReferenceConvertible on Apple's Foundation only
         XCTAssertEqual(Text("\(Date(timeIntervalSince1970: 0), formatter: ISO8601DateFormatter())")._string, "1970-01-01T00:00:00Z")
+        #endif
     }
 
     func testValuelessAnimationCompilesAndStrokeStyleIsApplied() {

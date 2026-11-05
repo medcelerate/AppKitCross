@@ -162,7 +162,11 @@ final class SwiftUILayoutProtocolTests: XCTestCase, @unchecked Sendable {
         bold.underlineStyle = .single
         bold.kern = 2
         var code = AttributedString(" code")
-        code.inlinePresentationIntent = .code
+        code.font = Font.body.monospaced()
+        #if canImport(Darwin)
+        code.font = nil
+        code.inlinePresentationIntent = .code     // corelibs has no inline presentation intents
+        #endif
         s += bold + code
         let runs = Text._runs(of: s)
         XCTAssertEqual(runs.map(\.string), ["plain ", "bold", " code"])

@@ -35,17 +35,18 @@ public class CGPath: @unchecked Sendable {
 
     public var isEmpty: Bool { elements.isEmpty }
 
+    /// The last point drawn; after a close, the start of that subpath (as CoreGraphics).
     public var currentPoint: CGPoint {
-        var start = CGPoint.zero
-        for e in elements.reversed() {
+        for (i, e) in elements.enumerated().reversed() {
             switch e {
             case let .move(p): return p
             case let .line(p), let .quad(_, p), let .curve(_, _, p): return p
-            case .close: break
+            case .close:
+                for j in stride(from: i - 1, through: 0, by: -1) { if case let .move(p) = elements[j] { return p } }
+                return .zero
             }
         }
-        for e in elements { if case let .move(p) = e { start = p; break } }
-        return start
+        return .zero
     }
 
     /// Bounding box of all points, control points included.
