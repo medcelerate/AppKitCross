@@ -66,7 +66,7 @@ build() {
         # snippets the compiler prints under them (which may contain "error:" as text).
         # `|| true`: under `set -eo pipefail` a grep with no match would end the script
         # before the log is shown.
-        echo "$out" | grep -E "^([^ |]+:[0-9]+:[0-9]+: )?error:|^<unknown>:[0-9]+: error:|^error:" | head -20 || true
+        echo "$out" | grep -E "error:|undefined symbol|lld-link" | grep -vE "willPresentError|^\s*[0-9]+ \||^\s*\||warning:" | head -30 || true
         echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\|" | tail -40 || true
         return 1
     fi
