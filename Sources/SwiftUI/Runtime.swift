@@ -287,8 +287,8 @@ public final class _ViewNode {
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if let p = primitive, !p.isLayoutTransparent {
             let s = p.sizeThatFits(proposal, node: self)
-            if NSView._traceInvalidation, s.width.isNaN || s.height.isNaN {
-                NSView._trace("swiftui NaN size from \(type(of: p)) for \(viewType) proposal \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil")")
+            if NSView._traceInvalidation, !s.width.isFinite || !s.height.isFinite {
+                NSView._trace("swiftui non-finite size \(s) from \(type(of: p)) for \(viewType) proposal \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil")")
             }
             return s
         }
@@ -608,6 +608,7 @@ public final class _ViewRoot: NSHostingRoot {
         updateIfNeeded()
         guard let node = rootNode else { return .zero }
         let s = node.sizeThatFits(ProposedViewSize(width: proposal.width, height: proposal.height))
+        if NSView._traceInvalidation { NSView._trace("swiftui root sizeThatFits \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil") -> \(s)") }
         return NSSize(width: s.width.rounded(.up), height: s.height.rounded(.up))
     }
 

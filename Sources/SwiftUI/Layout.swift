@@ -204,7 +204,8 @@ final class _StackPrimitive: _Primitive {
             let total = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, sizes.count - 1))
             // Right to left: the first item sits at the right edge and the row grows leftwards.
             let rightToLeft = direction == .rightToLeft
-            var x = rightToLeft ? rect.maxX - max(0, (rect.width - total) / 2) : rect.minX + max(0, (rect.width - total) / 2)
+            let leftover = rect.width.isFinite ? max(0, (rect.width - total) / 2) : 0
+            var x = rightToLeft ? (rect.width.isFinite ? rect.maxX - leftover : rect.minX + total) : rect.minX + leftover
             for (i, item) in items.enumerated() {
                 let s = sizes[i]
                 let y = rect.minY + (rect.height - s.height) * v.fraction
