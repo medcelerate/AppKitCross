@@ -1,6 +1,6 @@
 // The PipeWire output backend (Linux), over the CPipeWire shim.
 
-#if canImport(CPipeWire)
+#if os(Linux)
 import Foundation
 import CPipeWire
 

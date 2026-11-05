@@ -1,6 +1,6 @@
 // The ALSA output backend (Linux, when PipeWire is absent), over the CALSA shim.
 
-#if canImport(CALSA)
+#if os(Linux)
 import Foundation
 import CALSA
 
