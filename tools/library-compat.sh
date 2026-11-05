@@ -24,6 +24,9 @@ for arg in "$@"; do case "$arg" in --probe) PROBE=1 ;; --run) RUN=1 ;; esac; don
 # Plain diagnostics: swiftc colours them on Windows, which would hide "error:" from the greps.
 FLAGS=(-Xswiftc -no-color-diagnostics)
 if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
+# Windows (Swift 6.4.1): the frontend's debug-type round-trip check asserts on some of
+# SwiftUICharts' shape files; skipping the check gives the library's own verdict.
+case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types) ;; esac
 # AppKitWin's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
 # dependency, so they are passed to every compile here: the hand-written maps in Sources
@@ -88,9 +91,10 @@ if [ "$PROBE" = 1 ]; then
         if swift build --target "$target" "${FLAGS[@]}" >"$log" 2>&1; then
             echo "$target: builds"
         else
-            # Diagnostic lines start with a path; the source excerpts under them do not.
-            errors=$(grep -cE "^[^ |].*error: " "$log" || true)
-            first=$(grep -m1 -E "^[^ |].*:[0-9]+:[0-9]+: error: " "$log" || grep -m1 "error: " "$log" || true)
+            # Diagnostic lines name a source file and position; the source excerpts under
+            # them and the SwiftCompile summaries do not.
+            errors=$(grep -cE "\.swift:[0-9]+:[0-9]+: error: " "$log" || true)
+            first=$(grep -m1 -E "\.swift:[0-9]+:[0-9]+: error: " "$log" | tr -d '\r' || grep -m1 "error: " "$log" || true)
             first=$(echo "$first" | sed -E 's|^.*/checkouts/||')
             echo "$target: FAILS ($errors errors); first: $first"
         fi

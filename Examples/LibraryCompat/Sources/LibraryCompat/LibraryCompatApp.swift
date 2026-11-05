@@ -64,7 +64,9 @@ enum Libraries {
         LibraryEntry(id: "introspect", name: "SwiftUI-Introspect", version: "27.1.0", included: Compiled.introspect,
                      exclusion: "imports ObjectiveC and reaches into AppKit's private view hierarchy"),
         LibraryEntry(id: "charts", name: "SwiftUICharts", version: "2.10.4", included: Compiled.charts,
-                     exclusion: "`Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136); everything else compiles"),
+                     exclusion: Platform.name == "Windows"
+                        ? "the Swift 6.4.1 frontend asserts on its shape files (debug-type round trip; the probe disables the check), and `Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136)"
+                        : "`Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136); everything else compiles"),
         LibraryEntry(id: "nuke", name: "Nuke + NukeUI", version: "13.2.1", included: false,
                      exclusion: "`#if !os(macOS) import UIKit`, Core Image filters and the ImageIO C API"),
     ]
