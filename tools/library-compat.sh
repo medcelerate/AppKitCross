@@ -53,6 +53,8 @@ if [ "$(uname)" = Linux ] && command -v pkg-config >/dev/null; then
 fi
 
 echo "== step 1: AppKitWin's SwiftUI (and AppKit) into the Modules directory"
+# A second full build of the package lands here; say how much room it has (CI runners).
+df -h . 2>/dev/null | tail -1 || true
 # Runs a build, printing its last lines on success and the whole log on failure.
 build() {
     local out
