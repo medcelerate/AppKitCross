@@ -207,6 +207,7 @@ final class RightToLeftSizingTests: XCTestCase, @unchecked Sendable {
             let h = NSHostingView(rootView: Demo())
             let unspecified = h.sizeThatFits(.unspecified)
             XCTAssertTrue(unspecified.width.isFinite && unspecified.height.isFinite, "sizeThatFits(.unspecified) \(unspecified)")
+            XCTAssertLessThan(unspecified.width, 2000, "flush-right text must measure its own width, not the unbounded container's")
             let ideal = h.intrinsicContentSize
             XCTAssertTrue(ideal.width.isFinite && ideal.height.isFinite, "ideal size \(ideal)")
             let fit = h.fittingSize

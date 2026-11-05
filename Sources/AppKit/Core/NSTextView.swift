@@ -454,7 +454,7 @@ import CoreText
     internal override var _contentSize: NSSize {
         let used = _layoutManager.usedRect(for: _container)
         let padding = isFieldEditor ? 0 : _container.lineFragmentPadding
-        return NSSize(width: (used.width + padding + 2 * _textContainerInset.width).rounded(.up),
+        return NSSize(width: (used.width + 2 * padding + 2 * _textContainerInset.width).rounded(.up),
                       height: max(used.height, _lineHeight) + 2 * _textContainerInset.height)
     }
 
