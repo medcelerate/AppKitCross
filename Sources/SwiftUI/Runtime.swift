@@ -75,6 +75,54 @@ public final class _ViewNode {
     /// Set by an enclosing stack before measuring its items (Spacer reads it).
     var stackAxis: Axis? = nil
     var layoutPriority: Double = 0
+    /// Set by `.zIndex`; siblings' backing views are stacked by it (ties keep tree order).
+    var zIndex: Double? = nil
+    /// The z-index this subtree asks its container for: its own, else its single child's.
+    var effectiveZIndex: Double { zIndex ?? (children.count == 1 ? children[0].effectiveZIndex : 0) }
+    /// `.gridColumnAlignment` and `.gridCellColumns` on this subtree (a cell's single-child
+    /// chain is searched, as for the z-index).
+    var gridColumnAlignment: HorizontalAlignment? = nil
+    var gridCellColumns: Int? = nil
+    /// `.layoutValue(key:value:)` values a `Layout` reads through its subview proxies.
+    var layoutValues: [ObjectIdentifier: Any] = [:]
+    func trait<T>(_ keyPath: KeyPath<_ViewNode, T?>) -> T? {
+        if let v = self[keyPath: keyPath] { return v }
+        return children.count == 1 ? children[0].trait(keyPath) : nil
+    }
+    /// A trait set on this leaf or on the transparent wrappers between it and `container`
+    /// (a container lists its layout leaves, which sit below such wrappers).
+    func trait<T>(_ keyPath: KeyPath<_ViewNode, T?>, upTo container: _ViewNode?) -> T? {
+        if let v = trait(keyPath) { return v }
+        var p = parent
+        while let n = p, n !== container {
+            if let v = n[keyPath: keyPath] { return v }
+            p = n.parent
+        }
+        return nil
+    }
+    /// The view's dimensions at `size`, with the baselines of the first and last text in it.
+    func dimensions(for size: CGSize) -> ViewDimensions {
+        var first: CGFloat? = nil, last: CGFloat? = nil
+        func visit(_ n: _ViewNode) {
+            if let t = n.primitive as? _TextPrimitive {
+                let b = t.baselines(for: size)
+                if first == nil { first = b.first }
+                last = size.height - (t.lastMeasuredHeight - b.last)
+                return
+            }
+            for c in n.children { visit(c) }
+        }
+        visit(self)
+        return ViewDimensions(width: size.width, height: size.height, firstBaseline: first, lastBaseline: last)
+    }
+    /// Children in drawing order: by z-index, stable.
+    var childrenByZIndex: [_ViewNode] {
+        guard children.count > 1, children.contains(where: { $0.effectiveZIndex != 0 }) else { return children }
+        return children.enumerated().sorted { a, b in
+            let (za, zb) = (a.element.effectiveZIndex, b.element.effectiveZIndex)
+            return za == zb ? a.offset < b.offset : za < zb
+        }.map(\.element)
+    }
     var onAppear: [() -> Void] = []
     var onDisappear: [() -> Void] = []
     private var appeared = false
@@ -191,6 +239,7 @@ public final class _ViewNode {
         let envChanged = !_sameEnvironment(environment, env)
         environment = env
         let rerun = force || needsUpdate || envChanged || newBox != nil
+        if rerun { sizeCache.removeAll(keepingCapacity: true) }
         if box.isPrimitive {
             if rerun || primitive == nil {
                 guard let fresh = box.makePrimitive(node: self) else { return }
@@ -284,7 +333,24 @@ public final class _ViewNode {
         return children.flatMap(\.layoutLeaves)
     }
 
+    /// Measurements are memoised per proposal for one layout pass (the root's generation):
+    /// stacks probe each item's flexibility with extra proposals, and nested stacks would
+    /// otherwise measure the leaves exponentially often (SwiftUICharts' hierarchy).
+    private var sizeCache: [_SizeKey: CGSize] = [:]
+    private var sizeCacheGeneration = -1
+    private struct _SizeKey: Hashable { let width: CGFloat?; let height: CGFloat? }
+
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        let generation = root?.measureGeneration ?? -1
+        if generation != sizeCacheGeneration { sizeCache.removeAll(keepingCapacity: true); sizeCacheGeneration = generation }
+        let key = _SizeKey(width: proposal.width, height: proposal.height)
+        if generation >= 0, let cached = sizeCache[key] { return cached }
+        let size = computeSizeThatFits(proposal)
+        if generation >= 0 { sizeCache[key] = size }
+        return size
+    }
+
+    private func computeSizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
         if let p = primitive, !p.isLayoutTransparent { return p.sizeThatFits(proposal, node: self) }
         let leaves = layoutLeaves
         if leaves.count == 1 { return leaves[0].sizeThatFits(proposal) }
@@ -323,7 +389,7 @@ public final class _ViewNode {
     /// All backing views in this subtree in drawing order, stopping at nested backing views.
     func collectBackingViews(into out: inout [NSView]) {
         if let v = primitive?.nsView { out.append(v); return }
-        for c in children { c.collectBackingViews(into: &out) }
+        for c in childrenByZIndex { c.collectBackingViews(into: &out) }
         for e in exiting { e.collectBackingViews(into: &out) }
     }
 
@@ -579,6 +645,8 @@ public final class _ViewRoot: NSHostingRoot {
     private var dirty = false
     /// Set once a preference primitive attaches; the tree is then walked after layout.
     var usesPreferences = false
+    /// Bumped whenever the tree may have changed; nodes drop their measurement memo.
+    var measureGeneration = 0
 
     func scheduleUpdate() {
         dirty = true
@@ -593,6 +661,7 @@ public final class _ViewRoot: NSHostingRoot {
     public func updateIfNeeded() {
         updateScheduled = false
         dirty = false
+        measureGeneration &+= 1
         guard let node = rootNode else { return }
         node.update(box: contentChanged ? contentBox : nil, environment: rootEnvironment, force: contentChanged)
         contentChanged = false
@@ -600,6 +669,7 @@ public final class _ViewRoot: NSHostingRoot {
 
     public func sizeThatFits(_ proposal: NSHostingSizeProposal) -> NSSize {
         updateIfNeeded()
+        measureGeneration &+= 1
         guard let node = rootNode else { return .zero }
         let s = node.sizeThatFits(ProposedViewSize(width: proposal.width, height: proposal.height))
         return NSSize(width: s.width.rounded(.up), height: s.height.rounded(.up))
@@ -607,6 +677,7 @@ public final class _ViewRoot: NSHostingRoot {
 
     public func layout(in bounds: NSRect) {
         updateIfNeeded()
+        measureGeneration &+= 1
         guard let node = rootNode, let host else { return }
         node.place(in: bounds)
         deliverPreferences()
@@ -617,6 +688,7 @@ public final class _ViewRoot: NSHostingRoot {
         while dirty && passes < 4 {
             passes += 1
             updateIfNeeded()
+            measureGeneration &+= 1
             node.place(in: bounds)
             deliverPreferences()
         }

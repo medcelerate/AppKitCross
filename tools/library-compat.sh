@@ -24,6 +24,9 @@ for arg in "$@"; do case "$arg" in --probe) PROBE=1 ;; --run) RUN=1 ;; esac; don
 # Plain diagnostics: swiftc colours them on Windows, which would hide "error:" from the greps.
 FLAGS=(-Xswiftc -no-color-diagnostics)
 if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
+# Windows (Swift 6.4.1): the frontend's debug-type round-trip check asserts on some of
+# SwiftUICharts' shape files; skipping the check gives the library's own verdict.
+case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types) ;; esac
 # AppKitWin's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
 # dependency, so they are passed to every compile here: the hand-written maps in Sources
@@ -38,13 +41,20 @@ add_maps() {
     for m in "$@"; do
         [ -f "$m" ] || continue
         name=$(basename "$(dirname "$m")"); [ "$name" = include ] && name=$(basename "$(dirname "$(dirname "$m")")")
+        # A synthesised map (.build/debug/<Name>.build) is skipped when the shim has a
+        # hand-written one, which would otherwise be a redefinition of the module.
+        name=${name%.build}
         case " $seen " in *" $name "*) continue ;; esac
+        # The CoreGraphics submodule map stands in for Apple's framework; on macOS the SDK has it.
+        if [ "$(uname)" = Darwin ] && [ "$name" = CCoreGraphicsModules ]; then continue; fi
         seen="$seen $name"
         FLAGS+=(-Xcc -fmodule-map-file="$(abs "$(dirname "$m")")/$(basename "$m")")
     done
 }
 add_maps ../../Sources/C*/module.modulemap ../../Sources/C*/include/module.modulemap
 for d in ../../Sources/C*/include ../../Sources/C*; do
+    # (clang also finds a module.modulemap in an include directory on its own.)
+    if [ "$(uname)" = Darwin ] && [ "$(basename "$d")" = CCoreGraphicsModules ]; then continue; fi
     [ -d "$d" ] && FLAGS+=(-Xcc -I"$(abs "$d")")
 done
 # ... and the system headers those maps include (Cairo, Pango, X11, D-Bus on Linux).
@@ -81,13 +91,16 @@ if [ "$PROBE" = 1 ]; then
         if swift build --target "$target" "${FLAGS[@]}" >"$log" 2>&1; then
             echo "$target: builds"
         else
-            # Diagnostic lines start with a path; the source excerpts under them do not.
-            errors=$(grep -cE "^[^ |].*error: " "$log" || true)
-            first=$(grep -m1 -E "^[^ |].*:[0-9]+:[0-9]+: error: " "$log" || grep -m1 "error: " "$log" || true)
+            # Diagnostic lines name a source file and position; the source excerpts under
+            # them and the SwiftCompile summaries do not. The log is read as text with its
+            # carriage returns stripped (Windows), so grep never treats it as binary.
+            tr -d '\r' < "$log" > "$log.txt"
+            errors=$(grep -acE "swift:[0-9]+:[0-9]+: +error" "$log.txt" || true)
+            first=$(grep -am1 -E "swift:[0-9]+:[0-9]+: +error" "$log.txt" || grep -am1 "error: " "$log.txt" || true)
             first=$(echo "$first" | sed -E 's|^.*/checkouts/||')
             echo "$target: FAILS ($errors errors); first: $first"
         fi
-        rm -f "$log"
+        rm -f "$log" "$log.txt"
     done
 fi
 

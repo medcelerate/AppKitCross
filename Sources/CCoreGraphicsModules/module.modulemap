@@ -1,0 +1,30 @@
+// Apple's CoreGraphics is a clang framework module with one submodule per header, and code
+// written against it may import a submodule by name (`import CoreGraphics.CGGeometry`,
+// SwiftUICharts). A Swift module has no submodules, so this map declares the clang module
+// `CoreGraphics` with Apple's submodule names and no headers; the compiler treats the
+// port's Swift module of the same name as that clang module's overlay, and the submodule
+// import resolves to the Swift declarations. Windows and Linux only: on macOS the SDK's
+// CoreGraphics is the real thing (tools/library-compat.sh skips this map there).
+module CoreGraphics {
+  module CGAffineTransform { export * }
+  module CGBase { export * }
+  module CGBitmapContext { export * }
+  module CGColor { export * }
+  module CGColorSpace { export * }
+  module CGContext { export * }
+  module CGDataConsumer { export * }
+  module CGDataProvider { export * }
+  module CGError { export * }
+  module CGFont { export * }
+  module CGFunction { export * }
+  module CGGeometry { export * }
+  module CGGradient { export * }
+  module CGImage { export * }
+  module CGLayer { export * }
+  module CGPDFContext { export * }
+  module CGPDFDocument { export * }
+  module CGPath { export * }
+  module CGPattern { export * }
+  module CGShading { export * }
+  export *
+}

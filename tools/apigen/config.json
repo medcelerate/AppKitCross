@@ -21,6 +21,7 @@
     "NSDraggingSession",
     "NSEvent",
     "NSFont",
+    "NSFontManager",
     "NSGestureRecognizer",
     "NSGraphicsContext",
     "NSImage",

@@ -35,17 +35,18 @@ public class CGPath: @unchecked Sendable {
 
     public var isEmpty: Bool { elements.isEmpty }
 
+    /// The last point drawn; after a close, the start of that subpath (as CoreGraphics).
     public var currentPoint: CGPoint {
-        var start = CGPoint.zero
-        for e in elements.reversed() {
+        for (i, e) in elements.enumerated().reversed() {
             switch e {
             case let .move(p): return p
             case let .line(p), let .quad(_, p), let .curve(_, _, p): return p
-            case .close: break
+            case .close:
+                for j in stride(from: i - 1, through: 0, by: -1) { if case let .move(p) = elements[j] { return p } }
+                return .zero
             }
         }
-        for e in elements { if case let .move(p) = e { start = p; break } }
-        return start
+        return .zero
     }
 
     /// Bounding box of all points, control points included.
@@ -253,6 +254,26 @@ public final class CGMutablePath: CGPath, @unchecked Sendable {
         start = end
     }
 
+    /// An arc of `radius` tangent to the lines current point - `tangent1End` and
+    /// `tangent1End` - `tangent2End`, preceded by the line to where the arc starts.
+    public func addArc(tangent1End: CGPoint, tangent2End: CGPoint, radius: CGFloat, transform: CGAffineTransform = .identity) {
+        let p0 = currentPoint, p1 = tangent1End, p2 = tangent2End
+        let d1 = CGPoint(x: p0.x - p1.x, y: p0.y - p1.y), d2 = CGPoint(x: p2.x - p1.x, y: p2.y - p1.y)
+        let l1 = (d1.x * d1.x + d1.y * d1.y).squareRoot(), l2 = (d2.x * d2.x + d2.y * d2.y).squareRoot()
+        guard radius > 0, l1 > 0, l2 > 0 else { addLine(to: p1, transform: transform); return }
+        let u1 = CGPoint(x: d1.x / l1, y: d1.y / l1), u2 = CGPoint(x: d2.x / l2, y: d2.y / l2)
+        let cross = u1.x * u2.y - u1.y * u2.x
+        let cosTheta = max(-1, min(1, u1.x * u2.x + u1.y * u2.y))
+        let theta = acos(cosTheta)
+        guard abs(cross) > 1e-9, theta > 1e-6, theta < .pi - 1e-6 else { addLine(to: p1, transform: transform); return }
+        let t = radius / tan(theta / 2)
+        let t1 = CGPoint(x: p1.x + u1.x * t, y: p1.y + u1.y * t), t2 = CGPoint(x: p1.x + u2.x * t, y: p1.y + u2.y * t)
+        let bis = CGPoint(x: u1.x + u2.x, y: u1.y + u2.y)
+        let bl = (bis.x * bis.x + bis.y * bis.y).squareRoot()
+        let c = CGPoint(x: p1.x + bis.x / bl * radius / sin(theta / 2), y: p1.y + bis.y / bl * radius / sin(theta / 2))
+        addLine(to: t1, transform: transform)
+        addArc(center: c, radius: radius, startAngle: atan2(t1.y - c.y, t1.x - c.x), endAngle: atan2(t2.y - c.y, t2.x - c.x), clockwise: cross > 0, transform: transform)
+    }
     public func addPath(_ path: CGPath, transform: CGAffineTransform = .identity) {
         if transform.isIdentity { elements += path.elements } else { elements += (path.copy(using: [transform])?.elements ?? []) }
     }

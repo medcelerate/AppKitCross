@@ -27,6 +27,9 @@ import MarkdownUI
 #if HAS_INTROSPECT
 import SwiftUIIntrospect
 #endif
+#if HAS_CHARTS
+import SwiftUICharts
+#endif
 
 @main
 struct LibraryCompatApp: App {
@@ -57,11 +60,13 @@ enum Libraries {
         LibraryEntry(id: "defaults", name: "Defaults", version: "9.0.9", included: Compiled.defaults,
                      exclusion: "`#if os(macOS)` … `#else import UIKit`: every platform that is not macOS is assumed to have UIKit"),
         LibraryEntry(id: "markdown", name: "swift-markdown-ui", version: "2.4.1", included: Compiled.markdown,
-                     exclusion: "its NetworkImage dependency and the Markdown views need SwiftUI members the port lacks (see the report)"),
+                     exclusion: "its NetworkImage dependency extends URLSession in a file that imports only Foundation, which on Windows and Linux is FoundationNetworking's"),
         LibraryEntry(id: "introspect", name: "SwiftUI-Introspect", version: "27.1.0", included: Compiled.introspect,
                      exclusion: "imports ObjectiveC and reaches into AppKit's private view hierarchy"),
-        LibraryEntry(id: "charts", name: "SwiftUICharts", version: "2.10.4", included: false,
-                     exclusion: "imports the CoreGraphics.CGGeometry submodule and needs Gradient/GridItem/position/zIndex/Path.trimmedPath and more"),
+        LibraryEntry(id: "charts", name: "SwiftUICharts", version: "2.10.4", included: Compiled.charts,
+                     exclusion: Platform.name == "Windows"
+                        ? "the Swift 6.4.1 frontend asserts on its shape files (debug-type round trip; the probe disables the check), and `Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136)"
+                        : "`Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136); everything else compiles"),
         LibraryEntry(id: "nuke", name: "Nuke + NukeUI", version: "13.2.1", included: false,
                      exclusion: "`#if !os(macOS) import UIKit`, Core Image filters and the ImageIO C API"),
     ]
@@ -99,6 +104,11 @@ enum Compiled {
     static let introspect = true
     #else
     static let introspect = false
+    #endif
+    #if HAS_CHARTS
+    static let charts = true
+    #else
+    static let charts = false
     #endif
 }
 
@@ -155,6 +165,7 @@ struct LibraryTab: View {
         case "defaults": DefaultsDemo()
         case "markdown": MarkdownDemo()
         case "introspect": IntrospectDemo()
+        case "charts": ChartsDemo()
         default: EmptyView()
         }
     }
@@ -286,9 +297,16 @@ struct MarkdownDemo: View {
 
             - Direct2D and DirectComposition on Windows
             - Cairo, X11 and Wayland on Linux
+            - [x] Builds against the port's `SwiftUI`
 
-            > Markdown rendered by `swift-markdown-ui`.
+            | Platform | Backend |
+            | --- | --- |
+            | Windows | Direct2D |
+            | Linux | Cairo |
+
+            > Markdown rendered by `swift-markdown-ui` (`Grid`, `Layout`, `Text(AttributedString)`, label styles).
             """)
+            .padding(4)
         }
         #else
         EmptyView()
@@ -306,6 +324,59 @@ struct IntrospectDemo: View {
                     field.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.3)
                 }
             Text("`.introspect(.textField)` hands the NSTextField behind the field to the closure.")
+                .font(.caption).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
+struct ChartsDemo: View {
+    #if HAS_CHARTS
+    /// Monthly build counts as a line and as bars (`LineChart`, `BarChart`).
+    @State private var line = LineChartData(
+        dataSets: LineDataSet(
+            dataPoints: [12, 18, 15, 24, 30, 27, 36].enumerated().map { LineChartDataPoint(value: $1, xAxisLabel: "M\($0 + 1)", description: "month \($0 + 1)") },
+            legendTitle: "Builds",
+            pointStyle: PointStyle(pointSize: 6, borderColour: .blue, fillColour: .white, lineWidth: 2, pointType: .filledOutLine, pointShape: .circle),
+            style: LineStyle(lineColour: ColourStyle(colour: .blue), lineType: .curvedLine)),
+        metadata: ChartMetadata(title: "Builds per month", subtitle: "SwiftUICharts LineChart"),
+        chartStyle: LineChartStyle(infoBoxPlacement: .infoBox(isStatic: false), xAxisGridStyle: GridStyle(numberOfLines: 7), yAxisGridStyle: GridStyle(numberOfLines: 4), yAxisNumberOfLabels: 4, baseline: .zero, globalAnimation: .easeOut(duration: 0.8)))
+    @State private var bars = BarChartData(
+        dataSets: BarDataSet(dataPoints: [
+            BarChartDataPoint(value: 9, xAxisLabel: "mac", description: "macOS", colour: ColourStyle(colour: .purple)),
+            BarChartDataPoint(value: 14, xAxisLabel: "win", description: "Windows", colour: ColourStyle(colour: .orange)),
+            BarChartDataPoint(value: 11, xAxisLabel: "lin", description: "Linux", colour: ColourStyle(colour: .green)),
+        ], legendTitle: "Platforms"),
+        metadata: ChartMetadata(title: "Jobs per platform", subtitle: "SwiftUICharts BarChart"),
+        barStyle: BarStyle(barWidth: 0.6, cornerRadius: CornerRadius(top: 6, bottom: 0), colourFrom: .dataPoints),
+        chartStyle: BarChartStyle(yAxisNumberOfLabels: 3, globalAnimation: .easeOut(duration: 0.8)))
+    #endif
+    var body: some View {
+        #if HAS_CHARTS
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                LineChart(chartData: line)
+                    .pointMarkers(chartData: line)
+                    .touchOverlay(chartData: line)
+                    .xAxisGrid(chartData: line)
+                    .yAxisGrid(chartData: line)
+                    .xAxisLabels(chartData: line)
+                    .yAxisLabels(chartData: line)
+                    .headerBox(chartData: line)
+                    .legends(chartData: line, columns: [GridItem(.flexible())])
+                    .frame(minWidth: 240, minHeight: 180)
+                BarChart(chartData: bars)
+                    .touchOverlay(chartData: bars)
+                    .yAxisGrid(chartData: bars)
+                    .xAxisLabels(chartData: bars)
+                    .yAxisLabels(chartData: bars)
+                    .headerBox(chartData: bars)
+                    .frame(minWidth: 200, minHeight: 180)
+            }
+            Text("`LineChart` and `BarChart` draw with `Path.trimmedPath`, `Shape.trim`/`.scale`, `LazyVGrid` legends, `.position`, `.zIndex` and a `DragGesture` touch overlay; the library imports `CoreGraphics.CGGeometry`.")
                 .font(.caption).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -34,23 +34,72 @@ public enum Axis: Int8, CaseIterable, Hashable, Sendable {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/horizontalalignment
+/// Built-in alignments are a fraction of the view's width; a custom `AlignmentID` computes
+/// its guide from the view's dimensions (`ViewDimensions`).
 public struct HorizontalAlignment: Equatable, Hashable, Sendable {
     let key: String
     let fraction: CGFloat
+    let custom: (@Sendable (ViewDimensions) -> CGFloat)?
+    init(key: String, fraction: CGFloat) { self.key = key; self.fraction = fraction; custom = nil }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/horizontalalignment/init(_:)
+    public init(_ id: AlignmentID.Type) {
+        key = "custom:\(ObjectIdentifier(id))"; fraction = 0.5
+        custom = { id.defaultValue(in: $0) }
+    }
+    public static func == (a: HorizontalAlignment, b: HorizontalAlignment) -> Bool { a.key == b.key }
+    public func hash(into h: inout Hasher) { h.combine(key) }
     public static let leading = HorizontalAlignment(key: "leading", fraction: 0)
     public static let center = HorizontalAlignment(key: "center", fraction: 0.5)
     public static let trailing = HorizontalAlignment(key: "trailing", fraction: 1)
+    /// Where this guide falls in a view of `dims`.
+    func guide(in dims: ViewDimensions) -> CGFloat { dims[self] }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/verticalalignment
 public struct VerticalAlignment: Equatable, Hashable, Sendable {
     let key: String
     let fraction: CGFloat
+    let custom: (@Sendable (ViewDimensions) -> CGFloat)?
+    init(key: String, fraction: CGFloat) { self.key = key; self.fraction = fraction; custom = nil }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/verticalalignment/init(_:)
+    public init(_ id: AlignmentID.Type) {
+        key = "custom:\(ObjectIdentifier(id))"; fraction = 0.5
+        custom = { id.defaultValue(in: $0) }
+    }
+    public static func == (a: VerticalAlignment, b: VerticalAlignment) -> Bool { a.key == b.key }
+    public func hash(into h: inout Hasher) { h.combine(key) }
     public static let top = VerticalAlignment(key: "top", fraction: 0)
     public static let center = VerticalAlignment(key: "center", fraction: 0.5)
     public static let bottom = VerticalAlignment(key: "bottom", fraction: 1)
     public static let firstTextBaseline = VerticalAlignment(key: "firstTextBaseline", fraction: 1)
     public static let lastTextBaseline = VerticalAlignment(key: "lastTextBaseline", fraction: 1)
+    func guide(in dims: ViewDimensions) -> CGFloat { dims[self] }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/alignmentid
+public protocol AlignmentID {
+    static func defaultValue(in context: ViewDimensions) -> CGFloat
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/viewdimensions
+public struct ViewDimensions {
+    public let width: CGFloat
+    public let height: CGFloat
+    /// Baselines from the top (nil: no text inside; the bottom edge stands in).
+    let firstBaseline: CGFloat?
+    let lastBaseline: CGFloat?
+    init(width: CGFloat, height: CGFloat, firstBaseline: CGFloat? = nil, lastBaseline: CGFloat? = nil) {
+        self.width = width; self.height = height; self.firstBaseline = firstBaseline; self.lastBaseline = lastBaseline
+    }
+    public subscript(guide: HorizontalAlignment) -> CGFloat { guide.custom?(self) ?? width * guide.fraction }
+    public subscript(guide: VerticalAlignment) -> CGFloat {
+        if guide.key == "firstTextBaseline" { return firstBaseline ?? height }
+        if guide.key == "lastTextBaseline" { return lastBaseline ?? height }
+        return guide.custom?(self) ?? height * guide.fraction
+    }
+    /// Explicit guides (`alignmentGuide`) are not kept yet.
+    public subscript(explicit guide: HorizontalAlignment) -> CGFloat? { nil }
+    public subscript(explicit guide: VerticalAlignment) -> CGFloat? { nil }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/alignment
@@ -200,9 +249,15 @@ final class _StackPrimitive: _Primitive {
             let sizes = measure(items, proposal: ProposedViewSize(rect.size), horizontal: true)
             let total = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, sizes.count - 1))
             var x = rect.minX + max(0, (rect.width - total) / 2)
+            // The items' guides meet on one line; the block they form sits in the rect by
+            // the alignment's fraction (top, centre, bottom; custom guides centre).
+            let guides = items.indices.map { v.guide(in: items[$0].dimensions(for: sizes[$0])) }
+            let line = guides.max() ?? 0
+            let blockHeight = zip(sizes, guides).map { line - $1 + $0.height }.max() ?? 0
+            let blockY = rect.minY + (rect.height - blockHeight) * v.fraction
             for (i, item) in items.enumerated() {
                 let s = sizes[i]
-                let y = rect.minY + (rect.height - s.height) * v.fraction
+                let y = blockY + line - guides[i]
                 item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
                 x += s.width + spacing
             }
@@ -210,9 +265,13 @@ final class _StackPrimitive: _Primitive {
             let sizes = measure(items, proposal: ProposedViewSize(rect.size), horizontal: false)
             let total = sizes.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, sizes.count - 1))
             var y = rect.minY + max(0, (rect.height - total) / 2)
+            let guides = items.indices.map { h.guide(in: items[$0].dimensions(for: sizes[$0])) }
+            let line = guides.max() ?? 0
+            let blockWidth = zip(sizes, guides).map { line - $1 + $0.width }.max() ?? 0
+            let blockX = rect.minX + (rect.width - blockWidth) * h.fraction
             for (i, item) in items.enumerated() {
                 let s = sizes[i]
-                let x = rect.minX + (rect.width - s.width) * h.fraction
+                let x = blockX + line - guides[i]
                 item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
                 y += s.height + spacing
             }
@@ -331,23 +390,17 @@ final class _FramePrimitive: _Primitive {
         if ph == nil, let i = idealHeight { ph = i }
         let childProposal = ProposedViewSize(width: pw.map { clamp($0, minWidth, maxWidth) }, height: ph.map { clamp($0, minHeight, maxHeight) })
         let child = content?.sizeThatFits(childProposal) ?? .zero
-        var w = child.width, h = child.height
-        if minWidth != nil || maxWidth != nil {
-            let target = pw ?? child.width
-            w = clamp(target.isFinite ? target : child.width, minWidth, maxWidth)
-            if maxWidth == .infinity, pw == nil { w = max(child.width, minWidth ?? 0) }
-            if maxWidth == .infinity, let p = pw, p.isFinite { w = max(p, minWidth ?? 0) }
-            if let mw = maxWidth, mw.isFinite, w > mw { w = mw }
-            if w < child.width, maxWidth == nil { w = child.width }
+        // SwiftUI's rule: a bound that is not given defaults to the content's size, so a
+        // frame with only a minimum never stretches to the proposal and one with only a
+        // maximum never shrinks below its content.
+        func resolve(_ proposed: CGFloat?, _ content: CGFloat, _ lo: CGFloat?, _ hi: CGFloat?) -> CGFloat {
+            guard lo != nil || hi != nil else { return content }
+            let low = lo ?? content, high = hi ?? content
+            let target = proposed.map { $0.isFinite ? $0 : (hi == .infinity ? content : $0) } ?? content
+            return max(min(target, high), low)
         }
-        if minHeight != nil || maxHeight != nil {
-            let target = ph ?? child.height
-            h = clamp(target.isFinite ? target : child.height, minHeight, maxHeight)
-            if maxHeight == .infinity, ph == nil { h = max(child.height, minHeight ?? 0) }
-            if maxHeight == .infinity, let p = ph, p.isFinite { h = max(p, minHeight ?? 0) }
-            if let mh = maxHeight, mh.isFinite, h > mh { h = mh }
-            if h < child.height, maxHeight == nil { h = child.height }
-        }
+        var w = resolve(pw, child.width, minWidth, maxWidth)
+        var h = resolve(ph, child.height, minHeight, maxHeight)
         if idealWidth != nil, proposal.width == nil, minWidth == nil, maxWidth == nil { w = idealWidth! }
         if idealHeight != nil, proposal.height == nil, minHeight == nil, maxHeight == nil { h = idealHeight! }
         return (CGSize(width: w, height: h), child)
@@ -452,5 +505,59 @@ extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/layoutpriority(_:)
     public func layoutPriority(_ value: Double) -> some View {
         _LayoutModified(content: self) { _LayoutPriorityPrimitive(priority: value, content: $0) }
+    }
+}
+
+// MARK: Position and z-order
+
+/// `.position`: fills what it is proposed and centres the content on a point of it.
+@MainActor
+final class _PositionPrimitive: _Primitive {
+    var position: CGPoint
+    init(position: CGPoint, content: _AnyViewBox) {
+        self.position = position
+        super.init()
+        children = [content]
+    }
+    override func update(from other: _Primitive) { super.update(from: other); if let o = other as? _PositionPrimitive { position = o.position } }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let child = node.children.first?.sizeThatFits(proposal) ?? .zero
+        return CGSize(width: proposal.width.map { $0.isFinite ? $0 : child.width } ?? child.width, height: proposal.height.map { $0.isFinite ? $0 : child.height } ?? child.height)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {
+        guard let child = node.children.first else { return }
+        let s = child.sizeThatFits(ProposedViewSize(rect.size))
+        child.place(in: CGRect(x: rect.minX + position.x - s.width / 2, y: rect.minY + position.y - s.height / 2, width: s.width, height: s.height).integralIfNeeded)
+    }
+}
+
+/// `.zIndex`: a layout-transparent marker; siblings' backing views are ordered by it.
+@MainActor
+final class _ZIndexPrimitive: _Primitive {
+    var zIndex: Double
+    init(zIndex: Double, content: _AnyViewBox) {
+        self.zIndex = zIndex
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _ZIndexPrimitive { zIndex = o.zIndex }
+        node?.zIndex = zIndex
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); node.zIndex = zIndex }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/position(_:)
+    public func position(_ position: CGPoint) -> some View {
+        _LayoutModified(content: self) { _PositionPrimitive(position: position, content: $0) }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/position(x:y:)
+    public func position(x: CGFloat = 0, y: CGFloat = 0) -> some View { position(CGPoint(x: x, y: y)) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/zindex(_:)
+    public func zIndex(_ value: Double) -> some View {
+        _LayoutModified(content: self) { _ZIndexPrimitive(zIndex: value, content: $0) }
     }
 }

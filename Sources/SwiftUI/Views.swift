@@ -19,6 +19,33 @@ public struct Font: Hashable, Sendable {
     var weight: Weight? = nil
     var isItalic = false
     var monospacedDigits = false
+    var width: Width? = nil
+    var smallCapsStyle: SmallCaps? = nil
+    var leading: Leading? = nil
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/width
+    public struct Width: Hashable, Sendable {
+        public var value: CGFloat
+        public init(_ value: CGFloat) { self.value = value }
+        public static let compressed = Width(-0.3)
+        public static let condensed = Width(-0.2)
+        public static let standard = Width(0)
+        public static let expanded = Width(0.2)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/leading
+    public enum Leading: Hashable, Sendable { case standard, tight, loose }
+    enum SmallCaps: Hashable { case all, lowercase, uppercase }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/width(_:)
+    public func width(_ width: Width) -> Font { var f = self; f.width = width; return f }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/smallcaps()
+    public func smallCaps() -> Font { var f = self; f.smallCapsStyle = .all; return f }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/lowercasesmallcaps()
+    public func lowercaseSmallCaps() -> Font { var f = self; f.smallCapsStyle = .lowercase; return f }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/uppercasesmallcaps()
+    public func uppercaseSmallCaps() -> Font { var f = self; f.smallCapsStyle = .uppercase; return f }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/leading(_:)
+    public func leading(_ leading: Leading) -> Font { var f = self; f.leading = leading; return f }
 
     public static let largeTitle = Font(base: .style(.largeTitle, .default))
     public static let title = Font(base: .style(.title, .default))
@@ -176,6 +203,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
             Color(self)._fill(context, path: path, in: rect, environment: environment)
         }
+        @MainActor public func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor? { cgColor }
     }
     init(named: String) { storage = .named(named) }
 
@@ -228,7 +256,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         return opacityMultiplier == 1 ? base : base.withAlphaComponent(base.alphaComponent * CGFloat(opacityMultiplier))
     }
 
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, stroke: nil, lineWidth: 0, isColorFill: true) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, isColorFill: true) }
 }
 
 extension NSColor {
@@ -241,11 +269,20 @@ extension NSColor {
 }
 
 extension Color: ShapeStyle {
+    @MainActor func _resolved(_ environment: EnvironmentValues) -> Color { storage == .named("primary") ? (environment.foregroundColor ?? self) : self }
     @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
-        let c = storage == .named("primary") ? (environment.foregroundColor ?? self) : self
-        context.setFillColor(c.nsColor.cgColor)
+        context.setFillColor(_resolved(environment).nsColor.cgColor)
         context.addPath(path)
         context.fillPath()
+    }
+    @MainActor public func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor? { _resolved(environment).nsColor.cgColor }
+    @MainActor public func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues) {
+        context.saveGState()
+        context.setStrokeColor(_resolved(environment).nsColor.cgColor)
+        context._apply(style)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
     }
 }
 
@@ -254,10 +291,29 @@ public protocol ShapeStyle: Sendable {
     /// Fills `path` (laid out in `rect`) with this style; the hook `Shape.fill(_:style:)`
     /// and the shape-drawing primitives draw through.
     @MainActor func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues)
+    /// Strokes `path` with this style (`Shape.stroke(_:style:)`).
+    @MainActor func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues)
+    /// The style's colour at a point of `rect`, for segment strokes (nil: not a colour style).
+    @MainActor func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor?
 }
 
 extension ShapeStyle {
     @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) { unimplemented("\(Self.self)._fill") }
+    /// Default: the stroke's outline, segment by segment, each filled with the style
+    /// (Shapes.swift); styles with a plain colour stroke directly.
+    @MainActor public func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues) {
+        _strokeSegments(context, path: path, in: rect, style: style, environment: environment)
+    }
+}
+
+extension CGContext {
+    func _apply(_ style: StrokeStyle) {
+        setLineWidth(style.lineWidth)
+        setLineCap(style.lineCap)
+        setLineJoin(style.lineJoin)
+        setMiterLimit(style.miterLimit)
+        setLineDash(phase: style.dashPhase, lengths: style.dash)
+    }
 }
 
 // MARK: Text
@@ -297,11 +353,12 @@ final class _TextView: NSView {
     /// `.redacted(reason: .placeholder)`: the text is drawn as a grey bar instead of glyphs.
     var isRedacted = false { didSet { if isRedacted != oldValue { needsDisplay = true } } }
 
-    func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode) {
+    func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode, lineSpacing: CGFloat = 0) {
         if !storage.isEqual(to: text) { storage.setAttributedString(text); if isInSelectedRow { applySelection() } }
         container.maximumNumberOfLines = lineLimit ?? 0
         container.lineBreakMode = lineLimit == 1 ? truncation : .byWordWrapping
         let style = NSMutableParagraphStyle()
+        style.lineSpacing = lineSpacing
         switch alignment {
         case .leading: style.alignment = .left
         case .center: style.alignment = .center
@@ -338,6 +395,16 @@ final class _TextView: NSView {
         return CGSize(width: used.width.rounded(.up), height: used.height.rounded(.up))
     }
 
+    /// The first and last baselines from the top, by the fonts of the first and last
+    /// characters (the text is laid out top-down from the first line).
+    var baselines: (first: CGFloat, last: CGFloat) {
+        guard storage.length > 0 else { return (0, 0) }
+        let firstFont = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lastFont = storage.attribute(.font, at: storage.length - 1, effectiveRange: nil) as? NSFont ?? firstFont
+        let used = layoutManager.usedRect(for: container)
+        return (firstFont.ascender.rounded(.up), (used.height + lastFont.descender).rounded(.up))
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         container.size = NSSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
         let range = layoutManager.glyphRange(for: container)
@@ -368,13 +435,22 @@ final class _TextPrimitive: _Primitive {
         guard let node else { return }
         let env = node.environment
         view.isRedacted = env.redactionReasons.contains(.placeholder)
-        view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail)
+        view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail, lineSpacing: env.lineSpacing)
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         refresh()
         var s = view.size(for: proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
         if let w = proposal.width, w.isFinite, w > 0, s.width > w, node.environment.lineLimit == 1 { s.width = w }
+        lastMeasuredHeight = s.height
         return s
+    }
+    /// The height of the last measurement (baselines are read against it).
+    var lastMeasuredHeight: CGFloat = 0
+    /// Baselines for a layout at `size` (the text is laid out at that width first).
+    func baselines(for size: CGSize) -> (first: CGFloat, last: CGFloat) {
+        refresh()
+        lastMeasuredHeight = view.size(for: size.width > 0 ? size.width : nil).height
+        return view.baselines
     }
     override func place(node: _ViewNode, in rect: CGRect) {}
     override func didLayout(node: _ViewNode) { view.needsDisplay = true }
@@ -390,19 +466,54 @@ public struct Text: View, _PrimitiveView, Equatable {
         var string: String
         var font: Font? = nil
         var color: Color? = nil
+        var backgroundColor: Color? = nil
         var bold = false
         var italic = false
-        var underline = false
-        var strikethrough = false
+        var underline: LineStyle? = nil
+        var strikethrough: LineStyle? = nil
         var kerning: CGFloat = 0
+        var tracking: CGFloat = 0
         var baselineOffset: CGFloat = 0
+        var monospacedDigits = false
+        /// An inline image (`Text(image)`), drawn as an attachment.
+        var image: Image? = nil
     }
     var runs: [Run]
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/linestyle
+    public struct LineStyle: Hashable, Sendable {
+        /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/linestyle/pattern
+        public struct Pattern: Hashable, Sendable {
+            let rawValue: Int
+            public static let solid = Pattern(rawValue: 0)
+            public static let dot = Pattern(rawValue: 1)
+            public static let dash = Pattern(rawValue: 2)
+            public static let dashDot = Pattern(rawValue: 3)
+            public static let dashDotDot = Pattern(rawValue: 4)
+        }
+        public var pattern: Pattern
+        public var color: Color?
+        public init(pattern: Pattern = .solid, color: Color? = nil) { self.pattern = pattern; self.color = color }
+        public static let single = LineStyle()
+        var nsStyle: NSUnderlineStyle {
+            switch pattern {
+            case .dot: return [.single, .patternDot]
+            case .dash: return [.single, .patternDash]
+            case .dashDot: return [.single, .patternDashDot]
+            case .dashDotDot: return [.single, .patternDashDotDot]
+            default: return .single
+            }
+        }
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/init(_:)-9cbvb
+    public init(_ image: Image) { runs = [Run(string: "\u{FFFC}", image: image)] }
 
     public init(verbatim content: String) { runs = [Run(string: content)] }
     public init<S: StringProtocol>(_ content: S) { runs = [Run(string: String(content))] }
     public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.key)] }
-    public init(_ attributed: AttributedString) { runs = [Run(string: String(attributed.characters))] }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/init(_:)-1a4oh
+    public init(_ attributed: AttributedString) { runs = Text._runs(of: attributed) }
     public init(_ date: Date, style: DateStyle) {
         let f = DateFormatter()
         switch style {
@@ -420,9 +531,17 @@ public struct Text: View, _PrimitiveView, Equatable {
     public func foregroundStyle(_ color: Color) -> Text { mapRuns { $0.color = color } }
     public func bold() -> Text { mapRuns { $0.bold = true } }
     public func italic() -> Text { mapRuns { $0.italic = true } }
-    public func underline(_ active: Bool = true, color: Color? = nil) -> Text { mapRuns { $0.underline = active } }
-    public func strikethrough(_ active: Bool = true, color: Color? = nil) -> Text { mapRuns { $0.strikethrough = active } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/underline(_:pattern:color:)
+    public func underline(_ isActive: Bool = true, pattern: LineStyle.Pattern = .solid, color: Color? = nil) -> Text { mapRuns { $0.underline = isActive ? LineStyle(pattern: pattern, color: color) : nil } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/strikethrough(_:pattern:color:)
+    public func strikethrough(_ isActive: Bool = true, pattern: LineStyle.Pattern = .solid, color: Color? = nil) -> Text { mapRuns { $0.strikethrough = isActive ? LineStyle(pattern: pattern, color: color) : nil } }
     public func kerning(_ kerning: CGFloat) -> Text { mapRuns { $0.kerning = kerning } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/tracking(_:)
+    public func tracking(_ tracking: CGFloat) -> Text { mapRuns { $0.tracking = tracking } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/monospaceddigit()
+    public func monospacedDigit() -> Text { mapRuns { $0.monospacedDigits = true } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/monospaced(_:)
+    public func monospaced(_ isActive: Bool = true) -> Text { mapRuns { if isActive { $0.font = ($0.font ?? .body).monospaced() } } }
     public func baselineOffset(_ offset: CGFloat) -> Text { mapRuns { $0.baselineOffset = offset } }
     public func fontWeight(_ weight: Font.Weight?) -> Text { mapRuns { if let w = weight { $0.font = ($0.font ?? .body).weight(w) } } }
     public func textCase(_ c: Case?) -> Text {
@@ -438,13 +557,21 @@ public struct Text: View, _PrimitiveView, Equatable {
             var font = r.font ?? baseFont
             if r.bold { font = font.bold() }
             if r.italic { font = font.italic() }
+            if r.monospacedDigits { font = font.monospacedDigit() }
             var attrs: [NSAttributedString.Key: Any] = [.font: font.nsFont]
             let color = r.color ?? baseColor
             attrs[.foregroundColor] = color?.nsColor ?? (env.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor)
-            if r.underline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-            if r.strikethrough { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
-            if r.kerning != 0 { attrs[.kern] = r.kerning }
+            if let bg = r.backgroundColor { attrs[.backgroundColor] = bg.nsColor }
+            if let u = r.underline { attrs[.underlineStyle] = u.nsStyle.rawValue; if let c = u.color { attrs[.underlineColor] = c.nsColor } }
+            if let st = r.strikethrough { attrs[.strikethroughStyle] = st.nsStyle.rawValue; if let c = st.color { attrs[.strikethroughColor] = c.nsColor } }
+            if r.kerning != 0 || r.tracking != 0 { attrs[.kern] = r.kerning + r.tracking }
             if r.baselineOffset != 0 { attrs[.baselineOffset] = r.baselineOffset }
+            if let image = r.image {
+                // The text system has no attachments yet (docs/ROADMAP.md): the image's
+                // accessibility label stands in for it.
+                out.append(NSAttributedString(string: image.accessibilityLabel ?? "", attributes: attrs))
+                continue
+            }
             out.append(NSAttributedString(string: r.string, attributes: attrs))
         }
         return out
@@ -455,7 +582,7 @@ public struct Text: View, _PrimitiveView, Equatable {
 
 extension Text {
     /// The plain string (tests and labels).
-    public var _string: String { runs.map(\.string).joined() }
+    public var _string: String { runs.map { $0.image == nil ? $0.string : "" }.joined() }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey
@@ -463,8 +590,52 @@ public struct LocalizedStringKey: ExpressibleByStringLiteral, ExpressibleByStrin
     let key: String
     public init(_ value: String) { key = value }
     public init(stringLiteral value: String) { key = value }
-    public init(stringInterpolation: DefaultStringInterpolation) { key = String(describing: stringInterpolation) }
+    public init(stringInterpolation: StringInterpolation) { key = stringInterpolation.output }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey/stringinterpolation
+    /// The key is built as the formatted string (there is no strings table to look up).
+    public struct StringInterpolation: StringInterpolationProtocol, Sendable {
+        var output = ""
+        public init(literalCapacity: Int, interpolationCount: Int) { output.reserveCapacity(literalCapacity) }
+        public mutating func appendLiteral(_ literal: String) { output += literal }
+        public mutating func appendInterpolation(_ string: String) { output += string }
+        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) { output += subject.description }
+        public mutating func appendInterpolation<T>(_ value: T) { output += String(describing: value) }
+        /// `"\(value, specifier: "%.2f")"`: a printf-style format for the value.
+        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { output += String(format: specifier, value._arg) }
+        public mutating func appendInterpolation<Subject: ReferenceConvertible>(_ subject: Subject, formatter: Formatter? = nil) {
+            let any: Any = subject
+            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += String(describing: subject) }
+        }
+        public mutating func appendInterpolation<Subject: NSObject>(_ subject: Subject, formatter: Formatter? = nil) {
+            let any: Any = subject
+            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += subject.description }
+        }
+        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { output += format.format(input) }
+        public mutating func appendInterpolation(_ text: Text) { output += text._string }
+        public mutating func appendInterpolation(_ image: Image) {}
+        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { output += Text(date, style: style)._string }
+    }
 }
+
+/// The types `LocalizedStringKey` accepts with a `specifier:`, as in Apple's SwiftUI.
+public protocol _FormatSpecifiable: Equatable {
+    var _arg: CVarArg { get }
+}
+extension Int: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int8: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int16: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int32: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int64: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt8: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt16: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt32: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt64: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Float: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Double: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension CGFloat: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension String: _FormatSpecifiable { public var _arg: CVarArg { self } }
 
 // MARK: Shapes
 
@@ -491,15 +662,20 @@ public struct Path: Equatable, @unchecked Sendable {
     public mutating func addQuadCurve(to p: CGPoint, control: CGPoint) { let m = mutable; m.addQuadCurve(to: p, control: control); cgPath = m }
     public mutating func addCurve(to p: CGPoint, control1: CGPoint, control2: CGPoint) { let m = mutable; m.addCurve(to: p, control1: control1, control2: control2); cgPath = m }
     public mutating func closeSubpath() { let m = mutable; m.closeSubpath(); cgPath = m }
-    public mutating func addRect(_ rect: CGRect) { let m = mutable; m.addRect(rect); cgPath = m }
-    public mutating func addEllipse(in rect: CGRect) { let m = mutable; m.addEllipse(in: rect); cgPath = m }
-    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
-        let m = mutable; m.addRoundedRect(in: rect, cornerWidth: cornerSize.width, cornerHeight: cornerSize.height); cgPath = m
+    public mutating func addRect(_ rect: CGRect, transform: CGAffineTransform = .identity) { let m = mutable; m.addRect(rect, transform: transform); cgPath = m }
+    public mutating func addRects(_ rects: [CGRect], transform: CGAffineTransform = .identity) { let m = mutable; m.addRects(rects, transform: transform); cgPath = m }
+    public mutating func addEllipse(in rect: CGRect, transform: CGAffineTransform = .identity) { let m = mutable; m.addEllipse(in: rect, transform: transform); cgPath = m }
+    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addRoundedRect(in: rect, cornerWidth: cornerSize.width, cornerHeight: cornerSize.height, transform: transform); cgPath = m
     }
-    public mutating func addPath(_ path: Path) { let m = mutable; m.addPath(path.cgPath); cgPath = m }
+    public mutating func addPath(_ path: Path, transform: CGAffineTransform = .identity) { let m = mutable; m.addPath(path.cgPath, transform: transform); cgPath = m }
     public mutating func addLines(_ lines: [CGPoint]) { let m = mutable; m.addLines(between: lines); cgPath = m }
-    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool) {
-        let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise); cgPath = m
+    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise, transform: transform); cgPath = m
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/path/addarc(tangent1end:tangent2end:radius:transform:)
+    public mutating func addArc(tangent1End: CGPoint, tangent2End: CGPoint, radius: CGFloat, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addArc(tangent1End: tangent1End, tangent2End: tangent2End, radius: radius, transform: transform); cgPath = m
     }
     public static func == (a: Path, b: Path) -> Bool {
         #if canImport(Darwin)
@@ -527,22 +703,30 @@ public struct Angle: Hashable, Comparable, Sendable {
 public enum RoundedCornerStyle: Hashable, Sendable { case circular, continuous }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape
-public protocol Shape: View {
-    func path(in rect: CGRect) -> Path
+/// `Sendable` with a nonisolated `path(in:)`, as Apple's: shapes are plain values a
+/// conforming struct can declare without main-actor isolation.
+public protocol Shape: Sendable, View {
+    nonisolated func path(in rect: CGRect) -> Path
 }
 
 extension Shape {
-    public var body: some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
+    public var body: some View { _ShapeView(shape: AnyShape(self), fill: Color.primary) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(_:style:)
-    public func fill(_ color: Color, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: color, stroke: nil, lineWidth: 0) }
-    public func fill<S: ShapeStyle>(_ content: S, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: nil, lineWidth: 0, fillStyle: content) }
-    public func fill() -> some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:)
-    public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth) }
-    public func stroke(_ color: Color, style: StrokeStyle) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: style.lineWidth) }
-    public func stroke(lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: .primary, lineWidth: lineWidth) }
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/strokeborder(_:linewidth:antialiased:)
-    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1, antialiased: Bool = true) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth, inset: true) }
+    public func fill<S: ShapeStyle>(_ content: S, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: content, fillStyle: style) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(style:)
+    public func fill(style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: Color.primary, fillStyle: style) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:antialiased:)
+    public func stroke<S: ShapeStyle>(_ content: S, lineWidth: CGFloat = 1, antialiased: Bool = true) -> some View {
+        _ShapeView(shape: AnyShape(self), stroke: content, strokeStyle: StrokeStyle(lineWidth: lineWidth))
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:style:antialiased:)
+    public func stroke<S: ShapeStyle>(_ content: S, style: StrokeStyle, antialiased: Bool = true) -> some View {
+        _ShapeView(shape: AnyShape(self), stroke: content, strokeStyle: style)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(linewidth:)
+    public func stroke(lineWidth: CGFloat = 1) -> some View { stroke(Color.primary, lineWidth: lineWidth) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(style:)
+    public func stroke(style: StrokeStyle) -> some View { stroke(Color.primary, style: style) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/fillstyle
@@ -616,47 +800,38 @@ final class _ShapeDrawingView: NSView {
 @MainActor
 final class _ShapeViewPrimitive: _Primitive {
     var shape: AnyShape
-    var fill: Color?
-    var stroke: Color?
-    var lineWidth: CGFloat
-    var inset = false
-    /// A fill that is not a plain colour (a gradient).
-    var fillStyle: (any ShapeStyle)?
+    var fill: (any ShapeStyle)?
+    var fillStyle: FillStyle
+    var stroke: (any ShapeStyle)?
+    var strokeStyle: StrokeStyle
     let isColorFill: Bool
     let view = _ShapeDrawingView(frame: .zero)
 
-    init(shape: AnyShape, fill: Color?, stroke: Color?, lineWidth: CGFloat, inset: Bool = false, isColorFill: Bool = false, fillStyle: (any ShapeStyle)? = nil) {
-        self.shape = shape; self.fill = fill; self.stroke = stroke; self.lineWidth = lineWidth; self.inset = inset; self.isColorFill = isColorFill; self.fillStyle = fillStyle
+    init(shape: AnyShape, fill: (any ShapeStyle)?, fillStyle: FillStyle = FillStyle(), stroke: (any ShapeStyle)? = nil, strokeStyle: StrokeStyle = StrokeStyle(), isColorFill: Bool = false) {
+        self.shape = shape; self.fill = fill; self.fillStyle = fillStyle; self.stroke = stroke; self.strokeStyle = strokeStyle; self.isColorFill = isColorFill
         super.init()
     }
     override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ShapeViewPrimitive else { return }
-        shape = o.shape; fill = o.fill; stroke = o.stroke; lineWidth = o.lineWidth; inset = o.inset; fillStyle = o.fillStyle
+        shape = o.shape; fill = o.fill; fillStyle = o.fillStyle; stroke = o.stroke; strokeStyle = o.strokeStyle
         install()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); install() }
     private func install() {
-        let fill = fill, stroke = stroke, lineWidth = lineWidth, shape = shape, inset = inset, fillStyle = fillStyle
+        let fill = fill, fillStyle = fillStyle, stroke = stroke, strokeStyle = strokeStyle, shape = shape
         let env = node?.environment ?? EnvironmentValues()
         view.draw = { ctx, bounds in
-            let rect = inset ? bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2) : bounds
-            if let style = fillStyle {
-                style._fill(ctx, path: shape.path(in: rect).cgPath, in: rect, environment: env)
-            }
+            let path = shape.path(in: bounds).cgPath
             if let f = fill {
-                let c = f.storage == .named("primary") ? (env.foregroundColor ?? f) : f
-                ctx.setFillColor(c.nsColor.cgColor)
-                ctx.addPath(shape.path(in: rect).cgPath)
-                ctx.fillPath()
+                ctx.saveGState()
+                if fillStyle.isEOFilled { ctx.addPath(path); ctx.clip(using: .evenOdd) }
+                f._fill(ctx, path: path, in: bounds, environment: env)
+                ctx.restoreGState()
             }
-            if let s = stroke, lineWidth > 0 {
-                let c = s.storage == .named("primary") ? (env.foregroundColor ?? s) : s
-                ctx.setStrokeColor(c.nsColor.cgColor)
-                ctx.setLineWidth(lineWidth)
-                ctx.addPath(shape.path(in: rect).cgPath)
-                ctx.strokePath()
+            if let s = stroke, strokeStyle.lineWidth > 0 {
+                s._stroke(ctx, path: path, in: bounds, style: strokeStyle, environment: env)
             }
         }
         view.needsDisplay = true
@@ -672,12 +847,11 @@ final class _ShapeViewPrimitive: _Primitive {
 struct _ShapeView: View, _PrimitiveView {
     typealias Body = Never
     let shape: AnyShape
-    let fill: Color?
-    let stroke: Color?
-    let lineWidth: CGFloat
-    var inset = false
-    var fillStyle: (any ShapeStyle)? = nil
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, stroke: stroke, lineWidth: lineWidth, inset: inset, fillStyle: fillStyle) }
+    var fill: (any ShapeStyle)? = nil
+    var fillStyle = FillStyle()
+    var stroke: (any ShapeStyle)? = nil
+    var strokeStyle = StrokeStyle()
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, fillStyle: fillStyle, stroke: stroke, strokeStyle: strokeStyle) }
 }
 
 // MARK: Divider
@@ -1004,6 +1178,12 @@ public struct Image: View, _PrimitiveView, Equatable {
     public init(systemName: String) { name = systemName; image = nil }
     public init(nsImage: NSImage) { name = ""; image = nsImage }
     public init(decorative name: String, bundle: Bundle? = nil) { self.init(name, bundle: bundle) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/init(_:bundle:label:)
+    public init(_ name: String, bundle: Bundle? = nil, label: Text) { self.init(name, bundle: bundle); accessibilityLabel = label._string }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/symbolrenderingmode(_:)
+    public func symbolRenderingMode(_ mode: SymbolRenderingMode?) -> Image { self }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/scale
+    public enum Scale: Hashable, CaseIterable, Sendable { case small, medium, large }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/init(_:scale:orientation:label:)
     public init(_ cgImage: CGImage, scale: CGFloat, orientation: Image.Orientation = .up, label: Text) {
         self.init(decorative: cgImage, scale: scale, orientation: orientation)
@@ -1028,6 +1208,7 @@ public struct Image: View, _PrimitiveView, Equatable {
     public enum TemplateRenderingMode: Hashable, Sendable { case template, original }
     public enum Interpolation: Hashable, Sendable { case none, low, medium, high }
     public static func == (a: Image, b: Image) -> Bool { a.name == b.name && a.image === b.image && a.resizable == b.resizable }
+    public static func != (a: Image, b: Image) -> Bool { !(a == b) }
     public func _makePrimitive(node: _ViewNode) -> _Primitive { _ImagePrimitive(image: self) }
 }
 
@@ -1069,8 +1250,11 @@ public enum ContentMode: Hashable, CaseIterable, Sendable { case fit, fill }
 public struct Label<Title: View, Icon: View>: View {
     let title: Title
     let icon: Icon
+    @Environment(\._labelStyle) private var style
     public init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) { self.title = title(); self.icon = icon() }
-    public var body: some View { HStack(spacing: 4) { icon; title } }
+    public var body: some View {
+        AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: AnyView(icon))))
+    }
 }
 
 extension Label where Title == Text, Icon == Image {

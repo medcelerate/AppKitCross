@@ -49,6 +49,15 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
         return f
     }
 
+    /// The same face with traits changed (NSFontManager's conversions).
+    internal func _converted(italic: Bool?, weight: CGFloat?, monospaced: Bool?) -> NSFont {
+        let i = italic ?? _italic, w = weight ?? _weight, m = monospaced ?? _monospaced
+        if i == _italic, w == _weight, m == _monospaced { return self }
+        return NSFont.make(family: _isSystem ? nil : _fontName, size: pointSize, weight: w, italic: i, monospaced: m) ?? self
+    }
+    internal var _isItalic: Bool { _italic }
+    internal var _weightValue: CGFloat { _weight }
+
     open override var description: String { "\(fontName) \(pointSize) pt." }
     open override func isEqual(_ object: Any?) -> Bool {
         guard let o = object as? NSFont else { return false }

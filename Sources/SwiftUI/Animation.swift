@@ -305,6 +305,9 @@ extension View {
     public func animation<V: Equatable>(_ animation: Animation?, value: V) -> some View {
         _AnimationScope(content: self, value: value, animation: animation)
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/animation(_:)
+    /// Deprecated by Apple in favour of `animation(_:value:)`; every change below animates.
+    public func animation(_ animation: Animation?) -> some View { _AnimationScope(content: self, value: _AlwaysChanged(), animation: animation) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/transaction(_:)
     public func transaction(_ transform: @escaping (inout Transaction) -> Void) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/offset(x:y:)
@@ -362,4 +365,9 @@ final class _AnimationScopePrimitive<V: Equatable>: _Primitive {
         animation = o.animation
         if changed, let node { node.implicitAnimation = animation; node.root?.noteImplicitAnimation(node) }
     }
+}
+
+/// A value that is never equal to its previous one (the value-less `.animation`).
+struct _AlwaysChanged: Equatable {
+    static func == (a: _AlwaysChanged, b: _AlwaysChanged) -> Bool { false }
 }
