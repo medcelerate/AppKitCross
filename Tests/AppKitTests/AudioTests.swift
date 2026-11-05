@@ -345,9 +345,17 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
         wait(for: [fourth], timeout: 0.3)
         lock.lock(); XCTAssertEqual(Set(order), ["first", "second"]); lock.unlock()
 
-        // A looping buffer plays until stopped, and stop() calls its handler.
+        // A looping buffer plays until stopped, and stop() calls its handler. The player is
+        // already playing, and Apple's engine applies a schedule asynchronously, so render
+        // until the loop's audio shows up (bounded) before checking that it keeps going.
         let stopped = expectation(description: "loop stopped")
         player.scheduleBuffer(constant([0.75], rate: 48000, frames: 100), at: nil, options: .loops) { stopped.fulfill() }
+        var started = false
+        for _ in 0..<200 {
+            let chunk = try renderAll(engine, frames: 256)
+            if chunk.floatChannelData![0][255] == 0.75 { started = true; break }
+        }
+        XCTAssertTrue(started, "the looping buffer was never heard")
         let looped = try renderAll(engine, frames: 512)
         XCTAssertEqual(looped.floatChannelData![0][0], 0.75)
         XCTAssertEqual(looped.floatChannelData![0][511], 0.75, "looping keeps going past the buffer length")
