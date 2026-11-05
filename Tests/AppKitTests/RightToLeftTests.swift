@@ -143,3 +143,82 @@ final class RightToLeftTests: XCTestCase, @unchecked Sendable {
     }
     @MainActor private func all(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(all) }
 }
+
+final class RightToLeftSizingTests: XCTestCase, @unchecked Sendable {
+    /// The HelloWindow SwiftUI demo crashed on Windows under RTL with a NaN window size:
+    /// every layout construct it uses must size finitely in a right-to-left environment.
+    func testDemoLikeContentSizesFinitelyRightToLeft() {
+        MainActor.assumeIsolated {
+            struct Row: Identifiable { let id: Int; let name: String; let moons: Int }
+            struct Demo: View {
+                let rows = [Row(id: 1, name: "Mercury", moons: 0), Row(id: 2, name: "Earth", moons: 1)]
+                @State private var selected: Set<Int> = []
+                @State private var name = ""
+                @State private var on = true
+                @State private var amount = 0.4
+                @State private var tab = "a"
+                @State private var pick = 1
+                var body: some View {
+                    TabView(selection: $tab) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("SwiftUI on AppKitWin").font(.title).bold()
+                            TextField("Name", text: $name)
+                            Toggle("Enabled", isOn: $on)
+                            Slider(value: $amount)
+                            Color.blue.frame(width: 240 * CGFloat(amount) + 20, height: 20)
+                            Picker("Pick", selection: $pick) { Text("One").tag(1); Text("Two").tag(2) }.pickerStyle(.segmented)
+                            HStack { Button("Add") {}; Spacer(); Text("count 0") }
+                            List(["a", "b"], id: \.self) { item in HStack { Circle().fill(Color.green).frame(width: 10, height: 10); Text(item); Spacer() } }.frame(height: 120)
+                            GeometryReader { g in Text("\(Int(g.size.width))") }.frame(height: 20)
+                            ScrollView { VStack { Text("row 0").frame(maxWidth: .infinity, alignment: .leading); Text("row 1") } }.frame(height: 60)
+                        }
+                        .padding(4)
+                        .tabItem { Text("Controls") }.tag("a")
+                        NavigationStack {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Pick:").foregroundColor(.secondary)
+                                NavigationLink("Detail", destination: Text("Pushed").padding())
+                                Spacer()
+                                Text("depth").font(.caption)
+                            }.padding(12)
+                        }.tabItem { Text("Navigation") }.tag("b")
+                        VStack(alignment: .leading, spacing: 8) {
+                            Table(rows, selection: $selected) {
+                                TableColumn("Name") { Text($0.name) }
+                                TableColumn("Moons") { Text("\($0.moons)") }.width(60)
+                            }.frame(minHeight: 180)
+                            Text("Files").frame(maxWidth: .infinity, minHeight: 40).background(RoundedRectangle(cornerRadius: 6).fill(Color.gray))
+                        }.padding(12).tabItem { Text("Data") }.tag("c")
+                        VStack(alignment: .leading, spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12).fill(Color.gray.opacity(0.15))
+                                RoundedRectangle(cornerRadius: 10).fill(Color.blue).frame(width: 120, height: 80)
+                                    .overlay(Text("1.00x").foregroundColor(.white)).scaleEffect(1).rotationEffect(.zero).offset(.zero)
+                            }.frame(minHeight: 220)
+                            HStack { Text("Taps: 0").padding(8).background(Color.gray.opacity(0.2)); Spacer(); Button("Reset") {} }
+                        }.tabItem { Text("Gestures") }.tag("d")
+                    }
+                    .padding(12)
+                    .frame(minWidth: 420, minHeight: 360)
+                }
+            }
+            NSApplication._layoutDirectionOverride = .rightToLeft      // the whole app, as APPKITWIN_LAYOUT_DIRECTION=rtl does
+            defer { NSApplication._layoutDirectionOverride = nil }
+            let h = NSHostingView(rootView: Demo())
+            let unspecified = h.sizeThatFits(.unspecified)
+            XCTAssertTrue(unspecified.width.isFinite && unspecified.height.isFinite, "sizeThatFits(.unspecified) \(unspecified)")
+            let ideal = h.intrinsicContentSize
+            XCTAssertTrue(ideal.width.isFinite && ideal.height.isFinite, "ideal size \(ideal)")
+            let fit = h.fittingSize
+            XCTAssertTrue(fit.width.isFinite && fit.height.isFinite, "fitting size \(fit)")
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            h.frame = NSRect(x: 0, y: 0, width: 500, height: 400)
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            @MainActor func check(_ v: NSView) { let f = v.frame; XCTAssertTrue(f.origin.x.isFinite && f.width.isFinite, "\(type(of: v)) frame \(f)"); for s in v.subviews { check(s) } }
+            check(h)
+            w.close()
+        }
+    }
+}

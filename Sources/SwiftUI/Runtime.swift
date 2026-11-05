@@ -285,7 +285,13 @@ public final class _ViewNode {
     }
 
     public func sizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
-        if let p = primitive, !p.isLayoutTransparent { return p.sizeThatFits(proposal, node: self) }
+        if let p = primitive, !p.isLayoutTransparent {
+            let s = p.sizeThatFits(proposal, node: self)
+            if NSView._traceInvalidation, s.width.isNaN || s.height.isNaN {
+                NSView._trace("swiftui NaN size from \(type(of: p)) for \(viewType) proposal \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil")")
+            }
+            return s
+        }
         let leaves = layoutLeaves
         if leaves.count == 1 { return leaves[0].sizeThatFits(proposal) }
         var size = CGSize.zero
