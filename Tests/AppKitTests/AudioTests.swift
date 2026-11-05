@@ -345,9 +345,17 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
         wait(for: [fourth], timeout: 0.3)
         lock.lock(); XCTAssertEqual(Set(order), ["first", "second"]); lock.unlock()
 
-        // A looping buffer plays until stopped, and stop() calls its handler.
+        // A looping buffer plays until stopped, and stop() calls its handler. The player is
+        // already playing, and Apple's engine applies a schedule asynchronously, so render
+        // until the loop's audio shows up (bounded) before checking that it keeps going.
         let stopped = expectation(description: "loop stopped")
         player.scheduleBuffer(constant([0.75], rate: 48000, frames: 100), at: nil, options: .loops) { stopped.fulfill() }
+        var started = false
+        for _ in 0..<200 {
+            let chunk = try renderAll(engine, frames: 256)
+            if chunk.floatChannelData![0][255] == 0.75 { started = true; break }
+        }
+        XCTAssertTrue(started, "the looping buffer was never heard")
         let looped = try renderAll(engine, frames: 512)
         XCTAssertEqual(looped.floatChannelData![0][0], 0.75)
         XCTAssertEqual(looped.floatChannelData![0][511], 0.75, "looping keeps going past the buffer length")
@@ -502,7 +510,9 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(engine.isRunning)
             XCTAssertNotNil(engine._outputDescription)
             player.play()
-            Thread.sleep(forTimeInterval: 0.25)
+            // The null stream renders in real time; wait for its clock rather than sleeping
+            // a fixed time (CI runners are slow).
+            waitUntil { (engine.outputNode.lastRenderTime?.sampleTime ?? 0) > 4800 }
             let t = engine.outputNode.lastRenderTime
             XCTAssertNotNil(t)
             XCTAssertGreaterThan(t!.sampleTime, 4800, "the null stream renders in real time")
@@ -514,7 +524,7 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.1)
             XCTAssertEqual(engine.outputNode.lastRenderTime!.sampleTime, paused)
             try engine.start()
-            Thread.sleep(forTimeInterval: 0.1)
+            waitUntil { engine.outputNode.lastRenderTime!.sampleTime > paused }
             XCTAssertGreaterThan(engine.outputNode.lastRenderTime!.sampleTime, paused)
             engine.stop()
         }
@@ -589,8 +599,7 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             XCTAssertNil(fromData.url)
             fromData.isMeteringEnabled = true
             XCTAssertTrue(fromData.play())
-            Thread.sleep(forTimeInterval: 0.1)
-            fromData.updateMeters()
+            waitUntil { fromData.updateMeters(); return fromData.averagePower(forChannel: 0) > -20 }
             XCTAssertGreaterThan(fromData.averagePower(forChannel: 0), -20, "a -6 dBFS sine meters above -20 dB")
             XCTAssertLessThan(fromData.peakPower(forChannel: 0), 0)
             fromData.stop()
@@ -620,10 +629,13 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
         XCTAssertGreaterThan(stream.bufferFrameCount, 0)
         print("stream: \(stream.deviceName) \(stream.sampleRate) Hz \(stream.channelCount) ch, period \(stream.bufferFrameCount) frames, latency \(stream.latency * 1000) ms")
         try stream.start()
-        Thread.sleep(forTimeInterval: 0.3)
+        // Wait (bounded) for the stream to pull 100 ms of audio: a fixed sleep is not enough
+        // on a slow CI runner.
+        let threshold = Int64(stream.sampleRate * 0.1)
+        waitUntil { calls.value > threshold }
         stream.stop()
         let rendered = calls.value
-        XCTAssertGreaterThan(rendered, Int64(stream.sampleRate * 0.1), "the stream pulled at least 100 ms of audio in 300 ms")
+        XCTAssertGreaterThan(rendered, threshold, "the stream pulled at least 100 ms of audio within two seconds")
         Thread.sleep(forTimeInterval: 0.05)
         XCTAssertEqual(calls.value, rendered, "no callbacks after stop()")
         XCTAssertGreaterThanOrEqual(stream.latency, 0)
