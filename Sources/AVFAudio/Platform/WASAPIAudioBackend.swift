@@ -1,6 +1,6 @@
 // The WASAPI output backend (Windows), over the CWASAPI shim.
 
-#if canImport(CWASAPI)
+#if os(Windows)
 import Foundation
 import CWASAPI
 
