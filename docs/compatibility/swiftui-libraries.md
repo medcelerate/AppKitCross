@@ -169,6 +169,9 @@ Listed in `docs/ROADMAP.md` as follow-ups:
   `.alignmentGuide` are not kept; `Font.Width` and small caps are stored but not applied to
   the font; `.blendMode` is not applied by the software or DirectComposition compositors;
   `CGGradient` in CoreGraphics on Windows and Linux would replace the banded gradient drawing.
+- Windows with swift.org's 6.2 toolchain: linking the `_FoundationCollections` index
+  metadata behind `AttributedString` run ranges fails (6.4.1 on the PC links it), so
+  `Text(AttributedString)` keeps the plain string there until CI moves to a newer toolchain.
 - Linux and Windows: a library file that imports only `Foundation` and uses `URLSession` still
   needs `FoundationNetworking` itself; the re-export from `CoreGraphics` helps every file that
   imports CoreGraphics, AppKit, SwiftUI or ImageIO.

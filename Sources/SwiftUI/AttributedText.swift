@@ -37,7 +37,12 @@ extension Text {
     /// The runs of an attributed string: SwiftUI attributes and Foundation's inline
     /// presentation intents (strong, emphasis, code, strikethrough) become text runs.
     static func _runs(of attributed: AttributedString) -> [Run] {
-        attributed.runs.map { run in
+        #if os(Windows)
+        // swift.org's Windows toolchain (6.2) fails to link the `_FoundationCollections`
+        // index metadata that run ranges pull in (fine with 6.4): the plain text for now.
+        return [Run(string: String(attributed.characters))]
+        #else
+        return attributed.runs.map { run in
             var r = Run(string: String(attributed[run.range].characters))
             r.font = run.font
             r.color = run.foregroundColor
@@ -58,5 +63,6 @@ extension Text {
             #endif
             return r
         }
+        #endif
     }
 }

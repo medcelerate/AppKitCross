@@ -154,7 +154,10 @@ final class SwiftUILayoutProtocolTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testAttributedStringRunsBecomeTextRuns() {
+    func testAttributedStringRunsBecomeTextRuns() throws {
+        #if os(Windows)
+        throw XCTSkip("the Windows 6.2 toolchain cannot link AttributedString run ranges; Text keeps the plain string there")
+        #endif
         var s = AttributedString("plain ")
         var bold = AttributedString("bold")
         bold.font = Font.title
