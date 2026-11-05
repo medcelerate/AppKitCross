@@ -263,6 +263,14 @@ public struct EnvironmentValues {
     }
 
     private struct FontKey: EnvironmentKey { static let defaultValue: Font? = nil }
+    private struct LineSpacingKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+    private struct ImageScaleKey: EnvironmentKey { static let defaultValue: Image.Scale = .medium }
+    private struct LabelStyleKey: EnvironmentKey { static let defaultValue: any LabelStyle = DefaultLabelStyle() }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/environmentvalues/linespacing
+    public var lineSpacing: CGFloat { get { self[LineSpacingKey.self] } set { self[LineSpacingKey.self] = newValue } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/environmentvalues/imagescale
+    public var imageScale: Image.Scale { get { self[ImageScaleKey.self] } set { self[ImageScaleKey.self] = newValue } }
+    var _labelStyle: any LabelStyle { get { self[LabelStyleKey.self] } set { self[LabelStyleKey.self] = newValue } }
     private struct ForegroundColorKey: EnvironmentKey { static let defaultValue: Color? = nil }
     private struct ColorSchemeKey: EnvironmentKey { static let defaultValue: ColorScheme = .light }
     private struct IsEnabledKey: EnvironmentKey { static let defaultValue = true }

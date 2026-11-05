@@ -154,6 +154,10 @@ extension _ViewRoot {
                 if let value = p.value { mine[p.key] = value(n) }
                 else if let t = p.transform { var v = mine[p.key] ?? p.defaultValue; t(&v); mine[p.key] = v }
             }
+            if let p = n.primitive as? _PreferenceValuePrimitive {
+                let v = mine[p.key] ?? p.defaultValue
+                pending.append { p.deliver(v) }
+            }
             if let o = n.primitive as? _OnPreferenceChangePrimitive {
                 let v = mine[o.key] ?? o.defaultValue
                 if o.last == nil || !o.isEqual(o.last!, v) {

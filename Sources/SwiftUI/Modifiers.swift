@@ -11,6 +11,16 @@ extension View {
     public func foregroundColor(_ color: Color?) -> some View { environment(\.foregroundColor, color) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:)
     public func foregroundStyle(_ color: Color) -> some View { environment(\.foregroundColor, color) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:_:)
+    /// Only the primary style is applied (hierarchical secondary and tertiary levels are
+    /// not drawn separately yet); a non-colour style leaves the foreground unchanged.
+    public func foregroundStyle<S1: ShapeStyle, S2: ShapeStyle>(_ primary: S1, _ secondary: S2) -> some View {
+        _EnvironmentView(content: self) { if let c = primary as? Color { $0.foregroundColor = c } }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:_:_:)
+    public func foregroundStyle<S1: ShapeStyle, S2: ShapeStyle, S3: ShapeStyle>(_ primary: S1, _ secondary: S2, _ tertiary: S3) -> some View {
+        _EnvironmentView(content: self) { if let c = primary as? Color { $0.foregroundColor = c } }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/disabled(_:)
     public func disabled(_ disabled: Bool) -> some View {
         _EnvironmentView(content: self) { if disabled { $0.isEnabled = false } }

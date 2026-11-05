@@ -60,10 +60,11 @@ enum Libraries {
         LibraryEntry(id: "defaults", name: "Defaults", version: "9.0.9", included: Compiled.defaults,
                      exclusion: "`#if os(macOS)` … `#else import UIKit`: every platform that is not macOS is assumed to have UIKit"),
         LibraryEntry(id: "markdown", name: "swift-markdown-ui", version: "2.4.1", included: Compiled.markdown,
-                     exclusion: "its NetworkImage dependency and the Markdown views need SwiftUI members the port lacks (see the report)"),
+                     exclusion: "its NetworkImage dependency extends URLSession in a file that imports only Foundation, which on Windows and Linux is FoundationNetworking's"),
         LibraryEntry(id: "introspect", name: "SwiftUI-Introspect", version: "27.1.0", included: Compiled.introspect,
                      exclusion: "imports ObjectiveC and reaches into AppKit's private view hierarchy"),
-        LibraryEntry(id: "charts", name: "SwiftUICharts", version: "2.10.4", included: Compiled.charts, exclusion: nil),
+        LibraryEntry(id: "charts", name: "SwiftUICharts", version: "2.10.4", included: Compiled.charts,
+                     exclusion: "`Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136); everything else compiles"),
         LibraryEntry(id: "nuke", name: "Nuke + NukeUI", version: "13.2.1", included: false,
                      exclusion: "`#if !os(macOS) import UIKit`, Core Image filters and the ImageIO C API"),
     ]
@@ -294,9 +295,16 @@ struct MarkdownDemo: View {
 
             - Direct2D and DirectComposition on Windows
             - Cairo, X11 and Wayland on Linux
+            - [x] Builds against the port's `SwiftUI`
 
-            > Markdown rendered by `swift-markdown-ui`.
+            | Platform | Backend |
+            | --- | --- |
+            | Windows | Direct2D |
+            | Linux | Cairo |
+
+            > Markdown rendered by `swift-markdown-ui` (`Grid`, `Layout`, `Text(AttributedString)`, label styles).
             """)
+            .padding(4)
         }
         #else
         EmptyView()

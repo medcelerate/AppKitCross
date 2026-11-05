@@ -22,18 +22,22 @@ var linked: [Target.Dependency] = [
     // Build on macOS (the host build against this SwiftUI), Windows and Linux.
     .product(name: "Shimmer", package: "SwiftUI-Shimmer"),
     .product(name: "ConfettiSwiftUI", package: "ConfettiSwiftUI"),
-    // Its `import CoreGraphics.CGGeometry` resolves through the port's submodule map.
-    .product(name: "SwiftUICharts", package: "SwiftUICharts"),
 ]
-var defines: [SwiftSetting] = [.define("HAS_SHIMMER"), .define("HAS_CONFETTI"), .define("HAS_CHARTS")]
+var defines: [SwiftSetting] = [.define("HAS_SHIMMER"), .define("HAS_CONFETTI")]
 #if os(macOS)
 linked += [
     // `#if os(macOS)` … `#else` UIKit: these two treat every other platform as UIKit, so
     // they compile only on the macOS host build.
     .product(name: "WrappingHStack", package: "WrappingHStack"),
     .product(name: "Defaults", package: "Defaults"),
+    // One `#if os(…)` switch with no default (Color.systemsBackground) keeps it off Windows
+    // and Linux; its `import CoreGraphics.CGGeometry` resolves there through the port's map.
+    .product(name: "SwiftUICharts", package: "SwiftUICharts"),
+    // Its NetworkImage dependency extends URLSession in a file that imports only Foundation,
+    // which on corelibs is FoundationNetworking's.
+    .product(name: "MarkdownUI", package: "swift-markdown-ui"),
 ]
-defines += [.define("HAS_WRAPPINGHSTACK"), .define("HAS_DEFAULTS")]
+defines += [.define("HAS_WRAPPINGHSTACK"), .define("HAS_DEFAULTS"), .define("HAS_CHARTS"), .define("HAS_MARKDOWNUI")]
 #else
 linked += [
     // The modules Apple's AppKit re-exports and the libraries import by name.
@@ -43,8 +47,6 @@ linked += [
 ]
 #endif
 // Not linked anywhere (see the report):
-//   MarkdownUI (swift-markdown-ui): Font.Width, smallCaps, symbolRenderingMode, imageScale,
-//     Layout, AnyShapeStyle, AttributeContainer attributes, ... (NetworkImage itself builds now);
 //   SwiftUIIntrospect: `import ObjectiveC`, MapKit/WebKit/AVKit view types, and it reaches
 //     into AppKit's private hierarchy (the macOS SDK's MapKit crashes the compiler there);
 //   Nuke / NukeUI: `#if !os(macOS) import UIKit`, Core Image, the ImageIO C API.
