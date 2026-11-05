@@ -510,7 +510,9 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(engine.isRunning)
             XCTAssertNotNil(engine._outputDescription)
             player.play()
-            Thread.sleep(forTimeInterval: 0.25)
+            // The null stream renders in real time; wait for its clock rather than sleeping
+            // a fixed time (CI runners are slow).
+            waitUntil { (engine.outputNode.lastRenderTime?.sampleTime ?? 0) > 4800 }
             let t = engine.outputNode.lastRenderTime
             XCTAssertNotNil(t)
             XCTAssertGreaterThan(t!.sampleTime, 4800, "the null stream renders in real time")
@@ -522,7 +524,7 @@ final class AudioTests: XCTestCase, @unchecked Sendable {
             Thread.sleep(forTimeInterval: 0.1)
             XCTAssertEqual(engine.outputNode.lastRenderTime!.sampleTime, paused)
             try engine.start()
-            Thread.sleep(forTimeInterval: 0.1)
+            waitUntil { engine.outputNode.lastRenderTime!.sampleTime > paused }
             XCTAssertGreaterThan(engine.outputNode.lastRenderTime!.sampleTime, paused)
             engine.stop()
         }
