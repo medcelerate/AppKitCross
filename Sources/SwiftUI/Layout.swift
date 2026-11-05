@@ -40,6 +40,8 @@ public struct HorizontalAlignment: Equatable, Hashable, Sendable {
     public static let leading = HorizontalAlignment(key: "leading", fraction: 0)
     public static let center = HorizontalAlignment(key: "center", fraction: 0.5)
     public static let trailing = HorizontalAlignment(key: "trailing", fraction: 1)
+    /// The fraction from the left edge: leading is on the right in a right-to-left layout.
+    func fraction(in direction: LayoutDirection) -> CGFloat { direction == .rightToLeft ? 1 - fraction : fraction }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/verticalalignment
@@ -71,8 +73,8 @@ public struct Alignment: Equatable, Hashable, Sendable {
     public static let bottomLeading = Alignment(horizontal: .leading, vertical: .bottom)
     public static let bottomTrailing = Alignment(horizontal: .trailing, vertical: .bottom)
 
-    func origin(of size: CGSize, in rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX + (rect.width - size.width) * horizontal.fraction, y: rect.minY + (rect.height - size.height) * vertical.fraction)
+    func origin(of size: CGSize, in rect: CGRect, direction: LayoutDirection = .leftToRight) -> CGPoint {
+        CGPoint(x: rect.minX + (rect.width - size.width) * horizontal.fraction(in: direction), y: rect.minY + (rect.height - size.height) * vertical.fraction)
     }
 }
 
@@ -190,21 +192,30 @@ final class _StackPrimitive: _Primitive {
 
     override func place(node: _ViewNode, in rect: CGRect) {
         let items = items(node)
+        let direction = node.environment.layoutDirection
         switch kind {
         case .depth(let alignment):
             for i in items {
                 let s = i.sizeThatFits(ProposedViewSize(rect.size))
-                i.place(in: CGRect(origin: alignment.origin(of: s, in: rect), size: s).integralIfNeeded)
+                i.place(in: CGRect(origin: alignment.origin(of: s, in: rect, direction: direction), size: s).integralIfNeeded)
             }
         case .horizontal(let v):
             let sizes = measure(items, proposal: ProposedViewSize(rect.size), horizontal: true)
             let total = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, sizes.count - 1))
-            var x = rect.minX + max(0, (rect.width - total) / 2)
+            // Right to left: the first item sits at the right edge and the row grows leftwards.
+            let rightToLeft = direction == .rightToLeft
+            var x = rightToLeft ? rect.maxX - max(0, (rect.width - total) / 2) : rect.minX + max(0, (rect.width - total) / 2)
             for (i, item) in items.enumerated() {
                 let s = sizes[i]
                 let y = rect.minY + (rect.height - s.height) * v.fraction
-                item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
-                x += s.width + spacing
+                if rightToLeft {
+                    x -= s.width
+                    item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
+                    x -= spacing
+                } else {
+                    item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
+                    x += s.width + spacing
+                }
             }
         case .vertical(let h):
             let sizes = measure(items, proposal: ProposedViewSize(rect.size), horizontal: false)
@@ -212,7 +223,7 @@ final class _StackPrimitive: _Primitive {
             var y = rect.minY + max(0, (rect.height - total) / 2)
             for (i, item) in items.enumerated() {
                 let s = sizes[i]
-                let x = rect.minX + (rect.width - s.width) * h.fraction
+                let x = rect.minX + (rect.width - s.width) * h.fraction(in: direction)
                 item.place(in: CGRect(x: x, y: y, width: s.width, height: s.height).integralIfNeeded)
                 y += s.height + spacing
             }
@@ -358,7 +369,7 @@ final class _FramePrimitive: _Primitive {
     override func place(node: _ViewNode, in rect: CGRect) {
         let (_, child) = resolve(ProposedViewSize(rect.size), node: node)
         let s = CGSize(width: min(child.width, rect.width.isFinite ? max(rect.width, child.width) : child.width), height: child.height)
-        node.children.first?.place(in: CGRect(origin: alignment.origin(of: s, in: rect), size: s).integralIfNeeded)
+        node.children.first?.place(in: CGRect(origin: alignment.origin(of: s, in: rect, direction: node.environment.layoutDirection), size: s).integralIfNeeded)
     }
 }
 
@@ -377,7 +388,9 @@ final class _PaddingPrimitive: _Primitive {
         return CGSize(width: c.width + insets.horizontal, height: c.height + insets.vertical)
     }
     override func place(node: _ViewNode, in rect: CGRect) {
-        node.children.first?.place(in: CGRect(x: rect.minX + insets.leading, y: rect.minY + insets.top, width: max(0, rect.width - insets.horizontal), height: max(0, rect.height - insets.vertical)))
+        // The leading inset is on the right in a right-to-left layout.
+        let left = node.environment.layoutDirection == .rightToLeft ? insets.trailing : insets.leading
+        node.children.first?.place(in: CGRect(x: rect.minX + left, y: rect.minY + insets.top, width: max(0, rect.width - insets.horizontal), height: max(0, rect.height - insets.vertical)))
     }
 }
 

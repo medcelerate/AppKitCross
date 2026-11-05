@@ -535,7 +535,28 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/updatewindowsrunloopordering
     class public var updateWindowsRunLoopOrdering: Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/userinterfacelayoutdirection
-    @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection { .leftToRight }
+    @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection { NSApplication._resolvedLayoutDirection }
+
+    /// The application's direction, decided once: `APPKITWIN_LAYOUT_DIRECTION=rtl|ltr`
+    /// (demos and tests), then the macOS defaults keys (`AppleTextDirection`,
+    /// `NSForceRightToLeftWritingDirection`), then the current locale's language.
+    nonisolated(unsafe) internal static var _layoutDirectionOverride: NSUserInterfaceLayoutDirection?
+    internal static var _resolvedLayoutDirection: NSUserInterfaceLayoutDirection {
+        if let o = _layoutDirectionOverride { return o }
+        if let env = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_DIRECTION"]?.lowercased() {
+            if env == "rtl" || env == "righttoleft" { return .rightToLeft }
+            if env == "ltr" || env == "lefttoright" { return .leftToRight }
+        }
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "NSForceRightToLeftWritingDirection") != nil, defaults.bool(forKey: "NSForceRightToLeftWritingDirection") { return .rightToLeft }
+        if defaults.object(forKey: "AppleTextDirection") != nil { return defaults.bool(forKey: "AppleTextDirection") ? .rightToLeft : .leftToRight }
+        return NSApplication._isRightToLeftLanguage(Locale.current.identifier) ? .rightToLeft : .leftToRight
+    }
+    /// Languages written right to left (the ones ICU marks as such), by locale identifier prefix.
+    internal static func _isRightToLeftLanguage(_ identifier: String) -> Bool {
+        let code = identifier.split(whereSeparator: { $0 == "_" || $0 == "-" }).first.map(String.init)?.lowercased() ?? ""
+        return ["ar", "arc", "ckb", "dv", "fa", "he", "iw", "khw", "ks", "ku", "ps", "sd", "ug", "ur", "yi"].contains(code)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/validrequestor(forsendtype:returntype:)
     @MainActor open override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/willbecomeactivenotification

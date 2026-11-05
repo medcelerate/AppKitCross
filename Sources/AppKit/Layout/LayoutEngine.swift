@@ -33,9 +33,18 @@ final class LayoutEngine {
     /// Engine-space expression for an attribute of an item.
     private func expression(_ item: AnyObject, _ attribute: NSLayoutConstraint.Attribute) -> LayoutExpression {
         let v = variables(for: item)
+        // Leading is the left edge in a left-to-right view and the right edge in a
+        // right-to-left one (the item's own direction, inherited from its superview). In a
+        // right-to-left layout the leading/trailing axis runs leftwards, so those
+        // attributes are the negated edges: `a.leading == b.leading + 20` then puts `a`
+        // 20 points inward from the right, and `b.leading == a.trailing + 8` puts `b`
+        // to the left of `a`, as AppKit does.
+        let rightToLeft = ((item as? NSView)?.userInterfaceLayoutDirection ?? (item as? NSLayoutGuide)?.owningView?.userInterfaceLayoutDirection) == .rightToLeft
         switch attribute {
-        case .left, .leading: return LayoutExpression(v.x)
-        case .right, .trailing: return LayoutExpression(v.x) + LayoutExpression(v.width)
+        case .left: return LayoutExpression(v.x)
+        case .right: return LayoutExpression(v.x) + LayoutExpression(v.width)
+        case .leading: return rightToLeft ? LayoutExpression(v.x, -1) + LayoutExpression(v.width, -1) : LayoutExpression(v.x)
+        case .trailing: return rightToLeft ? LayoutExpression(v.x, -1) : LayoutExpression(v.x) + LayoutExpression(v.width)
         case .top: return LayoutExpression(v.y)
         case .bottom: return LayoutExpression(v.y) + LayoutExpression(v.height)
         case .width: return LayoutExpression(v.width)

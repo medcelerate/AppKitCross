@@ -58,6 +58,15 @@ xwd -root -silent | convert xwd:- /tmp/hellowindow-linux-metal.png
 wait $APP 2>/dev/null || true
 grep -E "^device|Vulkan|pipeline failed|^frame" /tmp/hellowindow-linux-metal.log | head -5
 echo "screenshot: /tmp/hellowindow-linux-metal.png ($(stat -c %s /tmp/hellowindow-linux-metal.png) bytes)"
+# Right-to-left layout: the same window mirrored (leading edges on the right, natural
+# text flush right); compare with hellowindow-linux.png.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_DIRECTION=rtl timeout 5 ./.build/debug/HelloWindow >/tmp/hellowindow-linux-rtl.log 2>&1 &
+APP=$!
+sleep 3
+xwd -root -silent | convert xwd:- /tmp/hellowindow-linux-rtl.png
+wait $APP 2>/dev/null || true
+grep -iE "unimplemented|fatal" /tmp/hellowindow-linux-rtl.log | head -3
+echo "screenshot: /tmp/hellowindow-linux-rtl.png ($(stat -c %s /tmp/hellowindow-linux-rtl.png) bytes)"
 # The small examples (Examples/<Name>): each runs under Xvfb for a screenshot, and its log
 # is checked for a trap (an `unimplemented()` stub or a crash); Drawing also exports its
 # canvas headlessly, which checks the PNG path.

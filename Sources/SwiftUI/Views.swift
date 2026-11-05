@@ -297,15 +297,17 @@ final class _TextView: NSView {
     /// `.redacted(reason: .placeholder)`: the text is drawn as a grey bar instead of glyphs.
     var isRedacted = false { didSet { if isRedacted != oldValue { needsDisplay = true } } }
 
-    func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode) {
+    func configure(_ text: NSAttributedString, lineLimit: Int?, alignment: TextAlignment, truncation: NSLineBreakMode, direction: LayoutDirection = .leftToRight) {
         if !storage.isEqual(to: text) { storage.setAttributedString(text); if isInSelectedRow { applySelection() } }
         container.maximumNumberOfLines = lineLimit ?? 0
         container.lineBreakMode = lineLimit == 1 ? truncation : .byWordWrapping
         let style = NSMutableParagraphStyle()
+        let rightToLeft = direction == .rightToLeft
+        style.baseWritingDirection = rightToLeft ? .rightToLeft : .leftToRight
         switch alignment {
-        case .leading: style.alignment = .left
+        case .leading: style.alignment = rightToLeft ? .right : .left
         case .center: style.alignment = .center
-        case .trailing: style.alignment = .right
+        case .trailing: style.alignment = rightToLeft ? .left : .right
         }
         storage.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: storage.length))
     }
@@ -368,7 +370,7 @@ final class _TextPrimitive: _Primitive {
         guard let node else { return }
         let env = node.environment
         view.isRedacted = env.redactionReasons.contains(.placeholder)
-        view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail)
+        view.configure(text._attributed(env), lineLimit: env.lineLimit, alignment: env.multilineTextAlignment, truncation: env.truncationMode == .head ? .byTruncatingHead : env.truncationMode == .middle ? .byTruncatingMiddle : .byTruncatingTail, direction: env.layoutDirection)
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         refresh()

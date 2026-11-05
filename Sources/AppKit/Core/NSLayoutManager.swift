@@ -321,7 +321,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             switch style?.alignment ?? .natural {
             case .center: flush = 0.5
             case .right: flush = 1
-            default: flush = 0
+            case .left: flush = 0
+            default: flush = style?.baseWritingDirection == .rightToLeft ? 1 : 0   // natural follows the paragraph's direction
             }
             let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
             let flushOffset = max(0, width - (lineWidth - trailing)) * flush

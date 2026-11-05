@@ -203,6 +203,7 @@ import CoreText
         switch alignment {
         case .center: x = rect.midX - size.width / 2
         case .right: x = rect.maxX - size.width
+        case .natural, .justified: if _controlView?.userInterfaceLayoutDirection == .rightToLeft { x = rect.maxX - size.width }
         default: break
         }
         let yTop = flipped ? rect.midY - size.height / 2 : rect.midY + size.height / 2

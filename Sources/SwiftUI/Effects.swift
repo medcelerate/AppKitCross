@@ -216,7 +216,7 @@ final class _MaskPrimitive: _Primitive {
         m.update(box: maskBoxChanged ? maskBox : nil, environment: node.environment, force: maskBoxChanged)
         maskBoxChanged = false
         let s = m.sizeThatFits(ProposedViewSize(rect.size))
-        m.place(in: CGRect(origin: alignment.origin(of: s, in: rect), size: s).integralIfNeeded)
+        m.place(in: CGRect(origin: alignment.origin(of: s, in: rect, direction: node.environment.layoutDirection), size: s).integralIfNeeded)
     }
     override func didLayout(node: _ViewNode) { view.needsDisplay = true }
     override func didSyncBackingViews(node: _ViewNode) {

@@ -297,7 +297,7 @@ final class _DecorationPrimitive: _Primitive {
         for (i, d) in decorations.enumerated() {
             let alignment = (i == 0 && hasBackground) ? backgroundAlignment : overlayAlignment
             let s = d.sizeThatFits(ProposedViewSize(rect.size))
-            d.place(in: CGRect(origin: alignment.origin(of: s, in: rect), size: s).integralIfNeeded)
+            d.place(in: CGRect(origin: alignment.origin(of: s, in: rect, direction: node.environment.layoutDirection), size: s).integralIfNeeded)
         }
     }
 
