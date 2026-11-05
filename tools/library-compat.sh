@@ -92,13 +92,15 @@ if [ "$PROBE" = 1 ]; then
             echo "$target: builds"
         else
             # Diagnostic lines name a source file and position; the source excerpts under
-            # them and the SwiftCompile summaries do not.
-            errors=$(grep -cE "\.swift:[0-9]+:[0-9]+: error: " "$log" || true)
-            first=$(grep -m1 -E "\.swift:[0-9]+:[0-9]+: error: " "$log" | tr -d '\r' || grep -m1 "error: " "$log" || true)
+            # them and the SwiftCompile summaries do not. The log is read as text with its
+            # carriage returns stripped (Windows), so grep never treats it as binary.
+            tr -d '\r' < "$log" > "$log.txt"
+            errors=$(grep -acE "swift:[0-9]+:[0-9]+: +error" "$log.txt" || true)
+            first=$(grep -am1 -E "swift:[0-9]+:[0-9]+: +error" "$log.txt" || grep -am1 "error: " "$log.txt" || true)
             first=$(echo "$first" | sed -E 's|^.*/checkouts/||')
             echo "$target: FAILS ($errors errors); first: $first"
         fi
-        rm -f "$log"
+        rm -f "$log" "$log.txt"
     done
 fi
 
