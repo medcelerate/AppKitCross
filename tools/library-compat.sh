@@ -38,6 +38,9 @@ add_maps() {
     for m in "$@"; do
         [ -f "$m" ] || continue
         name=$(basename "$(dirname "$m")"); [ "$name" = include ] && name=$(basename "$(dirname "$(dirname "$m")")")
+        # A synthesised map (.build/debug/<Name>.build) is skipped when the shim has a
+        # hand-written one, which would otherwise be a redefinition of the module.
+        name=${name%.build}
         case " $seen " in *" $name "*) continue ;; esac
         # The CoreGraphics submodule map stands in for Apple's framework; on macOS the SDK has it.
         if [ "$(uname)" = Darwin ] && [ "$name" = CCoreGraphicsModules ]; then continue; fi

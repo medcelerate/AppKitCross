@@ -42,10 +42,11 @@ SwiftUICharts and swift-markdown-ui on macOS (`LibraryCompat --screenshot`, `too
   </tr>
 </table>
 
-Windows (Swift 6.4.1, 150 % DPI): the root build and host-backend tests pass, the probe
-gives the same per-library verdicts as Linux, the example runs with the shimmer sweeping and
-the confetti bursting, and the six excluded tabs show their reason. The Windows run of this
-revision is recorded in the pull request.
+Linux (the `appkitwin-linux` container, Swift 6.2): 308 host-backend tests pass, the probe
+gives the verdicts above (SwiftUICharts' 9 errors are all the one getter, MarkdownUI's 9 are
+all NetworkImage's `URLSession`), and `LibraryCompat --screenshot` under Xvfb captures all
+eight tabs, the six excluded ones showing their reason. Windows (Swift 6.4.1, 150 % DPI): the
+same verdicts; the PC run of this revision is recorded in the pull request.
 
 ## How the example is built
 
