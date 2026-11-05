@@ -39,12 +39,16 @@ add_maps() {
         [ -f "$m" ] || continue
         name=$(basename "$(dirname "$m")"); [ "$name" = include ] && name=$(basename "$(dirname "$(dirname "$m")")")
         case " $seen " in *" $name "*) continue ;; esac
+        # The CoreGraphics submodule map stands in for Apple's framework; on macOS the SDK has it.
+        if [ "$(uname)" = Darwin ] && [ "$name" = CCoreGraphicsModules ]; then continue; fi
         seen="$seen $name"
         FLAGS+=(-Xcc -fmodule-map-file="$(abs "$(dirname "$m")")/$(basename "$m")")
     done
 }
 add_maps ../../Sources/C*/module.modulemap ../../Sources/C*/include/module.modulemap
 for d in ../../Sources/C*/include ../../Sources/C*; do
+    # (clang also finds a module.modulemap in an include directory on its own.)
+    if [ "$(uname)" = Darwin ] && [ "$(basename "$d")" = CCoreGraphicsModules ]; then continue; fi
     [ -d "$d" ] && FLAGS+=(-Xcc -I"$(abs "$d")")
 done
 # ... and the system headers those maps include (Cairo, Pango, X11, D-Bus on Linux).

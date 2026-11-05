@@ -588,6 +588,9 @@ final class _AccessibilityPrimitive: _Primitive {
         var identifier: String? = nil
         var hint: String? = nil
         var isElement: Bool? = nil
+        /// `.accessibilityElement(children:)`: `.ignore` and `.combine` make the first
+        /// backing view the element and hide the rest from assistive technology.
+        var childBehavior: AccessibilityChildBehavior? = nil
     }
     var traits: Traits
     init(traits: Traits, content: _AnyViewBox) {
@@ -612,7 +615,9 @@ final class _AccessibilityPrimitive: _Primitive {
     private func apply() {
         for (i, v) in backingViews.enumerated() {
             if let h = traits.hidden, v.isAccessibilityHidden() != h { v.setAccessibilityHidden(h) }
+            if let b = traits.childBehavior, b != .contain, i > 0, !v.isAccessibilityHidden() { v.setAccessibilityHidden(true) }
             guard i == 0 else { continue }
+            if let b = traits.childBehavior, b != .contain, !v.isAccessibilityElement() { v.setAccessibilityElement(true) }
             if let l = traits.label, v.accessibilityLabel() != l { v.setAccessibilityLabel(l) }
             if let value = traits.value, (v.accessibilityValue() as? String) != value { v.setAccessibilityValue(value) }
             if let id = traits.identifier { v.setAccessibilityIdentifier(id) }
@@ -655,6 +660,16 @@ extension View {
     public func accessibilityHint<S: StringProtocol>(_ hint: S) -> some View { _accessibility { $0.hint = String(hint) } }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityhint(_:)-6fdn0
     public func accessibilityHint(_ hint: Text) -> some View { _accessibility { $0.hint = hint._string } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityelement(children:)
+    public func accessibilityElement(children: AccessibilityChildBehavior = .ignore) -> some View { _accessibility { $0.childBehavior = children } }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/accessibilitychildbehavior
+public struct AccessibilityChildBehavior: Hashable, Sendable {
+    let kind: Int
+    public static let ignore = AccessibilityChildBehavior(kind: 0)
+    public static let contain = AccessibilityChildBehavior(kind: 1)
+    public static let combine = AccessibilityChildBehavior(kind: 2)
 }
 
 // MARK: No-op compatibility modifiers

@@ -26,9 +26,12 @@ targets += [
                          // the DWM frame/backdrop attributes used by Win32Window.
                          .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
     ),
+    // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
+    // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).
+    .systemLibrary(name: "CCoreGraphicsModules", path: "Sources/CCoreGraphicsModules"),
     .target(
         name: "CoreGraphics",
-        dependencies: ["CD2D"],
+        dependencies: ["CD2D", "CCoreGraphicsModules"],
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),
@@ -93,9 +96,10 @@ targets += [
         path: "Sources/CWayland",
         linkerSettings: [.linkedLibrary("wayland-client"), .linkedLibrary("wayland-cursor"), .linkedLibrary("xkbcommon")]
     ),
+    .systemLibrary(name: "CCoreGraphicsModules", path: "Sources/CCoreGraphicsModules"),
     .target(
         name: "CoreGraphics",
-        dependencies: ["CCairo"],
+        dependencies: ["CCairo", "CCoreGraphicsModules"],
         path: "Sources/CoreGraphics",
         swiftSettings: [.swiftLanguageMode(.v5)]
     ),

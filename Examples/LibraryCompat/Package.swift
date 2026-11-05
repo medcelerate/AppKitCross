@@ -22,8 +22,10 @@ var linked: [Target.Dependency] = [
     // Build on macOS (the host build against this SwiftUI), Windows and Linux.
     .product(name: "Shimmer", package: "SwiftUI-Shimmer"),
     .product(name: "ConfettiSwiftUI", package: "ConfettiSwiftUI"),
+    // Its `import CoreGraphics.CGGeometry` resolves through the port's submodule map.
+    .product(name: "SwiftUICharts", package: "SwiftUICharts"),
 ]
-var defines: [SwiftSetting] = [.define("HAS_SHIMMER"), .define("HAS_CONFETTI")]
+var defines: [SwiftSetting] = [.define("HAS_SHIMMER"), .define("HAS_CONFETTI"), .define("HAS_CHARTS")]
 #if os(macOS)
 linked += [
     // `#if os(macOS)` … `#else` UIKit: these two treat every other platform as UIKit, so
@@ -45,8 +47,6 @@ linked += [
 //     Layout, AnyShapeStyle, AttributeContainer attributes, ... (NetworkImage itself builds now);
 //   SwiftUIIntrospect: `import ObjectiveC`, MapKit/WebKit/AVKit view types, and it reaches
 //     into AppKit's private hierarchy (the macOS SDK's MapKit crashes the compiler there);
-//   SwiftUICharts: `import CoreGraphics.CGGeometry` submodule, GridItem, position, zIndex,
-//     InsettableShape, Path.trimmedPath, Shape.trim/scale, ...;
 //   Nuke / NukeUI: `#if !os(macOS) import UIKit`, Core Image, the ImageIO C API.
 
 let package = Package(

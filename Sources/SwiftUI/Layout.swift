@@ -454,3 +454,57 @@ extension View {
         _LayoutModified(content: self) { _LayoutPriorityPrimitive(priority: value, content: $0) }
     }
 }
+
+// MARK: Position and z-order
+
+/// `.position`: fills what it is proposed and centres the content on a point of it.
+@MainActor
+final class _PositionPrimitive: _Primitive {
+    var position: CGPoint
+    init(position: CGPoint, content: _AnyViewBox) {
+        self.position = position
+        super.init()
+        children = [content]
+    }
+    override func update(from other: _Primitive) { super.update(from: other); if let o = other as? _PositionPrimitive { position = o.position } }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let child = node.children.first?.sizeThatFits(proposal) ?? .zero
+        return CGSize(width: proposal.width.map { $0.isFinite ? $0 : child.width } ?? child.width, height: proposal.height.map { $0.isFinite ? $0 : child.height } ?? child.height)
+    }
+    override func place(node: _ViewNode, in rect: CGRect) {
+        guard let child = node.children.first else { return }
+        let s = child.sizeThatFits(ProposedViewSize(rect.size))
+        child.place(in: CGRect(x: rect.minX + position.x - s.width / 2, y: rect.minY + position.y - s.height / 2, width: s.width, height: s.height).integralIfNeeded)
+    }
+}
+
+/// `.zIndex`: a layout-transparent marker; siblings' backing views are ordered by it.
+@MainActor
+final class _ZIndexPrimitive: _Primitive {
+    var zIndex: Double
+    init(zIndex: Double, content: _AnyViewBox) {
+        self.zIndex = zIndex
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _ZIndexPrimitive { zIndex = o.zIndex }
+        node?.zIndex = zIndex
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); node.zIndex = zIndex }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/position(_:)
+    public func position(_ position: CGPoint) -> some View {
+        _LayoutModified(content: self) { _PositionPrimitive(position: position, content: $0) }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/position(x:y:)
+    public func position(x: CGFloat = 0, y: CGFloat = 0) -> some View { position(CGPoint(x: x, y: y)) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/zindex(_:)
+    public func zIndex(_ value: Double) -> some View {
+        _LayoutModified(content: self) { _ZIndexPrimitive(zIndex: value, content: $0) }
+    }
+}

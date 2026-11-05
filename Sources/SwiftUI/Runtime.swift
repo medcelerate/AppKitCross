@@ -75,6 +75,18 @@ public final class _ViewNode {
     /// Set by an enclosing stack before measuring its items (Spacer reads it).
     var stackAxis: Axis? = nil
     var layoutPriority: Double = 0
+    /// Set by `.zIndex`; siblings' backing views are stacked by it (ties keep tree order).
+    var zIndex: Double? = nil
+    /// The z-index this subtree asks its container for: its own, else its single child's.
+    var effectiveZIndex: Double { zIndex ?? (children.count == 1 ? children[0].effectiveZIndex : 0) }
+    /// Children in drawing order: by z-index, stable.
+    var childrenByZIndex: [_ViewNode] {
+        guard children.count > 1, children.contains(where: { $0.effectiveZIndex != 0 }) else { return children }
+        return children.enumerated().sorted { a, b in
+            let (za, zb) = (a.element.effectiveZIndex, b.element.effectiveZIndex)
+            return za == zb ? a.offset < b.offset : za < zb
+        }.map(\.element)
+    }
     var onAppear: [() -> Void] = []
     var onDisappear: [() -> Void] = []
     private var appeared = false
@@ -323,7 +335,7 @@ public final class _ViewNode {
     /// All backing views in this subtree in drawing order, stopping at nested backing views.
     func collectBackingViews(into out: inout [NSView]) {
         if let v = primitive?.nsView { out.append(v); return }
-        for c in children { c.collectBackingViews(into: &out) }
+        for c in childrenByZIndex { c.collectBackingViews(into: &out) }
         for e in exiting { e.collectBackingViews(into: &out) }
     }
 

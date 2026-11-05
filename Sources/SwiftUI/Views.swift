@@ -176,6 +176,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
             Color(self)._fill(context, path: path, in: rect, environment: environment)
         }
+        @MainActor public func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor? { cgColor }
     }
     init(named: String) { storage = .named(named) }
 
@@ -228,7 +229,7 @@ public struct Color: Hashable, Sendable, View, _PrimitiveView {
         return opacityMultiplier == 1 ? base : base.withAlphaComponent(base.alphaComponent * CGFloat(opacityMultiplier))
     }
 
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, stroke: nil, lineWidth: 0, isColorFill: true) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: AnyShape(Rectangle()), fill: self, isColorFill: true) }
 }
 
 extension NSColor {
@@ -241,11 +242,20 @@ extension NSColor {
 }
 
 extension Color: ShapeStyle {
+    @MainActor func _resolved(_ environment: EnvironmentValues) -> Color { storage == .named("primary") ? (environment.foregroundColor ?? self) : self }
     @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
-        let c = storage == .named("primary") ? (environment.foregroundColor ?? self) : self
-        context.setFillColor(c.nsColor.cgColor)
+        context.setFillColor(_resolved(environment).nsColor.cgColor)
         context.addPath(path)
         context.fillPath()
+    }
+    @MainActor public func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor? { _resolved(environment).nsColor.cgColor }
+    @MainActor public func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues) {
+        context.saveGState()
+        context.setStrokeColor(_resolved(environment).nsColor.cgColor)
+        context._apply(style)
+        context.addPath(path)
+        context.strokePath()
+        context.restoreGState()
     }
 }
 
@@ -254,10 +264,29 @@ public protocol ShapeStyle: Sendable {
     /// Fills `path` (laid out in `rect`) with this style; the hook `Shape.fill(_:style:)`
     /// and the shape-drawing primitives draw through.
     @MainActor func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues)
+    /// Strokes `path` with this style (`Shape.stroke(_:style:)`).
+    @MainActor func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues)
+    /// The style's colour at a point of `rect`, for segment strokes (nil: not a colour style).
+    @MainActor func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor?
 }
 
 extension ShapeStyle {
     @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) { unimplemented("\(Self.self)._fill") }
+    /// Default: the stroke's outline, segment by segment, each filled with the style
+    /// (Shapes.swift); styles with a plain colour stroke directly.
+    @MainActor public func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues) {
+        _strokeSegments(context, path: path, in: rect, style: style, environment: environment)
+    }
+}
+
+extension CGContext {
+    func _apply(_ style: StrokeStyle) {
+        setLineWidth(style.lineWidth)
+        setLineCap(style.lineCap)
+        setLineJoin(style.lineJoin)
+        setMiterLimit(style.miterLimit)
+        setLineDash(phase: style.dashPhase, lengths: style.dash)
+    }
 }
 
 // MARK: Text
@@ -463,8 +492,52 @@ public struct LocalizedStringKey: ExpressibleByStringLiteral, ExpressibleByStrin
     let key: String
     public init(_ value: String) { key = value }
     public init(stringLiteral value: String) { key = value }
-    public init(stringInterpolation: DefaultStringInterpolation) { key = String(describing: stringInterpolation) }
+    public init(stringInterpolation: StringInterpolation) { key = stringInterpolation.output }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey/stringinterpolation
+    /// The key is built as the formatted string (there is no strings table to look up).
+    public struct StringInterpolation: StringInterpolationProtocol, Sendable {
+        var output = ""
+        public init(literalCapacity: Int, interpolationCount: Int) { output.reserveCapacity(literalCapacity) }
+        public mutating func appendLiteral(_ literal: String) { output += literal }
+        public mutating func appendInterpolation(_ string: String) { output += string }
+        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) { output += subject.description }
+        public mutating func appendInterpolation<T>(_ value: T) { output += String(describing: value) }
+        /// `"\(value, specifier: "%.2f")"`: a printf-style format for the value.
+        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { output += String(format: specifier, value._arg) }
+        public mutating func appendInterpolation<Subject: ReferenceConvertible>(_ subject: Subject, formatter: Formatter? = nil) {
+            let any: Any = subject
+            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += String(describing: subject) }
+        }
+        public mutating func appendInterpolation<Subject: NSObject>(_ subject: Subject, formatter: Formatter? = nil) {
+            let any: Any = subject
+            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += subject.description }
+        }
+        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { output += format.format(input) }
+        public mutating func appendInterpolation(_ text: Text) { output += text._string }
+        public mutating func appendInterpolation(_ image: Image) {}
+        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { output += Text(date, style: style)._string }
+    }
 }
+
+/// The types `LocalizedStringKey` accepts with a `specifier:`, as in Apple's SwiftUI.
+public protocol _FormatSpecifiable: Equatable {
+    var _arg: CVarArg { get }
+}
+extension Int: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int8: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int16: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int32: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Int64: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt8: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt16: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt32: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension UInt64: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Float: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension Double: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension CGFloat: _FormatSpecifiable { public var _arg: CVarArg { self } }
+extension String: _FormatSpecifiable { public var _arg: CVarArg { self } }
 
 // MARK: Shapes
 
@@ -491,15 +564,20 @@ public struct Path: Equatable, @unchecked Sendable {
     public mutating func addQuadCurve(to p: CGPoint, control: CGPoint) { let m = mutable; m.addQuadCurve(to: p, control: control); cgPath = m }
     public mutating func addCurve(to p: CGPoint, control1: CGPoint, control2: CGPoint) { let m = mutable; m.addCurve(to: p, control1: control1, control2: control2); cgPath = m }
     public mutating func closeSubpath() { let m = mutable; m.closeSubpath(); cgPath = m }
-    public mutating func addRect(_ rect: CGRect) { let m = mutable; m.addRect(rect); cgPath = m }
-    public mutating func addEllipse(in rect: CGRect) { let m = mutable; m.addEllipse(in: rect); cgPath = m }
-    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular) {
-        let m = mutable; m.addRoundedRect(in: rect, cornerWidth: cornerSize.width, cornerHeight: cornerSize.height); cgPath = m
+    public mutating func addRect(_ rect: CGRect, transform: CGAffineTransform = .identity) { let m = mutable; m.addRect(rect, transform: transform); cgPath = m }
+    public mutating func addRects(_ rects: [CGRect], transform: CGAffineTransform = .identity) { let m = mutable; m.addRects(rects, transform: transform); cgPath = m }
+    public mutating func addEllipse(in rect: CGRect, transform: CGAffineTransform = .identity) { let m = mutable; m.addEllipse(in: rect, transform: transform); cgPath = m }
+    public mutating func addRoundedRect(in rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .circular, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addRoundedRect(in: rect, cornerWidth: cornerSize.width, cornerHeight: cornerSize.height, transform: transform); cgPath = m
     }
-    public mutating func addPath(_ path: Path) { let m = mutable; m.addPath(path.cgPath); cgPath = m }
+    public mutating func addPath(_ path: Path, transform: CGAffineTransform = .identity) { let m = mutable; m.addPath(path.cgPath, transform: transform); cgPath = m }
     public mutating func addLines(_ lines: [CGPoint]) { let m = mutable; m.addLines(between: lines); cgPath = m }
-    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool) {
-        let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise); cgPath = m
+    public mutating func addArc(center: CGPoint, radius: CGFloat, startAngle: Angle, endAngle: Angle, clockwise: Bool, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians), endAngle: CGFloat(endAngle.radians), clockwise: clockwise, transform: transform); cgPath = m
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/path/addarc(tangent1end:tangent2end:radius:transform:)
+    public mutating func addArc(tangent1End: CGPoint, tangent2End: CGPoint, radius: CGFloat, transform: CGAffineTransform = .identity) {
+        let m = mutable; m.addArc(tangent1End: tangent1End, tangent2End: tangent2End, radius: radius, transform: transform); cgPath = m
     }
     public static func == (a: Path, b: Path) -> Bool {
         #if canImport(Darwin)
@@ -527,22 +605,30 @@ public struct Angle: Hashable, Comparable, Sendable {
 public enum RoundedCornerStyle: Hashable, Sendable { case circular, continuous }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape
-public protocol Shape: View {
-    func path(in rect: CGRect) -> Path
+/// `Sendable` with a nonisolated `path(in:)`, as Apple's: shapes are plain values a
+/// conforming struct can declare without main-actor isolation.
+public protocol Shape: Sendable, View {
+    nonisolated func path(in rect: CGRect) -> Path
 }
 
 extension Shape {
-    public var body: some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
+    public var body: some View { _ShapeView(shape: AnyShape(self), fill: Color.primary) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(_:style:)
-    public func fill(_ color: Color, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: color, stroke: nil, lineWidth: 0) }
-    public func fill<S: ShapeStyle>(_ content: S, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: nil, lineWidth: 0, fillStyle: content) }
-    public func fill() -> some View { _ShapeView(shape: AnyShape(self), fill: .primary, stroke: nil, lineWidth: 0) }
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:)
-    public func stroke(_ color: Color, lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth) }
-    public func stroke(_ color: Color, style: StrokeStyle) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: style.lineWidth) }
-    public func stroke(lineWidth: CGFloat = 1) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: .primary, lineWidth: lineWidth) }
-    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/strokeborder(_:linewidth:antialiased:)
-    public func strokeBorder(_ color: Color, lineWidth: CGFloat = 1, antialiased: Bool = true) -> some View { _ShapeView(shape: AnyShape(self), fill: nil, stroke: color, lineWidth: lineWidth, inset: true) }
+    public func fill<S: ShapeStyle>(_ content: S, style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: content, fillStyle: style) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/fill(style:)
+    public func fill(style: FillStyle = FillStyle()) -> some View { _ShapeView(shape: AnyShape(self), fill: Color.primary, fillStyle: style) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:linewidth:antialiased:)
+    public func stroke<S: ShapeStyle>(_ content: S, lineWidth: CGFloat = 1, antialiased: Bool = true) -> some View {
+        _ShapeView(shape: AnyShape(self), stroke: content, strokeStyle: StrokeStyle(lineWidth: lineWidth))
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(_:style:antialiased:)
+    public func stroke<S: ShapeStyle>(_ content: S, style: StrokeStyle, antialiased: Bool = true) -> some View {
+        _ShapeView(shape: AnyShape(self), stroke: content, strokeStyle: style)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(linewidth:)
+    public func stroke(lineWidth: CGFloat = 1) -> some View { stroke(Color.primary, lineWidth: lineWidth) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shape/stroke(style:)
+    public func stroke(style: StrokeStyle) -> some View { stroke(Color.primary, style: style) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/fillstyle
@@ -616,47 +702,38 @@ final class _ShapeDrawingView: NSView {
 @MainActor
 final class _ShapeViewPrimitive: _Primitive {
     var shape: AnyShape
-    var fill: Color?
-    var stroke: Color?
-    var lineWidth: CGFloat
-    var inset = false
-    /// A fill that is not a plain colour (a gradient).
-    var fillStyle: (any ShapeStyle)?
+    var fill: (any ShapeStyle)?
+    var fillStyle: FillStyle
+    var stroke: (any ShapeStyle)?
+    var strokeStyle: StrokeStyle
     let isColorFill: Bool
     let view = _ShapeDrawingView(frame: .zero)
 
-    init(shape: AnyShape, fill: Color?, stroke: Color?, lineWidth: CGFloat, inset: Bool = false, isColorFill: Bool = false, fillStyle: (any ShapeStyle)? = nil) {
-        self.shape = shape; self.fill = fill; self.stroke = stroke; self.lineWidth = lineWidth; self.inset = inset; self.isColorFill = isColorFill; self.fillStyle = fillStyle
+    init(shape: AnyShape, fill: (any ShapeStyle)?, fillStyle: FillStyle = FillStyle(), stroke: (any ShapeStyle)? = nil, strokeStyle: StrokeStyle = StrokeStyle(), isColorFill: Bool = false) {
+        self.shape = shape; self.fill = fill; self.fillStyle = fillStyle; self.stroke = stroke; self.strokeStyle = strokeStyle; self.isColorFill = isColorFill
         super.init()
     }
     override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ShapeViewPrimitive else { return }
-        shape = o.shape; fill = o.fill; stroke = o.stroke; lineWidth = o.lineWidth; inset = o.inset; fillStyle = o.fillStyle
+        shape = o.shape; fill = o.fill; fillStyle = o.fillStyle; stroke = o.stroke; strokeStyle = o.strokeStyle
         install()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); install() }
     private func install() {
-        let fill = fill, stroke = stroke, lineWidth = lineWidth, shape = shape, inset = inset, fillStyle = fillStyle
+        let fill = fill, fillStyle = fillStyle, stroke = stroke, strokeStyle = strokeStyle, shape = shape
         let env = node?.environment ?? EnvironmentValues()
         view.draw = { ctx, bounds in
-            let rect = inset ? bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2) : bounds
-            if let style = fillStyle {
-                style._fill(ctx, path: shape.path(in: rect).cgPath, in: rect, environment: env)
-            }
+            let path = shape.path(in: bounds).cgPath
             if let f = fill {
-                let c = f.storage == .named("primary") ? (env.foregroundColor ?? f) : f
-                ctx.setFillColor(c.nsColor.cgColor)
-                ctx.addPath(shape.path(in: rect).cgPath)
-                ctx.fillPath()
+                ctx.saveGState()
+                if fillStyle.isEOFilled { ctx.addPath(path); ctx.clip(using: .evenOdd) }
+                f._fill(ctx, path: path, in: bounds, environment: env)
+                ctx.restoreGState()
             }
-            if let s = stroke, lineWidth > 0 {
-                let c = s.storage == .named("primary") ? (env.foregroundColor ?? s) : s
-                ctx.setStrokeColor(c.nsColor.cgColor)
-                ctx.setLineWidth(lineWidth)
-                ctx.addPath(shape.path(in: rect).cgPath)
-                ctx.strokePath()
+            if let s = stroke, strokeStyle.lineWidth > 0 {
+                s._stroke(ctx, path: path, in: bounds, style: strokeStyle, environment: env)
             }
         }
         view.needsDisplay = true
@@ -672,12 +749,11 @@ final class _ShapeViewPrimitive: _Primitive {
 struct _ShapeView: View, _PrimitiveView {
     typealias Body = Never
     let shape: AnyShape
-    let fill: Color?
-    let stroke: Color?
-    let lineWidth: CGFloat
-    var inset = false
-    var fillStyle: (any ShapeStyle)? = nil
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, stroke: stroke, lineWidth: lineWidth, inset: inset, fillStyle: fillStyle) }
+    var fill: (any ShapeStyle)? = nil
+    var fillStyle = FillStyle()
+    var stroke: (any ShapeStyle)? = nil
+    var strokeStyle = StrokeStyle()
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ShapeViewPrimitive(shape: shape, fill: fill, fillStyle: fillStyle, stroke: stroke, strokeStyle: strokeStyle) }
 }
 
 // MARK: Divider
