@@ -59,9 +59,11 @@ build() {
     if out=$(swift build "$@" "${FLAGS[@]}" 2>&1); then
         echo "$out" | grep -E "error:|Build complete|Compiling" | tail -3 || true
     else
-        # The error lines first (the tail alone can be all warnings), then the tail.
-        echo "$out" | grep -E "error:" | grep -vE "warning:|note:" | head -20
-        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s+[0-9]+ \||^\s+\|" | tail -40
+        # The diagnostics first (the tail alone can be all warnings): lines of the form
+        # path:line:col: error:, <unknown>:0: error: or a bare error:, not the source
+        # snippets the compiler prints under them (which may contain "error:" as text).
+        echo "$out" | grep -E "^([^ |]+:[0-9]+:[0-9]+: )?error:|^<unknown>:[0-9]+: error:|^error:" | head -20
+        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\|" | tail -40
         return 1
     fi
 }
