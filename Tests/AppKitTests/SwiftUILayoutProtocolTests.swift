@@ -203,6 +203,21 @@ final class SwiftUILayoutProtocolTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testFontManagerConvertsTraits() {
+        MainActor.assumeIsolated {
+            let base = NSFont.systemFont(ofSize: 13)
+            let italic = NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
+            XCTAssertTrue(NSFontManager.shared.traits(of: italic).contains(.italicFontMask))
+            XCTAssertFalse(NSFontManager.shared.traits(of: base).contains(.italicFontMask))
+            XCTAssertEqual(NSFontManager.shared.convert(italic, toNotHaveTrait: .italicFontMask), base)
+            let bold = NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+            XCTAssertEqual(NSFontManager.shared.weight(of: bold), 9)
+            XCTAssertEqual(NSFontManager.shared.weight(of: base), 5)
+            XCTAssertEqual(NSFontManager.shared.convert(base, toSize: 20).pointSize, 20)
+            XCTAssertTrue(Font.body.italic().nsFont.italicAngle != 0, "Font.italic() goes through the manager")
+        }
+    }
+
     struct WidthKey: PreferenceKey {
         static let defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }

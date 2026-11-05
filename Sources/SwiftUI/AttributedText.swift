@@ -47,12 +47,15 @@ extension Text {
             r.kerning = run.kern ?? 0
             r.tracking = run.tracking ?? 0
             r.baselineOffset = run.baselineOffset ?? 0
+            #if canImport(Darwin)
+            // swift-corelibs-foundation does not expose the inline presentation intents yet.
             if let intent = run.inlinePresentationIntent {
                 if intent.contains(.stronglyEmphasized) { r.bold = true }
                 if intent.contains(.emphasized) { r.italic = true }
                 if intent.contains(.strikethrough) { r.strikethrough = r.strikethrough ?? .single }
                 if intent.contains(.code) { r.font = (r.font ?? .body).monospaced() }
             }
+            #endif
             return r
         }
     }

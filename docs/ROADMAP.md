@@ -22,7 +22,7 @@ are concrete and testable.
 | M12 Gestures | first version: `NSGestureRecognizer` with the click, pan, press, magnification and rotation recognizers (hand-written; the window feeds the hit view's and its ancestors' recognizers before the view, `delays*` withhold events while a recognizer tracks, delegate veto and `_actionHandler` for hosts), gesture `NSEvent`s (magnify, rotate, swipe, beginGesture/endGesture, smartMagnify) dispatched to the view under the pointer; SwiftUI `Gesture` with TapGesture, LongPressGesture, DragGesture, MagnifyGesture/MagnificationGesture, RotateGesture/RotationGesture, `onChanged`/`onEnded`/`map`, `.gesture`/`.highPriorityGesture`/`.simultaneousGesture`/`.onLongPressGesture`; platforms: Windows WM_GESTURE on touch screens (zoom, rotate, pan as precise scroll with phases, two-finger tap as smart magnify) and Ctrl+wheel as a magnify gesture (how precision touchpads report pinch), X11 XInput 2.4 pinch/swipe gestures (libXi, selected when the server speaks 2.4), Wayland `zwp_pointer_gestures_v1` pinch/swipe; HelloWindow: pinch resizes the canvas circle, rotate turns its needle, SwiftUI demo "Gestures" tab; `GestureRecognizerTests`, `SwiftUIGestureTests` |
 | M10 Combine | done: `Sources/Combine` ports OpenCombine 0.14.0 under Apple's module name (ADR-0008), plus Merge/CombineLatest which upstream lacks; 17 Combine tests pass on macOS (Apple's Combine) and Linux (the port); Windows by reading only |
 | M11 Accessibility | first version (ADR-0013): the NSAccessibility protocol answers on views, windows and the application (roles, labels, values, screen frames, parent/children with ignored plain views, focus, press/increment/decrement/showMenu actions, the `setAccessibility...` overrides, `NSAccessibility.post`), SwiftUI's accessibilityLabel/Value/Hidden/Identifier/Hint modifiers, one snapshot-tree seam to the platform window; Windows: UI Automation through the `CUIAutomation` shim (fragment providers on the HWND answering WM_GETOBJECT, Invoke/Toggle/Value/RangeValue/Selection/SelectionItem/Text patterns, focus/property/structure events), verified on the Windows machine with UI Automation clients (tree, rectangles on a 150% monitor, Invoke/Toggle/RangeValue/Value and SelectionItem on table rows all act; focus, toggle-state, value and text-changed events arrive while tabbing and typing, `tools/windows/uia-events.ps1`), Narrator itself not run (the remote session cannot hear it); tabs of an `NSTabView` and segments of an `NSSegmentedControl` are elements of their own (TabItem / radio-button items), the native Win32 menu bar's own UIA proxy refuses ExpandCollapse (menus open by mouse or Alt); Linux: AT-SPI2 over D-Bus (`AtspiBridge`: Accessible, Application, Component, Action, Value, Text, EditableText, events), `tools/linux/run.sh` runs an accessibility bus under Xvfb and `atspi-probe.py` walks and drives HelloWindow's tree; tests: 11 host-backend `AccessibilityTests`, `UIAutomationTests` (Windows) and `AtspiTests` (Linux with a bus), skipped elsewhere |
-| M10 Third-party SwiftUI libraries | `Examples/LibraryCompat` (its own package, `tools/library-compat.sh`): Shimmer and ConfettiSwiftUI build and run on all three platforms, WrappingHStack and Defaults on the macOS host build (they assume UIKit elsewhere), swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts and Nuke do not compile; verdicts and the gap list in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md) |
+| M10 Third-party SwiftUI libraries | `Examples/LibraryCompat` (its own package, `tools/library-compat.sh`): Shimmer and ConfettiSwiftUI build and run on all three platforms; WrappingHStack, Defaults, SwiftUICharts and swift-markdown-ui build and run on the macOS host build and are each blocked on Windows and Linux by one upstream `#if os(…)`/UIKit/`Foundation`-only construct (file and line in the report); SwiftUI-Introspect and Nuke do not compile; the port's own gaps from the first survey are closed (`Layout`, `Grid`, lazy grids, shape transforms and trimming, styled strokes, alignment guides, label styles, attributed text, `CoreGraphics` submodule imports); verdicts and the remaining gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md) |
 | M10 UniformTypeIdentifiers and ImageIO | done on macOS and Linux (ADR-0009): `UTType` over the SDK's generated core-type table with Apple's `dyn.*` encoding; `CGImageSource`/`CGImageDestination` over Cairo PNG (Linux) and WIC through CD2D (Windows, awaiting Windows verification); 12 tests pass against Apple's modules on macOS and against ours in the Linux container |
 | M12 Audio | first version (ADR-0014): `AVFAudio` and `AVFoundation` under Apple's module names on Windows and Linux (macOS uses Apple's): `AVAudioFormat`/`AVAudioPCMBuffer`/`AVAudioTime`/`AVAudioChannelLayout`, `AVAudioFile` reading and writing WAV and AIFF/AIFF-C, `AVAudioEngine` with player, mixer, output and EQ nodes, taps, manual rendering, `AVAudioPlayer`, the error domain, `NSSound` over `AVAudioPlayer`; a pure-Swift pull-model mixer (Apple's measured pan and gain laws, Kaiser-sinc rate conversion, lock-free command and completion rings, a delivery thread) over the `PlatformAudio` seam with WASAPI (IAudioClient3 low-latency shared mode, IAudioClient fallback, MMCSS render thread), PipeWire (dlopen'ed, `pw_stream` with RT process), ALSA (dlopen'ed fallback) and a null backend; `Examples/AudioPlayer` (file and sine players, loop, level meter, output device and latency in the status line, `--render` offline); 15 `AudioTests` run against Apple's AVFAudio on macOS and against the port on macOS (`APPKITWIN_HOST_AVFAUDIO=1`), Windows and Linux; Windows playback verification on the PC is recorded in the pull request |
 
@@ -407,32 +407,36 @@ Windows is unverified until the next Windows session (nothing platform-specific 
 ## M10: Third-party SwiftUI libraries (Examples/LibraryCompat)
 
 Status (2026-11-04): `Examples/LibraryCompat` builds eight popular SwiftUI packages against
-this SwiftUI; the per-library verdicts and the API gaps are in
+this SwiftUI; the per-library verdicts and the remaining gaps are in
 [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Landed for it:
 `Gradient`/`LinearGradient` (drawn as bands; no `CGGradient` yet), `.mask`, `PreferenceKey`
 with `preference`/`anchorPreference`/`transformPreference`/`onPreferenceChange` and
 resolved anchors, `.rotation3DEffect`, `.task`, `.redacted`, `.blendMode`, `PreviewProvider`,
-`Image` from `CGImage`, `Color`/`NSColor`/`CGColor` bridging, `Color.Resolved`, and `View`
-being main-actor isolated as Apple's is. Follow-ups the libraries asked for, largest first:
+`Image` from `CGImage`, `Color`/`NSColor`/`CGColor` bridging, `Color.Resolved`, `View`
+being main-actor isolated as Apple's is; then the `Layout` protocol, `AlignmentID` and
+`ViewDimensions` with guides aligned in stacks (real text baselines), `Grid`/`GridRow`,
+`GridItem`/`LazyVGrid`/`LazyHGrid`, `InsettableShape` and the shape transforms,
+`Path` elements and trimming, `ShapeStyle` strokes with a full `StrokeStyle`, `.position`,
+`.zIndex`, `LabelStyle`, `AttributeScopes.SwiftUIAttributes` rendered by `Text`,
+`Font.Width`/small caps, `Text.LineStyle`, `@ScaledMetric`, `AnyShapeStyle`,
+`transformEnvironment`, `backgroundPreferenceValue`/`overlayPreferenceValue`,
+`LocalizedStringKey` format specifiers, `NSFontManager` trait conversions, memoised layout
+measurement, and on Windows and Linux the `CoreGraphics` submodule map
+(`import CoreGraphics.CGGeometry`) with `Foundation`/`FoundationNetworking` re-exported.
+Follow-ups:
 
-- `Layout` protocol (`Layout`, `Subviews`, `ProposedViewSize` cache, `AlignmentID`,
-  `ViewDimensions`) and `Grid`/`GridRow`/`LazyVGrid`/`GridItem`: swift-markdown-ui's tables
-  and flow layout, SwiftUICharts' legends.
-- Text styling: `Font.Width`, `Font.smallCaps`/`lowercaseSmallCaps`/`uppercaseSmallCaps`,
-  `Text.LineStyle`, `Text.monospacedDigit`, `.lineSpacing`, `.tracking`/`.kerning` on views,
-  `@ScaledMetric`, and `AttributedString` SwiftUI attributes (`font`, `foregroundColor`,
-  `backgroundColor`, `underlineStyle`, `strikethroughStyle`, `kern`) rendered by `Text`.
-- Shapes: `InsettableShape`, `Shape.trim`/`scale`/`offset`, `Path.trimmedPath`/`addRelativeArc`
-  /`forEach`, `AnyShapeStyle`, `RadialGradient`/`AngularGradient`, `CGGradient` in CoreGraphics
-  on Windows and Linux (Direct2D and Cairo both have gradient brushes).
-- View modifiers: `.position`, `.zIndex`, `.gesture` beyond tap/hover, `.labelStyle`/`LabelStyle`,
-  `.symbolRenderingMode`/`.imageScale` (SF Symbols are Apple-only; `Image(systemName:)` has no
-  glyphs here), `transformEnvironment`, `backgroundPreferenceValue`/`overlayPreferenceValue`.
+- Upstream: SwiftUICharts (`Color.systemsBackground` switch), NetworkImage
+  (`Foundation`-only `URLSession` extension), WrappingHStack, Defaults and Nuke (`!os(macOS)`
+  means UIKit), SwiftUI-Introspect (`ObjectiveC`); an `ObjectiveC` shim stays out of scope.
+- Rendering: SF Symbol glyphs for `Image(systemName:)` (markdown list bullets), text
+  attachments for `Text(Image)`, `Font.Width` and small caps applied to the font, secondary
+  and tertiary `foregroundStyle` levels, explicit alignment guides (`.alignmentGuide`,
+  `ViewDimensions[explicit:]`), `RadialGradient`/`AngularGradient`, `CGGradient` in
+  CoreGraphics on Windows and Linux (Direct2D and Cairo both have gradient brushes).
 - Compositing blend modes in the software and DirectComposition compositors (`.blendMode`
   sets the layer's compositing filter; nothing applies it yet).
-- `CoreGraphics` submodules (`import CoreGraphics.CGGeometry`) and an `ObjectiveC` shim are
-  Foundation-level gaps outside this package's scope; libraries that assume `!os(macOS)` means
-  UIKit (Defaults, Nuke, WrappingHStack) need upstream `canImport(AppKit)` checks.
+- Nuke's macOS-host gaps (Core Image, the ImageIO C API, `Sendable` `NSImage`/`NSColor`) once
+  the library builds on the port's platforms.
 
 ## M11: Accessibility
 
