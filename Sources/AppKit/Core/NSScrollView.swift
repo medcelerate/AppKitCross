@@ -208,7 +208,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/findbarposition
     @MainActor open var findBarPosition: NSScrollView.FindBarPosition {
         get { _findBarPosition }
-        set { _findBarPosition = newValue }
+        set { _findBarPosition = newValue; tile() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/flashscrollers()
     @MainActor open func flashScrollers() { }
@@ -385,6 +385,15 @@ import CoreText
         if content.isNull || content.width < 0 || content.height < 0 {
             content = NSRect(x: bounds.minX + min(inset, bounds.width / 2), y: bounds.minY + min(inset, bounds.height / 2), width: 0, height: 0)
         }
+        // The find bar takes a strip above (or below) the content.
+        if _isFindBarVisible, let bar = _findBarView {
+            let h = max(0, bar.intrinsicContentSize.height > 0 ? bar.intrinsicContentSize.height : bar.frame.height)
+            let below = _findBarPosition == .belowContent
+            let barAtMinY = below ? !isFlipped : isFlipped
+            bar.frame = NSRect(x: content.minX, y: barAtMinY ? content.minY : content.maxY - h, width: content.width, height: h)
+            content.size.height = max(0, content.height - h)
+            if barAtMinY { content.origin.y += h }
+        }
         // A table's header sits above the content, scrolling horizontally with it.
         let header = (_contentView.documentView as? NSTableView)?.headerView
         if let stale = _headerView, stale !== header { stale.removeFromSuperview() }
@@ -470,15 +479,31 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/willstartlivescrollnotification
     static public var willStartLiveScrollNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSScrollViewWillStartLiveScrollNotification") }
     // Requirement of NSTextFinderBarContainer
+    /// The find bar; it is a subview only while visible (ADR-0030).
     open var findBarView: NSView? {
         get { MainActor.assumeIsolated { _findBarView } }
-        set { MainActor.assumeIsolated { _findBarView = newValue } }
+        set {
+            MainActor.assumeIsolated {
+                if _findBarView !== newValue { _findBarView?.removeFromSuperview() }
+                _findBarView = newValue
+                if _isFindBarVisible, let v = newValue, v.superview !== self { addSubview(v) }
+                tile()
+            }
+        }
     }
     // Requirement of NSTextFinderBarContainer
     open var isFindBarVisible: Bool {
-        get { false }
-        set { }
+        get { MainActor.assumeIsolated { _isFindBarVisible } }
+        set {
+            MainActor.assumeIsolated {
+                _isFindBarVisible = newValue
+                if newValue, let v = _findBarView, v.superview !== self { addSubview(v) }
+                if !newValue { _findBarView?.removeFromSuperview() }
+                tile()
+            }
+        }
     }
     // Requirement of NSTextFinderBarContainer
-    open func findBarViewDidChangeHeight() { }
+    open func findBarViewDidChangeHeight() { MainActor.assumeIsolated { tile() } }
+    private var _isFindBarVisible = false
 }

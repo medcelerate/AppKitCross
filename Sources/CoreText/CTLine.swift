@@ -55,7 +55,7 @@ public final class CTRun: NSObject {
     /// Draws glyphs `range` at `origin` (the line origin in `ctx` user space).
     func draw(in ctx: CGContext, range: CFRange, origin: CGPoint, lineAscent: CGFloat, lineDescent: CGFloat) {
         let r = resolvedRange(range)
-        guard !r.isEmpty else { return }
+        guard !r.isEmpty, attributes[.ctRunDelegate] == nil else { return }   // a delegate's space draws nothing
         let m = ctx.textMatrix
         let color: CGColor = {
             if let c = foregroundColor { return c }
@@ -162,8 +162,14 @@ public final class CTLine: NSObject {
         self.trailingWhitespaceWidth = trailingWhitespaceWidth
         self.fallbackFont = fallbackFont
         var a: CGFloat = 0, d: CGFloat = 0, l: CGFloat = 0
-        let fonts = runs.isEmpty ? [fallbackFont] : runs.map(\.font)
-        for f in fonts { a = max(a, f.engine.ascent); d = max(d, f.engine.descent); l = max(l, f.engine.leading) }
+        if runs.isEmpty { a = fallbackFont.engine.ascent; d = fallbackFont.engine.descent; l = fallbackFont.engine.leading }
+        for r in runs {
+            if let delegate = r.attributes[.ctRunDelegate] as? CTRunDelegate {
+                a = max(a, delegate.ascent); d = max(d, delegate.descent)
+            } else {
+                a = max(a, r.font.engine.ascent); d = max(d, r.font.engine.descent); l = max(l, r.font.engine.leading)
+            }
+        }
         ascent = a; descent = d; leading = l
     }
 
