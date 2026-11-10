@@ -116,9 +116,14 @@ platform code: Wayland (xdg-shell toplevels with wl_shm buffers, xkbcommon keybo
 wl_cursor themes, server-side decorations through xdg-decoration) is preferred when
 `WAYLAND_DISPLAY` is set and the connection succeeds, X11 is the fallback;
 `APPKITWIN_LINUX_BACKEND=x11|wayland` forces one. Under sway the compositor draws the title
-bar:
+bar (server-side decorations through xdg-decoration); where the compositor offers none
+(GNOME's Mutter) or answers client side, the package draws the frame itself: title band
+with the standard buttons, shadow, rounded corners, move and resize through the compositor
+(ADR-0015). `APPKITWIN_WAYLAND_DECORATIONS=client` forces that under sway:
 
-![HelloWindow on Linux under a headless sway](images/hellowindow-linux-wayland.png)
+| sway's frame (server side) | the package's frame (client side) |
+|---|---|
+| ![HelloWindow under a headless sway](images/hellowindow-linux-wayland.png) | ![HelloWindow with client-side decorations](images/hellowindow-linux-wayland-csd.png) |
 
 ## Examples
 
@@ -162,6 +167,7 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_VULKAN_DEVICE=n` | Picks Vulkan physical device `n` instead of the best one. |
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
+| `APPKITWIN_WAYLAND_DECORATIONS=client\|server` | What Wayland windows ask xdg-decoration for (the compositor has the last word); `client` shows the package's own frame on a compositor that would draw one (ADR-0015). |
 | `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |
 | `APPKITWIN_LAYOUT_TAB=table` | Opens the HelloWindow Layout Demo on that tab (form, split, table, metal); screenshots are named by tab. |
 | `APPKITWIN_COMPAT_TAB=confetti` | Opens `LibraryCompat` on that library's tab (shimmer, confetti, wrapping, defaults, markdown, introspect, charts, nuke). |

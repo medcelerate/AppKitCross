@@ -87,8 +87,12 @@ import CoreText
     // MARK: Window buttons (NSWindowButtons.swift)
 
     private var _windowButtons: _NSWindowButtonsView?
-    /// Content that covers the title bar shows AppKit's own close/miniaturize/zoom buttons.
-    internal var _showsWindowButtons: Bool { _styleMask.contains(.titled) && _styleMask.contains(.fullSizeContentView) }
+    /// Content that covers the title bar shows AppKit's own close/miniaturize/zoom buttons;
+    /// so does a title bar the platform leaves to the package (Wayland client-side decorations).
+    internal var _showsWindowButtons: Bool { _styleMask.contains(.titled) && (_styleMask.contains(.fullSizeContentView) || _hasClientSideTitleBar) }
+    /// The platform draws no title bar: the frame has a band above the content that
+    /// `platformWindowDrawTitleBar` paints (ClientSideDecoration.swift).
+    internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
 
     /// Creates the overlay when first needed and keeps it placed and styled.
     @discardableResult
@@ -105,7 +109,11 @@ import CoreText
             _windowButtons = v
         }
         if let v = _windowButtons {
-            v.layout(in: contentRect(forFrameRect: frame).size, styleMask: _styleMask, isKey: _isKey)
+            // The row sits at the top of the content when the content covers the title bar,
+            // and at the top of the frame (in the band above the content) when the package
+            // draws the title bar.
+            let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : contentRect(forFrameRect: frame).size
+            v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
         }
         return _windowButtons
@@ -300,7 +308,66 @@ import CoreText
         if _isMovableByWindowBackground { return .caption }
         let chrome = _chrome
         if chrome.extendsContentIntoTitleBar, point.y >= content.bounds.height - NSWindow._titleBarBandHeight { return .caption }
+        // The package-drawn title band above the content (its buttons were caught above).
+        if _hasClientSideTitleBar, point.y >= content.bounds.height { return .caption }
         return .client
+    }
+
+    public func platformWindowTitleBarDoubleClicked() {
+        guard _styleMask.contains(.resizable) else { return }
+        performZoom(nil)
+    }
+
+    /// The title band of a window the platform does not decorate: a flat bar in the
+    /// window's appearance with the title centred and the standard buttons at the left,
+    /// as AppKit draws it (and over a transparent title bar, the window background).
+    public func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect) {
+        guard _hasClientSideTitleBar, _styleMask.contains(.titled), !_styleMask.contains(.fullSizeContentView) else { return }
+        let content = contentRect(forFrameRect: frame).size
+        let band = NSRect(x: 0, y: content.height, width: frame.width, height: max(0, frame.height - content.height))
+        guard band.height > 0, band.intersects(dirtyRect) else { return }
+        context.saveGState()
+        let previousAppearance = NSAppearance.current
+        NSAppearance.current = effectiveAppearance
+        let dark = effectiveAppearance.isDark
+        let chrome = _chrome
+        if chrome.transparentTitleBar {
+            context.setFillColor(_backgroundColor.cgColor)
+        } else if _isKey {
+            context.setFillColor(dark ? CGColor(red: 0.23, green: 0.23, blue: 0.24, alpha: 1) : CGColor(red: 0.91, green: 0.91, blue: 0.91, alpha: 1))
+        } else {
+            context.setFillColor(dark ? CGColor(red: 0.18, green: 0.18, blue: 0.19, alpha: 1) : CGColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+        }
+        context.fill(band)
+        if !chrome.transparentTitleBar {
+            context.setFillColor(dark ? CGColor(red: 0, green: 0, blue: 0, alpha: 0.5) : CGColor(red: 0, green: 0, blue: 0, alpha: 0.12))
+            context.fill(NSRect(x: band.minX, y: band.minY, width: band.width, height: 1))
+        }
+        if !chrome.hidesTitle, !_title.isEmpty {
+            let previous = NSGraphicsContext.current
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            let font = NSFont.titleBarFont(ofSize: 13)
+            let color = _isKey ? NSColor.windowFrameTextColor : NSColor.secondaryLabelColor
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let size = _title.size(withAttributes: attributes)
+            // Centred in the band, kept clear of the buttons on the left.
+            let buttonsEnd = _NSWindowButtonsView.width + 8
+            let x = max(buttonsEnd, band.midX - size.width / 2)
+            let width = min(size.width, band.maxX - 8 - x)
+            if width > 0 {
+                context.saveGState()
+                context.clip(to: NSRect(x: x, y: band.minY, width: width, height: band.height))
+                _title.draw(at: NSPoint(x: x, y: band.midY - size.height / 2), withAttributes: attributes)
+                context.restoreGState()
+            }
+            NSGraphicsContext.current = previous
+        }
+        if let buttons = _ensureWindowButtons() {
+            buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        }
+        NSAppearance.current = previousAppearance
+        NSGraphicsContext.current = nil
+        context.restoreGState()
     }
 
     /// The draggable band at the top of windows whose content covers the title bar.

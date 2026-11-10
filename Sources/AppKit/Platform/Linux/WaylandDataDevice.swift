@@ -361,7 +361,7 @@ final class WaylandDataDevice: PlatformPasteboard, PlatformDragDrop {
         if let proxy, let i = offers.firstIndex(where: { $0.proxy == proxy }) { dragOffer = offers.remove(at: i) }
         guard let window = backend.window(for: surface) else { return }
         dragWindow = window
-        let location = NSPoint(x: x, y: window.frame.height - y)
+        let location = window.windowPoint(fromSurface: NSPoint(x: x, y: y))
         let local = dragSource != nil
         var items: [[String]] = []
         var best: [String: String] = [:]
@@ -417,7 +417,7 @@ final class WaylandDataDevice: PlatformPasteboard, PlatformDragDrop {
 
     private func dragMoved(x: Double, y: Double) {
         guard let window = dragWindow, let info = dragInfo else { return }
-        info.location = NSPoint(x: x, y: window.frame.height - y)
+        info.location = window.windowPoint(fromSurface: NSPoint(x: x, y: y))
         info.modifierFlags = backend.modifierFlags
         answer(window.ownerDragUpdated(info), best: [:])
     }

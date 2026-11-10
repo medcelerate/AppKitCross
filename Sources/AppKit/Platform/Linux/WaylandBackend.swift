@@ -38,6 +38,9 @@ final class WaylandBackend: PlatformBackend {
     private(set) var seat: OpaquePointer?         // wl_seat*
     private(set) var wmBase: OpaquePointer?       // xdg_wm_base*
     private(set) var decorationManager: OpaquePointer?   // zxdg_decoration_manager_v1*
+    /// APPKITWIN_WAYLAND_DECORATIONS=client|server overrides what windows ask xdg-decoration
+    /// for (the compositor still has the last word); nil follows the style mask.
+    let decorationPreference: ClientSideDecorationMode?
     private(set) var pointer: OpaquePointer?      // wl_pointer*
     private(set) var keyboard: OpaquePointer?     // wl_keyboard*
     private(set) var outputs: [WaylandOutput] = []
@@ -82,6 +85,8 @@ final class WaylandBackend: PlatformBackend {
     private var cursorThemeScale = 1
     private var currentCursor: PlatformCursor = .arrow
     private var cursorHidden = false
+    /// XCursor names a window's decoration wants over a resize handle, overriding the core's cursor.
+    private var decorationCursorNames: [String]? = nil
 
     private static var listenerStorage: [UnsafeMutableRawPointer] = []
 
@@ -104,6 +109,11 @@ final class WaylandBackend: PlatformBackend {
         display = d
         text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
+        switch ProcessInfo.processInfo.environment["APPKITWIN_WAYLAND_DECORATIONS"]?.lowercased() {
+        case "client", "csd": decorationPreference = .client
+        case "server", "ssd": decorationPreference = .server
+        default: decorationPreference = nil
+        }
         var fds: [Int32] = [-1, -1]
         if pipe(&fds) == 0 { wakePipe = fds }
         dataDevice = WaylandDataDevice(backend: self)
@@ -365,7 +375,8 @@ final class WaylandBackend: PlatformBackend {
 
     var mouseLocation: NSPoint {
         guard let w = pointerFocus else { return .zero }
-        return NSPoint(x: w.frame.minX + pointerPosition.x, y: w.frame.maxY - pointerPosition.y)
+        let p = w.windowPoint(fromSurface: pointerPosition)
+        return NSPoint(x: w.frame.minX + p.x, y: w.frame.minY + p.y)
     }
 
     let text: any PlatformTextBackend
@@ -387,8 +398,19 @@ final class WaylandBackend: PlatformBackend {
         // No native menu bar on Wayland; NSApplication still dispatches key equivalents.
     }
 
-    func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect { contentRect }
-    func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect { frameRect }
+    /// The band a window of this style would draw itself (ClientSideDecoration.swift):
+    /// none when the compositor decorates, which it is expected to when it has xdg-decoration.
+    func titleBarHeight(for styleMask: NSWindow.StyleMask) -> CGFloat {
+        let requestsServer = decorationPreference.map { $0 == .server } ?? !styleMask.contains(.fullSizeContentView)
+        let mode = ClientSideDecorationMode.mode(for: styleMask, serverSideGranted: decorationManager == nil ? nil : requestsServer)
+        return mode == .client && !styleMask.contains(.fullSizeContentView) ? ClientSideDecorationLayout.titleBandHeight : 0
+    }
+    func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect {
+        NSRect(origin: contentRect.origin, size: ClientSideDecorationLayout.frameSize(forContentSize: contentRect.size, titleBarHeight: titleBarHeight(for: styleMask)))
+    }
+    func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect {
+        NSRect(origin: frameRect.origin, size: ClientSideDecorationLayout.contentSize(forFrameSize: frameRect.size, titleBarHeight: titleBarHeight(for: styleMask)))
+    }
 
     // MARK: Cursors
 
@@ -422,6 +444,12 @@ final class WaylandBackend: PlatformBackend {
         applyCursor()
     }
 
+    func setDecorationCursor(_ names: [String]?) {
+        guard names != decorationCursorNames else { return }
+        decorationCursorNames = names
+        applyCursor()
+    }
+
     private func loadCursorTheme(scale: Int) {
         if let t = cursorTheme, cursorThemeScale == scale { _ = t; return }
         if let t = cursorTheme { wl_cursor_theme_destroy(t) }
@@ -444,7 +472,7 @@ final class WaylandBackend: PlatformBackend {
         loadCursorTheme(scale: scale)
         guard let theme = cursorTheme, let cursorSurface else { return }
         var wlCursor: UnsafeMutablePointer<wl_cursor>? = nil
-        for name in WaylandBackend.names(for: currentCursor) {
+        for name in decorationCursorNames ?? WaylandBackend.names(for: currentCursor) {
             wlCursor = wl_cursor_theme_get_cursor(theme, name)
             if wlCursor != nil { break }
         }
@@ -504,7 +532,10 @@ final class WaylandBackend: PlatformBackend {
     }
 
     private func pointerLeft(surface: OpaquePointer?) {
-        if pointerFocus?.surface == surface { pointerFocus = nil }
+        if pointerFocus?.surface == surface {
+            pointerFocus?.pointerLeft()
+            pointerFocus = nil
+        }
     }
 
     private func pointerMoved(time: UInt32, x: Double, y: Double) {

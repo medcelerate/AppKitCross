@@ -20,12 +20,23 @@ public struct PlatformDisplay: Sendable {
     public var backingScaleFactor: CGFloat
     public var localizedName: String
     public var isMain: Bool
-    public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool) {
+    /// Extended dynamic range (`NSScreen.maximumExtendedDynamicRangeColorComponentValue`
+    /// and friends): the largest colour component value the display shows now, the
+    /// largest it could show (HDR off but supported), and the largest in a reference
+    /// mode (0 when the display has none). 1 / 1 / 0 for an SDR display.
+    public var maximumEDRValue: CGFloat
+    public var maximumPotentialEDRValue: CGFloat
+    public var maximumReferenceEDRValue: CGFloat
+    public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool,
+                maximumEDRValue: CGFloat = 1, maximumPotentialEDRValue: CGFloat = 1, maximumReferenceEDRValue: CGFloat = 0) {
         self.frame = frame
         self.visibleFrame = visibleFrame
         self.backingScaleFactor = backingScaleFactor
         self.localizedName = localizedName
         self.isMain = isMain
+        self.maximumEDRValue = maximumEDRValue
+        self.maximumPotentialEDRValue = maximumPotentialEDRValue
+        self.maximumReferenceEDRValue = maximumReferenceEDRValue
     }
 }
 
@@ -103,6 +114,10 @@ public protocol PlatformWindow: AnyObject {
     func setNeedsDisplay(_ rect: NSRect?)
     /// Chrome beyond the style mask: title bar treatment, backdrop, shadow (Milestone 3b).
     var chrome: PlatformWindowChrome { get set }
+    /// The platform draws no title bar of its own and wants the owner's (Wayland client-side
+    /// decorations): the window's frame then has a band above the content that the owner
+    /// paints through `platformWindowDrawTitleBar` and whose buttons it hit-tests.
+    var hasClientSideTitleBar: Bool { get }
     /// Repaints synchronously if anything is marked dirty.
     func displayIfNeeded()
     /// Repaints synchronously.
@@ -125,6 +140,7 @@ extension PlatformBackend {
 
 extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
+    public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }
     public func deminiaturize() { }
@@ -158,6 +174,13 @@ public protocol PlatformWindowOwner: AnyObject {
     /// Draw the content area. `context` is in content coordinates (points, bottom-left
     /// origin, already scaled for the backing store). `dirtyRect` is in content coordinates.
     func platformWindowDraw(into context: CGContext, dirtyRect: NSRect)
+    /// Draw the title band of a window whose platform has `hasClientSideTitleBar`: the band
+    /// background, title and standard buttons. `context` and `dirtyRect` are in window
+    /// coordinates (the content at the origin, the band above it, y up).
+    func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect)
+    /// A double click on the platform-drawn title band (or the draggable band of content
+    /// that covers it): AppKit zooms the window.
+    func platformWindowTitleBarDoubleClicked()
     /// An input event for this window, already translated into an `NSEvent` whose
     /// `locationInWindow` is in content coordinates.
     func platformWindowDispatch(_ event: NSEvent)
@@ -212,6 +235,11 @@ public struct PlatformWindowChrome: Equatable, Sendable {
 }
 
 public enum PlatformWindowHitRegion: Sendable { case client, caption }
+
+extension PlatformWindowOwner {
+    public func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect) {}
+    public func platformWindowTitleBarDoubleClicked() {}
+}
 
 /// What an input method needs from the focused text view: composition (marked text)
 /// updates, committed text, and where to put its candidate window.
