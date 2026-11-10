@@ -21,6 +21,7 @@ extension Win32Window {
         callbacks.refresh = { context in MainActor.assumeIsolated { Win32Window.from(context).pushAccessibilityTree() } }
         callbacks.invoke = { context, id in MainActor.assumeIsolated { Win32Window.from(context).accessibilityPerform(.press, on: Int(id)) } }
         callbacks.toggle = { context, id in MainActor.assumeIsolated { Win32Window.from(context).accessibilityPerform(.press, on: Int(id)) } }
+        callbacks.expandCollapse = { context, id, expand in MainActor.assumeIsolated { Win32Window.from(context).accessibilityPerform(expand ? .expand : .collapse, on: Int(id)) } }
         callbacks.setValue = { context, id, value in
             MainActor.assumeIsolated {
                 let s = value.map { String(decodingCString: $0, as: UTF16.self) } ?? ""
@@ -151,6 +152,7 @@ extension Win32Window {
             if e.isMultiline { flags |= UInt32(CUIA_MULTILINE) }
             if e.allowsMultipleSelection { flags |= UInt32(CUIA_CAN_SELECT_MULTIPLE) }
             if e.subrole == "AXSecureTextField" { flags |= UInt32(CUIA_PASSWORD) }
+            if let expanded = e.isExpanded { flags |= UInt32(CUIA_HAS_EXPAND_COLLAPSE); if expanded { flags |= UInt32(CUIA_EXPANDED) } }
             let role = e.role
             switch role {
             case "AXCheckBox": flags |= UInt32(CUIA_HAS_TOGGLE)

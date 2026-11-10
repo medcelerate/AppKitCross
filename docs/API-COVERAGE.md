@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 97 |
-| Types generated | 441 |
+| Types handwritten | 100 |
+| Types generated | 438 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1175 |
+| Members unimplemented-calls | 1180 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -167,8 +167,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSColorSpace | class | generated | 30 | 0 | 1 |  |
 | NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |
 | NSColorWell | class | generated | 17 | 0 | 1 |  |
-| NSComboBox | class | generated | 31 | 1 | 0 |  |
-| NSComboBoxCell | class | generated | 28 | 0 | 0 |  |
+| NSComboBox | class | handwritten | 31 | 1 | 0 | 2 |
+| NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |
 | NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSComboBoxDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSComboBoxDelegate | protocol | generated | 4 | 0 | 0 |  |
@@ -302,7 +302,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSOpenGLView | class | generated | 10 | 0 | 0 |  |
 | NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |
 | NSOpenSavePanelDelegate | protocol | handwritten | 6 | 2 | 0 | 0 |
-| NSOutlineView | class | generated | 35 | 6 | 0 |  |
+| NSOutlineView | class | handwritten | 35 | 6 | 0 | 2 |
 | NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |
 | NSOutlineViewDelegate | protocol | generated | 39 | 0 | 0 |  |
 | NSPDFImageRep | class | generated | 5 | 0 | 0 |  |

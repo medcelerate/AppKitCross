@@ -131,11 +131,16 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
     var frame: NSRect {
         get { _frame }
         set {
+            let old = _frame
             _frame = newValue
             let px = pixelRect(newValue)
             XMoveResizeWindow(backend.display, xid, px.x, px.y, UInt32(max(1, px.w)), UInt32(max(1, px.h)))
             resizeBacking()
             dirty = NSRect(origin: .zero, size: _frame.size)
+            // The server's ConfigureNotify will report this same frame, which the handler
+            // treats as no change: tell the window now so its content view follows the
+            // size (a pop-up list sized after its window was made, say).
+            if old != _frame { owner?.platformWindowDidChangeFrame(_frame) }
         }
     }
 

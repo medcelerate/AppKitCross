@@ -41,6 +41,9 @@ enum {
     CUIA_IS_CONTENT = 1 << 13,
     CUIA_CAN_SELECT_MULTIPLE = 1 << 14,
     CUIA_PASSWORD = 1 << 15,
+    /// ExpandCollapse pattern (outline rows, disclosure triangles); CUIA_EXPANDED is its state.
+    CUIA_HAS_EXPAND_COLLAPSE = 1 << 16,
+    CUIA_EXPANDED = 1 << 17,
 };
 
 /// One element. Strings are UTF-16, NUL-terminated, and may be NULL; the shim copies
@@ -68,6 +71,7 @@ typedef struct CUIACallbacks {
     void (*refresh)(void *context);
     bool (*invoke)(void *context, int32_t id);
     bool (*toggle)(void *context, int32_t id);
+    bool (*expandCollapse)(void *context, int32_t id, bool expand);
     bool (*setValue)(void *context, int32_t id, const uint16_t *value);
     bool (*setRangeValue)(void *context, int32_t id, double value);
     /// mode: 0 selects the element alone, 1 adds it to the selection, 2 removes it.
@@ -113,6 +117,8 @@ bool cuia_root_debug_text(CUIARoot *root, int32_t id, uint16_t *buffer, int32_t 
 /// Test hooks: the pattern methods, as a client would call them (true on S_OK).
 bool cuia_debug_invoke(CUIARoot *root, int32_t id);
 bool cuia_debug_toggle(CUIARoot *root, int32_t id);
+/// ExpandCollapse pattern: Expand (expand true) or Collapse through the provider.
+bool cuia_debug_expand_collapse(CUIARoot *root, int32_t id, bool expand);
 bool cuia_debug_set_value(CUIARoot *root, int32_t id, const uint16_t *value);
 bool cuia_debug_set_range_value(CUIARoot *root, int32_t id, double value);
 bool cuia_debug_set_focus(CUIARoot *root, int32_t id);
