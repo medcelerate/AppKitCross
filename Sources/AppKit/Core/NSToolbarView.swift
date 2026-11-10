@@ -28,12 +28,15 @@ struct _NSToolbarMetrics: Equatable {
     var showsLabels: Bool
     var showsIcons: Bool
     var labelFontSize: CGFloat
-    /// Space kept free at the leading edge for the window's standard buttons.
+    /// Space kept free at the leading edge for the window's standard buttons when they
+    /// are the traffic lights at the left.
     var leadingInset: CGFloat
+    /// Space kept free at the trailing edge for the caption buttons at the right (Windows).
     var trailingInset: CGFloat
     var itemGap: CGFloat
 
-    static func resolve(style: NSWindow.ToolbarStyle, displayMode: NSToolbar.DisplayMode, sizeMode: NSToolbar.SizeMode, contentCoversTitleBar: Bool) -> _NSToolbarMetrics {
+    static func resolve(style: NSWindow.ToolbarStyle, displayMode: NSToolbar.DisplayMode, sizeMode: NSToolbar.SizeMode, contentCoversTitleBar: Bool,
+                        buttonStyle: PlatformWindowButtonStyle = .trafficLights) -> _NSToolbarMetrics {
         var resolved = style
         if resolved == .automatic { resolved = contentCoversTitleBar ? .unified : .expanded }
         let unified = resolved == .unified || resolved == .unifiedCompact
@@ -59,7 +62,8 @@ struct _NSToolbarMetrics: Equatable {
         }
         return _NSToolbarMetrics(placement: contentCoversTitleBar ? .overContent : .belowTitleBar, height: height + topInset, topInset: topInset,
                                  iconSize: icon, buttonSize: button, showsLabels: labels, showsIcons: icons, labelFontSize: labelSize,
-                                 leadingInset: contentCoversTitleBar && unified ? _NSWindowButtonsView.width + 4 : 8, trailingInset: 8, itemGap: 8)
+                                 leadingInset: contentCoversTitleBar && unified && buttonStyle == .trafficLights ? _NSWindowButtonsView.width + 4 : 8,
+                                 trailingInset: contentCoversTitleBar && unified && buttonStyle == .caption ? _NSWindowButtonsView.captionWidth + 4 : 8, itemGap: 8)
     }
 }
 
@@ -336,7 +340,8 @@ final class _NSToolbarView: NSView {
 
     /// Applies the window's style: the window calls this before placing the view.
     func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool) {
-        let m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar)
+        let m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar,
+                                          buttonStyle: window?._windowButtonStyle ?? Platform.backend.windowButtonStyle)
         if m != metrics { metrics = m; needsLayout = true; needsDisplay = true }
     }
 

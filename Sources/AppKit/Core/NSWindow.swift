@@ -110,12 +110,14 @@ import CoreText
     /// The platform draws no title bar: the frame has a band above the content that
     /// `platformWindowDrawTitleBar` paints (ClientSideDecoration.swift).
     internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
+    /// Traffic lights at the left (macOS, Linux) or Windows caption buttons at the right (ADR-0022).
+    internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.backend.windowButtonStyle }
 
     /// Creates the overlay when first needed and keeps it placed and styled.
     @discardableResult
     internal func _ensureWindowButtons(create: Bool = false) -> _NSWindowButtonsView? {
         if _windowButtons == nil, create || _showsWindowButtons {
-            let v = _NSWindowButtonsView()
+            let v = _NSWindowButtonsView(style: _windowButtonStyle)
             v.nextResponder = self
             v._setWindow(self)
             for (kind, b) in [(NSWindow.ButtonType.closeButton, v.close), (.miniaturizeButton, v.miniaturize), (.zoomButton, v.zoom)] {
@@ -130,6 +132,7 @@ import CoreText
             // and at the top of the frame (in the band above the content) when the package
             // draws the title bar.
             let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : _platformContentSize
+            v.style = _windowButtonStyle
             v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
         }
@@ -152,7 +155,8 @@ import CoreText
     /// How the toolbar is placed and sized for this window; nil when none is shown.
     internal var _toolbarMetrics: _NSToolbarMetrics? {
         guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
-        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
+        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView),
+                                         buttonStyle: _windowButtonStyle)
     }
     /// The height the toolbar takes out of the content area (below the title band). Zero
     /// when the content covers the title bar: the toolbar then overlays the content.
@@ -399,6 +403,15 @@ import CoreText
     public func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion {
         guard let content = _contentView else { return .client }
         let hit = _hitTest(point) ?? content.hitTest(point)
+        // A standard button the package draws: Windows reports it as the caption button it
+        // stands for (snap layouts over maximise); a disabled one is plain content.
+        if _showsWindowButtons, let b = hit as? _NSWindowButton, b.superview === _windowButtons, b.isEnabled {
+            switch b.kind {
+            case .closeButton: return .closeButton
+            case .miniaturizeButton: return .miniaturizeButton
+            default: return .zoomButton
+            }
+        }
         if let v = hit, !v.mouseDownCanMoveWindow { return .client }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if _isMovableByWindowBackground { return .caption }
@@ -446,10 +459,12 @@ import CoreText
             let color = _isKey ? NSColor.windowFrameTextColor : NSColor.secondaryLabelColor
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let size = _title.size(withAttributes: attributes)
-            // Centred in the band, kept clear of the buttons on the left.
-            let buttonsEnd = _NSWindowButtonsView.width + 8
+            // Centred in the band, kept clear of the buttons at whichever edge they sit.
+            let buttonStyle = _windowButtons?.style ?? _windowButtonStyle
+            let buttonsEnd = buttonStyle == .trafficLights ? _NSWindowButtonsView.width + 8 : 8
+            let trailingEnd = buttonStyle == .caption ? _NSWindowButtonsView.captionWidth + 8 : 8
             let x = max(buttonsEnd, band.midX - size.width / 2)
-            let width = min(size.width, band.maxX - 8 - x)
+            let width = min(size.width, band.maxX - trailingEnd - x)
             if width > 0 {
                 context.saveGState()
                 context.clip(to: NSRect(x: x, y: band.minY, width: width, height: band.height))
@@ -1594,6 +1609,7 @@ import CoreText
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
+            if event.type == .mouseExited { _windowButtons?.updateHover(event.locationInWindow) }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
             // Gestures go to the view under the pointer, or to the one tracking a press.
@@ -1702,7 +1718,7 @@ import CoreText
     @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? {
         switch b {
         case .closeButton, .miniaturizeButton, .zoomButton:
-            let button = _NSWindowButton(kind: b)
+            let button = _NSWindowButton(kind: b, style: Platform.backend.windowButtonStyle)
             button.isEnabled = b == .closeButton ? styleMask.contains(.closable) : b == .miniaturizeButton ? styleMask.contains(.miniaturizable) : styleMask.contains(.resizable)
             return button
         default: return nil

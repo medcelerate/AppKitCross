@@ -75,7 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         NSApp.mainMenu = main
 
         // Title bar hidden and transparent, content under it: AppKit draws the three
-        // standard buttons itself over the content (NSWindow+fullSizeContentView).
+        // standard buttons itself over the content (NSWindow+fullSizeContentView): the
+        // traffic lights at the top-left on macOS and Linux, Windows caption buttons at
+        // the top-right on Windows (ADR-0022).
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)

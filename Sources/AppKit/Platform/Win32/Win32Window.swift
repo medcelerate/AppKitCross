@@ -29,6 +29,10 @@ final class Win32Window: PlatformWindow {
     private(set) var isKey = false
     private var destroying = false
     private var pressedButtons = 0
+    /// `TrackMouseEvent` is armed for the client area / the non-client caption buttons, so
+    /// WM_MOUSELEAVE / WM_NCMOUSELEAVE will tell the owner the pointer left (hover ends).
+    private var trackingLeave = false
+    private var trackingNonClientLeave = false
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
     private var dpi: UINT = 96
@@ -779,6 +783,37 @@ final class Win32Window: PlatformWindow {
         owner?.platformWindowDispatch(e)
     }
 
+    /// A non-client mouse message (screen coordinates in `lParam`) over a package-drawn
+    /// caption button, delivered as the left-button event the button tracks.
+    private func nonClientMouse(_ type: NSEvent.EventType, _ lParam: LPARAM, clickCount: Int) {
+        let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
+        let y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
+        let e = NSEvent._mouseEvent(type: type, location: contentPoint(screenX: x, screenY: y), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: clickCount, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// The pointer left the window (or moved into non-client area that is not a button):
+    /// a move far outside, as the Wayland backend reports it, ends hover states.
+    private func pointerLeft() {
+        let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// Arms WM_MOUSELEAVE (client) or WM_NCMOUSELEAVE (non-client) once per entry.
+    private func trackMouseLeave(nonClient: Bool) {
+        guard let hwnd else { return }
+        if nonClient ? trackingNonClientLeave : trackingLeave { return }
+        var tme = TRACKMOUSEEVENT()
+        tme.cbSize = DWORD(MemoryLayout<TRACKMOUSEEVENT>.size)
+        tme.dwFlags = DWORD(TME_LEAVE) | (nonClient ? DWORD(TME_NONCLIENT) : 0)
+        tme.hwndTrack = hwnd
+        tme.dwHoverTime = 0
+        _ = TrackMouseEvent(&tme)
+        if nonClient { trackingNonClientLeave = true } else { trackingLeave = true }
+    }
+
     /// Virtual keys that AppKit reports as function-key characters (NSEvent.SpecialKey) or
     /// control characters, with the macOS virtual key code AppKit clients may compare against.
     private static let specialKeys: [Int32: (String, UInt16)] = [
@@ -1088,10 +1123,49 @@ final class Win32Window: PlatformWindow {
                 ScreenToClient(hwnd, &pt)
             }
             // NSWindow decides: caption when movable by background or in the title bar
-            // band of content that extends into it, unless a control is under the mouse.
+            // band of content that extends into it, unless a control is under the mouse;
+            // the standard buttons it draws answer as the caption buttons (HTCLOSE,
+            // HTMINBUTTON, HTMAXBUTTON: Windows 11 shows snap layouts over the latter).
             let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
             if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) { NSView._trace("win32 popup nchittest client \(pt.x),\(pt.y) -> \(region)") }
-            return LRESULT(region == .caption ? HTCAPTION : HTCLIENT)
+            return LRESULT(Win32WindowPolicy.hitCode(for: region))
+        case WM_NCMOUSEMOVE:
+            // Over a package-drawn caption button the pointer is "non-client": the owner
+            // still sees it move (hover fills). Elsewhere in the non-client area (the resize
+            // band over the buttons) the pointer is reported gone, so no button stays lit.
+            guard usesCustomFrame else { return nil }
+            trackMouseLeave(nonClient: true)
+            if Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) {
+                nonClientMouse(.mouseMoved, lParam, clickCount: 0)
+                return 0        // the button draws its own hover; no DefWindowProc hot-tracking
+            }
+            pointerLeft()
+            return nil
+        case WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK:
+            // A press on a package-drawn caption button is the button's to track (DefWindowProc
+            // would track a system caption button the frame does not have): capture, so the
+            // drag and the release arrive as client messages like any control's.
+            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            if let hwnd { SetCapture(hwnd) }
+            pressedButtons |= 1
+            NSEvent._pressedMouseButtons = pressedButtons
+            nonClientMouse(.leftMouseDown, lParam, clickCount: 1)
+            return 0
+        case WM_NCLBUTTONUP:
+            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            pressedButtons &= ~1
+            NSEvent._pressedMouseButtons = pressedButtons
+            if pressedButtons == 0 { ReleaseCapture() }
+            nonClientMouse(.leftMouseUp, lParam, clickCount: 1)
+            return 0
+        case WM_NCMOUSELEAVE:
+            trackingNonClientLeave = false
+            if pressedButtons == 0 { pointerLeft() }
+            return nil
+        case WM_MOUSELEAVE:
+            trackingLeave = false
+            if pressedButtons == 0 { pointerLeft() }
+            return 0
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
             // last-window-closed check run; NSWindow then calls close() here.
@@ -1177,6 +1251,7 @@ final class Win32Window: PlatformWindow {
             mouse(.otherMouseUp, lParam, button: 2)
             return 0
         case WM_MOUSEMOVE:
+            trackMouseLeave(nonClient: false)
             if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, lParam, button: 0) }
             else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, lParam, button: 1) }
             else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, lParam, button: 2) }

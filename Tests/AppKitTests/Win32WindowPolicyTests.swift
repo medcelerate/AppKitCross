@@ -25,4 +25,20 @@ final class Win32WindowPolicyTests: XCTestCase {
         XCTAssertTrue(Win32WindowPolicy.RedirectionBitmap.keptForMenuBar.keeps)
         XCTAssertFalse(Win32WindowPolicy.RedirectionBitmap.none.keeps)
     }
+
+    /// The WM_NCHITTEST answer for what the window says a point is: the package-drawn
+    /// standard buttons answer as the caption buttons (ADR-0022), which is what gives the
+    /// Windows 11 snap layouts flyout over maximise.
+    func testHitCodesForTheWindowsRegions() {
+        XCTAssertEqual(Win32WindowPolicy.hitCode(for: .client), 1)        // HTCLIENT
+        XCTAssertEqual(Win32WindowPolicy.hitCode(for: .caption), 2)       // HTCAPTION
+        XCTAssertEqual(Win32WindowPolicy.hitCode(for: .miniaturizeButton), 8)   // HTMINBUTTON
+        XCTAssertEqual(Win32WindowPolicy.hitCode(for: .zoomButton), 9)    // HTMAXBUTTON
+        XCTAssertEqual(Win32WindowPolicy.hitCode(for: .closeButton), 20)  // HTCLOSE
+        for region in [PlatformWindowHitRegion.closeButton, .miniaturizeButton, .zoomButton] {
+            XCTAssertTrue(Win32WindowPolicy.isCaptionButton(hitCode: Win32WindowPolicy.hitCode(for: region)))
+        }
+        XCTAssertFalse(Win32WindowPolicy.isCaptionButton(hitCode: 2))
+        XCTAssertFalse(Win32WindowPolicy.isCaptionButton(hitCode: 12))    // HTTOP: the resize band over the buttons
+    }
 }

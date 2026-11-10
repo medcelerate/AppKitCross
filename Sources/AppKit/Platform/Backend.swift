@@ -81,6 +81,19 @@ public protocol PlatformBackend: AnyObject {
     var dragDrop: (any PlatformDragDrop)? { get }
     /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
     var statusItems: (any PlatformStatusItemHost)? { get }
+    /// How the package draws the standard window buttons it supplies itself (content that
+    /// covers the title bar, client-side decorations): macOS traffic lights at the left, or
+    /// the platform's caption buttons at the right (ADR-0022). Default: traffic lights.
+    var windowButtonStyle: PlatformWindowButtonStyle { get }
+}
+
+/// The look and placement of the standard window buttons the package draws (ADR-0022).
+public enum PlatformWindowButtonStyle: Sendable, Equatable {
+    /// AppKit's close/miniaturize/zoom circles at the top-left (macOS, Linux).
+    case trafficLights
+    /// Windows caption buttons at the top-right: minimise, maximise/restore, close, with
+    /// Fluent glyphs, hover and pressed fills, close in red.
+    case caption
 }
 
 /// A native window. Frames are in AppKit screen coordinates.
@@ -180,6 +193,7 @@ public typealias PlatformLayerScene = _CALayerScene
 
 extension PlatformBackend {
     public func runNested(until stop: @escaping @MainActor () -> Bool) { runModal(for: nil, until: stop) }
+    public var windowButtonStyle: PlatformWindowButtonStyle { .trafficLights }
 }
 
 extension PlatformWindow {
@@ -283,7 +297,11 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public init() {}
 }
 
-public enum PlatformWindowHitRegion: Sendable { case client, caption }
+/// What a point of the content area is to the window system: content, the draggable
+/// caption, or one of the standard buttons the package draws (Windows reports those as
+/// `HTCLOSE`/`HTMINBUTTON`/`HTMAXBUTTON`, which gives the Windows 11 snap layouts flyout
+/// on the maximise button; the backend still delivers their clicks as mouse events).
+public enum PlatformWindowHitRegion: Sendable { case client, caption, closeButton, miniaturizeButton, zoomButton }
 
 extension PlatformWindowOwner {
     public func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect) {}

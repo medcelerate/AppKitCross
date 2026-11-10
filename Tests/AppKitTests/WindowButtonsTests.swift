@@ -31,9 +31,10 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(zoom.frame.origin.x, 52)
             XCTAssertEqual(close.frame.width, 12)
             XCTAssertTrue(close.isEnabled && mini.isEnabled && zoom.isEnabled)
-            // The buttons sit above the content and never drag the window; the gaps do.
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 186)), .client)
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 38, y: 186)), .client)
+            // The buttons sit above the content and never drag the window (the backend hears
+            // which button it is: Windows answers HTCLOSE and friends); the gaps do.
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 186)), .closeButton)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 38, y: 186)), .miniaturizeButton)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 4, y: 186)), .caption)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 186)), .caption)
             w.close()
@@ -46,10 +47,13 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(w.standardWindowButton(.closeButton)!.isEnabled)
             XCTAssertFalse(w.standardWindowButton(.miniaturizeButton)!.isEnabled)
             XCTAssertFalse(w.standardWindowButton(.zoomButton)!.isEnabled)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 58, y: 186)), .client, "a disabled zoom button is plain content")
             w.setFrame(NSRect(x: 0, y: 0, width: 400, height: 300), display: false)
             let row = w.standardWindowButton(.closeButton)!.superview!
             XCTAssertEqual(row.frame.maxY, w.contentRect(forFrameRect: w.frame).height)
             XCTAssertEqual(row.frame.origin.x, 0)
+            XCTAssertEqual(row.frame.width, 400, "the row spans the band, like AppKit's theme frame")
+            XCTAssertEqual(w.standardWindowButton(.closeButton)!.frame.origin.x, 12, "the buttons keep their place at the left")
             w.close()
         }
     }
@@ -113,6 +117,127 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             w.platformWindowDidDeminiaturize()
             XCTAssertEqual(delegate.deminis, 2)
             w.close()
+        }
+    }
+
+    /// An application that moves a standard button (`setFrameOrigin`, y from the top as
+    /// in AppKit's flipped theme frame) keeps it there across the window's relayouts, and
+    /// the moved button still takes clicks and reports itself to the backend.
+    func testRepositionedButtonsSurviveRelayoutAndStillHitTest() {
+        MainActor.assumeIsolated {
+            let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            let close = w.standardWindowButton(.closeButton)!
+            close.setFrameOrigin(NSPoint(x: 100, y: 8))
+            w.setFrame(NSRect(x: 0, y: 0, width: 500, height: 300), display: false)
+            XCTAssertEqual(close.frame.origin, NSPoint(x: 100, y: 8))
+            XCTAssertEqual(w.standardWindowButton(.miniaturizeButton)!.frame.origin.x, 32, "the others were placed by the window")
+            let band = w.contentView!.bounds.height - 14
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 106, y: band)), .closeButton)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: band)), .caption, "where the close button was is the draggable band")
+            close.isHidden = true
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 106, y: band)), .caption, "a hidden button is not hit")
+        }
+    }
+
+    // MARK: Windows caption buttons (ADR-0022)
+
+    private func withCaptionButtons(_ body: @MainActor () -> Void) {
+        MainActor.assumeIsolated {
+            let host = Platform.backend as! HostBackend
+            host.windowButtonStyle = .caption
+            defer { host.windowButtonStyle = .trafficLights }
+            body()
+        }
+    }
+
+    /// With the Windows style the row puts minimise, maximise and close at the top-right,
+    /// 46 points each, and the hit test names them so Win32 answers HTMINBUTTON,
+    /// HTMAXBUTTON and HTCLOSE; the gaps still drag and disabled buttons are content.
+    func testCaptionButtonsSitAtTheTopRight() {
+        withCaptionButtons {
+            let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            let close = w.standardWindowButton(.closeButton)!
+            let mini = w.standardWindowButton(.miniaturizeButton)!
+            let zoom = w.standardWindowButton(.zoomButton)!
+            XCTAssertEqual((close as? _NSWindowButton)?.style, .caption)
+            XCTAssertEqual(close.frame, NSRect(x: 300 - 46, y: 0, width: 46, height: 28))
+            XCTAssertEqual(zoom.frame.origin.x, 300 - 92)
+            XCTAssertEqual(mini.frame.origin.x, 300 - 138)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 290, y: 186)), .closeButton)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 230, y: 186)), .zoomButton)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 170, y: 186)), .miniaturizeButton)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 150, y: 186)), .caption, "left of the buttons the band drags")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 186)), .caption, "nothing at the left any more")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 290, y: 150)), .client, "below the band is content")
+            // Resizing keeps them at the right edge.
+            w.setFrame(NSRect(x: 0, y: 0, width: 500, height: 300), display: false)
+            XCTAssertEqual(close.frame.origin.x, 500 - 46)
+            let band = w.contentView!.bounds.height - 14
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 490, y: band)), .closeButton)
+            // A non-resizable window: the maximise button is there, greyed, and is content.
+            w.styleMask.remove(.resizable)
+            XCTAssertFalse(zoom.isEnabled)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 430, y: band)), .client)
+        }
+    }
+
+    /// Hover lights one caption button at a time and a press-and-release on close closes
+    /// the window, the same as a click delivered from the client area.
+    func testCaptionButtonsHoverAndClick() {
+        withCaptionButtons {
+            let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            w.makeKeyAndOrderFront(nil)
+            let close = w.standardWindowButton(.closeButton) as! _NSWindowButton
+            let zoom = w.standardWindowButton(.zoomButton) as! _NSWindowButton
+            @MainActor func move(to p: NSPoint) {
+                w.sendEvent(NSEvent.mouseEvent(with: .mouseMoved, location: p, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)!)
+            }
+            move(to: NSPoint(x: 290, y: 186))
+            XCTAssertTrue(close.isHovered)
+            XCTAssertFalse(zoom.isHovered)
+            move(to: NSPoint(x: 230, y: 186))
+            XCTAssertFalse(close.isHovered)
+            XCTAssertTrue(zoom.isHovered)
+            move(to: NSPoint(x: -100_000, y: -100_000))      // the backend's "pointer left"
+            XCTAssertFalse(zoom.isHovered)
+            let center = NSPoint(x: 290, y: 186)
+            w.sendEvent(NSEvent.mouseEvent(with: .leftMouseDown, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
+            w.sendEvent(NSEvent.mouseEvent(with: .leftMouseUp, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!)
+            XCTAssertFalse(w.isVisible)
+        }
+    }
+
+    /// The caption buttons render: a fill under the hovered close button (red) and glyphs
+    /// in the others, and nothing where the traffic lights used to be.
+    func testCaptionButtonsDraw() {
+        withCaptionButtons {
+            let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            w.backgroundColor = .white
+            w.makeKeyAndOrderFront(nil)
+            let close = w.standardWindowButton(.closeButton) as! _NSWindowButton
+            close.isHovered = true
+            w.display()
+            guard let image = (w._platformWindow as? HostWindow)?.lastImage else { return XCTFail("no host image") }
+            let scale = Int(w.backingScaleFactor)
+            func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int) {     // y from the top, in points
+                let data = CFDataGetBytePtr(image.dataProvider!.data!)!
+                let i = (y * scale) * image.bytesPerRow + (x * scale) * 4
+                return (Int(data[i + 2]), Int(data[i + 1]), Int(data[i]))     // BGRA
+            }
+            let red = pixel(300 - 40, 3)
+            XCTAssertGreaterThan(red.r, 150, "the hovered close button is red: \(red)")
+            XCTAssertLessThan(red.g, 90, "\(red)")
+            let gap = pixel(300 - 140, 14)
+            XCTAssertEqual(gap.r, 255, "left of the buttons the background shows: \(gap)")
+            let left = pixel(18, 14)
+            XCTAssertEqual(left.r, 255, "no traffic light at the left: \(left)")
+            // A dark pixel somewhere along the minimise glyph (a 10-point line at mid height).
+            var darkest = 255
+            for x in (300 - 138 + 15)...(300 - 138 + 31) { for y in 12...16 { darkest = min(darkest, pixel(x, y).r) } }
+            XCTAssertLessThan(darkest, 120, "the minimise glyph is drawn")
         }
     }
 

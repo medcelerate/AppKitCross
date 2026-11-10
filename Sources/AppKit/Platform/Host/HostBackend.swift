@@ -66,6 +66,10 @@ final class HostBackend: PlatformBackend {
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 
+    /// Test hook: the style of the standard buttons the package draws (ADR-0022). Windows
+    /// answers `.caption`; the host defaults to the traffic lights of macOS and Linux.
+    var windowButtonStyle: PlatformWindowButtonStyle = .trafficLights
+
     /// The in-process status area (StatusItem.swift): tests click its items.
     let hostStatusItems = HostStatusItems()
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
