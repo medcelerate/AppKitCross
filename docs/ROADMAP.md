@@ -136,7 +136,10 @@ No redirection bitmap (2026-11-10): every window that will present through a swa
 `WS_EX_NOREDIRECTIONBITMAP`, so DWM allocates no legacy redirection surface and copies
 nothing per frame; the bit is creation-only, so it is decided by `cd2d_presentation_available`
 (probed once) rather than by the chrome, kept across `styleMask` changes, and windows
-on the legacy `ID2D1HwndRenderTarget` keep their surface. Screenshot capture
+on the legacy `ID2D1HwndRenderTarget` keep their surface, as do windows that carry the
+Win32 menu bar (titled app windows with a main menu): user32 draws the bar through GDI
+into the redirection surface and the PC saw a black strip without one
+(`Platform/Win32WindowPolicy.swift`, `Win32WindowPolicyTests`). Screenshot capture
 (`cacheDisplay`, `HelloWindow --screenshot`) draws the view tree itself and does not read
 the surface. HDR (2026-11-10, ADR-0016): `cd2d_display_hdr_info` reads the monitor's
 `DXGI_OUTPUT_DESC1` (colour space, luminances) and `DISPLAYCONFIG_SDR_WHITE_LEVEL` /
