@@ -5,6 +5,7 @@
 void *appkitwin_wl_registry_bind(struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
     const struct wl_interface *iface = NULL;
     if (strcmp(interface, "wl_compositor") == 0) iface = &wl_compositor_interface;
+    else if (strcmp(interface, "wl_subcompositor") == 0) iface = &wl_subcompositor_interface;
     else if (strcmp(interface, "wl_shm") == 0) iface = &wl_shm_interface;
     else if (strcmp(interface, "wl_seat") == 0) iface = &wl_seat_interface;
     else if (strcmp(interface, "wl_output") == 0) iface = &wl_output_interface;

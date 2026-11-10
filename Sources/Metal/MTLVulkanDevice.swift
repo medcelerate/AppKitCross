@@ -1,6 +1,8 @@
 // Vulkan device for the Metal module (Linux), over the CMetalVulkan C interface.
 // Command buffers record closures and replay them into a Vulkan command buffer on
-// commit; drawables are Vulkan images read back on present (MTKView's readback seam).
+// commit. Drawables come from `MTLVulkanSwapChain`, a VkSwapchainKHR on the native surface
+// the window placed under the view (a child X window, a Wayland subsurface; MTKView in an
+// X11 or Wayland window); elsewhere MTKView renders into plain textures and reads them back.
 // Shaders are SPIR-V: passed through, or compiled from HLSL/MSL with dxc or glslang
 // found on PATH. See ADR-0012.
 
@@ -26,6 +28,11 @@ public final class MTLVulkanDevice: MTLDevice, @unchecked Sendable {
     public let isSoftwareDevice: Bool
     /// True when `APPKITWIN_VULKAN_DEBUG=1` found and enabled the validation layer.
     public let validationEnabled: Bool
+    /// The window systems the instance can make presentation surfaces for
+    /// (`VK_KHR_xlib_surface`, `VK_KHR_wayland_surface`); `isHeadless` says whether the
+    /// device can present to any of them (`VK_KHR_swapchain`).
+    public let supportsXlibPresentation: Bool
+    public let supportsWaylandPresentation: Bool
     let subgroupSize: Int
     let maxComputeInvocations: Int
     let uniformAlignment: Int
@@ -44,6 +51,8 @@ public final class MTLVulkanDevice: MTLDevice, @unchecked Sendable {
         }
         isSoftwareDevice = info.isSoftware
         validationEnabled = info.validation
+        supportsXlibPresentation = info.presentable && info.xlibSurfaces
+        supportsWaylandPresentation = info.presentable && info.waylandSurfaces
         isLowPower = info.isSoftware || info.isIntegrated
         isHeadless = !info.presentable
         hasUnifiedMemory = info.isSoftware || info.isIntegrated
@@ -423,11 +432,14 @@ final class MTLVulkanTexture: MTLTexture, @unchecked Sendable {
     var hazardTrackingMode: MTLHazardTrackingMode { .tracked }
     var allocatedSize: Int { width * height * pixelFormat.bytesPerPixel }
     let vkDevice: MTLVulkanDevice
+    /// False for swap-chain images, which the chain owns.
+    private let ownsHandle: Bool
 
-    init(device: MTLVulkanDevice, handle: OpaquePointer, descriptor d: MTLTextureDescriptor) {
+    init(device: MTLVulkanDevice, handle: OpaquePointer, descriptor d: MTLTextureDescriptor, ownsHandle: Bool = true) {
         self.device = device
         vkDevice = device
         self.handle = handle
+        self.ownsHandle = ownsHandle
         textureType = d.textureType; pixelFormat = d.pixelFormat
         width = d.width; height = d.height; depth = d.depth
         mipmapLevelCount = max(1, d.mipmapLevelCount); sampleCount = max(1, d.sampleCount); arrayLength = d.arrayLength
@@ -436,7 +448,7 @@ final class MTLVulkanTexture: MTLTexture, @unchecked Sendable {
     }
 
     deinit {
-        cmv_texture_release(handle)
+        if ownsHandle { cmv_texture_release(handle) }
         vkDevice.allocated(-allocatedSize)
     }
 
@@ -1001,5 +1013,141 @@ final class MTLVulkanComputeCommandEncoder: MTLVulkanEncoder, MTLComputeCommandE
                         depth: (t.depth + max(1, threadsPerThreadgroup.depth) - 1) / max(1, threadsPerThreadgroup.depth))
         dispatchThreadgroups(g, threadsPerThreadgroup: threadsPerThreadgroup)
     }
+}
+// MARK: Presentation
+
+/// How a swap chain paces its presents (`VkPresentModeKHR`).
+public enum MTLVulkanPresentMode: UInt32, Sendable {
+    case immediate = 0, mailbox = 1, fifo = 2, fifoRelaxed = 3
+}
+
+/// A `VkSwapchainKHR` on the native surface a window placed within its content area for
+/// the view (a child X window or a Wayland subsurface, `PlatformPresentationSurface` in
+/// AppKit): each frame renders into `nextDrawable()`'s texture and `present()` hands the
+/// image to the compositor. The counterpart of `MTLD3D12SwapChain` on Windows. Sized in
+/// pixels; `resize` re-creates the chain (window resizes, backing-scale changes), as does a
+/// change of `displaySyncEnabled` (FIFO when on; MAILBOX, then IMMEDIATE, where the
+/// surface offers them when off). Every image transition and the present go through the
+/// device's one queue, which every command queue executes on.
+public final class MTLVulkanSwapChain {
+    /// The window-system surface: the X11 `Display*` and `Window`, or the `wl_display*`
+    /// and `wl_surface*`, as the platform window hands them over.
+    public enum Surface: Sendable {
+        case xlib(display: UnsafeMutableRawPointer, window: UInt)
+        case wayland(display: UnsafeMutableRawPointer, surface: UnsafeMutableRawPointer)
+    }
+
+    let device: MTLVulkanDevice
+    let handle: OpaquePointer
+    public let pixelFormat: MTLPixelFormat
+    public private(set) var width: Int
+    public private(set) var height: Int
+    /// Present at the next vertical blank (`CAMetalLayer.displaySyncEnabled`).
+    public var displaySyncEnabled: Bool {
+        didSet {
+            guard displaySyncEnabled != oldValue else { return }
+            cmv_swapchain_set_vsync(handle, displaySyncEnabled)
+            _ = cmv_swapchain_resize(handle, UInt32(width), UInt32(height))
+        }
+    }
+    /// Frames presented so far.
+    public private(set) var presentCount = 0
+
+    /// The formats a surface can take: `CAMetalLayer`'s on every platform.
+    public static func isSupported(_ format: MTLPixelFormat) -> Bool { format == .bgra8Unorm || format == .bgra8Unorm_srgb || format == .rgba16Float }
+
+    /// Nil when the device cannot present (no `VK_KHR_swapchain`, no surface extension for
+    /// the window system), the format is not one of `isSupported`'s, or the surface rejects
+    /// it; `lastCreationError` then says which.
+    public init?(device: MTLVulkanDevice, surface: Surface, width: Int, height: Int, pixelFormat: MTLPixelFormat, displaySyncEnabled: Bool = true, maximumDrawableCount: Int = 3) {
+        guard width > 0, height > 0 else { MTLVulkanSwapChain.lastCreationError = "empty size"; return nil }
+        guard MTLVulkanSwapChain.isSupported(pixelFormat), let format = MTLVulkan.vkFormat(pixelFormat) else { MTLVulkanSwapChain.lastCreationError = "\(pixelFormat) is not a presentable format"; return nil }
+        let h: OpaquePointer?
+        switch surface {
+        case .xlib(let display, let window):
+            h = cmv_swapchain_create(device.handle, UInt32(CMV_SURFACE_XLIB), display, UInt(window), UInt32(width), UInt32(height), format, UInt32(max(1, maximumDrawableCount)), displaySyncEnabled)
+        case .wayland(let display, let wlSurface):
+            h = cmv_swapchain_create(device.handle, UInt32(CMV_SURFACE_WAYLAND), display, UInt(bitPattern: wlSurface), UInt32(width), UInt32(height), format, UInt32(max(1, maximumDrawableCount)), displaySyncEnabled)
+        }
+        guard let h else { MTLVulkanSwapChain.lastCreationError = String(cString: cmv_last_error()); return nil }
+        self.device = device
+        handle = h
+        self.pixelFormat = pixelFormat
+        self.width = width
+        self.height = height
+        self.displaySyncEnabled = displaySyncEnabled
+        MTLVulkanSwapChain.lastCreationError = ""
+    }
+
+    deinit { cmv_swapchain_release(handle) }
+
+    /// Why the last `init` returned nil ("" after a success).
+    nonisolated(unsafe) public private(set) static var lastCreationError = ""
+
+    /// The last create/resize/acquire/present failure, or "" (diagnostics).
+    public var lastError: String {
+        var buffer = [CChar](repeating: 0, count: 256)
+        cmv_swapchain_last_error(handle, &buffer, 256)
+        return String(cString: buffer)
+    }
+
+    /// The present mode in use and the number of images the implementation gave.
+    public var presentMode: MTLVulkanPresentMode { MTLVulkanPresentMode(rawValue: cmv_swapchain_present_mode(handle)) ?? .fifo }
+    public var imageCount: Int { Int(cmv_swapchain_image_count(handle)) }
+
+    /// Re-creates the images at a new size; drawables handed out earlier must have been dropped.
+    @discardableResult
+    public func resize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        guard width != self.width || height != self.height else { return true }
+        guard cmv_swapchain_resize(handle, UInt32(width), UInt32(height)) else { return false }
+        self.width = width
+        self.height = height
+        return true
+    }
+
+    /// Acquires the next image as a drawable (nil on timeout or a lost surface).
+    public func nextDrawable() -> MTLVulkanDrawable? {
+        guard let t = cmv_swapchain_acquire(handle) else { return nil }
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: pixelFormat, width: width, height: height, mipmapped: false)
+        desc.usage = [.renderTarget, .shaderRead]
+        desc.storageMode = .private
+        let texture = MTLVulkanTexture(device: device, handle: t, descriptor: desc, ownsHandle: false)
+        return MTLVulkanDrawable(swapChain: self, texture: texture)
+    }
+
+    fileprivate func present() -> Bool {
+        let ok = cmv_swapchain_present(handle)
+        if ok { presentCount += 1 }
+        return ok
+    }
+}
+
+/// An image of an `MTLVulkanSwapChain`; `present()` is called by the command buffer that
+/// drew into it, after its work completed.
+public final class MTLVulkanDrawable: MTLDrawable {
+    public let drawableID: Int
+    public private(set) var presentedTime: TimeInterval = 0
+    public let texture: any MTLTexture
+    public let swapChain: MTLVulkanSwapChain
+    private var handlers: [(any MTLDrawable) -> Void] = []
+    nonisolated(unsafe) private static var counter = 0
+
+    init(swapChain: MTLVulkanSwapChain, texture: any MTLTexture) {
+        MTLVulkanDrawable.counter += 1
+        drawableID = MTLVulkanDrawable.counter
+        self.swapChain = swapChain
+        self.texture = texture
+    }
+
+    public func present() {
+        guard presentedTime == 0 else { return }
+        _ = swapChain.present()
+        presentedTime = ProcessInfo.processInfo.systemUptime
+        for h in handlers { h(self) }
+    }
+
+    public func present(atTime presentationTime: TimeInterval) { present() }
+    public func addPresentedHandler(_ block: @escaping (any MTLDrawable) -> Void) { handlers.append(block) }
 }
 #endif

@@ -2,8 +2,11 @@
 // With the reference device the presented drawable is drawn through CoreGraphics, so a
 // cleared (or CPU-filled) texture shows on every platform. On Windows, in a window whose
 // layer tree DirectComposition hosts, the Direct3D 12 device renders into a flip-model DXGI
-// swap chain that is the content of the view's layer visual (`CAMetalLayer`); anywhere
-// else (the host backend, software layers) a GPU drawable is read back and drawn.
+// swap chain that is the content of the view's layer visual (`CAMetalLayer`). On Linux the
+// Vulkan device renders into a VkSwapchainKHR on a native surface the window places under
+// the view (a child X window, a Wayland subsurface: `NSWindow._makePresentationSurface`).
+// Anywhere else (the host backend, software layers, a device that cannot present) a GPU
+// drawable is read back and drawn through CoreGraphics into the window's own surface.
 
 import Foundation
 import AppKit
@@ -25,6 +28,21 @@ public protocol MTKViewDelegate: AnyObject {
     private var _currentTexture: (any MTLTexture)?
     #if os(Windows)
     private var _swapChain: MTLD3D12SwapChain?
+    #elseif os(Linux)
+    private var _swapChain: MTLVulkanSwapChain?
+    private var _surface: (any PlatformPresentationSurface)?
+    private var _surfaceFrame = NSRect.zero
+    private var _surfaceScale: CGFloat = 0
+    /// Set when a chain could not be made for the current surface, device and format, so
+    /// the readback path is used until one of them changes.
+    private var _swapChainError: String?
+    /// `APPKITWIN_METAL_READBACK=1` keeps every frame on the readback path (comparisons).
+    private static let _forcesReadback = ProcessInfo.processInfo.environment["APPKITWIN_METAL_READBACK"] == "1"
+    /// `APPKITWIN_METAL_TRACE=1` logs the swap chain's creation, re-creation and drops to stderr.
+    private static let _traces = ProcessInfo.processInfo.environment["APPKITWIN_METAL_TRACE"] == "1"
+    private func _trace(_ message: @autoclosure () -> String) {
+        if MTKView._traces { FileHandle.standardError.write(Data("MTKView: \(message())\n".utf8)) }
+    }
     #endif
     private var _presented: (any MTLTexture)?
     private var _displayLink: CADisplayLink?
@@ -40,6 +58,9 @@ public protocol MTKViewDelegate: AnyObject {
             // view wanting HDR output picks that format, ADR-0016).
             (layer as? CAMetalLayer)?.pixelFormat = colorPixelFormat.rawValue
             _dropTextures()
+            #if os(Linux)
+            _swapChainError = nil
+            #endif
         }
     }
     open var depthStencilPixelFormat: MTLPixelFormat = .invalid { didSet { _dropTextures() } }
@@ -72,24 +93,36 @@ public protocol MTKViewDelegate: AnyObject {
         return l
     }
 
-    /// True while frames go straight to a DXGI swap chain shown by the window's
-    /// DirectComposition tree (Windows); false on the CoreGraphics readback path.
+    /// True while frames go straight to a swap chain the window system shows: a DXGI
+    /// swap chain in the window's DirectComposition tree (Windows), a Vulkan swap chain on
+    /// the native surface under the view (Linux); false on the CoreGraphics readback path.
     /// Not part of Apple's API (tooling and tests).
     public var _presentsThroughSwapChain: Bool {
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         return _swapChain != nil
         #else
         return false
         #endif
     }
 
-    /// The swap chain's last present/resize failure ("" when none, or on the readback path).
-    /// Not part of Apple's API (tooling and tests).
+    /// The swap chain's last present/resize failure, or why none could be made ("" when
+    /// none, or on the readback path by choice). Not part of Apple's API (tooling and tests).
     public var _presentationError: String {
         #if os(Windows)
         return _swapChain?.lastError ?? ""
+        #elseif os(Linux)
+        return _swapChain?.lastError ?? _swapChainError ?? ""
         #else
         return ""
+        #endif
+    }
+
+    /// Frames the swap chain presented so far (0 on the readback path). Tooling and tests.
+    public var _swapChainPresentCount: Int {
+        #if os(Windows) || os(Linux)
+        return _swapChain?.presentCount ?? 0
+        #else
+        return 0
         #endif
     }
 
@@ -123,11 +156,96 @@ public protocol MTKViewDelegate: AnyObject {
         layer?._nativeContent = nil
         needsDisplay = true
     }
+    #elseif os(Linux)
+    /// The Vulkan swap chain on the window's native surface under the view, sized to the
+    /// drawable and placed at the view's frame; nil (any chain and surface dropped, frames
+    /// read back) without a window, a presentable Vulkan device, a surface from the
+    /// platform, or a chain the surface accepts.
+    private func _ensureSwapChain() -> MTLVulkanSwapChain? {
+        guard !MTKView._forcesReadback, let vk = _device as? MTLVulkanDevice, !vk.isHeadless, let w = window, !isHiddenOrHasHiddenAncestor else {
+            if _swapChain != nil { _trace("dropping the swap chain: readback forced, no presentable Vulkan device, no window, or hidden") }
+            _dropSwapChain()
+            return nil
+        }
+        let frame = convert(bounds, to: nil).intersection(w.contentView?.bounds ?? .zero)
+        guard frame.width >= 1, frame.height >= 1 else {
+            if _swapChain != nil { _trace("dropping the swap chain: the view is outside the content area") }
+            _dropSwapChain()
+            return nil
+        }
+        if _surface == nil {
+            guard _swapChainError == nil else { return nil }
+            guard let s = w._makePresentationSurface(frame: frame) else {
+                _trace("the window has no presentation surface: frames are read back")
+                return nil
+            }
+            _trace("presentation surface at \(frame) scale \(w.backingScaleFactor)")
+            _surface = s
+            _surfaceFrame = frame
+            _surfaceScale = w.backingScaleFactor
+        } else if frame != _surfaceFrame || w.backingScaleFactor != _surfaceScale {
+            _trace("presentation surface moved to \(frame) scale \(w.backingScaleFactor)")
+            _surface?.setFrame(frame)
+            _surfaceFrame = frame
+            _surfaceScale = w.backingScaleFactor
+        }
+        guard let surface = _surface else { return nil }
+        let width = max(1, Int(_drawableSize.width)), height = max(1, Int(_drawableSize.height))
+        let sync = (layer as? CAMetalLayer)?.displaySyncEnabled ?? true
+        if let sc = _swapChain, sc.pixelFormat == colorPixelFormat {
+            sc.displaySyncEnabled = sync
+            if (sc.width != width || sc.height != height) {
+                _trace("resizing the swap chain to \(width)x\(height)")
+                if !sc.resize(width: width, height: height) {
+                    _swapChainError = sc.lastError.isEmpty ? "the swap chain could not be re-sized to \(width)x\(height)" : sc.lastError
+                    _trace("dropping the swap chain: \(_swapChainError!)")
+                    _dropSwapChain()
+                    return nil
+                }
+            }
+            return sc
+        }
+        _swapChain = nil
+        guard _swapChainError == nil else { return nil }
+        let native: MTLVulkanSwapChain.Surface
+        switch surface.handle.kind {
+        case .xlib: native = .xlib(display: surface.handle.display, window: surface.handle.window)
+        case .wayland: native = .wayland(display: surface.handle.display, surface: UnsafeMutableRawPointer(bitPattern: surface.handle.window)!)
+        }
+        guard let sc = MTLVulkanSwapChain(device: vk, surface: native, width: width, height: height, pixelFormat: colorPixelFormat, displaySyncEnabled: sync,
+                                          maximumDrawableCount: (layer as? CAMetalLayer)?.maximumDrawableCount ?? 3) else {
+            let reason = MTLVulkanSwapChain.lastCreationError
+            _swapChainError = reason.isEmpty ? "no swap chain for \(colorPixelFormat) at \(width)x\(height)" : reason
+            _trace("no swap chain: \(_swapChainError!); frames are read back")
+            _dropSwapChain()
+            return nil
+        }
+        _trace("swap chain \(width)x\(height) \(colorPixelFormat) \(sc.presentMode) \(sc.imageCount) images")
+        _swapChain = sc
+        _presented = nil
+        return sc
+    }
+
+    /// Drops the chain and the native surface: the window shows the view's own drawing again.
+    private func _dropSwapChain() {
+        if let s = _surface { s.close(); _surface = nil }
+        guard _swapChain != nil else { return }
+        _trace("swap chain dropped")
+        _swapChain = nil
+        needsDisplay = true
+    }
     #endif
 
     open var device: (any MTLDevice)? {
         get { _device }
-        set { _device = newValue; _dropTextures() }
+        set {
+            _device = newValue
+            _dropTextures()
+            #if os(Linux)
+            _swapChainError = nil
+            _dropSwapChain()
+            #endif
+        }
     }
 
     open override var isFlipped: Bool { true }
@@ -160,7 +278,7 @@ public protocol MTKViewDelegate: AnyObject {
     /// - SeeAlso: https://developer.apple.com/documentation/metalkit/mtkview/currentdrawable
     open var currentDrawable: (any MTLDrawable)? {
         if let d = _currentDrawable { return d }
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         if let sc = _ensureSwapChain() {
             guard let d = sc.nextDrawable() else { return nil }
             _currentTexture = d.texture
@@ -272,7 +390,7 @@ public protocol MTKViewDelegate: AnyObject {
         let newSize = CGSize(width: size.width * scale, height: size.height * scale)
         guard newSize != _drawableSize else { return }
         drawableSize = newSize
-        #if os(Windows)
+        #if os(Windows) || os(Linux)
         if _swapChain != nil, !isPaused, delegate != nil { draw() }
         #endif
     }
@@ -287,6 +405,11 @@ public protocol MTKViewDelegate: AnyObject {
         if autoResizeDrawable, let w = window {
             drawableSize = CGSize(width: bounds.width * w.backingScaleFactor, height: bounds.height * w.backingScaleFactor)
         }
+        #if os(Linux)
+        // The surface belongs to the window the view was in: a new window makes a new one.
+        _swapChainError = nil
+        _dropSwapChain()
+        #endif
         _updateLink()
     }
 
@@ -310,6 +433,8 @@ public protocol MTKViewDelegate: AnyObject {
             _displayLink?.invalidate()
             #if os(Windows)
             layer?._nativeContent = nil
+            #elseif os(Linux)
+            _dropSwapChain()
             #endif
         }
     }
