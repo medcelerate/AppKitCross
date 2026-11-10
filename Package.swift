@@ -18,7 +18,7 @@ targets += [
     .target(
         name: "CD2D",
         path: "Sources/CD2D",
-        linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("windowscodecs"), .linkedLibrary("ole32"), .linkedLibrary("shlwapi"), .linkedLibrary("oleaut32"), .linkedLibrary("shell32"),
+        linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("windowscodecs"), .linkedLibrary("ole32"), .linkedLibrary("shlwapi"), .linkedLibrary("oleaut32"), .linkedLibrary("shell32"), .linkedLibrary("advapi32"),
                          // Milestone 3: DXGI flip-model swap chain presentation (d3d11 device, dxgi
                          // factory/swap chain, dxguid for the DXGI debug GUIDs).
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),

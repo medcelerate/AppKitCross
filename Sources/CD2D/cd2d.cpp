@@ -955,6 +955,7 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
     std::vector<std::wstring> names, patterns;
     std::vector<COMDLG_FILTERSPEC> filters;
     std::wstring defaultExt = defaultExtension ? std::wstring(reinterpret_cast<const wchar_t *>(defaultExtension)) : L"";
+    size_t selectedIndex = 0;
     if (extensions && extensions[0]) {
         std::vector<std::wstring> groups = cd2d_split(reinterpret_cast<const wchar_t *>(extensions), L'|');
         std::vector<std::wstring> groupNames = labels ? cd2d_split(reinterpret_cast<const wchar_t *>(labels), L'|') : std::vector<std::wstring>();
@@ -1006,12 +1007,24 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
             defaultExt = groupFirst[0];
         }
         if (!filters.empty()) dlg->SetFileTypeIndex((UINT)selected + 1);
+        selectedIndex = selected + 1;
         if (!defaultExt.empty()) dlg->SetDefaultExtension(defaultExt.c_str());
     }
     // The name goes in after the file types, the selected type and the default extension:
     // changing the type index afterwards makes the dialog re-derive the name from the new
     // filter, which drops the extension of a name set earlier.
     if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
+    // APPKITWIN_FILE_DIALOG_TRACE=1: what the dialog was given, and whether Explorer hides
+    // known extensions (HideFileExt), which also hides them in the dialog's name box: the
+    // name box then shows "Untitled" for "Untitled.txt" while the saved file keeps ".txt".
+    if (GetEnvironmentVariableW(L"APPKITWIN_FILE_DIALOG_TRACE", nullptr, 0) > 0) {
+        DWORD hide = 0, size = sizeof(hide);
+        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideFileExt", RRF_RT_REG_DWORD, nullptr, &hide, &size) != ERROR_SUCCESS) hide = 0xFFFFFFFF;
+        fwprintf(stderr, L"[file-dialog] %ls name=\"%ls\" defaultExtension=\"%ls\" filters=%u selected=%u HideFileExt=%ld\n",
+                 o->isSave ? L"save" : L"open", defaultName ? reinterpret_cast<const wchar_t *>(defaultName) : L"",
+                 defaultExt.c_str(), (unsigned)filters.size(), (unsigned)selectedIndex, (long)hide);
+        for (size_t i = 0; i < filters.size(); i++) fwprintf(stderr, L"[file-dialog]   %u: %ls = %ls\n", (unsigned)i + 1, filters[i].pszName, filters[i].pszSpec);
+    }
     hr = dlg->Show((HWND)ownerHwnd);
     if (FAILED(hr)) { dlg->Release(); return false; }
     std::wstring joined;
