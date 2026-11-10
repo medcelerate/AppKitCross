@@ -4,7 +4,7 @@
 // controller's view on the Core Animation display link (`CADisplayLink`, driven by
 // `CARuntime.tick()` on every platform), so tests step them with a fake clock. A
 // two-finger horizontal scroll pages live, swipe events and the arrow keys page with
-// an animation (ADR-0022).
+// an animation (ADR-0023).
 //
 // Every member is either implemented (hand-written types only), stubbed with
 // unimplemented(), or listed as SKIPPED with the reason it cannot compile on Windows yet.
@@ -511,22 +511,3 @@ import CoreText
 /// The page controller's own view: clips its pages while they slide.
 @MainActor
 final class _NSPageControllerView: NSView {}
-
-extension NSPageController {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontroller/objectidentifier
-    public typealias ObjectIdentifier = String
-}
-
-extension NSPageController {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontroller/transitionstyle
-    public enum TransitionStyle: Int, Sendable, Equatable, Hashable {
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontroller/transitionstyle/horizontalstrip
-        case horizontalStrip = 2
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontroller/transitionstyle/stackbook
-        case stackBook = 1
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontroller/transitionstyle/stackhistory
-        case stackHistory = 0
-        // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
-        // SKIPPED (constrained extension): var hashValue: Int { get }
-    }
-}

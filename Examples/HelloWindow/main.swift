@@ -1154,7 +1154,7 @@ final class OutlineDemoViewController: NSViewController, NSOutlineViewDataSource
 /// The Layout Demo's Pages tab: an `NSPageController` over three pages with Back and
 /// Next buttons, a segmented control bound through `takeSelectedIndexFrom`, a transition
 /// style pop-up, and a trailing title bar accessory while the tab shows. The pages
-/// highlight under the pointer through `NSTrackingArea` (ADR-0022).
+/// highlight under the pointer through `NSTrackingArea` (ADR-0023).
 final class PagesDemoViewController: NSViewController, NSPageControllerDelegate, NSSelectorHandling {
     /// A page that lights up while the pointer is over it and shows the hand over its hot spot.
     final class HoverPage: NSView {
@@ -1191,7 +1191,7 @@ final class PagesDemoViewController: NSViewController, NSPageControllerDelegate,
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.labelColor]
             name.draw(at: NSPoint(x: 20, y: bounds.maxY - 50), withAttributes: attrs)
             let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
-            "Hover to highlight; the square shows the hand. Two-finger scroll, swipe or arrows page.".draw(at: NSPoint(x: 20, y: bounds.minY + 16), withAttributes: hint)
+            "Hover to highlight; the square shows the hand. Scroll, swipe or arrow to page.".draw(at: NSPoint(x: 20, y: bounds.minY + 16), withAttributes: hint)
         }
     }
 

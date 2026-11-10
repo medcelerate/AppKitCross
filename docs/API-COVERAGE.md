@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 97 |
-| Types generated | 441 |
+| Types handwritten | 100 |
+| Types generated | 438 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10213 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1168 |
+| Members unimplemented-calls | 1166 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -309,7 +309,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPDFInfo | class | generated | 6 | 0 | 0 |  |
 | NSPDFPanel | class | generated | 7 | 0 | 1 |  |
 | NSPICTImageRep | class | generated | 3 | 0 | 0 |  |
-| NSPageController | class | generated | 14 | 0 | 2 |  |
+| NSPageController | class | handwritten | 14 | 0 | 2 | 1 |
 | NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |
 | NSPageLayout | class | generated | 10 | 0 | 1 |  |
 | NSPanGestureRecognizer | class | handwritten | 5 | 0 | 0 | 0 |
@@ -516,7 +516,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
 | NSTintConfiguration | class | generated | 7 | 0 | 0 |  |
 | NSTintProminence | enum | generated | 4 | 0 | 0 |  |
-| NSTitlebarAccessoryViewController | class | generated | 8 | 0 | 0 |  |
+| NSTitlebarAccessoryViewController | class | handwritten | 8 | 0 | 0 | 3 |
 | NSTitlebarSeparatorStyle | enum | generated | 4 | 0 | 0 |  |
 | NSTokenField | class | generated | 10 | 1 | 1 |  |
 | NSTokenFieldCell | class | generated | 6 | 0 | 0 |  |
@@ -533,7 +533,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTouchBarDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSTouchBarItem | class | generated | 22 | 0 | 2 |  |
 | NSTouchBarProvider | protocol | generated | 1 | 0 | 0 |  |
-| NSTrackingArea | class | generated | 15 | 0 | 1 |  |
+| NSTrackingArea | class | handwritten | 15 | 0 | 1 | 3 |
 | NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |
 | NSTreeController | class | generated | 34 | 0 | 0 |  |
 | NSTreeNode | class | generated | 9 | 0 | 0 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 135 |
+| NSView | class | handwritten | 361 | 3 | 19 | 132 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 154 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 148 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

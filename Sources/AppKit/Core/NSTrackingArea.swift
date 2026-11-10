@@ -90,31 +90,3 @@ open class NSTrackingArea: NSObject, NSCopying, NSCoding {
         return v.convert(r, to: nil)
     }
 }
-extension NSTrackingArea {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options
-    public struct Options: OptionSet, Sendable, Equatable {
-        public let rawValue: UInt
-        public init(rawValue: UInt) { self.rawValue = rawValue }
-
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/activealways
-        static public var activeAlways: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 128) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/activeinactiveapp
-        static public var activeInActiveApp: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 64) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/activeinkeywindow
-        static public var activeInKeyWindow: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 32) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/activewhenfirstresponder
-        static public var activeWhenFirstResponder: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 16) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/assumeinside
-        static public var assumeInside: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 256) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/cursorupdate
-        static public var cursorUpdate: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 4) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/enabledduringmousedrag
-        static public var enabledDuringMouseDrag: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 1024) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/invisiblerect
-        static public var inVisibleRect: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 512) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/mouseenteredandexited
-        static public var mouseEnteredAndExited: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 1) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/options/mousemoved
-        static public var mouseMoved: NSTrackingArea.Options { NSTrackingArea.Options(rawValue: 2) }
-    }
-}

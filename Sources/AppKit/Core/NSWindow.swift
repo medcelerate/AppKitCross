@@ -138,7 +138,7 @@ import CoreText
         return _windowButtons
     }
 
-    // MARK: Toolbar and title bar accessories (NSToolbarView.swift, NSTitlebarAccessoryViewController.swift; ADR-0018, ADR-0022)
+    // MARK: Toolbar and title bar accessories (NSToolbarView.swift, NSTitlebarAccessoryViewController.swift; ADR-0018, ADR-0023)
 
     /// The toolbar's view, an overlay root like the buttons: above the content, below the buttons.
     internal var _toolbarView: _NSToolbarView? { _toolbar?._view }

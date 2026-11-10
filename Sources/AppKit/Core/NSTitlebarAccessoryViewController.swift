@@ -2,7 +2,7 @@
 // A view controller whose view the window places in its title bar: beside the standard
 // buttons and the title for the leading, trailing, left and right attributes, or in a
 // band of its own under the title bar and the toolbar for `.bottom`. The window owns the
-// placement (NSWindow._resolveTitlebarLayout, ADR-0022); the controller holds the
+// placement (NSWindow._resolveTitlebarLayout, ADR-0023); the controller holds the
 // attribute, the visibility and the size policy.
 //
 // Every member is either implemented (hand-written types only), stubbed with

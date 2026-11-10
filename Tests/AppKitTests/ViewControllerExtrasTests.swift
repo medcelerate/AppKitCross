@@ -1,6 +1,6 @@
 // NSTrackingArea option semantics against synthesized mouse events, the title bar
 // accessories' placement per layout attribute and direction, and NSPageController's
-// navigation, delegate order and transitions (ADR-0022).
+// navigation, delegate order and transitions (ADR-0023).
 
 import XCTest
 @testable import AppKit
