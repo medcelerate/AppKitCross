@@ -546,3 +546,317 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+// MARK: - Page controller
+
+@MainActor
+private final class PageDelegate: NSObject, NSPageControllerDelegate {
+    var log: [String] = []
+    var made = 0
+    var completesItself = false
+    var frame: NSRect?
+    func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { "page" }
+    func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController {
+        made += 1
+        final class Focusable: NSView { override var acceptsFirstResponder: Bool { true } }
+        let vc = NSViewController()
+        vc.view = Focusable(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+        vc.title = "vc\(made)"
+        return vc
+    }
+    func pageController(_ pageController: NSPageController, prepare viewController: NSViewController, with object: Any?) { log.append("prepare:\(object as? String ?? "-")") }
+    func pageController(_ pageController: NSPageController, didTransitionTo object: Any) {
+        log.append("did:\(object as? String ?? "-")")
+        if completesItself { pageController.completeTransition(); log.append("completed") }
+    }
+    func pageControllerWillStartLiveTransition(_ pageController: NSPageController) { log.append("willStartLive") }
+    func pageControllerDidEndLiveTransition(_ pageController: NSPageController) { log.append("didEndLive") }
+    func pageController(_ pageController: NSPageController, frameFor object: Any?) -> NSRect { frame ?? pageController.view.bounds }
+}
+
+final class PageControllerTests: XCTestCase, @unchecked Sendable {
+    /// A page controller over three pages in a window, with the animation clock under the test's control.
+    @MainActor private func makePages() -> (NSWindow, NSPageController, PageDelegate) {
+        let w = makeWindow()
+        let pc = NSPageController()
+        let d = PageDelegate()
+        pc.delegate = d
+        pc.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        w.contentView = pc.view
+        pc.arrangedObjects = ["one", "two", "three"]
+        return (w, pc, d)
+    }
+
+    /// The animation clock under the test's control.
+    final class Clock { var time: CFTimeInterval = 100 }
+    @MainActor private func run(_ body: (Clock) -> Void) {
+        let clock = Clock()
+        let saved = CARuntime.now
+        CARuntime.now = { clock.time }
+        defer { CARuntime.now = saved }
+        body(clock)
+    }
+
+    func testFirstPageShowsAndNavigationAnimatesWithTheDelegateOrder() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                XCTAssertEqual(pc.selectedIndex, 0)
+                XCTAssertEqual(pc.transitionStyle, .stackHistory)
+                XCTAssertEqual(d.made, 1, "one controller for the first page")
+                XCTAssertEqual(d.log, ["prepare:one"])
+                let first = pc.selectedViewController!
+                XCTAssertTrue(first.view.superview === pc.view)
+                XCTAssertEqual(first.representedObject as? String, "one")
+                XCTAssertTrue(first.parent === pc, "pages are children")
+                // Forward: the index changes at once, the view controller when the slide ends.
+                pc.navigateForward(nil)
+                XCTAssertEqual(pc.selectedIndex, 1)
+                XCTAssertTrue(pc.selectedViewController === first)
+                XCTAssertEqual(d.made, 2, "a second controller for the incoming page")
+                XCTAssertEqual(d.log, ["prepare:one", "prepare:two"])
+                XCTAssertNotNil(pc._transitionProgress)
+                let incoming = pc.children.first { $0 !== first }!
+                XCTAssertGreaterThan(incoming.view.frame.minX, 0, "the new page starts off to the right")
+                clock.time += 0.1
+                CARuntime.tick()
+                XCTAssertTrue(incoming.view.frame.minX > 0 && incoming.view.frame.minX < 400, "half way")
+                clock.time += 0.5
+                CARuntime.tick()
+                XCTAssertNil(pc._transitionProgress, "the transition completed")
+                XCTAssertTrue(pc.selectedViewController === incoming)
+                XCTAssertEqual(incoming.view.frame, pc.view.bounds)
+                XCTAssertNil(first.view.superview, "the old page left")
+                XCTAssertEqual(d.log, ["prepare:one", "prepare:two", "did:two"])
+                // Forward again: the first controller is reused from the cache.
+                pc.navigateForward(nil)
+                XCTAssertEqual(d.made, 2, "cached per identifier: no third controller")
+                XCTAssertEqual(d.log.last, "prepare:three")
+                XCTAssertTrue(pc.children.contains { $0 === first })
+                XCTAssertEqual(first.representedObject as? String, "three")
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(pc.selectedIndex, 2)
+                XCTAssertTrue(pc.selectedViewController === first)
+                // Past the end: nothing.
+                pc.navigateForward(nil)
+                XCTAssertEqual(pc.selectedIndex, 2)
+                XCTAssertNil(pc._transitionProgress)
+                // Back, with the delegate completing the transition itself.
+                d.completesItself = true
+                pc.navigateBack(nil)
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(pc.selectedIndex, 1)
+                XCTAssertEqual(d.log.suffix(3), ["prepare:two", "did:two", "completed"])
+                XCTAssertNil(pc._transitionProgress)
+                // navigateForward(to:) and takeSelectedIndexFrom.
+                pc.navigateForward(to: "three")
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(pc.selectedIndex, 2)
+                let seg = NSSegmentedControl(labels: ["a", "b", "c"], trackingMode: .selectOne, target: nil, action: nil)
+                seg.selectedSegment = 0
+                pc.takeSelectedIndexFrom(seg)
+                XCTAssertEqual(pc.selectedIndex, 0)
+                XCTAssertNotNil(pc._transitionProgress, "animated")
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertNil(pc._transitionProgress)
+            }
+        }
+    }
+
+    func testSelectedIndexSnapsAndTheAnimatorProxyAnimates() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                pc.selectedIndex = 2
+                XCTAssertEqual(pc.selectedIndex, 2)
+                XCTAssertNil(pc._transitionProgress, "a plain set shows the page at once")
+                XCTAssertEqual(pc.selectedViewController?.representedObject as? String, "three")
+                XCTAssertEqual(pc.view.subviews.count, 1)
+                pc.animator().selectedIndex = 0
+                XCTAssertNotNil(pc._transitionProgress, "the animator proxy transitions")
+                XCTAssertEqual(pc.view.subviews.count, 2)
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(pc.selectedViewController?.representedObject as? String, "one")
+                XCTAssertEqual(pc.view.subviews.count, 1)
+            }
+        }
+    }
+
+    func testTransitionStylesMoveThePagesDifferently() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                @MainActor func midway(_ style: NSPageController.TransitionStyle, forward: Bool) -> (from: CGFloat, to: CGFloat, incomingOnTop: Bool) {
+                    pc.selectedIndex = forward ? 0 : 1
+                    pc.transitionStyle = style
+                    let from = pc.selectedViewController!
+                    if forward { pc.navigateForward(nil) } else { pc.navigateBack(nil) }
+                    let to = pc.children.first { $0.view.superview === pc.view && $0 !== from }!
+                    clock.time += 0.125     // half of the 0.25 s animation
+                    CARuntime.tick()
+                    let result = (from.view.frame.minX, to.view.frame.minX, pc.view.subviews.last === to.view)
+                    clock.time += 1
+                    CARuntime.tick()
+                    return result
+                }
+                let strip = midway(.horizontalStrip, forward: true)
+                XCTAssertEqual(strip.from, -200, accuracy: 1, "both pages move: the old one leaves to the left")
+                XCTAssertEqual(strip.to, 200, accuracy: 1)
+                let history = midway(.stackHistory, forward: true)
+                XCTAssertEqual(history.from, 0, "the old page stays")
+                XCTAssertEqual(history.to, 200, accuracy: 1, "the new one slides in over it")
+                XCTAssertTrue(history.incomingOnTop)
+                let historyBack = midway(.stackHistory, forward: false)
+                XCTAssertEqual(historyBack.from, 200, accuracy: 1, "going back the top page slides out the way it came")
+                XCTAssertEqual(historyBack.to, 0)
+                XCTAssertFalse(historyBack.incomingOnTop)
+                let book = midway(.stackBook, forward: true)
+                XCTAssertEqual(book.from, -200, accuracy: 1, "a book: the page turns away")
+                XCTAssertEqual(book.to, 0, "revealing the next underneath")
+                XCTAssertFalse(book.incomingOnTop)
+                // Right to left mirrors the direction.
+                pc.view.userInterfaceLayoutDirection = .rightToLeft
+                let rtl = midway(.horizontalStrip, forward: true)
+                XCTAssertEqual(rtl.from, 200, accuracy: 1)
+                XCTAssertEqual(rtl.to, -200, accuracy: 1)
+            }
+        }
+    }
+
+    func testTwoFingerScrollPagesLiveAndSettles() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                pc.transitionStyle = .horizontalStrip
+                let first = pc.selectedViewController!
+                @MainActor func scroll(_ dx: CGFloat, phase: NSEvent.Phase) {
+                    let e = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: dx, deltaY: 0, precise: true, phase: phase)
+                    NSApplication.shared.sendEvent(e)
+                }
+                d.log = []
+                scroll(0, phase: .began)
+                XCTAssertTrue(pc._isLiveTransition)
+                XCTAssertEqual(d.log, ["willStartLive"])
+                scroll(-100, phase: .changed)      // fingers moving left: forward, a quarter of the way
+                XCTAssertEqual(pc._transitionProgress!, 0.25, accuracy: 0.01)
+                XCTAssertEqual(first.view.frame.minX, -100, accuracy: 1)
+                let incoming = pc.children.first { $0 !== first }!
+                XCTAssertEqual(incoming.view.frame.minX, 300, accuracy: 1, "the next page follows the fingers")
+                XCTAssertEqual(d.log, ["willStartLive", "prepare:two"])
+                scroll(-160, phase: .changed)
+                XCTAssertEqual(pc._transitionProgress!, 0.65, accuracy: 0.01)
+                scroll(0, phase: .ended)
+                XCTAssertEqual(d.log, ["willStartLive", "prepare:two", "didEndLive"], "the live part ended; the pages settle")
+                XCTAssertEqual(pc.selectedIndex, 1, "past the middle: the next page is selected")
+                XCTAssertFalse(pc._isLiveTransition)
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(d.log.last, "did:two")
+                XCTAssertTrue(pc.selectedViewController === incoming)
+                XCTAssertNil(first.view.superview)
+                // A short pull springs back.
+                d.log = []
+                scroll(0, phase: .began)
+                scroll(60, phase: .changed)        // fingers moving right: back, a bit
+                XCTAssertEqual(pc._transitionProgress!, 0.15, accuracy: 0.01)
+                XCTAssertEqual(d.log, ["willStartLive", "prepare:one"])
+                scroll(0, phase: .ended)
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertEqual(pc.selectedIndex, 1, "not far enough: still on page two")
+                XCTAssertEqual(incoming.view.frame.minX, 0)
+                XCTAssertEqual(pc.view.subviews.count, 1, "the peeked page left")
+                XCTAssertEqual(d.log, ["willStartLive", "prepare:one", "didEndLive"])
+                // Against the last page the strip resists and comes back.
+                pc.selectedIndex = 2
+                let last = pc.selectedViewController!
+                scroll(0, phase: .began)
+                scroll(-200, phase: .changed)
+                XCTAssertEqual(last.view.frame.minX, -50, accuracy: 1, "a quarter of the pull")
+                XCTAssertEqual(pc.view.subviews.count, 1, "no page that way")
+                scroll(0, phase: .ended)
+                XCTAssertEqual(last.view.frame.minX, 0)
+                XCTAssertEqual(pc.selectedIndex, 2)
+            }
+        }
+    }
+
+    func testSwipeEventsAndArrowKeysPage() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                let swipe = NSEvent._gestureEvent(type: .swipe, location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: -1)
+                NSApplication.shared.sendEvent(swipe)
+                XCTAssertEqual(pc.selectedIndex, 1, "a swipe to the left goes forward")
+                clock.time += 1
+                CARuntime.tick()
+                let back = NSEvent._gestureEvent(type: .swipe, location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: 1)
+                NSApplication.shared.sendEvent(back)
+                XCTAssertEqual(pc.selectedIndex, 0)
+                clock.time += 1
+                CARuntime.tick()
+                // Arrow keys, with the page controller's view in the responder chain.
+                XCTAssertTrue(w.makeFirstResponder(pc.selectedViewController!.view))
+                @MainActor func key(_ char: String) {
+                    let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, characters: char, charactersIgnoringModifiers: char, isARepeat: false, keyCode: 0)!
+                    NSApplication.shared.sendEvent(e)
+                }
+                key("\u{F703}")
+                XCTAssertEqual(pc.selectedIndex, 1, "right arrow goes forward")
+                clock.time += 1
+                CARuntime.tick()
+                key("\u{F702}")
+                XCTAssertEqual(pc.selectedIndex, 0, "left arrow goes back")
+                clock.time += 1
+                CARuntime.tick()
+                // A mouse wheel's horizontal notch pages a step.
+                let wheel = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: -1, deltaY: 0, precise: false)
+                NSApplication.shared.sendEvent(wheel)
+                XCTAssertEqual(pc.selectedIndex, 1)
+            }
+        }
+    }
+
+    func testArrangedViewControllersNeedNoDelegateAndFramesFollowTheDelegate() {
+        MainActor.assumeIsolated {
+            run { clock in
+                let w = makeWindow()
+                defer { w.close() }
+                let pc = NSPageController()
+                pc.view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+                w.contentView = pc.view
+                let a = NSViewController(), b = NSViewController()
+                a.view = NSView(frame: .zero); b.view = NSView(frame: .zero)
+                pc.arrangedObjects = [a, b]
+                XCTAssertTrue(pc.selectedViewController === a, "view controllers page themselves")
+                XCTAssertEqual(a.view.frame, pc.view.bounds)
+                pc.navigateForward(nil)
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertTrue(pc.selectedViewController === b)
+                XCTAssertNil(a.view.superview)
+                // The delegate's frame.
+                let (w2, pc2, d2) = makePages()
+                defer { w2.close(); withExtendedLifetime(d2) {} }
+                d2.frame = NSRect(x: 20, y: 20, width: 360, height: 260)
+                pc2.selectedIndex = 1
+                XCTAssertEqual(pc2.selectedViewController!.view.frame, NSRect(x: 20, y: 20, width: 360, height: 260))
+                // Replacing the objects keeps the index in range.
+                pc2.selectedIndex = 2
+                pc2.arrangedObjects = ["only"]
+                XCTAssertEqual(pc2.selectedIndex, 0)
+                XCTAssertEqual(pc2.selectedViewController?.representedObject as? String, "only")
+            }
+        }
+    }
+}

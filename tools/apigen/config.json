@@ -353,7 +353,10 @@
     "NSOutlineViewDelegate.outlineView(_:selectionIndexesForProposedSelection:)": "return proposedSelectionIndexes",
     "NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:)": "return []",
     "NSComboBoxDataSource.comboBox(_:indexOfItemWithStringValue:)": "return NSNotFound",
-    "NSComboBoxCellDataSource.comboBoxCell(_:indexOfItemWithStringValue:)": "return NSNotFound"
+    "NSComboBoxCellDataSource.comboBoxCell(_:indexOfItemWithStringValue:)": "return NSNotFound",
+    "NSPageControllerDelegate.pageController(_:frameFor:)": "return pageController.view.bounds",
+    "NSPageControllerDelegate.pageController(_:identifierFor:)": "return \"\"",
+    "NSPageControllerDelegate.pageController(_:viewControllerForIdentifier:)": "return NSViewController()"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",
