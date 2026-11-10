@@ -149,6 +149,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         fflush(nil)
     }
 
+    /// ` text "…"` when the sheet's field holds anything but whitespace; nothing otherwise.
+    static func textSuffix(_ field: NSTextField) -> String {
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "" : " text \"\(text)\""
+    }
+
     private func describe(_ response: NSApplication.ModalResponse) -> String {
         switch response {
         case .OK: return "OK"
@@ -235,7 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     func showCustom() {
         let (sheet, field) = makeCustomSheet(title: "A custom sheet", nested: true)
         window.beginSheet(sheet) { [weak self] response in
-            self?.report("custom sheet ended: \(self?.describe(response) ?? "")" + (field.stringValue.isEmpty ? "" : " text \"\(field.stringValue)\""))
+            self?.report("custom sheet ended: \(self?.describe(response) ?? "")\(AppDelegate.textSuffix(field))")
         }
         sheet.makeFirstResponder(field)
     }
@@ -249,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         sheet.makeFirstResponder(field)
         let response = NSApp.runModal(for: sheet)
         window.endSheet(sheet, returnCode: response)
-        report("modal sheet ended: \(describe(response))" + (field.stringValue.isEmpty ? "" : " text \"\(field.stringValue)\""))
+        report("modal sheet ended: \(describe(response))\(AppDelegate.textSuffix(field))")
     }
 
     /// Two sheets begun at once: the second waits until the first ends.
