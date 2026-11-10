@@ -66,7 +66,9 @@ attaches the sheet with its native mechanism behind that hook.
   one point high to its full height over 0.25 s (ease-out) with the content view pinned to
   the top, and rolls back up over 0.2 s when it ends; a `CADisplayLink` on Core Animation's
   frame clock drives the steps (`CARuntime.now`, so tests use a fake clock). A window with
-  `animationBehavior == .none`, or `NSWindow._sheetAnimationDuration == 0`, skips it.
+  `animationBehavior == .none`, or `NSWindow._sheetAnimationDuration == 0`, skips it; the
+  duration defaults to 0 on the headless host backend (tests, the macOS host build), where
+  nothing spins the run loop for frames.
 - **Modality.** A window with an attached sheet is blocked: its `sendEvent` drops mouse
   events for its content and forwards key events to the attached sheet (that is how a sheet
   gets the keyboard on Wayland, where focus stays with the toplevel); `becomeKey` on it

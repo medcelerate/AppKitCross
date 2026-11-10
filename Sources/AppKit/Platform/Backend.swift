@@ -62,8 +62,9 @@ public protocol PlatformBackend: AnyObject {
     var image: any PlatformImageBackend { get }
     /// The system clipboard.
     var systemPasteboard: any PlatformPasteboard { get }
-    /// Shows the native open/save dialog modally; nil when cancelled.
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]?
+    /// The operating system's open/save dialog (FileDialog.swift, ADR-0017); nil when the
+    /// panels should draw themselves.
+    var fileDialog: (any PlatformFileDialog)? { get }
     /// Runs a nested event loop for a modal window until `stop` reports true.
     /// Other windows of the application do not receive input meanwhile.
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
@@ -114,6 +115,9 @@ public protocol PlatformWindow: AnyObject {
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
     func setNeedsDisplay(_ rect: NSRect?)
+    /// `NSWindow.isDocumentEdited`: platforms with native title bars mark the title (an
+    /// asterisk before it, as their own editors do); the default does nothing.
+    func setDocumentEdited(_ edited: Bool)
     /// Chrome beyond the style mask: title bar treatment, backdrop, shadow (Milestone 3b).
     var chrome: PlatformWindowChrome { get set }
     /// The platform draws no title bar of its own and wants the owner's (Wayland client-side
@@ -189,6 +193,7 @@ extension PlatformBackend {
 }
 
 extension PlatformWindow {
+    public func setDocumentEdited(_ edited: Bool) { }
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
@@ -246,23 +251,6 @@ public protocol PlatformWindowOwner: AnyObject {
     func platformDrop(_ drag: PlatformDragInfo) -> NSDragOperation
     /// The window's accessibility tree and actions (Accessibility.swift, ADR-0013).
     var platformAccessibility: any PlatformAccessibilityProvider { get }
-}
-
-public struct PlatformFileDialogOptions: Sendable {
-    public var isSave = false
-    public var title: String? = nil
-    public var prompt: String? = nil            // confirm button label
-    public var message: String? = nil
-    public var directory: URL? = nil
-    public var defaultName: String? = nil
-    public var allowedExtensions: [String] = []  // without dots; empty = any
-    public var allowsOtherTypes = true
-    public var canChooseFiles = true
-    public var canChooseDirectories = false
-    public var allowsMultipleSelection = false
-    public var canCreateDirectories = true
-    public var showsHiddenFiles = false
-    public init() {}
 }
 
 /// Window chrome a backend can offer beyond the style mask (Milestone 3b: frameless and

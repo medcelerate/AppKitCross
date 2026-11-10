@@ -118,6 +118,7 @@ import CoreText
             let v = _NSWindowButtonsView()
             v.nextResponder = self
             v._setWindow(self)
+            v.close.isDocumentEdited = _isDocumentEdited
             for (kind, b) in [(NSWindow.ButtonType.closeButton, v.close), (.miniaturizeButton, v.miniaturize), (.zoomButton, v.zoom)] {
                 b.target = self
                 let selector = kind == .closeButton ? "performClose:" : kind == .miniaturizeButton ? "performMiniaturize:" : "performZoom:"
@@ -561,7 +562,11 @@ import CoreText
         if _isBlockedBySheet { Platform.backend.beep(); return false }    // the close button is disabled under a sheet
         let should = delegate?.windowShouldClose(self) ?? true
         if NSView._traceInvalidation { NSView._trace("shouldClose \'\(_title)\' -> \(should)") }
-        return should
+        guard should, let wc = _windowController, let doc = wc.document as? NSDocument else { return should }
+        // The native close button on a document window: the document decides, and closes
+        // the window itself when it may.
+        doc._shouldCloseWindowController(wc) { [weak self] shouldClose in if shouldClose { self?.close() } }
+        return false
     }
 
     public func platformWindowWillClose() {
@@ -734,8 +739,9 @@ import CoreText
     /// `.sheet`, as on macOS). Not part of Apple's API: SwiftUI sets it on its sheets.
     public var _cancelsSheetOnEscape = false
     /// How long the slide in takes (the slide out takes four fifths); 0 skips the
-    /// animation, which tests use. Not part of Apple's API.
-    public static var _sheetAnimationDuration: TimeInterval = 0.25
+    /// animation. Off on the headless host backend (tests and the macOS host build), whose
+    /// run loop nobody spins for frames; the slide test turns it on. Not part of Apple's API.
+    public static var _sheetAnimationDuration: TimeInterval = Platform.backend is HostBackend ? 0 : 0.25
     /// The window is closed once its sheet session ends (after the slide out): for sheets
     /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
     /// linger hidden in the application's window list. Not part of Apple's API.
@@ -881,6 +887,11 @@ import CoreText
         if let previous = app.keyWindow, previous !== self { previous.resignKey() }
         _isKey = true
         app._keyWindow = self
+        // The first time the window is key, `initialFirstResponder` takes focus (macOS
+        // does this when the window is first shown), so typing reaches the document's view.
+        if firstResponder == nil || firstResponder === self, let initial = _initialFirstResponder, initial.window === self {
+            makeFirstResponder(initial)
+        }
         _toolbar?.validateVisibleItems()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
@@ -958,6 +969,7 @@ import CoreText
         _isClosing = true
         post(NSWindow.willCloseNotification)
         delegate?.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: self))
+        _windowController?._windowWillClose()
         let disappearing = isVisible
         let wasKey = _isKey
         if disappearing { _contentView?._windowVisibilityWillChange(false) }
@@ -1332,9 +1344,19 @@ import CoreText
         set { _isAutodisplay = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isdocumentedited
+    /// The edited state shows as a dot in the close button of a package-drawn title bar
+    /// (as macOS marks it) and as the platform's own mark in native title bars (an
+    /// asterisk before the title on Windows and Linux).
     @MainActor open var isDocumentEdited: Bool {
         get { _isDocumentEdited }
-        set { _isDocumentEdited = newValue }
+        set {
+            guard _isDocumentEdited != newValue else { return }
+            _isDocumentEdited = newValue
+            _platform?.setDocumentEdited(newValue)
+            _ensureWindowButtons()
+            _windowButtons?.close.isDocumentEdited = newValue
+            if _hasClientSideTitleBar { _platform?.setNeedsDisplay(nil) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isexcludedfromwindowsmenu
     @MainActor open var isExcludedFromWindowsMenu: Bool {
@@ -1567,9 +1589,16 @@ import CoreText
         set { _parent = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performclose(_:)
+    /// The delegate's `windowShouldClose` first; then a window with a document asks the
+    /// document (`shouldCloseWindowController`), whose unsaved-changes alert may cancel.
     @MainActor open func performClose(_ sender: Any?) {
         guard _styleMask.contains(.closable), !_isBlockedBySheet else { Platform.backend.beep(); return }
-        if delegate?.windowShouldClose(self) ?? true { close() }
+        guard delegate?.windowShouldClose(self) ?? true else { return }
+        if let wc = _windowController, let doc = wc.document as? NSDocument {
+            doc._shouldCloseWindowController(wc) { [weak self] shouldClose in if shouldClose { self?.close() } }
+            return
+        }
+        close()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performdrag(with:)
     @available(macOS 10.11, *)
@@ -1619,8 +1648,8 @@ import CoreText
     @MainActor open func removeTitlebarAccessoryViewController(at index: Int) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/representedfilename
     @MainActor open var representedFilename: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _representedURL?.path ?? "" }
+        set { _representedURL = newValue.isEmpty ? nil : URL(fileURLWithPath: newValue) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/representedurl
     @MainActor open var representedURL: URL? {
@@ -1845,7 +1874,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setiszoomed(_:)
     @MainActor open func setIsZoomed(_ flag: Bool) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/settitlewithrepresentedfilename(_:)
-    @MainActor open func setTitleWithRepresentedFilename(_ filename: String) { unimplemented() }
+    @MainActor open func setTitleWithRepresentedFilename(_ filename: String) {
+        representedFilename = filename
+        title = (filename as NSString).lastPathComponent
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sharingtype
     @MainActor open var sharingType: NSWindow.SharingType {
         get { unimplemented() }
@@ -2015,9 +2047,24 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/willstartliveresizenotification
     static public var willStartLiveResizeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSWindowWillStartLiveResizeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowcontroller
+    /// The controller is the window's next responder, so actions and the undo manager
+    /// reach it and its document.
     @MainActor open var windowController: NSWindowController? {
         get { _windowController }
-        set { _windowController = newValue }
+        set {
+            _windowController = newValue
+            nextResponder = newValue
+        }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/undomanager
+    /// The delegate's (`windowWillReturnUndoManager`), else the window controller's (a
+    /// document's), else one of the window's own.
+    private var _ownUndoManager: UndoManager? = nil
+    @MainActor open override var undoManager: UndoManager? {
+        if let d = delegate, let m = d.windowWillReturnUndoManager(self) { return m }
+        if let wc = _windowController, let m = wc.undoManager { return m }
+        if _ownUndoManager == nil { _ownUndoManager = UndoManager() }
+        return _ownUndoManager
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windownumber
     @MainActor open var windowNumber: Int { _windowNumber }

@@ -38,6 +38,38 @@ import CoreText
         super.init()
         window?.windowController = self
     }
+
+    /// The window's `nextResponder` is its controller, and the controller answers for its
+    /// document: actions that neither the window's views nor the window handle reach the
+    /// document (`saveDocument:`, `revertDocumentToSaved:`, ...), as on macOS.
+    @MainActor open override func tryToPerform(_ action: Selector, with object: Any?) -> Bool {
+        if ActionRegistry.perform(action, on: self, with: object) { return true }
+        if let doc = _document, ActionRegistry.perform(action, on: doc, with: object) { return true }
+        return nextResponder?.tryToPerform(action, with: object) ?? false
+    }
+
+    /// Whether the controller or its document would handle `action` (for menu validation).
+    @MainActor internal func _canPerform(_ action: Selector) -> AnyObject? {
+        if ActionRegistry.canPerform(action, on: self) { return self }
+        if let doc = _document, ActionRegistry.canPerform(action, on: doc) { return doc }
+        return nil
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/undomanager
+    /// The document's undo manager when the controller has an `NSDocument`.
+    @MainActor open override var undoManager: UndoManager? {
+        if let doc = _document as? NSDocument { return doc.undoManager }
+        return nextResponder?.undoManager
+    }
+
+    /// The window is closing: the document drops this controller (and closes when it was
+    /// the last one or `shouldCloseDocument`).
+    @MainActor internal func _windowWillClose() {
+        if let doc = _document as? NSDocument { doc._windowControllerDidClose(self) }
+    }
+
+    /// Sets the document without touching the title (used while a document drops the controller).
+    @MainActor internal func _setDocumentWithoutSync(_ document: AnyObject?) { _document = document }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/init(windownibname:)
     @MainActor public convenience init(windowNibName: NSNib.Name) {
         self.init(window: nil)
@@ -71,7 +103,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/document
     @MainActor open var document: AnyObject? {
         get { _document }
-        set { _document = newValue; synchronizeWindowTitleWithDocumentName() }
+        set {
+            _document = newValue
+            if _windowLoaded { synchronizeWindowTitleWithDocumentName() }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/iswindowloaded
     @MainActor open var isWindowLoaded: Bool { _windowLoaded }
@@ -90,6 +125,7 @@ import CoreText
         w.windowController = self
         _window = w
     }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/owner
     @MainActor open var owner: AnyObject? { _owner ?? self }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/previewrepresentableactivityitems
@@ -116,8 +152,15 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open var storyboard: NSStoryboard? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/synchronizewindowtitlewithdocumentname()
+    /// The window's title becomes `windowTitle(forDocumentDisplayName:)` of the document's
+    /// display name, its represented URL the document's file and its edited dot the
+    /// document's edited state.
     @MainActor open func synchronizeWindowTitleWithDocumentName() {
-        // NSDocument is not implemented yet, so there is no display name to take.
+        guard let doc = _document as? NSDocument, _windowLoaded, let w = _window else { return }
+        let name = doc.displayName ?? ""
+        w.title = windowTitle(forDocumentDisplayName: name)
+        w.representedURL = doc.fileURL
+        w.isDocumentEdited = doc.isDocumentEdited
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/window
     @MainActor open var window: NSWindow? {
@@ -127,6 +170,7 @@ import CoreText
                 windowWillLoad()
                 loadWindow()
                 windowDidLoad()
+                synchronizeWindowTitleWithDocumentName()
             }
             return _window
         }
@@ -135,6 +179,7 @@ import CoreText
             _window = newValue
             _windowLoaded = newValue != nil
             newValue?.windowController = self
+            if newValue != nil { synchronizeWindowTitleWithDocumentName() }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/windowdidload()

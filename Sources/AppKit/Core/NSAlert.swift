@@ -31,6 +31,9 @@ import CoreText
     private var _window: NSPanel? = nil
     private var _response: NSApplication.ModalResponse = .cancel
     private var _sheetCompletion: ((NSApplication.ModalResponse) -> Void)? = nil
+    /// A sheet keeps its alert alive until a button ends it (the buttons only hold their
+    /// target weakly, and callers rarely keep the alert themselves).
+    private var _retainedWhileSheetIsUp: NSAlert? = nil
 
     @MainActor public override init() { super.init() }
 
@@ -118,10 +121,6 @@ import CoreText
         completion(response)
         _ = keepAlive
     }
-
-    /// A sheet keeps its alert alive until it ends (the buttons only hold their target
-    /// weakly, and callers rarely keep the alert themselves).
-    private var _retainedWhileSheetIsUp: NSAlert? = nil
 
     @MainActor open func beginSheetModal(for sheetWindow: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
         // The panel is attached to the window as a sheet (ADR-0019); a button ends it with
