@@ -102,6 +102,11 @@ import UniformTypeIdentifiers
             return type.flatMap { _typeDisplayNames[$0.identifier] ?? $0.localizedDescription } ?? ext.uppercased()
         }
         o.allowsOtherTypes = _allowsOtherFileTypes || o.allowedExtensions.isEmpty
+        if let current = _currentContentType, let ext = current.preferredFilenameExtension?.lowercased(), o.allowedExtensions.contains(ext) {
+            o.defaultExtension = ext
+        } else if let ext = (_nameFieldStringValue as NSString).pathExtension.lowercased() as String?, !ext.isEmpty, o.allowedExtensions.contains(ext) {
+            o.defaultExtension = ext
+        }
         o.canCreateDirectories = _canCreateDirectories
         o.showsHiddenFiles = _showsHiddenFiles
         o.treatsFilePackagesAsDirectories = _treatsFilePackagesAsDirectories

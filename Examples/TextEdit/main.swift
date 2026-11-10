@@ -14,12 +14,26 @@ import Foundation
 #if canImport(UniformTypeIdentifiers)
 import UniformTypeIdentifiers
 #endif
+#if os(Windows)
+import WinSDK
+#endif
+
+/// Sets an environment variable for this process (`setenv` is POSIX; Windows has
+/// `SetEnvironmentVariableW`, which `ProcessInfo.environment` reads back).
+func setEnvironmentVariable(_ name: String, _ value: String) {
+#if os(Windows)
+    let n = Array(name.utf16) + [0], v = Array(value.utf16) + [0]
+    _ = n.withUnsafeBufferPointer { n in v.withUnsafeBufferPointer { v in SetEnvironmentVariableW(n.baseAddress, v.baseAddress) } }
+#else
+    setenv(name, value, 1)
+#endif
+}
 
 // Without a bundle, the document controller reads Info.plist from APPKITWIN_INFO_PLIST
 // or from next to the executable; SwiftPM puts resources elsewhere (and refuses a resource
 // named Info.plist), so point it at the copy in the resource bundle.
 if ProcessInfo.processInfo.environment["APPKITWIN_INFO_PLIST"] == nil, let plist = Bundle.module.url(forResource: "TextEdit-Info", withExtension: "plist", subdirectory: "Resources") {
-    setenv("APPKITWIN_INFO_PLIST", plist.path, 1)
+    setEnvironmentVariable("APPKITWIN_INFO_PLIST", plist.path)
 }
 
 /// One text document: plain text (UTF-8) or RTF, edited in an NSTextView.

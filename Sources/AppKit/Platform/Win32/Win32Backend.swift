@@ -509,13 +509,25 @@ final class Win32FileDialog: PlatformFileDialog {
         let prompt = Array((options.prompt ?? "").utf16) + [0]
         let name = Array((options.defaultName ?? "").utf16) + [0]
         let dir = Array((options.directory?.path.replacingOccurrences(of: "/", with: "\\") ?? "").utf16) + [0]
-        let exts = Array(options.allowedExtensions.joined(separator: ";").utf16) + [0]
+        // One filter group per type: extensions that share a description (a content type)
+        // form a group; without descriptions every extension is one "Supported files" group.
+        var groups: [(label: String, extensions: [String])] = []
+        if options.allowedTypeDescriptions.count == options.allowedExtensions.count {
+            for (ext, label) in zip(options.allowedExtensions, options.allowedTypeDescriptions) {
+                if let i = groups.firstIndex(where: { $0.label == label }) { groups[i].extensions.append(ext) } else { groups.append((label, [ext])) }
+            }
+        } else if !options.allowedExtensions.isEmpty {
+            groups = [("", options.allowedExtensions)]
+        }
+        let exts = Array(groups.map { $0.extensions.joined(separator: ";") }.joined(separator: "|").utf16) + [0]
+        let labels = Array(groups.map { $0.label.replacingOccurrences(of: "|", with: "/") }.joined(separator: "|").utf16) + [0]
+        let defaultExt = Array((options.defaultExtension ?? "").utf16) + [0]
         var out: UnsafeMutablePointer<UInt16>? = nil
         var outLen: UInt32 = 0
         let hwnd = (parent as? Win32Window)?.hwnd
-        let ok = title.withUnsafeBufferPointer { t in prompt.withUnsafeBufferPointer { p in name.withUnsafeBufferPointer { n in dir.withUnsafeBufferPointer { d in exts.withUnsafeBufferPointer { e in
-            cd2d_file_dialog(hwnd.map { UnsafeMutableRawPointer($0) }, &o, t.baseAddress, p.baseAddress, n.baseAddress, d.baseAddress, e.baseAddress, &out, &outLen)
-        } } } } }
+        let ok = title.withUnsafeBufferPointer { t in prompt.withUnsafeBufferPointer { p in name.withUnsafeBufferPointer { n in dir.withUnsafeBufferPointer { d in exts.withUnsafeBufferPointer { e in labels.withUnsafeBufferPointer { l in defaultExt.withUnsafeBufferPointer { x in
+            cd2d_file_dialog(hwnd.map { UnsafeMutableRawPointer($0) }, &o, t.baseAddress, p.baseAddress, n.baseAddress, d.baseAddress, e.baseAddress, l.baseAddress, x.baseAddress, &out, &outLen)
+        } } } } } } }
         guard ok, let out else { return nil }
         defer { cd2d_file_dialog_free(out) }
         // Paths are NUL-separated, double NUL terminated.

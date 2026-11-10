@@ -26,6 +26,10 @@ public struct PlatformFileDialogOptions: Sendable {
     /// known (the dialog's type filter labels).
     public var allowedTypeDescriptions: [String] = []
     public var allowsOtherTypes = true
+    /// The extension of the type selected to begin with (a save panel's current content
+    /// type): a native dialog preselects that type's filter and appends it to a name typed
+    /// without one. nil means the first allowed extension.
+    public var defaultExtension: String? = nil
     public var canChooseFiles = true
     public var canChooseDirectories = false
     public var allowsMultipleSelection = false

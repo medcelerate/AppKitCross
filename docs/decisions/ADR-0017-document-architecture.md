@@ -102,8 +102,11 @@ file/directory/multiple choices, hidden files) and returns the chosen URLs; nil 
 panel draws itself.
 
 - Windows: `Win32FileDialog` over the CD2D shim's `cd2d_file_dialog`
-  (`IFileOpenDialog`/`IFileSaveDialog`, type filters from the extensions, parented to the
-  key window's HWND).
+  (`IFileOpenDialog`/`IFileSaveDialog`, one `COMDLG_FILTERSPEC` per content type named by
+  its description or `CFBundleTypeName`, "All supported files" first on open dialogs and
+  "All files" last when other types are allowed, the save panel's current type preselected
+  and its extension set as the dialog's default so a name typed without one gets it and
+  the dialog swaps it when the filter changes, parented to the key window's HWND).
 - Linux: `LinuxFileChooserPortal` talks `org.freedesktop.portal.FileChooser` over libdbus on
   a private session-bus connection: `OpenFile`/`SaveFile` with the `a{sv}` options
   (`handle_token`, `modal`, `multiple`, `directory`, `accept_label`, `current_name`,
