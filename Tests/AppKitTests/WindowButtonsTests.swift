@@ -284,6 +284,34 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// Under either button style, a plain titled window and a `fullSizeContentView` window
+    /// come up with their frames and titles intact after `makeKeyAndOrderFront`: the
+    /// buttons overlay never feeds the platform window an empty frame or steals the title.
+    func testWindowsKeepTheirFramesAndTitlesUnderBothStyles() {
+        for style in [PlatformWindowButtonStyle.trafficLights, .caption] {
+            MainActor.assumeIsolated {
+                let host = Platform.backend as! HostBackend
+                host.windowButtonStyle = style
+                defer { host.windowButtonStyle = .trafficLights }
+                for mask in [NSWindow.StyleMask([.titled, .closable, .miniaturizable, .resizable]),
+                             [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]] {
+                    let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 600, height: 300), styleMask: mask, backing: .buffered, defer: false)
+                    defer { w.close() }
+                    w.title = "Toolbar"
+                    w.makeKeyAndOrderFront(nil)
+                    let platform = w._platformWindow as! HostWindow
+                    XCTAssertTrue(platform.isVisible, "\(style) \(mask.rawValue)")
+                    XCTAssertEqual(platform.title, "Toolbar", "\(style) \(mask.rawValue)")
+                    XCTAssertEqual(platform.frame.width, 600, "\(style) \(mask.rawValue)")
+                    XCTAssertGreaterThanOrEqual(platform.frame.height, 300, "\(style) \(mask.rawValue)")
+                    XCTAssertEqual(w.contentRect(forFrameRect: w.frame).size, NSSize(width: 600, height: 300), "\(style) \(mask.rawValue)")
+                    XCTAssertEqual(w.contentView!.frame.size, NSSize(width: 600, height: 300), "\(style) \(mask.rawValue)")
+                    XCTAssertEqual(w._showsWindowButtons, mask.contains(.fullSizeContentView))
+                }
+            }
+        }
+    }
+
     func testClassFactoryHonoursTheStyleMask() {
         MainActor.assumeIsolated {
             XCTAssertTrue(NSWindow.standardWindowButton(.closeButton, for: [.titled, .closable])!.isEnabled)
