@@ -79,7 +79,7 @@ import CoreText
         let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?._autorepeatFired() }
         }
-        RunLoop.main.add(t, forMode: .common)
+        RunLoop.main.add(t, forMode: .default)
         _repeatTimer = t
     }
 

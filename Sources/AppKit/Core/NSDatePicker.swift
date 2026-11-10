@@ -110,7 +110,7 @@ import CoreText
                 self._scheduleStepperRepeat(after: NSStepper.autorepeatInterval)
             }
         }
-        RunLoop.main.add(t, forMode: .common)
+        RunLoop.main.add(t, forMode: .default)
         _stepperRepeat = t
     }
 

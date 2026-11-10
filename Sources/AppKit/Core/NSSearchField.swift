@@ -68,7 +68,7 @@ import CoreText
         let t = Timer(timeInterval: NSSearchField.searchDelay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?._fireSearch() }
         }
-        RunLoop.main.add(t, forMode: .common)
+        RunLoop.main.add(t, forMode: .default)
         _searchTimer = t
     }
 
