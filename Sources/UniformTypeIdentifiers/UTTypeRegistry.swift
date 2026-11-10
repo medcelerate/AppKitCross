@@ -69,9 +69,15 @@ final class UTTypeRegistry: @unchecked Sendable {
     /// Declares `identifier` (an exported or imported type). Core types are never
     /// redeclared; a second declaration of an app type replaces the first.
     func declare(_ identifier: String, conformingTo parent: String?) -> UTTypeRecord {
+        declare(identifier, conformingTo: parent.map { [$0] } ?? [], extensions: [], mimeTypes: [], description: nil)
+    }
+
+    /// A full declaration, as an Info.plist `UTExportedTypeDeclarations` entry gives it.
+    @discardableResult
+    func declare(_ identifier: String, conformingTo parents: [String], extensions: [String], mimeTypes: [String], description: String?) -> UTTypeRecord {
         lock.lock(); defer { lock.unlock() }
         if let existing = byIdentifier[identifier.lowercased()], utCoreIdentifiers.contains(identifier.lowercased()) { return existing }
-        let record = UTTypeRecord(identifier, parent.map { [$0] } ?? [], [], [], nil, nil, nil)
+        let record = UTTypeRecord(identifier, parents, extensions, mimeTypes, description, nil, nil)
         insert(record)
         return record
     }

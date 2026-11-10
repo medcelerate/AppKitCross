@@ -74,7 +74,7 @@ targets += [
     .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
-appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO"]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -139,7 +139,7 @@ targets += [
     .target(name: "CALSA", path: "Sources/CALSA", linkerSettings: [.linkedLibrary("dl")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
-appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO"]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO", "UniformTypeIdentifiers"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -263,6 +263,10 @@ targets += [
     .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
+    // The document-based example: its Info.plist (CFBundleDocumentTypes) travels as a
+    // resource (SwiftPM refuses a resource named Info.plist, hence Resources/TextEdit-Info.plist)
+    // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
+    .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,

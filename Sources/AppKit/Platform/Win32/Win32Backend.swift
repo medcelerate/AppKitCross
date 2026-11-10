@@ -344,31 +344,9 @@ final class Win32Backend: PlatformBackend {
 
     // MARK: File dialogs
 
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
-        var o = CD2DFileDialogOptions()
-        o.isSave = options.isSave
-        o.canChooseFiles = options.canChooseFiles
-        o.canChooseDirectories = options.canChooseDirectories
-        o.allowsMultiple = options.allowsMultipleSelection
-        o.allowsOtherTypes = options.allowsOtherTypes
-        o.showsHidden = options.showsHiddenFiles
-        let title = Array((options.title ?? "").utf16) + [0]
-        let prompt = Array((options.prompt ?? "").utf16) + [0]
-        let name = Array((options.defaultName ?? "").utf16) + [0]
-        let dir = Array((options.directory?.path.replacingOccurrences(of: "/", with: "\\") ?? "").utf16) + [0]
-        let exts = Array(options.allowedExtensions.joined(separator: ";").utf16) + [0]
-        var out: UnsafeMutablePointer<UInt16>? = nil
-        var outLen: UInt32 = 0
-        let hwnd = (parent as? Win32Window)?.hwnd
-        let ok = title.withUnsafeBufferPointer { t in prompt.withUnsafeBufferPointer { p in name.withUnsafeBufferPointer { n in dir.withUnsafeBufferPointer { d in exts.withUnsafeBufferPointer { e in
-            cd2d_file_dialog(hwnd.map { UnsafeMutableRawPointer($0) }, &o, t.baseAddress, p.baseAddress, n.baseAddress, d.baseAddress, e.baseAddress, &out, &outLen)
-        } } } } }
-        guard ok, let out else { return nil }
-        defer { cd2d_file_dialog_free(out) }
-        // Paths are NUL-separated, double NUL terminated.
-        let all = String(decoding: UnsafeBufferPointer(start: out, count: Int(outLen)), as: UTF16.self)
-        return all.split(separator: "\u{0}", omittingEmptySubsequences: true).map { URL(fileURLWithPath: String($0).replacingOccurrences(of: "\\", with: "/")) }
-    }
+    /// IFileOpenDialog / IFileSaveDialog through the CD2D shim (ADR-0017).
+    private lazy var win32FileDialog = Win32FileDialog()
+    var fileDialog: (any PlatformFileDialog)? { PlatformFileDialogPolicy.allowsNative ? win32FileDialog : nil }
 
     // MARK: Pasteboard and modal loops
 
@@ -513,3 +491,35 @@ final class Win32Backend: PlatformBackend {
     }
 }
 #endif
+
+/// The Windows common item dialog (`IFileOpenDialog` / `IFileSaveDialog`), shown by the
+/// CD2D shim. Type filters come from the allowed extensions; the dialog is modal to the
+/// parent HWND while the shim pumps messages.
+@MainActor
+final class Win32FileDialog: PlatformFileDialog {
+    func run(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
+        var o = CD2DFileDialogOptions()
+        o.isSave = options.isSave
+        o.canChooseFiles = options.canChooseFiles
+        o.canChooseDirectories = options.canChooseDirectories
+        o.allowsMultiple = options.allowsMultipleSelection
+        o.allowsOtherTypes = options.allowsOtherTypes
+        o.showsHidden = options.showsHiddenFiles
+        let title = Array((options.title ?? "").utf16) + [0]
+        let prompt = Array((options.prompt ?? "").utf16) + [0]
+        let name = Array((options.defaultName ?? "").utf16) + [0]
+        let dir = Array((options.directory?.path.replacingOccurrences(of: "/", with: "\\") ?? "").utf16) + [0]
+        let exts = Array(options.allowedExtensions.joined(separator: ";").utf16) + [0]
+        var out: UnsafeMutablePointer<UInt16>? = nil
+        var outLen: UInt32 = 0
+        let hwnd = (parent as? Win32Window)?.hwnd
+        let ok = title.withUnsafeBufferPointer { t in prompt.withUnsafeBufferPointer { p in name.withUnsafeBufferPointer { n in dir.withUnsafeBufferPointer { d in exts.withUnsafeBufferPointer { e in
+            cd2d_file_dialog(hwnd.map { UnsafeMutableRawPointer($0) }, &o, t.baseAddress, p.baseAddress, n.baseAddress, d.baseAddress, e.baseAddress, &out, &outLen)
+        } } } } }
+        guard ok, let out else { return nil }
+        defer { cd2d_file_dialog_free(out) }
+        // Paths are NUL-separated, double NUL terminated.
+        let all = String(decoding: UnsafeBufferPointer(start: out, count: Int(outLen)), as: UTF16.self)
+        return all.split(separator: "\u{0}", omittingEmptySubsequences: true).map { URL(fileURLWithPath: String($0).replacingOccurrences(of: "\\", with: "/")) }
+    }
+}
