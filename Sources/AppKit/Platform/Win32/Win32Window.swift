@@ -262,9 +262,20 @@ final class Win32Window: PlatformWindow {
         get { _title }
         set {
             _title = newValue
-            guard let hwnd else { return }
-            newValue.withCString(encodedAs: UTF16.self) { _ = SetWindowTextW(hwnd, $0) }
+            applyNativeTitle()
         }
+    }
+    /// `NSWindow.isDocumentEdited`: shown as "*" before the title, as Notepad does.
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        guard let hwnd else { return }
+        let shown = isDocumentEdited ? "*" + _title : _title
+        shown.withCString(encodedAs: UTF16.self) { _ = SetWindowTextW(hwnd, $0) }
     }
 
     var styleMask: NSWindow.StyleMask {

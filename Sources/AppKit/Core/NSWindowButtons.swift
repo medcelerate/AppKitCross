@@ -38,6 +38,9 @@ final class _NSWindowButton: NSButton {
     private(set) var hasCustomFrame = false
     /// Set by the row while it places the button, so its own placement is not "custom".
     fileprivate var placedByRow = false
+    /// The close button carries a dot while the window's document has unsaved changes
+    /// (on a traffic light; a Windows caption button shows nothing, as Windows does).
+    var isDocumentEdited = false { didSet { if isDocumentEdited != oldValue { needsDisplay = true } } }
     private var pressed = false
 
     static let trafficLightSize = NSSize(width: 12, height: 12)
@@ -95,6 +98,10 @@ final class _NSWindowButton: NSButton {
         NSColor(white: 0, alpha: 0.15).setStroke()
         circle.lineWidth = 0.5
         circle.stroke()
+        if kind == .closeButton, isDocumentEdited, !showsGlyph, isEnabled {
+            NSColor(white: 0, alpha: 0.55).setFill()
+            NSBezierPath(ovalIn: NSRect(x: bounds.midX - 2, y: bounds.midY - 2, width: 4, height: 4)).fill()
+        }
         guard showsGlyph, isEnabled else { return }
         let glyph = NSBezierPath()
         glyph.lineWidth = 1.5

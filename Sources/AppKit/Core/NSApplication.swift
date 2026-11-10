@@ -15,7 +15,24 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication
-@MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization {
+@MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization, NSSelectorHandling {
+    /// The application's own menu actions (`terminate:`, `hide:`, the About panel), at the
+    /// end of the responder chain as on macOS.
+    private static let _actions: Set<String> = ["terminate:", "hide:", "unhide:", "unhideAllApplications:", "orderFrontStandardAboutPanel:", "arrangeInFront:"]
+    public func respondsToSelectorAction(_ action: Selector) -> Bool { NSApplication._actions.contains(NSStringFromSelector(action)) }
+    public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "terminate:": terminate(sender)
+        case "hide:": hide(sender)
+        case "unhide:": unhide(sender)
+        case "unhideAllApplications:": unhideWithoutActivation()
+        case "orderFrontStandardAboutPanel:": orderFrontStandardAboutPanel(sender)
+        case "arrangeInFront:": arrangeInFront(sender)
+        default: return false
+        }
+        return true
+    }
+
     @MainActor public override init() {
         super.init()
         _CoreAnimationHost.installIfNeeded()
@@ -216,11 +233,21 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/extendstaterestoration()
     @MainActor open func extendStateRestoration() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/finishlaunching()
+    /// A document-based application (one whose Info.plist declares `CFBundleDocumentTypes`,
+    /// or that made a document controller already) opens the files named on the command
+    /// line, or an untitled document when `applicationShouldOpenUntitledFile` agrees,
+    /// between the will- and did-finish-launching messages, as macOS does.
     @MainActor open func finishLaunching() {
         guard !_finishedLaunching else { return }
         delegate?.applicationWillFinishLaunching(post(NSApplication.willFinishLaunchingNotification))
         _finishedLaunching = true
         activate(ignoringOtherApps: true)
+        if let dc = NSDocumentController._shared ?? (NSDocumentController._applicationDeclaresDocumentTypes ? NSDocumentController.shared : nil) {
+            dc._mainMenuDidChange()
+            if !dc._openCommandLineFiles(), delegate?.applicationShouldOpenUntitledFile(self) ?? true {
+                if delegate?.applicationOpenUntitledFile(self) != true, dc.defaultType != nil { dc.newDocument(nil) }
+            }
+        }
         delegate?.applicationDidFinishLaunching(post(NSApplication.didFinishLaunchingNotification))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/helpmenu
@@ -279,6 +306,7 @@ import CoreText
 
     /// Rebuilds the platform menu bar from the main menu tree.
     @MainActor internal func _mainMenuDidChange() {
+        NSDocumentController._shared?._mainMenuDidChange()
         guard !_menuRebuildSuppressed else { return }
         Platform.backend.setMainMenu(_mainMenu?._platformMenu(), host: self)
     }
@@ -295,13 +323,18 @@ import CoreText
     /// The object that would receive `action` for a nil target (responder chain from the
     /// key window's first responder, then the application, then its delegate).
     @MainActor internal func _target(forAction action: Selector) -> AnyObject? {
-        var r: NSResponder? = keyWindow?.firstResponder
-        while let cur = r {
-            if ActionRegistry.canPerform(action, on: cur) { return cur }
-            r = cur.nextResponder
+        for window in [keyWindow, mainWindow].compactMap({ $0 }) {
+            var r: NSResponder? = window.firstResponder
+            while let cur = r {
+                if ActionRegistry.canPerform(action, on: cur) { return cur }
+                // A window controller answers for its document too.
+                if let wc = cur as? NSWindowController, let t = wc._canPerform(action) { return t }
+                r = cur.nextResponder
+            }
         }
         if ActionRegistry.canPerform(action, on: self) { return self }
         if let d = delegate, ActionRegistry.canPerform(action, on: d) { return d }
+        if let dc = NSDocumentController._shared, ActionRegistry.canPerform(action, on: dc) { return dc }
         return nil
     }
 
@@ -431,7 +464,9 @@ import CoreText
         if let key = keyWindow, key.firstResponder?.tryToPerform(action, with: sender) == true { return true }
         if let main = mainWindow, main !== keyWindow, main.firstResponder?.tryToPerform(action, with: sender) == true { return true }
         if tryToPerform(action, with: sender) { return true }
-        if let d = delegate { return ActionRegistry.perform(action, on: d, with: sender) }
+        if let d = delegate, ActionRegistry.perform(action, on: d, with: sender) { return true }
+        // The document controller ends the chain (newDocument:, openDocument:, ...).
+        if let dc = NSDocumentController._shared, ActionRegistry.perform(action, on: dc, with: sender) { return true }
         return false
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
@@ -504,13 +539,22 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/target(foraction:to:from:)
     @MainActor open func target(forAction action: Selector, to target: Any?, from sender: Any?) -> Any? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/terminate(_:)
+    /// After the delegate agrees, the document controller reviews unsaved documents
+    /// (each one's Save / Cancel / Don't Save); Cancel keeps the application running.
     @MainActor open func terminate(_ sender: Any?) {
         let reply = delegate?.applicationShouldTerminate(self) ?? .terminateNow
         switch reply {
         case .terminateCancel: return
         case .terminateLater: return      // the delegate calls reply(toApplicationShouldTerminate:)
-        default: _terminateNow()
+        default: break
         }
+        if let dc = NSDocumentController._shared, dc.hasEditedDocuments {
+            dc._reviewUnsavedDocuments(title: "Quit", cancellable: true) { [weak self] ok in
+                if ok { self?._terminateNow() }
+            }
+            return
+        }
+        _terminateNow()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/toggletouchbarcustomizationpalette(_:)
     @available(macOS 10.12, *)
