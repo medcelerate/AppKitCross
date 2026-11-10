@@ -131,6 +131,7 @@ fields confirm or navigate on Return. The delegate's `shouldEnable`, `userEntere
 called at the same points as on macOS; the native path applies `validate` to the dialog's
 answer. The controls are ordinary AppKit controls with accessibility labels, so the
 panel is reachable through the UI Automation and AT-SPI bridges (ADR-0013).
+`docs/images/textedit-linux-save-panel.png` is the panel under Xvfb (`tools/linux/run.sh`).
 
 `runModal` runs the panel through `NSApplication.runModal(for:)`, `begin` shows it
 modeless with a completion, `beginSheetModal` attaches it with `NSWindow.beginSheet`

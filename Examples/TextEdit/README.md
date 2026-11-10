@@ -3,6 +3,8 @@
 A document-based application: `NSDocument` and `NSDocumentController` with plain-text,
 Markdown and RTF documents, same source on macOS, Windows and Linux.
 
+![TextEdit's save panel under Xvfb on Linux (the package-drawn panel, ADR-0017)](../../docs/images/textedit-linux-save-panel.png)
+
 What it demonstrates:
 
 - `TextDocument: NSDocument` overriding `read(from:ofType:)` and `data(ofType:)` (UTF-8
