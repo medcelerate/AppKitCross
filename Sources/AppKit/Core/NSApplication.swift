@@ -81,6 +81,9 @@ import CoreText
     private func _terminateNow() -> Never {
         _ = post(NSApplication.willTerminateNotification)
         delegate?.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification, object: self))
+        // Flush the defaults (window frames, toolbar configurations, @AppStorage) before
+        // exit(): swift-corelibs-foundation writes the file only on synchronize().
+        UserDefaults.standard.synchronize()
         Platform.backend.stop()
         exit(0)
     }
@@ -432,6 +435,9 @@ import CoreText
         return false
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendevent(_:)
+    /// A click that arrived outside the event stream (a status item's): `currentEvent`
+    /// reports it while its action runs.
+    @MainActor internal func _setCurrentEvent(_ event: NSEvent) { _currentEvent = event }
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
         // A drag in progress owns the mouse (and Escape) until it drops or cancels.
