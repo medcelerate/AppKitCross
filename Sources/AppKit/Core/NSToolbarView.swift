@@ -312,6 +312,9 @@ final class _NSToolbarView: NSView {
     private(set) var overflowItems: [NSToolbarItem] = []
     /// Where each shown item sits (its button or view frame), for labels and selection.
     private var slots: [(item: NSToolbarItem, frame: NSRect)] = []
+    /// Where an item is drawn in the band (nil when it is in the overflow menu). NSPopover
+    /// anchors on it for `show(relativeTo:)`.
+    func _frame(ofItem item: NSToolbarItem) -> NSRect? { slots.first { $0.item === item }?.frame }
     private var separators: [NSRect] = []
     static let overflowChosen = Selector(("_toolbarOverflowItemChosen:"))
 

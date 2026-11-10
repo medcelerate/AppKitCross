@@ -207,6 +207,7 @@ extension Win32Window {
     /// AppKit roles → UIA control types (the UIA_*ControlTypeId constants).
     private static func controlType(for e: PlatformAccessibilityElement) -> Int32 {
         if e.subrole == "AXTabButton" { return 50019 }      // TabItem
+        if e.subrole == "AXSwitch" { return 50000 }         // Button with the Toggle pattern (a toggle switch)
         switch e.role {
         case "AXButton", "AXMenuButton": return 50000
         case "AXCheckBox": return 50002
@@ -223,7 +224,7 @@ extension Win32Window {
         case "AXGroup", "AXSplitGroup", "AXCell": return 50026
         case "AXRadioGroup": return 50008      // List of radio-button items (a segmented control)
         case "AXTabGroup": return 50018
-        case "AXWindow", "AXSheet", "AXDrawer": return 50032
+        case "AXWindow", "AXSheet", "AXDrawer", "AXPopover": return 50032
         case "AXMenu", "AXMenuBar": return 50009
         case "AXMenuItem", "AXMenuBarItem": return 50011
         case "AXLink": return 50005

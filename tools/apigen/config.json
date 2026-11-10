@@ -52,6 +52,7 @@
     "NSPasteboardItem",
     "NSPopUpButton",
     "NSPopUpButtonCell",
+    "NSPopover",
     "NSPressGestureRecognizer",
     "NSResponder",
     "NSRotationGestureRecognizer",
@@ -72,6 +73,7 @@
     "NSStatusBar",
     "NSStatusBarButton",
     "NSStatusItem",
+    "NSSwitch",
     "NSTabView",
     "NSTabViewController",
     "NSTabViewItem",
@@ -350,7 +352,8 @@
     "NSOutlineViewDelegate.outlineView(_:selectionIndexesForProposedSelection:)": "return proposedSelectionIndexes",
     "NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:)": "return []",
     "NSComboBoxDataSource.comboBox(_:indexOfItemWithStringValue:)": "return NSNotFound",
-    "NSComboBoxCellDataSource.comboBoxCell(_:indexOfItemWithStringValue:)": "return NSNotFound"
+    "NSComboBoxCellDataSource.comboBoxCell(_:indexOfItemWithStringValue:)": "return NSNotFound",
+    "NSPopoverDelegate.popoverShouldClose(_:)": "return true"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",

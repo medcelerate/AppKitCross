@@ -258,9 +258,20 @@ final class Win32Window: PlatformWindow {
         get { _title }
         set {
             _title = newValue
-            guard let hwnd else { return }
-            newValue.withCString(encodedAs: UTF16.self) { _ = SetWindowTextW(hwnd, $0) }
+            applyNativeTitle()
         }
+    }
+    /// `NSWindow.isDocumentEdited`: shown as "*" before the title, as Notepad does.
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        guard let hwnd else { return }
+        let shown = isDocumentEdited ? "*" + _title : _title
+        shown.withCString(encodedAs: UTF16.self) { _ = SetWindowTextW(hwnd, $0) }
     }
 
     var styleMask: NSWindow.StyleMask {
@@ -320,6 +331,38 @@ final class Win32Window: PlatformWindow {
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+
+    // MARK: Sheets (ADR-0019)
+
+    /// The style mask before the window became a sheet, restored when it is detached.
+    private var styleBeforeSheet: NSWindow.StyleMask?
+
+    /// A sheet is an owned, borderless popup: Windows keeps an owned window above its
+    /// owner, hides it while the owner is minimised and, without `WS_EX_APPWINDOW`, lists
+    /// it in neither the taskbar nor Alt-Tab. The borderless style drops the caption (the
+    /// shadow frame of ADR-0016 keeps the drop shadow) and the menu bar, which only titled
+    /// windows carry. Windows does not move owned windows with their owner: the core
+    /// re-places the sheet when the owner reports WM_MOVE/WM_SIZE.
+    func attachSheet(to parent: PlatformWindow?) {
+        guard let hwnd else { return }
+        if let owner = (parent as? Win32Window)?.hwnd {
+            if styleBeforeSheet == nil { styleBeforeSheet = _styleMask }
+            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, LONG_PTR(Int(bitPattern: owner)))
+            SetMenu(hwnd, nil)
+            styleMask = _styleMask.subtracting([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            let ex = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & ~DWORD(WS_EX_APPWINDOW)
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, LONG_PTR(ex))
+            if NSView._traceInvalidation { NSView._trace("win32 sheet '\(_title)' attached to owner \(owner)") }
+        } else {
+            SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, 0)
+            if let s = styleBeforeSheet {
+                styleBeforeSheet = nil
+                styleMask = s
+                if wantsMenuBar { backend.menuBar.apply(to: hwnd) }
+            }
+            if NSView._traceInvalidation { NSView._trace("win32 sheet '\(_title)' detached") }
+        }
+    }
 
     /// Pixels between the window rect and the client rect on each side, at `dpi`
     /// (`left`/`top` positive inward). A custom frame has none, except that a

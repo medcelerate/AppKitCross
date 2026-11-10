@@ -66,17 +66,14 @@ final class HostBackend: PlatformBackend {
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 
+    /// The host has no native dialog: the panels draw themselves. Tests may install one
+    /// (`HostFileDialog` records the options and answers a canned result).
+    var fileDialogOverride: (any PlatformFileDialog)? = nil
+    var fileDialog: (any PlatformFileDialog)? { fileDialogOverride }
+
     /// The in-process status area (StatusItem.swift): tests click its items.
     let hostStatusItems = HostStatusItems()
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
-
-    /// Test hook: what the next file dialog "chooses" (nil = cancel).
-    var nextFileDialogResult: [URL]? = nil
-    private(set) var lastFileDialogOptions: PlatformFileDialogOptions? = nil
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
-        lastFileDialogOptions = options
-        return nextFileDialogResult
-    }
 
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
         // Tests end modal sessions from inside the loop via posted blocks.
@@ -189,8 +186,12 @@ final class HostWindow: PlatformWindow {
         }
     }
 
-    func frameRect(forContentRect contentRect: NSRect) -> NSRect { backend.frameRect(forContentRect: contentRect, styleMask: styleMask) }
-    func contentRect(forFrameRect frameRect: NSRect) -> NSRect { backend.contentRect(forFrameRect: frameRect, styleMask: styleMask) }
+    /// The window this one is attached to as a sheet (ADR-0019); a sheet has no title bar.
+    private(set) weak var sheetParent: HostWindow?
+    func attachSheet(to parent: PlatformWindow?) { sheetParent = parent as? HostWindow }
+
+    func frameRect(forContentRect contentRect: NSRect) -> NSRect { sheetParent != nil ? contentRect : backend.frameRect(forContentRect: contentRect, styleMask: styleMask) }
+    func contentRect(forFrameRect frameRect: NSRect) -> NSRect { sheetParent != nil ? frameRect : backend.contentRect(forFrameRect: frameRect, styleMask: styleMask) }
 
     func show() {
         isVisible = true
@@ -403,6 +404,21 @@ final class HostPasteboard: PlatformPasteboard {
     private(set) var changeCount = 0
     func write(_ entries: [PlatformPasteboardEntry]) { self.entries = entries; changeCount += 1 }
     func read() -> [PlatformPasteboardEntry] { entries }
+}
+
+/// A stand-in native dialog for tests: records what the panel asked for and answers with
+/// `result` (nil cancels).
+@MainActor
+final class HostFileDialog: PlatformFileDialog {
+    var result: [URL]?
+    private(set) var lastOptions: PlatformFileDialogOptions?
+    private(set) var runCount = 0
+    init(result: [URL]?) { self.result = result }
+    func run(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
+        lastOptions = options
+        runCount += 1
+        return result
+    }
 }
 
 /// The host backend's status area: a registry of the items with what they show, and a
