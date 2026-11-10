@@ -451,6 +451,44 @@ final class OutlineViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// Assistive technology holds on to row elements (UI Automation providers, AT-SPI
+    /// objects) by their ids: after a collapse the rows still there keep their ids and
+    /// names, and the collapsed row's element still works for the next expand.
+    func testAccessibilityRowElementsFollowItemsAcrossCollapse() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            let tree = Tree(roots: sampleTree(), log: Log())
+            let (o, scroll) = makeOutline(tree, in: w)
+            scroll.frame = NSRect(x: 0, y: 0, width: 300, height: 300)      // room for every row
+            o.expandItem(tree.roots[0])
+            o.expandItem(tree.roots[1])
+            o.expandItem(tree.roots[1].children[0])
+            w.display()
+            @MainActor func rows() -> [(name: String, id: Int, expanded: Bool?)] {
+                o._accessibilityElement().children.filter { $0.role == "AXRow" }.map { ($0.label ?? "", $0.id, $0.isExpanded) }
+            }
+            let before = rows()
+            XCTAssertEqual(before.map(\.name), ["Documents, 3", "Reports, 2", "Notes, 0", "Budget, 0", "Pictures, 2", "Holiday, 2", "beach, 0", "sunset, 0", "cat, 0", "README, 0"])
+            let ids = Dictionary(uniqueKeysWithValues: before.map { ($0.name, $0.id) })
+            XCTAssertTrue(w.accessibilityPerform(.collapse, on: ids["Documents, 3"]!))
+            w.display()
+            let after = rows()
+            XCTAssertEqual(after.map(\.name), ["Documents, 3", "Pictures, 2", "Holiday, 2", "beach, 0", "sunset, 0", "cat, 0", "README, 0"])
+            for r in after { XCTAssertEqual(r.id, ids[r.name], "\(r.name) keeps its element across the collapse") }
+            XCTAssertEqual(after[0].expanded, false)
+            XCTAssertTrue(w.accessibilityTree().element(withID: ids["beach, 0"]!)?.label == "beach, 0", "the element found by id is still beach")
+            XCTAssertNil(w.accessibilityTree().element(withID: ids["Reports, 2"]!), "a hidden row's element is gone")
+            // The same element expands Documents again; the rows that stayed keep their ids.
+            XCTAssertTrue(w.accessibilityPerform(.expand, on: ids["Documents, 3"]!))
+            w.display()
+            let again = rows()
+            XCTAssertEqual(again.map(\.name), before.map(\.name))
+            for r in again where after.contains(where: { $0.name == r.name }) { XCTAssertEqual(r.id, ids[r.name], "\(r.name) keeps its element across the expand") }
+            XCTAssertEqual(again[0].expanded, true)
+            w.close()
+        }
+    }
+
     func testDelegateProvidesViewsAndRowHeights() {
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.titled], backing: .buffered, defer: false)

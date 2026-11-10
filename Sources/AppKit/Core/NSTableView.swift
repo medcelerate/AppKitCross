@@ -626,14 +626,25 @@ import CoreGraphics
     }
 
     private func _makeRowView(_ row: Int) -> NSTableRowView {
+        let rv = _delegateRowView(forRow: row) ?? _spareRowViews.popLast() ?? NSTableRowView(frame: rect(ofRow: row))
+        for v in rv.subviews { v.removeFromSuperview() }
+        _bindRowView(rv, row: row)
+        addSubview(rv)
+        _delegateDidAdd(rv, row: row)
+        didAdd(rv, forRow: row)
+        return rv
+    }
+
+    /// Fills `rv` with row `row`'s cells (replacing the ones it had) and records it as the
+    /// row's view.
+    private func _bindRowView(_ rv: NSTableRowView, row: Int) {
         let r = rect(ofRow: row)
-        let rv = _delegateRowView(forRow: row) ?? _spareRowViews.popLast() ?? NSTableRowView(frame: r)
         rv.frame = r
         rv._row = row
         rv._insetStyle = effectiveStyle == .inset
         rv.selectionHighlightStyle = _selectionHighlightStyle
         rv.isGroupRowStyle = _delegateIsGroupRow(row)
-        for v in rv.subviews { v.removeFromSuperview() }
+        for v in rv._cellViews { v.removeFromSuperview() }
         rv._cellViews = []
         for (i, frame) in _cellFrames(forRow: row, height: r.height) {
             let cell = _makeCellView(column: i, row: row, frame: frame)
@@ -643,10 +654,26 @@ import CoreGraphics
         _rowViewDidLayout(rv, row: row)
         _applyRowState(rv, row: row)
         _rowViews[row] = rv
-        addSubview(rv)
-        _delegateDidAdd(rv, row: row)
-        didAdd(rv, forRow: row)
-        return rv
+    }
+
+    /// `noteNumberOfRowsChanged` for a subclass whose rows moved rather than changed: a
+    /// row view whose row is now `newRow(oldRow)` stays that row's view, with its cells
+    /// re-read, so the view's identity (its accessibility element) follows the content;
+    /// views of rows that vanished (`nil`) are recycled.
+    internal func _noteRowsChanged(keeping newRow: (Int) -> Int?) {
+        let selected = _selectedRows
+        let old = _rowViews
+        _rowViews.removeAll()
+        _needsReload = true
+        _reloadIfNeeded()
+        var kept: [(NSTableRowView, Int)] = []
+        var taken = Set<Int>()
+        for (row, rv) in old.sorted(by: { $0.key < $1.key }) {
+            if let n = newRow(row), n >= 0, n < _numberOfRows, taken.insert(n).inserted { kept.append((rv, n)) } else { _recycle(rv, row: row) }
+        }
+        for (rv, n) in kept { _bindRowView(rv, row: n) }
+        _selectedRows = IndexSet(selected.filter { $0 < _numberOfRows })
+        needsDisplay = true
     }
 
     private func _recycle(_ rv: NSTableRowView, row: Int) {

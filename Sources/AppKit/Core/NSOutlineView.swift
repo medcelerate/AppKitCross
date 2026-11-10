@@ -190,9 +190,13 @@ enum _NSOutlineItemKey: Hashable {
     /// item hidden by a collapse hands the selection to its nearest visible ancestor).
     private func _rowsDidChange() {
         _rebuildRowsIfNeeded()
-        let selectedNodes = selectedRowIndexes.compactMap { $0 < _rows.count ? _rows[$0] : nil }
+        let oldRows = _rows
+        let selectedNodes = selectedRowIndexes.compactMap { $0 < oldRows.count ? oldRows[$0] : nil }
         _rowsDirty = true
-        noteNumberOfRowsChanged()
+        _rebuildRowsIfNeeded()
+        // Row views stay with their items (each is its row's accessibility element), so
+        // assistive technology keeps its references to the rows that are still there.
+        _noteRowsChanged { old in old < oldRows.count && oldRows[old].row >= 0 ? oldRows[old].row : nil }
         var selection = IndexSet()
         for n in selectedNodes {
             var cur: _Node? = n
