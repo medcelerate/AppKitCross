@@ -272,7 +272,7 @@ void cd2d_file_dialog_free(uint16_t *paths);
 /// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit
 /// pasteboard type; "public.utf8-plain-text" travels as CF_UNICODETEXT, "public.file-url"
 /// (whose bytes are a UTF-8 file system path here) as CF_HDROP, and every other type as the
-/// registered clipboard format "AppKitWin:<type>".
+/// registered clipboard format "AppKitCross:<type>".
 typedef struct CD2DDragEntry { uint32_t item; const uint16_t *type; const uint8_t *bytes; uint32_t length; } CD2DDragEntry;
 typedef struct CD2DDragData CD2DDragData;    // an IDataObject being delivered to a window
 typedef struct CD2DDragCallbacks {
@@ -298,7 +298,7 @@ void cd2d_dnd_revoke(void *hwnd);
 uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t allowedEffects,
                           const uint8_t *imageBGRA, uint32_t width, uint32_t height, int32_t hotspotX, int32_t hotspotY);
 /// Reads a delivered data object as entries (CF_UNICODETEXT, CF_HDROP with one item per
-/// file, and the AppKitWin:* formats). Free with cd2d_drag_data_free_entries.
+/// file, and the AppKitCross:* formats). Free with cd2d_drag_data_free_entries.
 CD2DDragEntry *cd2d_drag_data_read(CD2DDragData *data, uint32_t *count);
 void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count);
 

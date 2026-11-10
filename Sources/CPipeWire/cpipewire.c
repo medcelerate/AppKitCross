@@ -114,7 +114,7 @@ static bool enumerate(void) {
     if (!g_initialised) { p_pw_init(NULL, NULL); g_initialised = true; }
     struct Probe p;
     memset(&p, 0, sizeof p);
-    p.loop = p_pw_thread_loop_new("AppKitWin probe", NULL);
+    p.loop = p_pw_thread_loop_new("AppKitCross probe", NULL);
     if (!p.loop) { snprintf(g_error, sizeof g_error, "pw_thread_loop_new failed"); return false; }
     p.context = p_pw_context_new(p_pw_thread_loop_get_loop(p.loop), NULL, 0);
     if (!p.context) { snprintf(g_error, sizeof g_error, "pw_context_new failed"); p_pw_thread_loop_destroy(p.loop); return false; }
@@ -229,13 +229,13 @@ CPWStream *cpw_open(uint32_t rate, uint32_t channels, cpw_render_fn render, void
     s->info.channels = s->requestedChannels;
     s->info.quantumFrames = 1024;
     snprintf(s->info.target, sizeof s->info.target, "default sink");
-    s->loop = p_pw_thread_loop_new("AppKitWin audio", NULL);
+    s->loop = p_pw_thread_loop_new("AppKitCross audio", NULL);
     if (!s->loop) { if (error) snprintf(error, errorLength, "pw_thread_loop_new failed"); free(s); return NULL; }
     char latency[64];
     snprintf(latency, sizeof latency, "%u/%u", 512u, s->requestedRate);
     struct pw_properties *props = p_pw_properties_new(PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Playback", PW_KEY_MEDIA_ROLE, "Music",
-                                                      PW_KEY_APP_NAME, "AppKitWin", PW_KEY_NODE_LATENCY, latency, NULL);
-    s->stream = p_pw_stream_new_simple(p_pw_thread_loop_get_loop(s->loop), "AppKitWin output", props, &streamEvents, s);
+                                                      PW_KEY_APP_NAME, "AppKitCross", PW_KEY_NODE_LATENCY, latency, NULL);
+    s->stream = p_pw_stream_new_simple(p_pw_thread_loop_get_loop(s->loop), "AppKitCross output", props, &streamEvents, s);
     if (!s->stream) { if (error) snprintf(error, errorLength, "pw_stream_new_simple failed"); p_pw_thread_loop_destroy(s->loop); free(s); return NULL; }
     uint8_t buffer[1024];
     struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof buffer);
