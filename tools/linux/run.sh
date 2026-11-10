@@ -80,7 +80,7 @@ echo "screenshot: /tmp/hellowindow-linux-rtl.png ($(stat -c %s /tmp/hellowindow-
 # The small examples (Examples/<Name>): each runs under Xvfb for a screenshot, and its log
 # is checked for a trap (an `unimplemented()` stub or a crash); Drawing also exports its
 # canvas headlessly, which checks the PNG path.
-for example in Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit; do
+for example in Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar; do
     lower=$(echo "$example" | tr '[:upper:]' '[:lower:]')
     echo "== $example under Xvfb (X11 backend)"
     args=""

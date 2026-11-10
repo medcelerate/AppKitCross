@@ -279,7 +279,10 @@ final class Win32Window: PlatformWindow {
         set {
             _styleMask = newValue
             guard let hwnd else { return }
-            let style = windowStyle(for: newValue)
+            // The state bits (visible, minimised, maximised) belong to the window, not the
+            // mask: writing a style without WS_VISIBLE hides the window.
+            let state = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_STYLE)) & DWORD(WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE)
+            let style = windowStyle(for: newValue) | state
             // The redirection-bitmap bit is creation-only: keep whatever the window has.
             let ex = Win32Backend.styles(for: newValue).1 | (DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & Win32Window.wsExNoRedirectionBitmap)
             SetWindowLongPtrW(hwnd, GWL_STYLE, LONG_PTR(style))
@@ -1068,7 +1071,7 @@ final class Win32Window: PlatformWindow {
             }
             return 0
         case WM_NCHITTEST:
-            guard let hwnd, usesCustomFrame || _chrome.movableByBackground else { return nil }
+            guard let hwnd, usesCustomFrame || _chrome.movableByBackground || _chrome.hasDraggableBand else { return nil }
             var pt = POINT(x: Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF)), y: Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF)))
             if usesCustomFrame {
                 // Resize bands (8 px at 96 dpi) along the edges of resizable, non-maximised windows.

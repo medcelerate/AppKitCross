@@ -199,6 +199,8 @@ public final class _AppRunner {
     public private(set) var windows: [NSWindow] = []
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
+    /// `.windowToolbarStyle(_:)` for the windows the next scene opens (Toolbar.swift).
+    var pendingToolbarStyle: NSWindow.ToolbarStyle = .automatic
     var pendingResizability: WindowResizability = .automatic
     private var delegate: AnyObject?
     /// The Settings scene's content, opened from the app menu.
@@ -292,6 +294,7 @@ public final class _AppRunner {
         case .automatic: break
         }
         if pendingHidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
+        window.toolbarStyle = pendingToolbarStyle
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting

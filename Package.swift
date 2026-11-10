@@ -269,6 +269,7 @@ targets += [
     // resource (SwiftPM refuses a resource named Info.plist, hence Resources/TextEdit-Info.plist)
     // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
     .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
+    .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,

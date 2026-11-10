@@ -27,7 +27,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar; do swift build --product $p; done
       - name: Drawing example headless PNG export
         run: .build/debug/Drawing --export drawing-macos.png
       - name: TextEdit example headless document round trip (NSDocumentController, RTF)
@@ -78,7 +78,7 @@ jobs:
           fi
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit; do swift build -j 2 --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar; do swift build -j 2 --product $p; done
       - name: AudioPlayer example offline render (WASAPI absent on the runner)
         run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: TextEdit example headless document round trip
@@ -105,7 +105,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar; do swift build --product $p; done
       - name: Drawing example headless PNG export on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
       - name: TextEdit example headless document round trip on the host backend
@@ -127,7 +127,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar; do swift build --product $p; done
       - name: Tests on the host backend with the validation layer
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device

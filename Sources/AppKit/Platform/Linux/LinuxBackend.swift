@@ -42,6 +42,16 @@ final class LinuxBackend: PlatformBackend {
     var lastEventTime: Time = Time(CurrentTime)
     private(set) var x11DragDrop: X11DragDrop!
     var dragDrop: (any PlatformDragDrop)? { x11DragDrop }
+    /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
+    private var statusNotifier: LinuxStatusNotifierHost?
+    private var statusNotifierTried = false
+    var statusItems: (any PlatformStatusItemHost)? {
+        if !statusNotifierTried {
+            statusNotifierTried = true
+            statusNotifier = LinuxStatusNotifierHost.connect { [unowned self] x, y in NSPoint(x: CGFloat(x) / scale, y: (screenHeightPx - CGFloat(y)) / scale) }
+        }
+        return statusNotifier
+    }
     /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013); nil without an accessibility bus.
     private(set) var atspi: AtspiBridge?
 
@@ -132,6 +142,7 @@ final class LinuxBackend: PlatformBackend {
                        pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
                        pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
             if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
+            if let s = statusNotifier, s.fileDescriptor >= 0 { fds.append(pollfd(fd: s.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
             var timeout: Int32 = -1
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
@@ -151,6 +162,7 @@ final class LinuxBackend: PlatformBackend {
             dispatch(&event)
         }
         atspi?.dispatch()
+        statusNotifier?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }
