@@ -79,6 +79,8 @@ public protocol PlatformBackend: AnyObject {
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
     /// Drags to and from other applications (see DragDrop.swift); nil when the platform has none.
     var dragDrop: (any PlatformDragDrop)? { get }
+    /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
+    var statusItems: (any PlatformStatusItemHost)? { get }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.
@@ -281,6 +283,9 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public var hasShadow = true
     /// `isMovableByWindowBackground`.
     public var movableByBackground = false
+    /// The window draws a band of its own (a toolbar under a system title bar) that
+    /// drags the window: the backend asks the owner's hit test for client points.
+    public var hasDraggableBand = false
     public var roundedCorners = true
     public init() {}
 }

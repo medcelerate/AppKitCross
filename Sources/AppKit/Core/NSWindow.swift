@@ -59,9 +59,14 @@ import CoreText
         cv.layoutSubtreeIfNeeded()
         let content = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
         var scene = root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
-        // The window buttons overlay is a second root above the content.
-        if let buttons = _windowButtons, _showsWindowButtons, let layer = buttons.layer {
-            let extra = layer._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
+        // The toolbar and the window buttons overlays are further roots above the content.
+        var overlays: [NSView] = []
+        if let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded(); overlays.append(t) }
+        if let buttons = _windowButtons, _showsWindowButtons { overlays.append(buttons) }
+        let platformContent = NSRect(origin: .zero, size: _platformContentSize)
+        for overlay in overlays {
+            guard let layer = overlay.layer else { continue }
+            let extra = layer._buildScene(parentFlipped: false, parentBounds: platformContent, scale: backingScaleFactor, frame: _layerSceneFrame)
             let offset = scene.nodes.count
             for var node in extra.nodes {
                 if let p = node.parent { node.parent = p + offset }
@@ -79,6 +84,8 @@ import CoreText
         case "performClose:": return _styleMask.contains(.closable)
         case "performMiniaturize:": return _styleMask.contains(.miniaturizable)
         case "performZoom:": return _styleMask.contains(.resizable)
+        case "toggleToolbarShown:": return _toolbar != nil
+        case "runToolbarCustomizationPalette:": return _toolbar?.allowsUserCustomization == true
         default: return false
         }
     }
@@ -87,6 +94,8 @@ import CoreText
         case "performClose:": performClose(sender)
         case "performMiniaturize:": performMiniaturize(sender)
         case "performZoom:": performZoom(sender)
+        case "toggleToolbarShown:": toggleToolbarShown(sender)
+        case "runToolbarCustomizationPalette:": runToolbarCustomizationPalette(sender)
         default: return false
         }
         return true
@@ -120,16 +129,93 @@ import CoreText
             // The row sits at the top of the content when the content covers the title bar,
             // and at the top of the frame (in the band above the content) when the package
             // draws the title bar.
-            let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : contentRect(forFrameRect: frame).size
+            let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : _platformContentSize
             v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
         }
+        _layoutToolbarView()
         return _windowButtons
+    }
+
+    // MARK: Toolbar (NSToolbar.swift, NSToolbarView.swift; ADR-0018)
+
+    /// The toolbar's view, an overlay root like the buttons: above the content, below the buttons.
+    internal var _toolbarView: _NSToolbarView? { _toolbar?._view }
+    /// The band the toolbar takes out of the frame as reflected in the current frame.
+    private var _toolbarBandApplied: CGFloat = 0
+    /// The content area the platform gives this window (the band above the content view
+    /// that a toolbar takes is part of it).
+    internal var _platformContentSize: NSSize {
+        if let p = _platform { return p.contentRect(forFrameRect: frame).size }
+        return NSSize(width: contentRect(forFrameRect: frame).width, height: contentRect(forFrameRect: frame).height + _toolbarBandHeight)
+    }
+    /// How the toolbar is placed and sized for this window; nil when none is shown.
+    internal var _toolbarMetrics: _NSToolbarMetrics? {
+        guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
+        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
+    }
+    /// The height the toolbar takes out of the content area (below the title band). Zero
+    /// when the content covers the title bar: the toolbar then overlays the content.
+    internal var _toolbarBandHeight: CGFloat {
+        guard let m = _toolbarMetrics, m.placement == .belowTitleBar else { return 0 }
+        return m.height
+    }
+
+    /// Places the toolbar view across the top of the platform's content area.
+    internal func _layoutToolbarView() {
+        guard let t = _toolbar, let v = t._view else { return }
+        let m = _toolbarMetrics
+        v.isHidden = m == nil
+        guard let m else { return }
+        v.apply(style: _toolbarStyle, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
+        let pc = _platformContentSize
+        let f = NSRect(x: 0, y: pc.height - m.height, width: pc.width, height: m.height)
+        if v.frame != f { v.frame = f; v.needsLayout = true }
+        v.needsDisplay = true
+    }
+
+    /// The toolbar appeared, disappeared or changed height: the frame grows or shrinks by
+    /// the difference with the top edge fixed, so the content keeps its size, as on macOS.
+    internal func _toolbarGeometryDidChange() {
+        let band = _toolbarBandHeight
+        let delta = band - _toolbarBandApplied
+        _toolbarBandApplied = band
+        if delta != 0, _platform != nil {
+            var f = frame
+            f.origin.y -= delta
+            f.size.height += delta
+            setFrame(f, display: true)
+            if let cv = _contentView { let cr = contentRect(forFrameRect: frame); if cv.frame.size != cr.size { cv.setFrameSize(cr.size) } }
+        }
+        _ensureWindowButtons()
+        _contentView?.needsLayout = true     // contentLayoutRect changed with the band
+        _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
+        _toolbar?.validateVisibleItems()
+        _platform?.setNeedsDisplay(nil)
+    }
+
+    private func _setToolbar(_ toolbar: NSToolbar?) {
+        guard toolbar !== _toolbar else { return }
+        if let old = _toolbar {
+            old._detach()
+            _toolbar = nil
+            _toolbarGeometryDidChange()
+        }
+        _toolbar = toolbar
+        guard let toolbar else { return }
+        if let previous = toolbar._window, previous !== self { previous.toolbar = nil }
+        toolbar._attach(to: self)
+        if let v = toolbar._view {
+            v.nextResponder = self
+            v._setWindow(self)
+        }
+        _toolbarGeometryDidChange()
     }
 
     /// The view under a window point: the buttons overlay first, then the content.
     private func _hitTest(_ point: NSPoint) -> NSView? {
         if _showsWindowButtons, let b = _windowButtons, !b.isHidden, let hit = b.hitTest(point) { return hit }
+        if let t = _toolbarView, !t.isHidden, let hit = t.hitTest(point) { return hit }
         return _contentView?.hitTest(point)
     }
 
@@ -299,6 +385,7 @@ import CoreText
         c.isTransparent = !_isOpaque
         c.hasShadow = _hasShadow
         c.movableByBackground = _isMovableByWindowBackground
+        c.hasDraggableBand = _toolbarView.map { !$0.isHidden } ?? false
         return c
     }
 
@@ -313,6 +400,7 @@ import CoreText
         guard let content = _contentView else { return .client }
         let hit = _hitTest(point) ?? content.hitTest(point)
         if let v = hit, !v.mouseDownCanMoveWindow { return .client }
+        if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if _isMovableByWindowBackground { return .caption }
         let chrome = _chrome
         if chrome.extendsContentIntoTitleBar, point.y >= content.bounds.height - NSWindow._titleBarBandHeight { return .caption }
@@ -512,6 +600,10 @@ import CoreText
         }
         _contentView?.layoutSubtreeIfNeeded()
         _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
+            t.layoutSubtreeIfNeeded()
+            t._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        }
         if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
             buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
         }
@@ -785,6 +877,7 @@ import CoreText
         if let previous = app.keyWindow, previous !== self { previous.resignKey() }
         _isKey = true
         app._keyWindow = self
+        _toolbar?.validateVisibleItems()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
     }
@@ -913,7 +1006,13 @@ import CoreText
     @MainActor open var contentLayoutGuide: Any? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentlayoutrect
     @available(macOS 10.10, *)
-    @MainActor open var contentLayoutRect: NSRect { _contentView?.bounds ?? .zero }
+    /// The content's bounds less the toolbar band that overlays it on a window whose
+    /// content covers the title bar.
+    @MainActor open var contentLayoutRect: NSRect {
+        guard var r = _contentView?.bounds else { return .zero }
+        if let m = _toolbarMetrics, m.placement == .overContent { r.size.height = max(0, r.height - m.height) }
+        return r
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentmaxsize
     @MainActor open var contentMaxSize: NSSize {
         get { contentRect(forFrameRect: NSRect(origin: .zero, size: maxSize)).size }
@@ -925,7 +1024,14 @@ import CoreText
         set { minSize = frameRect(forContentRect: NSRect(origin: .zero, size: newValue)).size }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentrect(forframerect:)
-    @MainActor open func contentRect(forFrameRect frameRect: NSRect) -> NSRect { _platform?.contentRect(forFrameRect: frameRect) ?? frameRect }
+    /// The platform's content area less the toolbar band, when a toolbar is shown below
+    /// the title bar: the band is part of the frame, as on macOS.
+    @MainActor open func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
+        var r = _platform?.contentRect(forFrameRect: frameRect) ?? frameRect
+        let band = _toolbarBandHeight
+        if band > 0 { r.size.height = max(0, r.height - band) }
+        return r
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentrect(forframerect:stylemask:)
     @MainActor public class func contentRect(forFrameRect fRect: NSRect, styleMask style: NSWindow.StyleMask) -> NSRect { Platform.backend.contentRect(forFrameRect: fRect, styleMask: style) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentresizeincrements
@@ -1159,7 +1265,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framedescriptor
     @MainActor open var frameDescriptor: NSWindow.PersistableFrameDescriptor { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framerect(forcontentrect:)
-    @MainActor open func frameRect(forContentRect contentRect: NSRect) -> NSRect { _platform?.frameRect(forContentRect: contentRect) ?? contentRect }
+    @MainActor open func frameRect(forContentRect contentRect: NSRect) -> NSRect {
+        var c = contentRect
+        let band = _toolbarBandHeight
+        if band > 0 { c.size.height += band }
+        return _platform?.frameRect(forContentRect: c) ?? c
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framerect(forcontentrect:stylemask:)
     @MainActor public class func frameRect(forContentRect cRect: NSRect, styleMask style: NSWindow.StyleMask) -> NSRect { Platform.backend.frameRect(forContentRect: cRect, styleMask: style) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/gstate()
@@ -1555,7 +1666,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/restorecachedimage()
     @MainActor open func restoreCachedImage() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/runtoolbarcustomizationpalette(_:)
-    @MainActor open func runToolbarCustomizationPalette(_ sender: Any?) { unimplemented() }
+    @MainActor open func runToolbarCustomizationPalette(_ sender: Any?) { _toolbar?.runCustomizationPalette(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/saveframe(usingname:)
     @MainActor open func saveFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/screen
@@ -1768,7 +1879,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/stylemask
     @MainActor open var styleMask: NSWindow.StyleMask {
         get { _styleMask }
-        set { _styleMask = newValue; _platform?.styleMask = newValue; _updateChrome() }
+        set { _styleMask = newValue; _platform?.styleMask = newValue; _updateChrome(); _toolbarGeometryDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/subtitle
     @available(macOS 11.0, *)
@@ -1835,17 +1946,17 @@ import CoreText
     @available(macOS 10.13, *)
     @MainActor open func toggleTabOverview(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toggletoolbarshown(_:)
-    @MainActor open func toggleToolbarShown(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleToolbarShown(_ sender: Any?) { _toolbar?.isVisible.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toolbar
     @MainActor open var toolbar: NSToolbar? {
         get { _toolbar }
-        set { _toolbar = newValue }
+        set { _setToolbar(newValue) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toolbarstyle
     @available(macOS 11.0, *)
     @MainActor open var toolbarStyle: NSWindow.ToolbarStyle {
         get { _toolbarStyle }
-        set { _toolbarStyle = newValue }
+        set { guard _toolbarStyle != newValue else { return }; _toolbarStyle = newValue; _toolbarGeometryDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/trackevents(matching:timeout:mode:handler:)
     @available(macOS 10.10, *)
@@ -1960,7 +2071,9 @@ import CoreText
     open func accessibilityChildren() -> [Any]? {
         if let c = _a11yOverrides.children { return c }
         guard let cv = _contentView else { return [] }
-        return cv.isAccessibilityElement() ? [cv] : cv.accessibilityChildren()
+        var children: [Any] = (cv.isAccessibilityElement() ? [cv] : cv.accessibilityChildren()) ?? []
+        if let t = _toolbarView, !t.isHidden { children.append(t) }
+        return children
     }
     open func setAccessibilityChildren(_ accessibilityChildren: [Any]?) { _a11yOverrides.children = accessibilityChildren; _accessibilityNotify(.structure(_accessibilityElementID)) }
     open func accessibilityVisibleChildren() -> [Any]? { accessibilityChildren() }
@@ -2025,7 +2138,9 @@ extension NSWindow: PlatformAccessibilityProvider {
     public var accessibilityFocusedElementID: Int? { (accessibilityApplicationFocusedUIElement() as? NSView)?._accessibilityElementID }
 
     /// The view behind an element id, the window itself for its own id.
-    @MainActor internal func _accessibilityView(withID id: Int) -> NSView? { _contentView?._accessibilityView(withID: id) }
+    @MainActor internal func _accessibilityView(withID id: Int) -> NSView? {
+        _contentView?._accessibilityView(withID: id) ?? _toolbarView?._accessibilityView(withID: id)
+    }
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
         if elementID == _accessibilityElementID { return action == .raise ? accessibilityPerformRaise() : false }

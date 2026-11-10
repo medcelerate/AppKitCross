@@ -55,6 +55,15 @@ Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.s
 |---|---|
 | ![sway frame](images/hellowindow-linux-wayland.png) | ![client-side decorations](images/hellowindow-linux-wayland-csd.png) |
 
+A window toolbar (ADR-0018), drawn by the package under the title band on every backend:
+image items with labels, a segmented group, a menu item, the selected item, a search field
+and the standard Customize item, from `Examples/Toolbar` under Xvfb (X11, Cairo). Narrowing
+the window moves items into a » menu; the status item is in the tray, not the window.
+
+| Toolbar example (Linux) |
+|---|
+| ![Toolbar on Linux](images/toolbar-linux.png) |
+
 Metal on Linux (ADR-0012): the Layout Demo's Metal tab, an `MTKView` whose frames the Vulkan
 device presents through a `VkSwapchainKHR` on a native surface the window places under the
 view (a child window on X11, a subsurface on Wayland), from lavapipe in the container with
