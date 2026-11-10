@@ -235,8 +235,13 @@ final class CombineTests: XCTestCase, @unchecked Sendable {
 
     /// A value and the completion behind it are scheduled on a concurrent queue with the
     /// same delay; the value must still arrive first (the port once let the completion
-    /// overtake it and dropped the value).
-    func testDelayKeepsValueBeforeCompletionOnConcurrentQueue() {
+    /// overtake it and dropped the value). Apple's Combine gives no such guarantee on a
+    /// concurrent queue (about one round in 200 loses the value on macOS), so this checks
+    /// the port's Delay only.
+    func testDelayKeepsValueBeforeCompletionOnConcurrentQueue() throws {
+        #if canImport(Darwin)
+        throw XCTSkip("Apple's Combine may deliver the completion before a delayed value on a concurrent queue")
+        #endif
         var lost = 0
         for _ in 0..<200 {
             let expectation = expectation(description: "completed")
