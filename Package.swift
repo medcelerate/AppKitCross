@@ -18,7 +18,7 @@ targets += [
     .target(
         name: "CD2D",
         path: "Sources/CD2D",
-        linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("windowscodecs"), .linkedLibrary("ole32"), .linkedLibrary("shlwapi"), .linkedLibrary("oleaut32"), .linkedLibrary("shell32"),
+        linkerSettings: [.linkedLibrary("d2d1"), .linkedLibrary("dwrite"), .linkedLibrary("windowscodecs"), .linkedLibrary("ole32"), .linkedLibrary("shlwapi"), .linkedLibrary("oleaut32"), .linkedLibrary("shell32"), .linkedLibrary("advapi32"),
                          // Milestone 3: DXGI flip-model swap chain presentation (d3d11 device, dxgi
                          // factory/swap chain, dxguid for the DXGI debug GUIDs).
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
@@ -267,6 +267,10 @@ targets += [
     .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
+    // The document-based example: its Info.plist (CFBundleDocumentTypes) travels as a
+    // resource (SwiftPM refuses a resource named Info.plist, hence Resources/TextEdit-Info.plist)
+    // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
+    .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
     .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
     .testTarget(

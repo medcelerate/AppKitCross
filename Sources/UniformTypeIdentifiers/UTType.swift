@@ -132,6 +132,13 @@ extension UTType {
     public init(importedAs identifier: String, conformingTo parentType: UTType? = nil) {
         record = UTTypeRegistry.shared.declare(identifier, conformingTo: parentType?.identifier)
     }
+
+    /// Declares a type with its tags, as AppKit does for the `UTExportedTypeDeclarations`
+    /// and `UTImportedTypeDeclarations` of the application's Info.plist (on macOS
+    /// LaunchServices reads the bundle; here the document controller feeds the registry).
+    public static func _declare(identifier: String, conformsTo parents: [String], extensions: [String], mimeTypes: [String], description: String?, exported: Bool) {
+        UTTypeRegistry.shared.declare(identifier, conformingTo: parents, extensions: extensions, mimeTypes: mimeTypes, description: description)
+    }
 }
 
 // MARK: Protocols

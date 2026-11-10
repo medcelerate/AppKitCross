@@ -109,11 +109,22 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         get { _title }
         set {
             _title = newValue
-            XStoreName(backend.display, xid, newValue)
-            let utf8 = Array(newValue.utf8)
-            utf8.withUnsafeBufferPointer { buf in
-                _ = XChangeProperty(backend.display, xid, backend.netWmName, backend.utf8String, 8, PropModeReplace, buf.baseAddress, Int32(buf.count))
-            }
+            applyNativeTitle()
+        }
+    }
+    /// `NSWindow.isDocumentEdited`: shown as "*" before the title, as GNOME's editors do.
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        let shown = isDocumentEdited ? "*" + _title : _title
+        XStoreName(backend.display, xid, shown)
+        let utf8 = Array(shown.utf8)
+        utf8.withUnsafeBufferPointer { buf in
+            _ = XChangeProperty(backend.display, xid, backend.netWmName, backend.utf8String, 8, PropModeReplace, buf.baseAddress, Int32(buf.count))
         }
     }
 

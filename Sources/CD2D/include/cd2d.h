@@ -260,12 +260,18 @@ uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree);
 typedef struct CD2DFileDialogOptions {
     bool isSave, canChooseFiles, canChooseDirectories, allowsMultiple, allowsOtherTypes, showsHidden;
 } CD2DFileDialogOptions;
-/// Shows the dialog modally. Strings are NUL-terminated UTF-16 ("" = default); `extensions`
-/// is ';'-separated. On success `paths` holds NUL-separated UTF-16 paths (`length` code units);
-/// free with cd2d_file_dialog_free. Returns false when cancelled or failed.
+/// Shows the dialog modally. Strings are NUL-terminated UTF-16 ("" = default). `extensions`
+/// is a '|'-separated list of filter groups, each a ';'-separated list of extensions
+/// (one COMDLG_FILTERSPEC per group); `labels` holds the groups' names, '|'-separated and
+/// parallel (an empty name is built from the pattern). `defaultExtension` selects the group
+/// shown first and is what the dialog appends to a name typed without an extension (the
+/// dialog swaps it when the user picks another filter). An open dialog with several groups
+/// gets an "All supported files" entry first; `allowsOtherTypes` adds "All files" last. On
+/// success `paths` holds NUL-separated UTF-16 paths (`length` code units); free with
+/// cd2d_file_dialog_free. Returns false when cancelled or failed.
 bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, const uint16_t *title, const uint16_t *okLabel,
                       const uint16_t *defaultName, const uint16_t *directory, const uint16_t *extensions,
-                      uint16_t **paths, uint32_t *length);
+                      const uint16_t *labels, const uint16_t *defaultExtension, uint16_t **paths, uint32_t *length);
 void cd2d_file_dialog_free(uint16_t *paths);
 
 // The shell (ADR-0022: NSWorkspace). Strings are NUL-terminated UTF-16; buffers the
