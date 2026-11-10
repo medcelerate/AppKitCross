@@ -227,8 +227,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             w.display()
             guard let image = (w._platformWindow as? HostWindow)?.lastImage else { return XCTFail("no host image") }
             let scale = Int(w.backingScaleFactor)
+            let data = _pixels(image)
             func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int) {     // y from the top, in points
-                let data = CFDataGetBytePtr(image.dataProvider!.data!)!
                 let i = (y * scale) * image.bytesPerRow + (x * scale) * 4
                 return (Int(data[i + 2]), Int(data[i + 1]), Int(data[i]))     // BGRA
             }
