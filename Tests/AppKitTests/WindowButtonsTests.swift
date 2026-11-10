@@ -246,6 +246,44 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A FramelessWindow-style window (content covering the title bar, movable by
+    /// background, non-opaque, clear background) under the caption style is shown, key,
+    /// on screen and painted after `makeKeyAndOrderFront`, with the buttons placed in
+    /// its band: the overlay must never keep a window from appearing.
+    func testFramelessWindowIsVisibleWithCaptionButtons() {
+        withCaptionButtons {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+            defer { w.close() }
+            w.title = "Frameless"
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.hasShadow = true
+            w.isMovableByWindowBackground = true
+            w.minSize = NSSize(width: 320, height: 200)
+            w.center()
+            w.makeKeyAndOrderFront(nil)
+            let host = w._platformWindow as! HostWindow
+            XCTAssertTrue(w.isVisible)
+            XCTAssertTrue(host.isVisible, "the platform window was shown")
+            XCTAssertTrue(w.isKeyWindow)
+            XCTAssertEqual(w.frame.size.width, 480)
+            XCTAssertTrue(NSScreen.main!.frame.contains(w.frame), "on screen: \(w.frame)")
+            w.display()
+            XCTAssertNotNil(host.lastImage, "a frame was painted")
+            XCTAssertTrue(w._showsWindowButtons)
+            let row = w.standardWindowButton(.closeButton)!.superview!
+            XCTAssertFalse(row.isHidden)
+            XCTAssertEqual(row.frame.width, w.contentView!.bounds.width)
+            XCTAssertEqual(row.frame.maxY, w.contentView!.bounds.height)
+            XCTAssertEqual(w.standardWindowButton(.closeButton)!.frame.maxX, 480)
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 240, y: 150)), .caption, "movable by background")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 470, y: w.contentView!.bounds.height - 14)), .closeButton)
+        }
+    }
+
     func testClassFactoryHonoursTheStyleMask() {
         MainActor.assumeIsolated {
             XCTAssertTrue(NSWindow.standardWindowButton(.closeButton, for: [.titled, .closable])!.isEnabled)
