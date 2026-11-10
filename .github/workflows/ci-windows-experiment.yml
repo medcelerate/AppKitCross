@@ -59,8 +59,11 @@ jobs:
           flags=(-c debug -j 2)
           start=$(date +%s)
           status=0
-          swift build "${flags[@]}" --target AppKit -v > build.log 2>&1 || status=$?
+          swift build "${flags[@]}" --target AppKit -v > build.log 2> build.err || status=$?
           echo "status=$status after $(( $(date +%s) - start ))s"
+          echo "== stderr ($(wc -c < build.err) bytes), lines that are not compiler diagnostics"
+          tr -d '\r' < build.err | grep -avE "warning:|note:|^\s*[0-9]* *\||^\s*$|^\[#|^Swift\.|^\s+\|" | tail -30
+          echo "== stdout tail"; tr -d '\r' < build.log | tail -5 | cut -c1-300
           tr -d '\r' < build.log | grep -aE "^\[[0-9]+/[0-9]+\] (Emitting module AppKit|Compiling AppKit Unimplemented)|error:|Build complete|exit code|exception|signal" | grep -avE "warning:|^\s*[0-9]* *\|" | head -20
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
@@ -69,7 +72,8 @@ jobs:
         shell: pwsh
         run: |
           Start-Sleep -Seconds 2
-          "== frontends (exit codes and peaks)"; Get-Content "$env:RUNNER_TEMP\frontends\frontends.csv"
+          "== processes that are not plain compile jobs (exit codes and peaks)"; Get-Content "$env:RUNNER_TEMP\frontends\frontends.csv" | Where-Object { $_ -notmatch ',compile,' }
+          "== compile jobs that did not exit 0"; Get-Content "$env:RUNNER_TEMP\frontends\frontends.csv" | Where-Object { $_ -match ',compile,' -and $_ -notmatch ',0x00000000,' }
           "== peak system commit"; Import-Csv "$env:RUNNER_TEMP\frontends\samples.csv" | Sort-Object { [int]$_.commitMB } -Descending | Select-Object -First 3 | Format-Table
           "== dumps"; Get-ChildItem "$env:RUNNER_TEMP\dumps" -ErrorAction SilentlyContinue | Format-Table Name,Length
           "== Application log: crashes"
@@ -78,7 +82,7 @@ jobs:
           Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Resource-Exhaustion-Detector' } -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
           Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 1, 2 } -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Id,Message
           "== Defender detections"; try { Get-MpThreatDetection | Format-List } catch {}
-          Copy-Item build.log "$env:RUNNER_TEMP\frontends\" -ErrorAction SilentlyContinue
+          Copy-Item build.log, build.err "$env:RUNNER_TEMP\frontends\" -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         if: always()
         with:
