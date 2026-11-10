@@ -480,7 +480,25 @@ import CoreGraphics
     }
     @MainActor open override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
+        _observeClipView()
         _invalidateLayout()
+    }
+    /// Scrolling re-places the visible elements (pinned headers move with the visible
+    /// rect, items come and go) whether or not the backend redraws the document view
+    /// for it: the clip view's bounds change notification drives it.
+    private var _clipObserver: Any?
+    private func _observeClipView() {
+        if let o = _clipObserver { NotificationCenter.default.removeObserver(o); _clipObserver = nil }
+        guard let clip = superview as? NSClipView else { return }
+        clip.postsBoundsChangedNotifications = true
+        _clipObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: clip, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?._clipViewDidScroll() }
+        }
+    }
+    private func _clipViewDidScroll() {
+        guard _layout != nil else { return }
+        _updateVisibleElements()
+        needsDisplay = true
     }
 
     @MainActor open override func viewWillDraw() {

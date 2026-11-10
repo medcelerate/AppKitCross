@@ -395,6 +395,9 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
             // Pinned headers stay at the top of the visible rect while their section shows.
             (cv.collectionViewLayout as! NSCollectionViewFlowLayout).sectionHeadersPinToVisibleBounds = true
             scroll.contentView.scroll(to: NSPoint(x: 0, y: 30))
+            // The scroll alone (no redraw) re-places the header: the clip view's bounds
+            // notification drives it, so backends that scroll without drawing pin too.
+            XCTAssertEqual(cv.subviews.first { $0 is HeaderView }?.frame.minY, 30, "pinned by the scroll, before any draw")
             w.display()
             XCTAssertEqual(cv._supplementaryView(ofKind: NSCollectionView.elementKindSectionHeader, at: ip(0, 0))?.frame.minY, 30)
             let pinned = cv._supplementaryView(ofKind: NSCollectionView.elementKindSectionHeader, at: ip(0, 0))!
