@@ -901,7 +901,7 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
             r.spacing = 8
             let l = NSTextField(labelWithString: label)
             l.setContentHuggingPriority(.required, for: .horizontal)
-            l.widthAnchor.constraint(equalToConstant: 72).isActive = true
+            l.widthAnchor.constraint(equalToConstant: 84).isActive = true
             r.addArrangedSubview(l)
             for v in views { r.addArrangedSubview(v) }
             return r
@@ -1058,7 +1058,7 @@ final class DateDemoViewController: NSViewController, NSSelectorHandling {
             root.addSubview(p)
         }
         timeOnly.datePickerStyle = .textField
-        timeOnly.datePickerElements = .hourMinuteSecond
+        timeOnly.datePickerElements = .hourMinute
         graphical.datePickerStyle = .clockAndCalendar
         graphical.minDate = DateDemoViewController.demoDate.addingTimeInterval(-20 * 86400)
         let l1 = NSTextField(labelWithString: "Stepper:"), l2 = NSTextField(labelWithString: "Time:")
