@@ -186,34 +186,31 @@ extension Publishers.Delay {
             downstreamLock.unlock()
         }
 
+        // Events are queued in arrival order and each scheduled block delivers the
+        // oldest one, under `downstreamLock` for the whole pop-and-deliver. A concurrent
+        // scheduler (`DispatchQueue.global()`) may run the blocks for a value and the
+        // completion that followed it out of order or at once; delivering the captured
+        // event per block let the completion overtake the value, which was then dropped
+        // (`Just(42).delay(…, scheduler: DispatchQueue.global())` lost its value now and
+        // then on Linux and Windows).
+        private enum Pending {
+            case value(Input)
+            case completion(Subscribers.Completion<Failure>)
+        }
+        private var pending: [Pending] = []   // guarded by `lock`
+
         func receive(_ input: Input) -> Subscribers.Demand {
             lock.lock()
             guard case .subscribed = state else {
                 lock.unlock()
                 return .none
             }
+            pending.append(.value(input))
             lock.unlock()
             schedule {
-                self.scheduledReceive(input)
+                self.deliverNext()
             }
             return .none
-        }
-
-        private func scheduledReceive(_ input: Input) {
-            lock.lock()
-            guard state.subscription != nil else {
-                lock.unlock()
-                return
-            }
-            lock.unlock()
-            downstreamLock.lock()
-            let newDemand = downstream.receive(input)
-            downstreamLock.unlock()
-            if newDemand == .none { return }
-            lock.lock()
-            let subscription = state.subscription
-            lock.unlock()
-            subscription?.request(newDemand)
         }
 
         func receive(completion: Subscribers.Completion<Failure>) {
@@ -223,26 +220,43 @@ extension Publishers.Delay {
                 return
             }
             state = .pendingTerminal(subscription)
+            pending.append(.completion(completion))
             lock.unlock()
             schedule {
-                self.scheduledReceive(completion: completion)
+                self.deliverNext()
             }
         }
 
-        private func scheduledReceive(completion: Subscribers.Completion<Failure>) {
+        private func deliverNext() {
+            downstreamLock.lock()
+            defer { downstreamLock.unlock() }
             lock.lock()
-            guard case .pendingTerminal = state else {
-                assertionFailure(
-                    "This branch should not be reachable! Please report a bug."
-                )
+            guard !pending.isEmpty else {
                 lock.unlock()
                 return
             }
-            state = .terminal
-            lock.unlock()
-            downstreamLock.lock()
-            downstream.receive(completion: completion)
-            downstreamLock.unlock()
+            switch pending.removeFirst() {
+            case .value(let input):
+                guard state.subscription != nil else {
+                    lock.unlock()
+                    return
+                }
+                lock.unlock()
+                let newDemand = downstream.receive(input)
+                if newDemand == .none { return }
+                lock.lock()
+                let subscription = state.subscription
+                lock.unlock()
+                subscription?.request(newDemand)
+            case .completion(let completion):
+                guard case .pendingTerminal = state else {
+                    lock.unlock()
+                    return
+                }
+                state = .terminal
+                lock.unlock()
+                downstream.receive(completion: completion)
+            }
         }
 
         func request(_ demand: Subscribers.Demand) {
