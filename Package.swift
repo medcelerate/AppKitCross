@@ -24,7 +24,9 @@ targets += [
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
-                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
+                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
+                         // ADR-0022: the shell (version resources, session notifications).
+                         .linkedLibrary("version"), .linkedLibrary("wtsapi32"), .linkedLibrary("user32")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
     // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).
@@ -266,6 +268,7 @@ targets += [
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
+    .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,

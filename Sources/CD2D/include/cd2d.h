@@ -268,6 +268,44 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, con
                       uint16_t **paths, uint32_t *length);
 void cd2d_file_dialog_free(uint16_t *paths);
 
+// The shell (ADR-0022: NSWorkspace). Strings are NUL-terminated UTF-16; buffers the
+// caller frees with cd2d_shell_free.
+/// The shell icon for a path (or, with useFileAttributes, for a name that need not
+/// exist: ".txt", a folder): the closest system image list to sizePx, as premultiplied
+/// BGRA top-down pixels. Returns false when the shell has none.
+bool cd2d_shell_icon(const uint16_t *path, bool useFileAttributes, bool isDirectory, uint32_t sizePx,
+                     uint8_t **bgra, uint32_t *width, uint32_t *height);
+/// Opens Explorer on the items' folder with the items selected (SHOpenFolderAndSelectItems).
+/// `paths` holds `count` NUL-terminated paths back to back.
+bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count);
+/// Moves the item to the Recycle Bin (SHFileOperation, FO_DELETE with FOF_ALLOWUNDO).
+bool cd2d_shell_recycle(const uint16_t *path);
+/// The default handler's executable for a file extension (".txt") or a URL scheme
+/// (AssocQueryString ASSOCSTR_EXECUTABLE). Returns false when none is registered.
+bool cd2d_shell_default_handler(const uint16_t *assoc, bool isProtocol, uint16_t *buffer, uint32_t capacity);
+/// Every handler registered for a file extension (SHAssocEnumHandlers): executables back
+/// to back, NUL-terminated, `length` code units in all. NULL when none.
+uint16_t *cd2d_shell_handlers(const uint16_t *extension, uint32_t *length);
+/// Launches `file` (an executable, a document or a URL) through ShellExecuteEx with
+/// `parameters`; `show` is a SW_ constant. Answers the new process id when the shell
+/// reports one (0 otherwise).
+bool cd2d_shell_execute(void *ownerHwnd, const uint16_t *file, const uint16_t *parameters, int32_t show, uint32_t *pid);
+/// ITaskbarList3::SetOverlayIcon on a window (NULL icon clears it).
+bool cd2d_shell_set_overlay_icon(void *hwnd, void *hicon, const uint16_t *description);
+/// The Application User Model ID of a process (packaged applications), else false.
+bool cd2d_shell_app_user_model_id(uint32_t pid, uint16_t *buffer, uint32_t capacity);
+/// The FileDescription of an executable's version resource, else false.
+bool cd2d_shell_file_description(const uint16_t *exePath, uint16_t *buffer, uint32_t capacity);
+/// Registers the window for session (WTSRegisterSessionNotification) and console display
+/// state (RegisterPowerSettingNotification) broadcasts.
+void cd2d_shell_register_notifications(void *hwnd);
+/// For WM_POWERBROADCAST with PBT_POWERSETTINGCHANGE: whether lParam is the console
+/// display state, and its value (0 off, 1 on, 2 dimmed).
+bool cd2d_shell_display_state(const void *lParam, uint32_t *state);
+/// The machine of another process's executable as a NSBundleExecutableArchitecture value, or 0.
+int32_t cd2d_shell_process_architecture(uint32_t pid);
+void cd2d_shell_free(void *buffer);
+
 // Drag and drop (OLE; ADR-0011 stage B)
 /// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit
 /// pasteboard type; "public.utf8-plain-text" travels as CF_UNICODETEXT, "public.file-url"

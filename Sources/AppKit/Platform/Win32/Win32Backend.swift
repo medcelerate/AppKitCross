@@ -31,6 +31,14 @@ final class Win32Backend: PlatformBackend {
     /// The notification area (Win32StatusItem.swift).
     private(set) var win32StatusItems: Win32StatusItems?
     var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
+    /// The shell (Win32Workspace.swift, ADR-0022); made on first use.
+    private(set) var win32Workspace: Win32Workspace?
+    var workspace: any PlatformWorkspace {
+        if let w = win32Workspace { return w }
+        let w = Win32Workspace(backend: self)
+        win32Workspace = w
+        return w
+    }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
@@ -39,6 +47,7 @@ final class Win32Backend: PlatformBackend {
     func register(_ window: Win32Window) {
         windows.append(window)
         if let hwnd = window.hwnd, window.wantsMenuBar { menuBar.apply(to: hwnd) }
+        win32Workspace?.apply(to: window)
     }
 
     func unregister(_ window: Win32Window) {
@@ -493,6 +502,17 @@ final class Win32Backend: PlatformBackend {
         }
     }
 
+    /// An invisible top-level window of the message window's class: broadcasts
+    /// (WM_SETTINGCHANGE, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE) reach top-level windows
+    /// only, never message-only ones.
+    func makeBroadcastWindow() -> HWND? {
+        let hwnd = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
+            CreateWindowExW(DWORD(WS_EX_TOOLWINDOW), name, name, DWORD(WS_OVERLAPPED), 0, 0, 0, 0, nil, nil, hInstance, nil)
+        }
+        if let hwnd { SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))) }
+        return hwnd
+    }
+
     private func createMessageWindow() {
         messageWindow = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
             CreateWindowExW(0, name, name, 0, 0, 0, 0, 0, HWND(bitPattern: -3) /* HWND_MESSAGE */, nil, hInstance, nil)
@@ -503,6 +523,15 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
+        if msg == UINT(WM_SETTINGCHANGE) || msg == UINT(WM_POWERBROADCAST) || msg == 0x02B1 /* WM_WTSSESSION_CHANGE */ || (msg == UINT(WM_TIMER) && wParam != Win32Backend.dragTimer) {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                let handled = MainActor.assumeIsolated { backend.win32Workspace?.handle(message: msg, wParam: wParam, lParam: lParam) ?? false }
+                if handled { return msg == UINT(WM_POWERBROADCAST) ? 1 /* TRUE */ : 0 }
+            }
+            return DefWindowProcW(hwnd, msg, wParam, lParam)
+        }
         if msg == UINT(WM_TIMER), wParam == Win32Backend.dragTimer {
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
             if ptr != 0 {

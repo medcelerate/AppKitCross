@@ -172,6 +172,7 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
 
     func show() {
         guard !isVisible else { return }
+        backend.x11WindowSystem?.apply(to: xid)
         XMapRaised(backend.display, xid)
         isVisible = true
         dirty = NSRect(origin: .zero, size: _frame.size)

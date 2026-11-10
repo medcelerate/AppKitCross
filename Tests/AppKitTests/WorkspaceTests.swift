@@ -8,6 +8,16 @@ import XCTest
 import UniformTypeIdentifiers
 @testable import AppKit
 
+/// Notification names seen, collected from any thread.
+final class _NotificationLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String] = []
+    func add(_ s: String) { lock.lock(); items.append(s); lock.unlock() }
+    func removeAll() { lock.lock(); items.removeAll(); lock.unlock() }
+    var entries: [String] { lock.lock(); defer { lock.unlock() }; return items }
+    var count: Int { entries.count }
+}
+
 final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     @MainActor private var host: HostWorkspace { HostWorkspace.shared }
     private var observers: [NSObjectProtocol] = []
@@ -37,7 +47,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     }
 
     /// Collects the workspace notifications named, as "<short name>:<pid>" entries.
-    private func record(_ names: [NSNotification.Name], into log: NSMutableArray) {
+    private func record(_ names: [NSNotification.Name], into log: _NotificationLog) {
         for n in names {
             observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: n, object: nil, queue: nil) { note in
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -109,7 +119,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     func testOpeningWithAnApplicationLaunchesAndReportsTheProcess() async throws {
         let app = file("editor", "#!/bin/sh\n")
         let txt = file("b.txt")
-        let log = NSMutableArray()
+        let log = _NotificationLog()
         record([NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification], into: log)
         await MainActor.run { host.handlers[.fileExtension("txt")] = [app] }
         XCTAssertEqual(NSWorkspace.shared.urlForApplication(toOpen: txt), app)
@@ -128,7 +138,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(host.launches.last?.urls, [txt])
             XCTAssertEqual(host.launches.last?.options.arguments, ["--new-window"])
             XCTAssertFalse(host.launches.last?.options.activates ?? true)
-            XCTAssertEqual(log as? [String], ["DidLaunchApplication:\(running.processIdentifier)"])
+            XCTAssertEqual(log.entries, ["DidLaunchApplication:\(running.processIdentifier)"])
             // The workspace hands out the same object for the process.
             XCTAssertTrue(NSWorkspace.shared.runningApplications.contains { $0 === running })
             XCTAssertEqual(NSRunningApplication.runningApplications(withBundleIdentifier: "editor").count, 1)
@@ -237,7 +247,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
 
     func testRecycleAndDuplicate() async throws {
         let a = file("e.txt"), b = file("f.txt")
-        let log = NSMutableArray()
+        let log = _NotificationLog()
         record([NSWorkspace.didPerformFileOperationNotification], into: log)
         let recycled = try await NSWorkspace.shared.recycle([a, b])
         XCTAssertEqual(recycled.count, 2)
@@ -269,12 +279,12 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
 
     func testApplicationNotificationsFollowThePlatform() {
         MainActor.assumeIsolated {
-            let log = NSMutableArray()
+            let log = _NotificationLog()
             record([NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification,
                     NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification, NSWorkspace.didTerminateApplicationNotification], into: log)
             NSApplication.shared.activate(ignoringOtherApps: true)
             _ = NSWorkspace.shared.runningApplications
-            log.removeAllObjects()
+            log.removeAll()
             let me = NSRunningApplication.current.processIdentifier
             // Another application appears and comes to the front.
             let other = PlatformRunningApplication(processIdentifier: 4242, localizedName: "Notepad", bundleIdentifier: "notepad", executableURL: URL(fileURLWithPath: "/w/notepad.exe"))
@@ -290,8 +300,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(notepad.isActive)
             XCTAssertFalse(NSRunningApplication.current.isActive == true && NSWorkspace.shared.frontmostApplication === NSRunningApplication.current)
             XCTAssertTrue(NSWorkspace.shared.frontmostApplication === notepad)
-            XCTAssertEqual(log as? [String], ["DidLaunchApplication:4242", "DidDeactivateApplication:\(me)", "DidActivateApplication:4242"])
-            log.removeAllObjects()
+            XCTAssertEqual(log.entries, ["DidLaunchApplication:4242", "DidDeactivateApplication:\(me)", "DidActivateApplication:4242"])
+            log.removeAll()
             // Hide, unhide, through the application object and through the workspace.
             XCTAssertTrue(notepad.hide())
             XCTAssertTrue(notepad.isHidden)
@@ -301,12 +311,12 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(notepad.isHidden)
             NSApplication.shared.unhideAllApplications(nil)
             XCTAssertFalse(notepad.isHidden)
-            XCTAssertEqual(log as? [String], ["DidHideApplication:4242", "DidUnhideApplication:4242", "DidHideApplication:4242", "DidUnhideApplication:4242"])
-            log.removeAllObjects()
+            XCTAssertEqual(log.entries, ["DidHideApplication:4242", "DidUnhideApplication:4242", "DidHideApplication:4242", "DidUnhideApplication:4242"])
+            log.removeAll()
             // This application comes back to the front, then the other one terminates.
             NSApplication.shared.activate(ignoringOtherApps: true)
-            XCTAssertEqual(log as? [String], ["DidDeactivateApplication:4242", "DidActivateApplication:\(me)"])
-            log.removeAllObjects()
+            XCTAssertEqual(log.entries, ["DidDeactivateApplication:4242", "DidActivateApplication:\(me)"])
+            log.removeAll()
             XCTAssertTrue(notepad.terminate())
             XCTAssertEqual(host.terminated.last?.0, 4242)
             XCTAssertEqual(host.terminated.last?.1, false)
@@ -314,24 +324,24 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(notepad.isActive)
             XCTAssertFalse(notepad.terminate())
             XCTAssertFalse(NSWorkspace.shared.runningApplications.contains { $0.processIdentifier == 4242 })
-            XCTAssertEqual(log as? [String], ["DidTerminateApplication:4242"])
+            XCTAssertEqual(log.entries, ["DidTerminateApplication:4242"])
             // A process that vanished without an event is noticed on the next refresh.
             let silent = PlatformRunningApplication(processIdentifier: 4343, localizedName: "Silent")
             host.otherApplications.append(silent)
-            log.removeAllObjects()
+            log.removeAll()
             guard let s = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == 4343 }) else { return XCTFail() }
-            XCTAssertEqual(log as? [String], ["DidLaunchApplication:4343"])
+            XCTAssertEqual(log.entries, ["DidLaunchApplication:4343"])
             host.otherApplications.removeAll()
             _ = NSWorkspace.shared.runningApplications
             XCTAssertTrue(s.isTerminated)
-            XCTAssertEqual(log as? [String], ["DidLaunchApplication:4343", "DidTerminateApplication:4343"])
+            XCTAssertEqual(log.entries, ["DidLaunchApplication:4343", "DidTerminateApplication:4343"])
             XCTAssertTrue(s.forceTerminate() == false)
         }
     }
 
     func testPowerSessionAndAccessibilityNotifications() {
         MainActor.assumeIsolated {
-            let log = NSMutableArray()
+            let log = _NotificationLog()
             record([NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification,
                     NSWorkspace.sessionDidResignActiveNotification, NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.accessibilityDisplayOptionsDidChangeNotification], into: log)
             XCTAssertTrue(host.isMonitoring)
@@ -347,7 +357,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
             XCTAssertTrue(NSWorkspace.shared.isVoiceOverEnabled)
             for e in [PlatformWorkspaceEvent.willSleep, .didWake, .screensDidSleep, .screensDidWake, .sessionDidResignActive, .sessionDidBecomeActive] { host.postEvent(e) }
-            XCTAssertEqual(log as? [String], ["AccessibilityDisplayOptionsDidChange", "WillSleep", "DidWake", "ScreensDidSleep", "ScreensDidWake", "SessionDidResignActive", "SessionDidBecomeActive"])
+            XCTAssertEqual(log.entries, ["AccessibilityDisplayOptionsDidChange", "WillSleep", "DidWake", "ScreensDidSleep", "ScreensDidWake", "SessionDidResignActive", "SessionDidBecomeActive"])
             // The desktop picture.
             let wallpaper = URL(fileURLWithPath: "/pictures/w.png")
             XCTAssertNil(NSWorkspace.shared.desktopImageURL(for: NSScreen.main!))

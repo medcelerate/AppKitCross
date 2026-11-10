@@ -80,6 +80,15 @@ final class WaylandBackend: PlatformBackend {
     /// the first output.
     private var statusNotifier: LinuxStatusNotifierHost?
     private var statusNotifierTried = false
+    /// The workspace (LinuxWorkspace.swift, ADR-0022); Wayland lists no windows, so it knows
+    /// the processes launched here and this one.
+    private var linuxWorkspace: LinuxWorkspace?
+    var workspace: any PlatformWorkspace {
+        if let w = linuxWorkspace { return w }
+        let w = LinuxWorkspace(windowSystem: nil)
+        linuxWorkspace = w
+        return w
+    }
     var statusItems: (any PlatformStatusItemHost)? {
         if !statusNotifierTried {
             statusNotifierTried = true
@@ -346,6 +355,7 @@ final class WaylandBackend: PlatformBackend {
         }
         atspi?.dispatch()
         statusNotifier?.dispatch()
+        linuxWorkspace?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }
