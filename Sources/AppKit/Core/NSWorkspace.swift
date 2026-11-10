@@ -328,7 +328,8 @@ open class NSWorkspace: NSObject {
     open func absolutePathForApplication(withBundleIdentifier bundleIdentifier: String) -> String? { urlForApplication(withBundleIdentifier: bundleIdentifier)?.path }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/fullpath(forapplication:)
     open func fullPath(forApplication appName: String) -> String? {
-        if appName.hasPrefix("/") || appName.contains(":\\") { return FileManager.default.fileExists(atPath: appName) ? appName : nil }
+        // An absolute path (POSIX, or a Windows drive path with either separator) names the application itself.
+        if appName.hasPrefix("/") || appName.dropFirst().hasPrefix(":") { return FileManager.default.fileExists(atPath: appName) ? appName : nil }
         return urlForApplication(withBundleIdentifier: appName)?.path
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/setdefaultapplication(at:toopen:)
