@@ -865,32 +865,36 @@ final class PasteboardAndAlertTests: XCTestCase, @unchecked Sendable {
 }
 
 final class FileDialogTests: XCTestCase, @unchecked Sendable {
+    /// A native dialog stand-in (`HostFileDialog`) receives the panel's options and its
+    /// answer becomes the panel's URLs (the package-drawn panel is covered in DocumentTests).
     func testOpenPanelReturnsChosenURLs() {
         MainActor.assumeIsolated {
             let host = Platform.backend as! HostBackend
+            let dialog = HostFileDialog(result: [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.jpg")])
+            host.fileDialogOverride = dialog
+            defer { host.fileDialogOverride = nil }
             let panel = NSOpenPanel()
             panel.allowsMultipleSelection = true
             panel.canChooseDirectories = true
             panel.allowedFileTypes = ["png", "jpg"]
             panel.title = "Pick images"
-            host.nextFileDialogResult = [URL(fileURLWithPath: "/tmp/a.png"), URL(fileURLWithPath: "/tmp/b.jpg")]
             XCTAssertEqual(panel.runModal(), .OK)
             XCTAssertEqual(panel.urls.map { $0.lastPathComponent }, ["a.png", "b.jpg"])
             XCTAssertEqual(panel.url?.lastPathComponent, "a.png")
-            let o = host.lastFileDialogOptions!
+            let o = dialog.lastOptions!
             XCTAssertFalse(o.isSave)
             XCTAssertTrue(o.allowsMultipleSelection)
             XCTAssertTrue(o.canChooseDirectories)
             XCTAssertEqual(o.allowedExtensions, ["png", "jpg"])
-            host.nextFileDialogResult = nil
+            dialog.result = nil
             XCTAssertEqual(panel.runModal(), .cancel)
             XCTAssertNil(panel.url)
             let save = NSSavePanel()
             save.nameFieldStringValue = "Untitled.txt"
-            host.nextFileDialogResult = [URL(fileURLWithPath: "/tmp/Untitled.txt")]
+            dialog.result = [URL(fileURLWithPath: "/tmp/Untitled.txt")]
             XCTAssertEqual(save.runModal(), .OK)
-            XCTAssertTrue(host.lastFileDialogOptions!.isSave)
-            XCTAssertEqual(host.lastFileDialogOptions!.defaultName, "Untitled.txt")
+            XCTAssertTrue(dialog.lastOptions!.isSave)
+            XCTAssertEqual(dialog.lastOptions!.defaultName, "Untitled.txt")
             XCTAssertEqual(save.url?.path, "/tmp/Untitled.txt")
             panel.close(); save.close()
         }

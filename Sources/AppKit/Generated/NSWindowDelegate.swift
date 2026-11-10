@@ -86,6 +86,7 @@ public protocol NSWindowDelegate: NSObjectProtocol {
     @MainActor func windowWillMove(_ notification: Notification)
     @MainActor func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize
     @MainActor func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any?
+    @MainActor func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager?
     @MainActor func windowWillStartLiveResize(_ notification: Notification)
     @MainActor func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect
 }
@@ -211,7 +212,8 @@ extension NSWindowDelegate {
     @MainActor public func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize { return frameSize }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillreturnfieldeditor(_:to:)
     @MainActor public func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? { return nil }
-    // SKIPPED (Foundation.UndoManager not in corelibs): @MainActor func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager?
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillreturnundomanager(_:)
+    @MainActor public func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillstartliveresize(_:)
     @MainActor public func windowWillStartLiveResize(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowdelegate/windowwillusestandardframe(_:defaultframe:)

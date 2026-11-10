@@ -331,8 +331,20 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         get { _title }
         set {
             _title = newValue
-            if let t = toplevel { xdg_toplevel_set_title(t, newValue) }
+            applyNativeTitle()
         }
+    }
+    /// `NSWindow.isDocumentEdited` on a server-side decorated window: "*" before the
+    /// title (with client-side decorations the window draws the dot itself).
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        guard let t = toplevel else { return }
+        xdg_toplevel_set_title(t, isDocumentEdited && !hasClientSideTitleBar ? "*" + _title : _title)
     }
 
     var frame: NSRect {
