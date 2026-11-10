@@ -105,6 +105,7 @@ import CoreText
         delegate?.applicationWillBecomeActive(post(NSApplication.willBecomeActiveNotification))
         _isActive = true
         delegate?.applicationDidBecomeActive(post(NSApplication.didBecomeActiveNotification))
+        for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/activatecontexthelpmode(_:)
     @MainActor open func activateContextHelpMode(_ sender: Any?) { unimplemented() }
@@ -155,6 +156,7 @@ import CoreText
         delegate?.applicationWillResignActive(post(NSApplication.willResignActiveNotification))
         _isActive = false
         delegate?.applicationDidResignActive(post(NSApplication.didResignActiveNotification))
+        for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/delegate
     @MainActor open var delegate: (any NSApplicationDelegate)? {

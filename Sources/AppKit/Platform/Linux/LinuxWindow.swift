@@ -534,6 +534,16 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
                     if let owner { owner.platformWindowWillClose() } else { close() }
                 }
             }
+        case LeaveNotify:
+            // The pointer left the window (NotifyGrab/NotifyUngrab modes mean a grab, not a
+            // move out): a far-away move lets the tracking areas and hover states exit.
+            let c = event.xcrossing
+            if c.mode == NotifyNormal, pressedButtons == 0 {
+                backend.lastEventTime = c.time
+                let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(c.state),
+                                            timestamp: seconds(c.time), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+                owner?.platformWindowDispatch(e)
+            }
         case FocusIn:
             isKey = true
             owner?.platformWindowDidBecomeKey()
