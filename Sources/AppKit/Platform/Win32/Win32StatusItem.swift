@@ -116,7 +116,12 @@ final class Win32StatusItem: PlatformStatusItem {
         nid.hIcon = icon ?? LoadIconW(nil, UnsafePointer<WCHAR>(bitPattern: 32512))     // IDI_APPLICATION
         nid.dwStateMask = DWORD(NIS_HIDDEN)
         nid.dwState = isVisible ? 0 : DWORD(NIS_HIDDEN)
-        let tip = Array((toolTip ?? title).utf16.prefix(127)) + [0]
+        // The notification area names the icon by its tip (hover text, UI Automation):
+        // the tool tip, else the title, else the process name so it is never blank.
+        var text = toolTip ?? ""
+        if text.isEmpty { text = title }
+        if text.isEmpty { text = ProcessInfo.processInfo.processName }
+        let tip = Array(text.utf16.prefix(127)) + [0]
         withUnsafeMutablePointer(to: &nid.szTip) { p in
             p.withMemoryRebound(to: WCHAR.self, capacity: 128) { dst in
                 for (i, c) in tip.enumerated() { dst[i] = c }
@@ -141,7 +146,8 @@ final class Win32StatusItem: PlatformStatusItem {
     private func update() {
         guard added, !removed else { return }
         var nid = data()
-        _ = Shell_NotifyIconW(DWORD(NIM_MODIFY), &nid)
+        let ok = Shell_NotifyIconW(DWORD(NIM_MODIFY), &nid)
+        if NSView._traceInvalidation { NSView._trace("win32 status: modify item \(id) tip '\(toolTip ?? title)' icon \(icon == nil ? "default" : "custom") \(ok ? "ok" : "failed \(GetLastError())")") }
     }
 
     func setImage(_ image: CGImage?, scale: CGFloat) {
@@ -161,17 +167,7 @@ final class Win32StatusItem: PlatformStatusItem {
                 memcpy(&packed[y * w * 4], base + y * image.bytesPerRow, w * 4)
             }
         }
-        guard let color = packed.withUnsafeBytes({ CreateBitmap(Int32(w), Int32(h), 1, 32, $0.baseAddress) }) else { return nil }
-        defer { DeleteObject(color) }
-        guard let mask = CreateBitmap(Int32(w), Int32(h), 1, 1, nil) else { return nil }
-        defer { DeleteObject(mask) }
-        var info = ICONINFO()
-        info.fIcon = true
-        info.xHotspot = 0
-        info.yHotspot = 0
-        info.hbmMask = mask
-        info.hbmColor = color
-        return CreateIconIndirect(&info)
+        return Win32Backend.makeIconHandle(width: w, height: h, hotSpot: (0, 0), isIcon: true, bgra: packed)
     }
 
     func remove() {

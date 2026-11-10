@@ -188,6 +188,7 @@ import CoreText
             if let cv = _contentView { let cr = contentRect(forFrameRect: frame); if cv.frame.size != cr.size { cv.setFrameSize(cr.size) } }
         }
         _ensureWindowButtons()
+        _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
         _platform?.setNeedsDisplay(nil)
     }
@@ -383,6 +384,7 @@ import CoreText
         c.isTransparent = !_isOpaque
         c.hasShadow = _hasShadow
         c.movableByBackground = _isMovableByWindowBackground
+        c.hasDraggableBand = _toolbarView.map { !$0.isHidden } ?? false
         return c
     }
 
@@ -726,6 +728,7 @@ import CoreText
         let parent = frame
         let size = sheetWindow.frame.size
         sheetWindow.setFrameOrigin(NSPoint(x: parent.midX - size.width / 2, y: parent.maxY - size.height - NSWindow._titleBarBandHeight))
+        post(NSWindow.willBeginSheetNotification)
         sheetWindow.makeKeyAndOrderFront(nil)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculatescontentborderthickness(for:)
@@ -1085,6 +1088,7 @@ import CoreText
         let completion = _sheetCompletions.removeValue(forKey: ObjectIdentifier(sheetWindow))
         makeKeyAndOrderFront(nil)
         completion?(returnCode)
+        post(NSWindow.didEndSheetNotification)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/fieldeditor(_:for:)
     @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {

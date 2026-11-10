@@ -76,8 +76,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NST
         toolbar.displayMode = .iconAndLabel
         toolbar.selectedItemIdentifier = AppDelegate.edit
         window.toolbar = toolbar
+        syncModePopUp()        // the autosaved display mode
         window.center()
         window.makeKeyAndOrderFront(nil)
+        // The Customize sheet can change the display mode: resync the pop-up when it closes.
+        NotificationCenter.default.addObserver(forName: NSWindow.didEndSheetNotification, object: window, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncModePopUp() }
+        }
 
         makeStatusItem()
         report("ready; the toolbar's items send their actions here")
@@ -255,6 +260,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NST
         default: return false
         }
         return true
+    }
+
+    func syncModePopUp() {
+        let index = [NSToolbar.DisplayMode.iconAndLabel, .iconOnly, .labelOnly].firstIndex(of: toolbar.displayMode) ?? 0
+        if modes.indexOfSelectedItem != index { modes.selectItem(at: index) }
     }
 
     func report(_ text: String) {

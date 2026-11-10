@@ -59,7 +59,14 @@ same toolbar.
   delegate's `canBeInsertedAt` and `immovableItemIdentifiers` are honoured. There is no
   dragging. `autosavesConfiguration` writes AppKit's dictionary ("TB Item Identifiers",
   "TB Display Mode", "TB Size Mode", "TB Is Shown") under "NSToolbar Configuration
-  <identifier>" in `UserDefaults.standard` and reads it back when the toolbar loads.
+  <identifier>" in `UserDefaults.standard` and reads it back when the toolbar loads. Every
+  write is followed by `synchronize()`, and `NSApplication` synchronizes before `exit()`:
+  swift-corelibs-foundation (Windows, Linux) writes the defaults file only then, which
+  is how the first Windows run lost the customized set. The sheet posts
+  `NSWindow.willBeginSheetNotification`/`didEndSheetNotification` like AppKit, so an app
+  can resync controls that mirror the toolbar (the example's display-mode pop-up). A
+  toolbar under a system title bar sets `PlatformWindowChrome.hasDraggableBand`, so the
+  Win32 backend asks the window's hit test and reports the band's gaps as `HTCAPTION`.
 - **Validation.** `validate()` on an image item (or a view item whose view is a control)
   finds the target the way `sendAction` would (the explicit target, else the responder
   chain of the toolbar's window, the application, its delegate); nothing performing the

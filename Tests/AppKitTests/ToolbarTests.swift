@@ -479,9 +479,15 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             w.runToolbarCustomizationPalette(nil)
             XCTAssertFalse(tb.customizationPaletteIsRunning, "customization is off by default")
             tb.allowsUserCustomization = true
+            final class Counts: @unchecked Sendable { var began = 0; var ended = 0 }
+            let counts = Counts()
+            let o1 = NotificationCenter.default.addObserver(forName: NSWindow.willBeginSheetNotification, object: w, queue: nil) { _ in counts.began += 1 }
+            let o2 = NotificationCenter.default.addObserver(forName: NSWindow.didEndSheetNotification, object: w, queue: nil) { _ in counts.ended += 1 }
+            defer { NotificationCenter.default.removeObserver(o1); NotificationCenter.default.removeObserver(o2) }
             w.runToolbarCustomizationPalette(nil)
             XCTAssertTrue(tb.customizationPaletteIsRunning)
             XCTAssertEqual(w.sheets.count, 1)
+            XCTAssertEqual(counts.began, 1, "AppKit posts willBeginSheet when the sheet opens")
             let palette = Mirror(reflecting: tb).descendant("_palette") as! _NSToolbarCustomizationPalette
             XCTAssertEqual(palette.addPopUp.itemTitles.contains("Search"), true)
             XCTAssertFalse(palette.addPopUp.itemTitles.contains("Back"), "items already in the toolbar are not offered twice")
@@ -499,6 +505,27 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             palette.doneButton.performClick(nil)
             XCTAssertFalse(tb.customizationPaletteIsRunning)
             XCTAssertTrue(w.sheets.isEmpty)
+            XCTAssertEqual(counts.ended, 1, "didEndSheet lets the app resync (the example's display-mode pop-up)")
+        }
+    }
+
+    /// The band under a system title bar drags the window: the chrome tells the backend
+    /// to ask the window's hit test for client points (Win32 WM_NCHITTEST → HTCAPTION).
+    func testToolbarBandIsDraggableChrome() {
+        MainActor.assumeIsolated {
+            let w = makeWindow()
+            defer { w.close() }
+            let host = Mirror(reflecting: w).descendant("_platform") as! HostWindow
+            XCTAssertFalse(host.chrome.hasDraggableBand)
+            let d = Delegate()
+            let tb = NSToolbar(identifier: "test.band")
+            tb.delegate = d
+            w.toolbar = tb
+            XCTAssertTrue(host.chrome.hasDraggableBand)
+            tb.isVisible = false
+            XCTAssertFalse(host.chrome.hasDraggableBand)
+            w.toolbar = nil
+            XCTAssertFalse(host.chrome.hasDraggableBand)
         }
     }
 

@@ -340,6 +340,9 @@ import CoreGraphics
     private func _autosave() {
         guard _autosavesConfiguration, _loaded else { return }
         UserDefaults.standard.set(configuration, forKey: _autosaveKey)
+        // swift-corelibs-foundation (Windows, Linux) writes the defaults file only on
+        // synchronize(); without it the configuration is lost when the process exits.
+        UserDefaults.standard.synchronize()
     }
 
     // MARK: Standard items

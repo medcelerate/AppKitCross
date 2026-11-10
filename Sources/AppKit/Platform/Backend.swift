@@ -276,6 +276,9 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public var hasShadow = true
     /// `isMovableByWindowBackground`.
     public var movableByBackground = false
+    /// The window draws a band of its own (a toolbar under a system title bar) that
+    /// drags the window: the backend asks the owner's hit test for client points.
+    public var hasDraggableBand = false
     public var roundedCorners = true
     public init() {}
 }

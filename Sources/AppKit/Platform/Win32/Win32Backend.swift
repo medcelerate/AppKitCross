@@ -430,7 +430,14 @@ final class Win32Backend: PlatformBackend {
 
     /// Builds a color cursor (an icon with a hot spot) from premultiplied BGRA pixels.
     private func makeCursor(width: Int, height: Int, hotSpot: (Int, Int), bgra: [UInt8]) -> HCURSOR? {
-        guard bgra.count >= width * height * 4 else { return nil }
+        Win32Backend.makeIconHandle(width: width, height: height, hotSpot: hotSpot, isIcon: false, bgra: bgra)
+    }
+
+    /// An HICON/HCURSOR with alpha from premultiplied BGRA pixels (top-down rows): a
+    /// 32-bit DIB section as the colour plane, as the icon APIs document. Status items
+    /// (Win32StatusItem) and cursors share it.
+    static func makeIconHandle(width: Int, height: Int, hotSpot: (Int, Int), isIcon: Bool, bgra: [UInt8]) -> HICON? {
+        guard width > 0, height > 0, bgra.count >= width * height * 4 else { return nil }
         var bi = BITMAPV5HEADER()
         bi.bV5Size = DWORD(MemoryLayout<BITMAPV5HEADER>.size)
         bi.bV5Width = Int32(width)
@@ -449,7 +456,7 @@ final class Win32Backend: PlatformBackend {
         bgra.withUnsafeBytes { src in bits.copyMemory(from: src.baseAddress!, byteCount: width * height * 4) }
         let mask = CreateBitmap(Int32(width), Int32(height), 1, 1, nil)
         var info = ICONINFO()
-        info.fIcon = false
+        info.fIcon = isIcon
         info.xHotspot = DWORD(hotSpot.0)
         info.yHotspot = DWORD(hotSpot.1)
         info.hbmMask = mask

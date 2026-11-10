@@ -81,6 +81,9 @@ import CoreText
     private func _terminateNow() -> Never {
         _ = post(NSApplication.willTerminateNotification)
         delegate?.applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification, object: self))
+        // Flush the defaults (window frames, toolbar configurations, @AppStorage) before
+        // exit(): swift-corelibs-foundation writes the file only on synchronize().
+        UserDefaults.standard.synchronize()
         Platform.backend.stop()
         exit(0)
     }

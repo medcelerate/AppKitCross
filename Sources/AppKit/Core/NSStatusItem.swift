@@ -111,7 +111,10 @@ open class NSStatusItem: NSObject {
             MainActor.assumeIsolated {
                 guard _isVisible != newValue else { return }
                 _isVisible = newValue
-                if let name = _autosaveName { UserDefaults.standard.set(newValue, forKey: NSStatusItem._visibleKey(name)) }
+                if let name = _autosaveName {
+                    UserDefaults.standard.set(newValue, forKey: NSStatusItem._visibleKey(name))
+                    UserDefaults.standard.synchronize()     // corelibs Foundation persists only on synchronize()
+                }
                 _syncPlatform()
                 if !newValue, _behavior.contains(.terminationOnRemoval) { NSApplication.shared.terminate(self) }
             }
