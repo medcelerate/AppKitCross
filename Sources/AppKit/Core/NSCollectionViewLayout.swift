@@ -14,6 +14,15 @@ import Foundation
 import CoreGraphics
 #endif
 
+/// Whether two rects share area. `NSRect.intersects` answers differently for rects that
+/// only touch (Apple's says no, corelibs Foundation's yes); the layouts need Apple's
+/// answer on every platform, so an element that ends where the visible rect starts is
+/// not in it.
+internal func _rectsOverlap(_ a: NSRect, _ b: NSRect) -> Bool {
+    let i = a.intersection(b)
+    return !i.isNull && i.width > 0 && i.height > 0
+}
+
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout
 @available(macOS 10.11, *)
 @MainActor open class NSCollectionViewLayout: NSObject, NSCoding {

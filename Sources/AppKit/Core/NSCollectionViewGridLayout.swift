@@ -141,7 +141,7 @@ import CoreGraphics
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesforelements(in:)
     @MainActor open override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
-        _items.flatMap { $0 }.filter { !$0.isHidden && $0.frame.intersects(rect) }
+        _items.flatMap { $0 }.filter { !$0.isHidden && _rectsOverlap($0.frame, rect) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesforitem(at:)
     @MainActor open override func layoutAttributesForItem(at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {

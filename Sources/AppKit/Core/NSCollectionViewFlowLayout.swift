@@ -257,15 +257,15 @@ import CoreGraphics
         var out: [NSCollectionViewLayoutAttributes] = []
         let visible = _collectionView?.visibleRect ?? rect
         for (s, section) in _sections.enumerated() {
-            guard section.frame.intersects(rect) || (_headersPin && section.header != nil) || (_footersPin && section.footer != nil) else { continue }
+            guard _rectsOverlap(section.frame, rect) || (_headersPin && section.header != nil) || (_footersPin && section.footer != nil) else { continue }
             if let h = section.header {
                 let pinned = _headersPin ? _pinnedHeader(h, section: section, visible: visible) : h
-                if pinned.frame.intersects(rect) || (_headersPin && section.frame.intersects(visible) && pinned.frame.intersects(visible)) { out.append(pinned) }
+                if _rectsOverlap(pinned.frame, rect) || (_headersPin && _rectsOverlap(section.frame, visible) && _rectsOverlap(pinned.frame, visible)) { out.append(pinned) }
             }
-            for a in section.items where a.frame.intersects(rect) { out.append(a) }
+            for a in section.items where _rectsOverlap(a.frame, rect) { out.append(a) }
             if let f = section.footer {
                 let pinned = _footersPin ? _pinnedFooter(f, section: section, visible: visible) : f
-                if pinned.frame.intersects(rect) || (_footersPin && section.frame.intersects(visible) && pinned.frame.intersects(visible)) { out.append(pinned) }
+                if _rectsOverlap(pinned.frame, rect) || (_footersPin && _rectsOverlap(section.frame, visible) && _rectsOverlap(pinned.frame, visible)) { out.append(pinned) }
             }
             _ = s
         }
