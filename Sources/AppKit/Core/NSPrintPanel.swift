@@ -59,8 +59,7 @@ import CoreText
     @MainActor internal func _beginSheet(with printInfo: NSPrintInfo, modalFor docWindow: NSWindow, completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void) {
         _printInfo = printInfo
         let form = _makeForm()
-        form.onEnd = { [weak self, weak docWindow] response in
-            guard let self else { return }
+        form.onEnd = { [self, weak docWindow] response in   // keeps the panel alive until the sheet ends
             self._lastReturnCode = response.rawValue
             if let w = docWindow { w.endSheet(form.panel, returnCode: response) } else { form.panel.orderOut(nil) }
             self._form = nil
@@ -120,53 +119,9 @@ import CoreText
     }
 }
 
-extension NSPrintPanel {
-    public struct AccessorySummaryKey: RawRepresentable, Hashable, Equatable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
 
-        static public var itemDescription: NSPrintPanel.AccessorySummaryKey { NSPrintPanel.AccessorySummaryKey(rawValue: "description") }
-        static public var itemName: NSPrintPanel.AccessorySummaryKey { NSPrintPanel.AccessorySummaryKey(rawValue: "name") }
-    }
-}
 
-extension NSPrintPanel {
-    public struct JobStyleHint: RawRepresentable, Hashable, Equatable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
 
-        static public var allPresets: NSPrintPanel.JobStyleHint { NSPrintPanel.JobStyleHint(rawValue: "All") }
-        static public var noPresets: NSPrintPanel.JobStyleHint { NSPrintPanel.JobStyleHint(rawValue: "None") }
-        static public var photo: NSPrintPanel.JobStyleHint { NSPrintPanel.JobStyleHint(rawValue: "Photo") }
-    }
-}
-
-extension NSPrintPanel {
-    public struct Options: OptionSet, Sendable, Equatable {
-        public let rawValue: UInt
-        public init(rawValue: UInt) { self.rawValue = rawValue }
-
-        static public var showsCopies: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 1) }
-        static public var showsOrientation: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 8) }
-        static public var showsPageRange: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 2) }
-        static public var showsPageSetupAccessory: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 256) }
-        static public var showsPaperSize: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 4) }
-        static public var showsPreview: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 131072) }
-        static public var showsPrintSelection: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 32) }
-        static public var showsScaling: NSPrintPanel.Options { NSPrintPanel.Options(rawValue: 16) }
-    }
-}
-
-@available(macOS 14.0, *)
-extension NSPrintPanel {
-    @available(macOS 14.0, *)
-    public enum Result: Int, Sendable, Equatable, Hashable {
-        case cancelled = 0
-        case printed = 1
-    }
-}
 
 // MARK: - The form
 

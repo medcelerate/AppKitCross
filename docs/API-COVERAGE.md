@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 100 |
-| Types generated | 438 |
+| Types handwritten | 105 |
+| Types generated | 433 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1180 |
+| Members unimplemented-calls | 1166 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 42 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 41 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -195,7 +195,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |
 | NSDockTile | class | generated | 6 | 0 | 0 |  |
 | NSDockTilePlugIn | protocol | generated | 2 | 0 | 0 |  |
-| NSDocument | class | handwritten | 149 | 9 | 2 | 13 |
+| NSDocument | class | handwritten | 149 | 9 | 2 | 3 |
 | NSDocumentController | class | handwritten | 44 | 0 | 0 | 3 |
 | NSDragOperation | struct | generated | 9 | 0 | 0 |  |
 | NSDraggingContext | enum | generated | 2 | 0 | 0 |  |
@@ -311,7 +311,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPICTImageRep | class | generated | 3 | 0 | 0 |  |
 | NSPageController | class | generated | 14 | 0 | 2 |  |
 | NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |
-| NSPageLayout | class | generated | 10 | 0 | 1 |  |
+| NSPageLayout | class | handwritten | 10 | 0 | 1 | 1 |
 | NSPanGestureRecognizer | class | handwritten | 5 | 0 | 0 | 0 |
 | NSPanel | class | handwritten | 3 | 0 | 0 | 2 |
 | NSParagraphStyle | class | handwritten | 31 | 0 | 2 | 0 |
@@ -340,11 +340,11 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPressureConfiguration | class | generated | 3 | 0 | 0 |  |
 | NSPreviewRepresentableActivityItem | protocol | generated | 2 | 2 | 0 |  |
 | NSPreviewRepresentingActivityItem | class | generated | 1 | 1 | 0 |  |
-| NSPrintInfo | class | generated | 73 | 0 | 6 |  |
-| NSPrintOperation | class | generated | 35 | 0 | 2 |  |
-| NSPrintPanel | class | generated | 28 | 0 | 4 |  |
+| NSPrintInfo | class | handwritten | 73 | 0 | 6 | 7 |
+| NSPrintOperation | class | handwritten | 35 | 0 | 2 | 6 |
+| NSPrintPanel | class | handwritten | 28 | 0 | 4 | 1 |
 | NSPrintPanelAccessorizing | protocol | generated | 2 | 0 | 0 |  |
-| NSPrinter | class | generated | 12 | 0 | 3 |  |
+| NSPrinter | class | handwritten | 12 | 0 | 3 | 1 |
 | NSProgressIndicator | class | generated | 17 | 0 | 1 |  |
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
 | NSResponder | class | handwritten | 69 | 2 | 0 | 17 |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 135 |
+| NSView | class | handwritten | 361 | 3 | 19 | 117 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 151 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 150 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 53 | 0 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

@@ -130,27 +130,3 @@ open class NSPrinter: NSObject, NSCopying, NSCoding {
     }
     internal static func _localizedPaperName(_ name: NSPrinter.PaperName) -> String? { papers.first { $0.name == name }?.localized }
 }
-
-extension NSPrinter {
-    public struct PaperName: RawRepresentable, Hashable, Equatable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
-    }
-}
-
-extension NSPrinter {
-    public enum TableStatus: Int, Sendable, Equatable, Hashable {
-        case error = 2
-        case notFound = 1
-        case ok = 0
-    }
-}
-
-extension NSPrinter {
-    public struct TypeName: RawRepresentable, Hashable, Equatable, Sendable {
-        public let rawValue: String
-        public init(rawValue: String) { self.rawValue = rawValue }
-        public init(_ rawValue: String) { self.rawValue = rawValue }
-    }
-}

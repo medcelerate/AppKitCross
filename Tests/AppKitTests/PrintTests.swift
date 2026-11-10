@@ -35,6 +35,31 @@ final class ThreePageView: NSView {
     override func draw(_ dirtyRect: NSRect) { NSColor.red.setFill(); NSBezierPath.fill(dirtyRect) }
 }
 
+/// A document that prints its text view (what TextEdit does).
+@MainActor
+final class PrintableDocument: NSDocument {
+    var textView: NSTextView?
+    override func makeWindowControllers() {
+        let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 400, height: 300), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Printable"
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 1600))
+        tv.string = (1...90).map { "Line \($0): the quick brown fox jumps over the lazy dog." }.joined(separator: "\n")
+        w.contentView?.addSubview(tv)
+        textView = tv
+        addWindowController(NSWindowController(window: w))
+    }
+    override func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey: Any]) throws -> NSPrintOperation {
+        guard let tv = textView else { return try super.printOperation(withSettings: printSettings) }
+        var attributes: [NSPrintInfo.AttributeKey: Any] = [:]
+        for (key, value) in printInfo.dictionary() { if let k = key as? String { attributes[NSPrintInfo.AttributeKey(rawValue: k)] = value } }
+        for (key, value) in printSettings { attributes[key] = value }
+        tv.sizeToFit()   // the whole text, not the part the scroll view shows
+        let op = NSPrintOperation(view: tv, printInfo: NSPrintInfo(dictionary: attributes))
+        op.showsProgressPanel = false
+        return op
+    }
+}
+
 final class PrintTests: XCTestCase, @unchecked Sendable {
     @MainActor private var host: HostBackend { Platform.backend as! HostBackend }
     @MainActor private var printing: HostPrintBackend { host.hostPrinting }
@@ -586,6 +611,50 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(op2.run())
             XCTAssertEqual(printing.lastJob?.pages, 1)
             printing.nativePanelAnswer = nil
+        }
+    }
+
+    func testDocumentPrintsItsTextViewToPDFAndAsASheet() throws {
+        try MainActor.assumeIsolated {
+            let doc = PrintableDocument()
+            doc.makeWindowControllers()
+            doc.printInfo.paperName = NSPrinter.PaperName("na-letter")
+            doc.printInfo.orientation = .portrait
+            doc.printInfo.printer = NSPrinter(name: "Host Printer")!
+            // The TextEdit route: the document's own print operation, saved to a file.
+            let url = tempPDF("document")
+            doc.print(withSettings: [.jobDisposition: NSPrintInfo.JobDisposition.save.rawValue, .jobSavingURL: url], showPrintPanel: false, delegate: nil, didPrint: nil, contextInfo: nil)
+            let data = try Data(contentsOf: url)
+            XCTAssertTrue(_PDFInspector.isPDF(data))
+            XCTAssertEqual(pageCount(data), 3, "1600 points of text on 612-point pages")
+            try? FileManager.default.removeItem(at: url)
+            // A document without a print operation presents an error instead of crashing.
+            final class Plain: NSDocument {}
+            XCTAssertThrowsError(try Plain().printOperation(withSettings: [:]))
+            // File > Print… on a visible document window: the panel as a sheet, Print spools.
+            doc.showWindows()
+            let window = doc.windowForSheet!
+            XCTAssertTrue(window.isVisible)
+            XCTAssertFalse(window.respondsToSelectorAction(Selector(("print:"))), "a document's window leaves print: to the document")
+            XCTAssertTrue(doc.respondsToSelectorAction(Selector(("printDocument:"))))
+            XCTAssertTrue(window.tryToPerform(Selector(("print:")), with: nil), "print: walks the chain to the document")
+            XCTAssertNotNil(window.attachedSheet)
+            let op = NSPrintOperation.current!
+            XCTAssertEqual(op.jobTitle, "Untitled", "the controller names the window after the document")
+            op.printPanel._currentForm!.printButton.performClick(nil)
+            XCTAssertNil(window.attachedSheet)
+            XCTAssertEqual(printing.lastJob?.pages, 3)
+            XCTAssertEqual(printing.lastJob?.settings.jobTitle, "Untitled")
+            // Page Setup as a sheet changes the document's print info.
+            doc.runPageLayout(nil)
+            XCTAssertNotNil(window.attachedSheet)
+            let layoutForm = (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "Landscape" }
+            layoutForm!.performClick(nil)
+            (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "OK" }!.performClick(nil)
+            XCTAssertNil(window.attachedSheet)
+            XCTAssertEqual(doc.printInfo.orientation, .landscape)
+            XCTAssertEqual(doc.printInfo.paperSize, NSSize(width: 792, height: 612))
+            doc.close()
         }
     }
 }

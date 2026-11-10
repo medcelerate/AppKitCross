@@ -49,8 +49,7 @@ import CoreText
     @MainActor internal func _beginSheet(with printInfo: NSPrintInfo, modalFor docWindow: NSWindow, completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void) {
         _printInfo = printInfo
         let form = _makeForm(printInfo)
-        form.onEnd = { [weak self, weak docWindow] response in
-            guard let self else { return }
+        form.onEnd = { [self, weak docWindow] response in   // keeps the panel alive until the sheet ends
             self._lastReturnCode = response.rawValue
             if let w = docWindow { w.endSheet(form.panel, returnCode: response) } else { form.panel.orderOut(nil) }
             self._form = nil
@@ -89,14 +88,5 @@ import CoreText
         form.pdfButton.isHidden = true
         _form = form
         return form
-    }
-}
-
-@available(macOS 14.0, *)
-extension NSPageLayout {
-    @available(macOS 14.0, *)
-    public enum Result: Int, Sendable, Equatable, Hashable {
-        case cancelled = 0
-        case changed = 1
     }
 }

@@ -453,21 +453,7 @@ import CoreText
     }
 }
 
-extension NSPrintOperation {
-    public enum PageOrder: Int, Sendable, Equatable, Hashable {
-        case ascendingPageOrder = 1
-        case descendingPageOrder = -1
-        case specialPageOrder = 0
-        case unknownPageOrder = 2
-    }
-}
 
-extension NSPrintOperation {
-    public enum RenderingQuality: Int, Sendable, Equatable, Hashable {
-        case best = 0
-        case responsive = 1
-    }
-}
 
 // MARK: - Progress panel
 
