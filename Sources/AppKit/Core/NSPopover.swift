@@ -9,7 +9,7 @@
 // own rounded body and the arrow pointing at the positioning rect (`_NSPopoverFrameView`),
 // placed by `_NSPopoverPlacement` on the preferred edge or the opposite one when the
 // screen has no room, follows the parent when it moves and closes per its behaviour
-// through `NSApplication.sendEvent` (ADR-0022).
+// through `NSApplication.sendEvent` (ADR-0025).
 
 import Foundation
 #if canImport(CoreGraphics)
@@ -758,4 +758,10 @@ final class _NSPopoverFrameView: NSView {
         apply(1)
         completion()
     }
+}
+
+extension NSWindow {
+    /// Whether this is a popover's window (tooling that renders windows, such as the
+    /// examples' screenshots). Not part of Apple's API.
+    public var _isPopoverWindow: Bool { self is _NSPopoverWindow }
 }

@@ -1070,7 +1070,11 @@ public struct Toggle<Label: View>: View, _PrimitiveView {
     let isOn: Binding<Bool>
     let label: Label
     public init(isOn: Binding<Bool>, @ViewBuilder label: () -> Label) { self.isOn = isOn; self.label = label() }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TogglePrimitive(title: (label as? Text)?._string ?? "", isOn: isOn) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        let title = (label as? Text)?._string ?? ""
+        if node.environment.toggleStyle == .switch { return _SwitchTogglePrimitive(title: title, isOn: isOn) }
+        return _TogglePrimitive(title: title, isOn: isOn)
+    }
 }
 
 extension Toggle where Label == Text {
@@ -1111,6 +1115,78 @@ final class _TogglePrimitive: _ControlPrimitive<NSButton> {
         control.sizeToFit()
     }
     override var intrinsicSize: CGSize { let s = super.intrinsicSize; return CGSize(width: max(s.width, 18), height: max(s.height, 18)) }
+}
+
+/// The `.switch` toggle style: the label, then an `NSSwitch` at the trailing edge.
+@MainActor
+final class _SwiftUISwitchRow: NSView {
+    let label = NSTextField(labelWithString: "")
+    let toggle = NSSwitch(frame: .zero)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(label)
+        addSubview(toggle)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+    var gap: CGFloat { label.stringValue.isEmpty ? 0 : 8 }
+    override var intrinsicContentSize: NSSize {
+        let l = label.stringValue.isEmpty ? NSSize.zero : label.intrinsicContentSize
+        let s = toggle.intrinsicContentSize
+        return NSSize(width: l.width + gap + s.width, height: max(l.height, s.height))
+    }
+    override func layout() {
+        super.layout()
+        let s = toggle.intrinsicContentSize
+        let l = label.stringValue.isEmpty ? NSSize.zero : label.intrinsicContentSize
+        let rtl = userInterfaceLayoutDirection == .rightToLeft
+        let switchX = rtl ? 0 : bounds.width - s.width
+        toggle.frame = NSRect(x: switchX, y: ((bounds.height - s.height) / 2).rounded(), width: s.width, height: s.height)
+        label.isHidden = label.stringValue.isEmpty
+        let labelWidth = max(0, bounds.width - s.width - gap)
+        label.frame = NSRect(x: rtl ? s.width + gap : 0, y: ((bounds.height - l.height) / 2).rounded(), width: min(l.width, labelWidth), height: l.height)
+    }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
+}
+
+@MainActor
+final class _SwitchTogglePrimitive: _ControlPrimitive<_SwiftUISwitchRow> {
+    var isOn: Binding<Bool>
+    init(title: String, isOn: Binding<Bool>) {
+        self.isOn = isOn
+        let row = _SwiftUISwitchRow(frame: .zero)
+        row.label.stringValue = title
+        row.toggle.state = isOn.wrappedValue ? .on : .off
+        super.init(control: row)
+        let s = row.toggle
+        s.target = s
+        s.action = Selector(("swiftUISwitchAction:"))
+        s.setActionHandler(for: Selector(("swiftUISwitchAction:"))) { [weak self] _ in
+            guard let self else { return }
+            let v = self.control.toggle.state == .on
+            if self.isOn.wrappedValue != v { self.isOn.wrappedValue = v }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _SwitchTogglePrimitive else { return }
+        isOn = o.isOn
+        if control.label.stringValue != o.control.label.stringValue { control.label.stringValue = o.control.label.stringValue }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        let want: NSControl.StateValue = isOn.wrappedValue ? .on : .off
+        if control.toggle.state != want { control.toggle.state = want }
+        control.toggle.isEnabled = node?.environment.isEnabled ?? true
+        control.needsLayout = true
+    }
+    /// A labelled switch takes the width it is offered, the switch at the trailing edge.
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let s = intrinsicSize
+        guard !control.label.stringValue.isEmpty, let w = proposal.width, w.isFinite else { return s }
+        return CGSize(width: max(s.width, w), height: s.height)
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider

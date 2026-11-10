@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|popover picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -426,10 +426,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "popover"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
+
+    /// Renders a popover's window (body, arrow and content) to <dir>/layout-popover-open-<platform>.png.
+    @MainActor static func writePopoverScreenshot(_ w: NSWindow, to dir: String, platform: String) {
+        guard let cv = w.contentView else { return }
+        w.display()
+        guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { return }
+        cv.cacheDisplay(in: cv.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        let path = "\(dir)/layout-popover-open-\(platform).png"
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("screenshot: \(path)")
+    }
 
     @MainActor func writeScreenshots(to dir: String) {
         #if os(Windows)
@@ -440,8 +452,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let platform = "macos"
         #endif
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // APPKITWIN_POPOVER_OPEN=1 with the Popover tab: show the transient popover first so
+        // its window is rendered too.
+        if ProcessInfo.processInfo.environment["APPKITWIN_POPOVER_OPEN"] == "1",
+           let tabs = layoutWindowController?.window?.contentViewController as? NSTabViewController,
+           let demo = tabs.children.compactMap({ $0 as? PopoverDemoViewController }).first {
+            tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: "popover") ?? 0
+            demo.view.window?.layoutIfNeeded()
+            demo.view.window?.display()
+            demo.show(.transient, from: demo.transientButton)
+        }
         for w in NSApp.windows where w.isVisible {
             guard let cv = w.contentView else { continue }
+            // A popover's window renders as its own file: the body with the arrow.
+            if w._isPopoverWindow { AppDelegate.writePopoverScreenshot(w, to: dir, platform: platform); continue }
             // The Layout Demo's Form tab is the interesting one unless APPKITWIN_LAYOUT_TAB picks another.
             let layoutTab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"] ?? "form"
             if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: layoutTab) ?? 0 }
@@ -555,6 +579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(MetalDemoViewController())
         tabs.addChild(ComboDemoViewController())
         tabs.addChild(OutlineDemoViewController())
+        tabs.addChild(PopoverDemoViewController())
         tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
@@ -984,6 +1009,126 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
             applyFilterAndSort()
             return true
         case "rowClicked:": return true
+        default: return false
+        }
+    }
+}
+
+/// Popovers of each behaviour on push buttons (the application-defined one closes from
+/// its own button and detaches when dragged), and an NSSwitch. APPKITWIN_POPOVER_OPEN=1
+/// shows the transient popover on launch (for screenshots).
+final class PopoverDemoViewController: NSViewController, NSPopoverDelegate, NSSelectorHandling {
+    let transientButton = NSButton(title: "Transient", target: nil, action: nil)
+    let semitransientButton = NSButton(title: "Semitransient", target: nil, action: nil)
+    let definedButton = NSButton(title: "Application-defined", target: nil, action: nil)
+    let toggle = NSSwitch(frame: .zero)
+    let toggleLabel = NSTextField(labelWithString: "Wi-Fi")
+    let status = NSTextField(labelWithString: "Click a button for a popover; Space toggles the switch.")
+    var popovers: [NSPopover.Behavior: NSPopover] = [:]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Popover"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        for (b, action) in [(transientButton, "showTransient:"), (semitransientButton, "showSemitransient:"), (definedButton, "showDefined:")] {
+            b.target = self
+            b.action = Selector((action))
+            buttons.addArrangedSubview(b)
+        }
+        toggle.target = self
+        toggle.action = Selector(("switched:"))
+        toggle.state = .on
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.addArrangedSubview(toggleLabel)
+        row.addArrangedSubview(toggle)
+        for v in [buttons, row, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            row.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 28),
+            row.leadingAnchor.constraint(equalTo: buttons.leadingAnchor),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+        ])
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if ProcessInfo.processInfo.environment["APPKITWIN_POPOVER_OPEN"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+                view.window?.layoutIfNeeded()
+                show(.transient, from: transientButton)
+            }
+        }
+    }
+
+    /// One popover per behaviour, made on first use; the application-defined one carries
+    /// a Close button and detaches into a titled window when dragged.
+    func popover(for behavior: NSPopover.Behavior) -> NSPopover {
+        if let p = popovers[behavior] { return p }
+        let p = NSPopover()
+        p.behavior = behavior
+        p.delegate = self
+        let vc = NSViewController(nibName: nil, bundle: nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: behavior == .applicationDefined ? 96 : 64))
+        let name: String
+        switch behavior {
+        case .transient: name = "Transient: a click anywhere outside closes it."
+        case .semitransient: name = "Semitransient: a click in the parent window closes it."
+        default: name = "Application-defined: only Close closes it. Drag to detach."
+        }
+        let text = NSTextField(wrappingLabelWithString: name)
+        text.frame = NSRect(x: 12, y: content.frame.height - 48, width: 196, height: 40)
+        content.addSubview(text)
+        if behavior == .applicationDefined {
+            let close = NSButton(title: "Close", target: self, action: Selector(("closeDefined:")))
+            close.frame = NSRect(x: 12, y: 10, width: 80, height: 24)
+            content.addSubview(close)
+        }
+        vc.view = content
+        vc.title = "Popover"
+        p.contentViewController = vc
+        popovers[behavior] = p
+        return p
+    }
+
+    func show(_ behavior: NSPopover.Behavior, from button: NSButton) {
+        let p = popover(for: behavior)
+        if p.isShown { p.close(); return }
+        p.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func popoverShouldDetach(_ popover: NSPopover) -> Bool { popover.behavior == .applicationDefined }
+    func popoverDidShow(_ notification: Notification) {
+        if let p = notification.object as? NSPopover { status.stringValue = "Popover shown (\(p.behavior == .transient ? "transient" : p.behavior == .semitransient ? "semitransient" : "application-defined"))" }
+    }
+    func popoverDidClose(_ notification: Notification) {
+        let reason = (notification.userInfo?[NSPopover.closeReasonUserInfoKey] as? NSPopover.CloseReason) == .detachToWindow ? "detached" : "closed"
+        status.stringValue = "Popover \(reason)"
+    }
+    func popoverDidDetach(_ popover: NSPopover) { status.stringValue = "Popover detached into a window" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "showTransient:": show(.transient, from: transientButton); return true
+        case "showSemitransient:": show(.semitransient, from: semitransientButton); return true
+        case "showDefined:": show(.applicationDefined, from: definedButton); return true
+        case "closeDefined:": popovers[.applicationDefined]?.performClose(sender); return true
+        case "switched:": status.stringValue = "Switch is \(toggle.state == .on ? "on" : "off")"; return true
         default: return false
         }
     }

@@ -499,7 +499,7 @@ import CoreText
         // An open combo box list takes the mouse over it and its navigation keys; typing
         // still reaches the field.
         if let popUp = _NSComboBoxPopUp.current, popUp.handle(event) { return }
-        // Shown popovers close on clicks outside them per their behaviour (ADR-0022); the
+        // Shown popovers close on clicks outside them per their behaviour (ADR-0025); the
         // click still reaches what is under it.
         NSPopover._noteEvent(event)
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.

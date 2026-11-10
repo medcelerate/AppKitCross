@@ -1604,7 +1604,7 @@ import CoreText
         _currentEvent = event
         defer { _currentEvent = nil }
         // A child window that is key (a popover) takes the keyboard: on Wayland its keys
-        // arrive here, focus staying with the toplevel (ADR-0022).
+        // arrive here, focus staying with the toplevel (ADR-0025).
         if let child = _childWindows.last(where: { $0._isKey && $0.isVisible && $0 !== self }) {
             switch event.type {
             case .keyDown, .keyUp, .flagsChanged: child.sendEvent(event); return

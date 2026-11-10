@@ -9,8 +9,8 @@ sleep 1
 APPKITWIN_LINUX_BACKEND=x11 "${BIN:-./.build/debug/HelloWindow}" --swiftui --layout --screenshot "$OUT"
 # The SwiftUI demo's Data tab (Table) as a second capture.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/HelloWindow}" --swiftui --screenshot "$OUT"
-# The Layout Demo's Combo and Outline tabs, and the Outline tab mirrored right to left.
-for tab in combo outline; do
+# The Layout Demo's Combo, Outline and Popover tabs, and the Outline tab mirrored right to left.
+for tab in combo outline popover; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"
@@ -22,5 +22,14 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=combo APPKITWIN_COMBO_POPUP=1 "
 APP=$!
 sleep 3
 xwd -root -silent | convert xwd:- -trim "$OUT/layout-combo-open-linux.png"
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+# The popover tab with the transient popover open: its own window rendered by the demo
+# (layout-popover-open-linux.png) and a capture of the X screen showing it in place.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 "${BIN:-./.build/debug/HelloWindow}" --layout &
+APP=$!
+sleep 3
+xwd -root -silent | convert xwd:- -trim "$OUT/layout-popover-screen-linux.png"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true

@@ -14,6 +14,8 @@ by a capture of the live window.
 | Layout Demo, Combo tab: two `NSComboBox`es (one over its items with completion, one over a data source) | ![macOS](images/compare/layout-combo-macos.png) | ![Linux](images/compare/layout-combo-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
 | Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Popover tab: a button per `NSPopover` behaviour and an `NSSwitch` | ![macOS](images/compare/layout-popover-macos.png) | ![Linux](images/compare/layout-popover-linux.png) | awaiting a capture from the Windows machine |
+| The transient popover's own window (`APPKITWIN_POPOVER_OPEN=1`): body, arrow, content | ![macOS](images/compare/layout-popover-open-macos.png) | ![Linux](images/compare/layout-popover-open-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
@@ -35,6 +37,7 @@ Regenerate the macOS and Linux columns with:
 swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # macOS, headless
 APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
 APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
+APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 swift run HelloWindow --layout --screenshot docs/images/compare   # the Popover tab and the popover's window
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
 
@@ -43,6 +46,10 @@ include; `tools/linux/compare.sh` also captures the X screen with the Fruit list
 (`APPKITWIN_COMBO_POPUP=1`):
 
 ![Combo box list open on Linux](images/compare/layout-combo-open-linux.png)
+
+The transient popover open on the Layout Demo's Popover tab under Xvfb (the popover is a transient window of the demo's; X11 shows no transparency, so its surround is the parent's background colour):
+
+![Popover open on Linux](images/compare/layout-popover-screen-linux.png)
 
 The Windows column is captured by the Windows test machine (window captures of the live
 app). More Windows captures show the SwiftUI demo's other tabs and the menus, which are drawn
