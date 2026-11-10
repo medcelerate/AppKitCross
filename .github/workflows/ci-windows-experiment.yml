@@ -19,11 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         # One variable per variant; each against the control runs of E0/E1.
-        variant: [lifecycle, nosep, j1]
+        variant: [direct]
         rep: [1, 2, 3, 4]
-        exclude:
-          - { variant: lifecycle, rep: 3 }
-          - { variant: lifecycle, rep: 4 }
     steps:
       - uses: actions/checkout@v4
       - uses: compnerd/gha-setup-swift@main
@@ -78,6 +75,29 @@ jobs:
           tr -d '\r' < build.log | grep -aE "^\[[0-9]+/[0-9]+\] (Emitting module AppKit|Compiling AppKit Unimplemented)|error:|Build complete|exit code|exception|signal" | grep -avE "warning:|^\s*[0-9]* *\|" | head -20
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
+      - name: Replay the AppKit driver command outside SwiftPM, three times from scratch
+        if: matrix.variant == 'direct'
+        shell: pwsh
+        run: |
+          $line = (Get-Content build.log | Where-Object { $_ -match 'swiftc\.exe -module-name AppKit ' } | Select-Object -First 1)
+          $exe, $argline = $line -split ' ', 2
+          $b = '.build\x86_64-unknown-windows-msvc\debug'
+          New-Item -ItemType Directory -Force replay | Out-Null
+          Copy-Item "$b\AppKit.build\sources", "$b\AppKit.build\output-file-map.json" replay\
+          foreach ($i in 1..3) {
+            Remove-Item -Recurse -Force "$b\AppKit.build"; New-Item -ItemType Directory -Force "$b\AppKit.build\include" | Out-Null
+            Copy-Item replay\sources, replay\output-file-map.json "$b\AppKit.build\"
+            Remove-Item -Force "$b\Modules\AppKit.*" -ErrorAction SilentlyContinue
+            $t = Get-Date
+            $p = Start-Process -FilePath $exe -ArgumentList $argline -NoNewWindow -Wait -PassThru -RedirectStandardOutput "replay\out$i.txt" -RedirectStandardError "replay\err$i.txt"
+            "== replay $i: exit $('0x{0:X8}' -f $p.ExitCode) after $([int]((Get-Date) - $t).TotalSeconds)s, AppKit.swiftmodule $(Test-Path "$b\Modules\AppKit.swiftmodule")"
+            "-- parseable-output kinds:"; Select-String -Path "replay\out$i.txt" -Pattern '"kind": "(\w+)"' -AllMatches | ForEach-Object { $_.Matches.Groups[1].Value } | Group-Object | Format-Table Count,Name -HideTableHeaders
+            "-- emit-module messages:"; Select-String -Path "replay\out$i.txt" -Pattern '"name": "emit-module"' -Context 0,3 | Select-Object -First 4 | ForEach-Object { $_.ToString().Substring(0, [Math]::Min(300, $_.ToString().Length)) }
+            "-- signalled/failed/skipped:"; Select-String -Path "replay\out$i.txt" -Pattern '"kind": "(signalled|failed|skipped|abnormal)"' -Context 2,8 | Select-Object -First 3 | ForEach-Object { $_.ToString().Substring(0, [Math]::Min(1500, $_.ToString().Length)) }
+            "-- stderr and stdout lines that are not JSON or diagnostics:"
+            Get-Content "replay\err$i.txt", "replay\out$i.txt" | Where-Object { $_ -notmatch '^\s*[\[\]{}"0-9]|warning:|note:|^\s*\||^\s*$|^\s*[0-9]+ \|' } | Select-Object -Last 25
+          }
+          Copy-Item replay "$env:RUNNER_TEMP\frontends\" -Recurse
       - name: What the frontends and Windows said
         if: always()
         shell: pwsh
