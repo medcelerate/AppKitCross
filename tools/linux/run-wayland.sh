@@ -55,15 +55,32 @@ echo "frame trace: ${FRAME_LINE:-<no 500x400 frame line>}"
 if [ "$CSD_RECT" != "500x400" ] || [ -z "$FRAME_LINE" ]; then
     echo "FAIL: the window geometry does not match the compositor's rectangle"; grep -E "frame|unimplemented|Fatal" /tmp/hellowindow-wayland-csd.log | tail -5; kill $SWAY; exit 1
 fi
-# The Metal tab on the Vulkan device (ADR-0012), presented through the Wayland window;
-# the log lines are as in run.sh (device, then corner and centre pixels every 30 frames).
-timeout 6 ./.build/debug/HelloWindow --metal --metal-log >/tmp/hellowindow-wayland-metal.log 2>&1 &
+# The Metal tab on the Vulkan device (ADR-0012), presented through a VkSwapchainKHR on a
+# subsurface of the Wayland window; the log lines are as in run.sh (device, then corner and
+# centre pixels every 30 frames and the presentation path), and the screenshot must show
+# the static clear colour (#3399E6) where the subsurface is.
+timeout 6 ./.build/debug/HelloWindow --metal --metal-log --metal-static >/tmp/hellowindow-wayland-metal.log 2>&1 &
 APP=$!
 sleep 4
 grim /tmp/hellowindow-linux-wayland-metal.png
 wait $APP 2>/dev/null || true
 grep -E "^device|Vulkan|pipeline failed|^frame" /tmp/hellowindow-wayland-metal.log | head -5
 echo "screenshot: /tmp/hellowindow-linux-wayland-metal.png ($(stat -c %s /tmp/hellowindow-linux-wayland-metal.png) bytes)"
+count_pixels() { convert "$1" -depth 8 -format %c histogram:info:- 2>/dev/null | grep -i "$2" | awk -F: '{s+=$1} END {print s+0}'; }
+METAL_PIXELS=$(count_pixels /tmp/hellowindow-linux-wayland-metal.png "#3399E6")
+echo "presented clear-colour pixels on screen: $METAL_PIXELS"
+if grep -q "presentation=swap chain" /tmp/hellowindow-wayland-metal.log && [ "$METAL_PIXELS" -lt 10000 ]; then
+    echo "FAIL: the swap chain presented but the screenshot does not show the clear colour"; kill $SWAY; exit 1
+fi
+# The presentation tests on the Wayland backend (the test binary swift test built; this
+# user cannot write to .build): the swap chain on a subsurface, resize, the format fallback.
+echo "== Metal presentation tests on the Wayland backend"
+XCTEST=$(ls .build/debug/*PackageTests.xctest 2>/dev/null | head -1)
+if [ -x "$XCTEST" ]; then
+    "$XCTEST" AppKitTests.MetalVulkanPresentationTests 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|MetalVulkanPresentationTests:" | tail -6
+else
+    echo "skipped: no test binary (run swift test first)"
+fi
 # Monitor DPI change: a second headless output at scale 2 is added and HelloWindow is moved
 # onto it. The compositor sends wl_surface.leave/enter, WaylandWindow.outputsDidChange picks
 # the new scale, and NSWindow logs "backing scale '...' 2.0" (APPKITWIN_TRACE). The window's
@@ -87,6 +104,24 @@ echo "logical size before: $BEFORE after: $AFTER; trace: ${SCALE_LINE:-<no backi
 echo "screenshot: /tmp/hellowindow-linux-wayland-2x.png ($(stat -c %s /tmp/hellowindow-linux-wayland-2x.png) bytes)"
 if [ -z "$SCALE_LINE" ] || [ "$BEFORE" != "$AFTER" ] || [ -z "$BEFORE" ]; then
     echo "FAIL: the window did not keep its logical size or did not change scale"; cat /tmp/hellowindow-wayland-dpi.log | grep -E "backing|frame" | head; kill $SWAY; exit 1
+fi
+# The Metal tab on the 2x output: the swap chain is re-created at twice the pixels (the
+# subsurface keeps the view's points through its buffer scale) and keeps presenting.
+echo "== Metal tab moved to the 2x output: the swap chain follows the backing scale"
+timeout 8 ./.build/debug/HelloWindow --metal --metal-log --metal-static >/tmp/hellowindow-wayland-metal-2x.log 2>&1 &
+APP=$!
+sleep 2
+swaymsg '[app_id="AppKitCross"] move window to output HEADLESS-2' >/dev/null
+sleep 3
+grim -o HEADLESS-2 /tmp/hellowindow-linux-wayland-metal-2x.png
+wait $APP 2>/dev/null || true
+grep -E "^frame" /tmp/hellowindow-wayland-metal-2x.log | awk '!seen[$0 ~ /876x548/]++' | head -3
+METAL_2X=$(grep -c "size 876x548 presentation=swap chain" /tmp/hellowindow-wayland-metal-2x.log)
+METAL_2X_PIXELS=$(count_pixels /tmp/hellowindow-linux-wayland-metal-2x.png "#3399E6")
+echo "frames at 2x through the swap chain: $METAL_2X; presented clear-colour pixels on the 2x output: $METAL_2X_PIXELS"
+echo "screenshot: /tmp/hellowindow-linux-wayland-metal-2x.png ($(stat -c %s /tmp/hellowindow-linux-wayland-metal-2x.png) bytes)"
+if [ "$METAL_2X" -lt 1 ] || [ "$METAL_2X_PIXELS" -lt 40000 ]; then
+    echo "FAIL: the Metal tab did not present at 2x on the second output"; grep -E "^frame|Vulkan" /tmp/hellowindow-wayland-metal-2x.log | tail -5; kill $SWAY; exit 1
 fi
 kill $SWAY 2>/dev/null || true
 wait $SWAY 2>/dev/null || true

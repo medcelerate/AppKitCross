@@ -10,3 +10,12 @@
 #if canImport(CoreText)
 @_exported import CoreText
 #endif
+// `import AppKit` also brings ImageIO (CGImageSource and the C API) and Core Image into
+// scope on macOS; the port's ImageIO stands in on Windows and Linux, Core Image has no
+// counterpart there (CIImage, CIFilter stay unavailable).
+#if canImport(ImageIO)
+@_exported import ImageIO
+#endif
+#if canImport(CoreImage)
+@_exported import CoreImage
+#endif

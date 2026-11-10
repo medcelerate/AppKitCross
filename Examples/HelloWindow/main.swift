@@ -1039,6 +1039,9 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
     /// With `--metal-msl` the same triangle ships as Metal Shading Language and goes
     /// through the MSL → HLSL translator (ADR-0006).
     static let usesMSL = CommandLine.arguments.contains("--metal-msl")
+    /// With `--metal-static` the clear colour stays (0.2, 0.6, 0.9) and the triangle does
+    /// not turn, so a screenshot can be checked for the presented pixels (tools/linux).
+    static let isStatic = CommandLine.arguments.contains("--metal-static")
 
     /// Constants at buffer 0 (`b0`), vertices at buffer 1 with attributes 0 and 1.
     static let shaderSource = """
@@ -1142,8 +1145,8 @@ final class MetalDemoViewController: NSViewController, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         frame += 1
-        let t = Double(frame) / 60
-        view.clearColor = MTLClearColorMake(0.5 + 0.5 * sin(t), 0.5 + 0.5 * sin(t * 1.3 + 2), 0.5 + 0.5 * sin(t * 0.7 + 4), 1)
+        let t = Self.isStatic ? 0.3 : Double(frame) / 60
+        view.clearColor = Self.isStatic ? MTLClearColorMake(0.2, 0.6, 0.9, 1) : MTLClearColorMake(0.5 + 0.5 * sin(t), 0.5 + 0.5 * sin(t * 1.3 + 2), 0.5 + 0.5 * sin(t * 0.7 + 4), 1)
         guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
               let queue, let cb = queue.makeCommandBuffer(), let encoder = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
         if let pipeline, let vertices {

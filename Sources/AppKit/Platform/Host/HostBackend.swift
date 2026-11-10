@@ -25,15 +25,7 @@ final class HostBackend: PlatformBackend {
     #endif
     // The package's own ImageIO (ADR-0009) is importable on Windows and Linux too, but AppKit
     // keeps its platform image backends there; HostImageBackend is Apple's ImageIO on macOS.
-    #if canImport(ImageIO) && canImport(CoreGraphics) && !os(Windows) && !os(Linux)
-    let image: any PlatformImageBackend = HostImageBackend()
-    #elseif os(Linux)
-    let image: any PlatformImageBackend = LinuxImageBackend()
-    #elseif os(Windows)
-    let image: any PlatformImageBackend = Win32ImageBackend()
-    #else
-    let image: any PlatformImageBackend = NoImageBackend()
-    #endif
+    let image: any PlatformImageBackend = Platform.imageCodec
 
     func makeWindow(owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) -> PlatformWindow {
         HostWindow(owner: owner, contentRect: contentRect, styleMask: styleMask, backend: self)
@@ -257,6 +249,8 @@ final class HostWindow: PlatformWindow {
         #endif
     }
 
+    func captureContent() -> CGImage? { lastImage }
+
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
         guard layerHostingEnabled else { return false }
         hostedScene = scene
@@ -393,8 +387,9 @@ final class NoTextBackend: PlatformTextBackend {
 
 @MainActor
 final class NoImageBackend: PlatformImageBackend {
-    func decode(_ data: Data) -> CGImage? { nil }
-    func encode(_ image: CGImage, format: String, quality: Double) -> Data? { nil }
+    nonisolated init() {}
+    nonisolated func decode(_ data: Data) -> CGImage? { nil }
+    nonisolated func encode(_ image: CGImage, format: String, quality: Double) -> Data? { nil }
     func makeOffscreen(size: CGSize, scale: CGFloat) -> PlatformOffscreenSurface? { nil }
 }
 

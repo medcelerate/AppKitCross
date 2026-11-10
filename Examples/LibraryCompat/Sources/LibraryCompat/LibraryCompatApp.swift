@@ -30,6 +30,10 @@ import SwiftUIIntrospect
 #if HAS_CHARTS
 import SwiftUICharts
 #endif
+#if HAS_NUKE
+import Nuke
+import NukeUI
+#endif
 
 @main
 struct LibraryCompatApp: App {
@@ -67,8 +71,8 @@ enum Libraries {
                      exclusion: Platform.name == "Windows"
                         ? "the Swift 6.4.1 frontend asserts on its shape files (debug-type round trip; the probe disables the check), and `Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136)"
                         : "`Color.systemsBackground` switches on os(iOS/watchOS/tvOS/macOS/visionOS) with no default (Extensions.swift:136); everything else compiles"),
-        LibraryEntry(id: "nuke", name: "Nuke + NukeUI", version: "13.2.1", included: false,
-                     exclusion: "`#if !os(macOS) import UIKit`, Core Image filters and the ImageIO C API"),
+        LibraryEntry(id: "nuke", name: "Nuke + NukeUI", version: "13.2.1", included: Compiled.nuke,
+                     exclusion: "`#if !os(macOS) import UIKit`: every platform that is not macOS is assumed to have UIKit (ImageCache.swift:7)"),
     ]
 }
 
@@ -109,6 +113,11 @@ enum Compiled {
     static let charts = true
     #else
     static let charts = false
+    #endif
+    #if HAS_NUKE
+    static let nuke = true
+    #else
+    static let nuke = false
     #endif
 }
 
@@ -166,6 +175,7 @@ struct LibraryTab: View {
         case "markdown": MarkdownDemo()
         case "introspect": IntrospectDemo()
         case "charts": ChartsDemo()
+        case "nuke": NukeDemo()
         default: EmptyView()
         }
     }
@@ -377,6 +387,72 @@ struct ChartsDemo: View {
                     .frame(minWidth: 200, minHeight: 180)
             }
             Text("`LineChart` and `BarChart` draw with `Path.trimmedPath`, `Shape.trim`/`.scale`, `LazyVGrid` legends, `.position`, `.zIndex` and a `DragGesture` touch overlay; the library imports `CoreGraphics.CGGeometry`.")
+                .font(.caption).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+}
+
+struct NukeDemo: View {
+    /// A PNG the demo draws itself (the container and the CI runners have no network):
+    /// a 96x96 gradient of squares, written to the temporary directory once.
+    static let sampleURL: URL = {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("library-compat-nuke-sample.png")
+        let image = NSImage(size: NSSize(width: 96, height: 96))
+        image.lockFocus()
+        for row in 0..<6 {
+            for col in 0..<6 {
+                NSColor(calibratedHue: CGFloat(row * 6 + col) / 36, saturation: 0.7, brightness: 0.9, alpha: 1).setFill()
+                NSBezierPath.fill(NSRect(x: col * 16, y: row * 16, width: 16, height: 16))
+            }
+        }
+        image.unlockFocus()
+        if let rep = image.representations.first as? NSBitmapImageRep, let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: url)
+        }
+        return url
+    }()
+    @State private var reloads = 0
+
+    var body: some View {
+        #if HAS_NUKE
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 4) {
+                    LazyImage(url: NukeDemo.sampleURL) { state in
+                        if let image = state.image {
+                            image.resizable().aspectRatio(contentMode: .fit)
+                        } else if state.error != nil {
+                            Text("failed").foregroundColor(.red)
+                        } else {
+                            Text("loading…").foregroundColor(.secondary)
+                        }
+                    }
+                    .id(reloads)
+                    .frame(width: 120, height: 120)
+                    .background(Material.regular)
+                    Text("NukeUI.LazyImage").font(.caption)
+                }
+                VStack(spacing: 4) {
+                    AsyncImage(url: NukeDemo.sampleURL) { image in
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    } placeholder: {
+                        Text("loading…").foregroundColor(.secondary)
+                    }
+                    .frame(width: 120, height: 120)
+                    .background(.ultraThinMaterial)
+                    Text("SwiftUI.AsyncImage").font(.caption)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Button("Reload") { reloads += 1 }
+                    Text("pipeline: \(ImagePipeline.shared.configuration.isDecompressionEnabled ? "decompressing" : "plain")")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+            Text("`LazyImage` fetches through Nuke's `ImagePipeline` (a `file:` URL here; the runners have no network) and decodes with the port's ImageIO; the same PNG through the port's `AsyncImage`. Both sit on a `Material` background.")
                 .font(.caption).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

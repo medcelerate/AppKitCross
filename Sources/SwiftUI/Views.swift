@@ -1170,7 +1170,7 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image
-public struct Image: View, _PrimitiveView, Equatable {
+public struct Image: View, _PrimitiveView, Equatable, Sendable {
     public typealias Body = Never
     public enum ResizingMode: Hashable, Sendable { case tile, stretch }
     let image: NSImage?

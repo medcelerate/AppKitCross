@@ -3,7 +3,7 @@
 import Foundation
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/nsviewrepresentable
-@MainActor
+@MainActor @preconcurrency
 public protocol NSViewRepresentable: View where Body == Never {
     associatedtype NSViewType: NSView
     associatedtype Coordinator = Void
@@ -82,7 +82,7 @@ final class _RepresentablePrimitive<R: NSViewRepresentable>: _Primitive {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/nsviewcontrollerrepresentable
-@MainActor
+@MainActor @preconcurrency
 public protocol NSViewControllerRepresentable: View where Body == Never {
     associatedtype NSViewControllerType: NSViewController
     associatedtype Coordinator = Void

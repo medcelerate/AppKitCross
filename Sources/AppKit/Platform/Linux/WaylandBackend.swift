@@ -34,6 +34,7 @@ final class WaylandBackend: PlatformBackend {
     private(set) var registry: OpaquePointer!     // wl_registry*
     private(set) var compositor: OpaquePointer?   // wl_compositor*
     private(set) var compositorVersion: UInt32 = 0
+    private(set) var subcompositor: OpaquePointer? // wl_subcompositor* (presentation surfaces, ADR-0012)
     private(set) var shm: OpaquePointer?          // wl_shm*
     private(set) var seat: OpaquePointer?         // wl_seat*
     private(set) var wmBase: OpaquePointer?       // xdg_wm_base*
@@ -146,6 +147,8 @@ final class WaylandBackend: PlatformBackend {
             compositor = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, compositorVersion))
         case "wl_shm":
             shm = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
+        case "wl_subcompositor":
+            subcompositor = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
         case "zwp_pointer_gestures_v1":
             pointerGestures = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
             attachPointerGestures()
