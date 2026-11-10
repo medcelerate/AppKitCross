@@ -1401,7 +1401,7 @@ struct ControlsDemo: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("SwiftUI on AppKitWin").font(.title).bold()
+            Text("SwiftUI on AppKitCross").font(.title).bold()
             Text("State, bindings and layout running over this AppKit.").foregroundColor(.secondary)
             HStack {
                 TextField("Your name", text: $name)

@@ -273,7 +273,7 @@ targets += [
 
 
 let package = Package(
-    name: "AppKitWin",
+    name: "AppKitCross",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "AppKit", targets: ["AppKit"]),

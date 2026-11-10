@@ -1,4 +1,4 @@
-# AppKitWin conventions
+# AppKitCross conventions
 
 - Public API names, signatures and semantics must match Apple's AppKit exactly. The
   inventory in `api-inventory/` is the source of truth; do not invent members.

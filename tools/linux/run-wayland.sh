@@ -47,9 +47,9 @@ swaymsg output HEADLESS-2 resolution 1280x800 position 1280 0 scale 2 background
 APPKITWIN_TRACE=1 ./.build/debug/HelloWindow >/tmp/hellowindow-wayland-dpi.log 2>&1 &
 APP=$!
 sleep 3
-logical() { swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitWin") | "\(.rect.width)x\(.rect.height)"' | head -1; }
+logical() { swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitCross") | "\(.rect.width)x\(.rect.height)"' | head -1; }
 BEFORE=$(logical)
-swaymsg '[app_id="AppKitWin"] move window to output HEADLESS-2' >/dev/null
+swaymsg '[app_id="AppKitCross"] move window to output HEADLESS-2' >/dev/null
 sleep 2
 AFTER=$(logical)
 grim -o HEADLESS-2 /tmp/hellowindow-linux-wayland-2x.png

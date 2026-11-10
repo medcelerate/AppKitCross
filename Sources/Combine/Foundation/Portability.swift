@@ -4,7 +4,7 @@
 //
 //  Created by Sergej Jaskiewicz on 28.10.2020.
 //
-//  AppKitWin: upstream switches between CFRunLoopTimer on Darwin and Foundation.Timer
+//  AppKitCross: upstream switches between CFRunLoopTimer on Darwin and Foundation.Timer
 //  on swift-corelibs-foundation. This module is only built against corelibs (Windows
 //  and Linux), so only that branch is kept, and the wrapper is named `PortableTimer`
 //  so it cannot be confused with `Foundation.Timer` inside `extension Timer`.

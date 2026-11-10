@@ -8,8 +8,8 @@ import CD2D
 
 @MainActor
 final class Win32Backend: PlatformBackend {
-    static let windowClassName = "AppKitWin.NSWindow"
-    static let messageWindowClassName = "AppKitWin.MessageWindow"
+    static let windowClassName = "AppKitCross.NSWindow"
+    static let messageWindowClassName = "AppKitCross.MessageWindow"
     static let postMessage = UINT(WM_APP) + 1
 
     let hInstance: HINSTANCE? = GetModuleHandleW(nil)

@@ -161,7 +161,7 @@ final class RightToLeftSizingTests: XCTestCase, @unchecked Sendable {
                 var body: some View {
                     TabView(selection: $tab) {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("SwiftUI on AppKitWin").font(.title).bold()
+                            Text("SwiftUI on AppKitCross").font(.title).bold()
                             TextField("Name", text: $name)
                             Toggle("Enabled", isOn: $on)
                             Slider(value: $amount)

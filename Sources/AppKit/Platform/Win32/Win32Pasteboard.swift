@@ -13,7 +13,7 @@ final class Win32Pasteboard: PlatformPasteboard {
     private func format(for type: String) -> UINT {
         if type == Win32Pasteboard.textType { return UINT(CF_UNICODETEXT) }
         if let f = formats[type] { return f }
-        let f = ("AppKitWin:" + type).withCString(encodedAs: UTF16.self) { RegisterClipboardFormatW($0) }
+        let f = ("AppKitCross:" + type).withCString(encodedAs: UTF16.self) { RegisterClipboardFormatW($0) }
         formats[type] = f
         return f
     }

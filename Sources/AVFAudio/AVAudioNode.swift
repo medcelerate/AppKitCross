@@ -191,5 +191,5 @@ open class AVAudioOutputNode: AVAudioIONode {
 /// AppKit; the audio module has its own copy so it does not depend on AppKit).
 @inline(never)
 func unimplemented(_ symbol: String = #function, file: StaticString = #fileID, line: UInt = #line) -> Never {
-    fatalError("AppKitWin: `\(symbol)` is not implemented yet", file: file, line: line)
+    fatalError("AppKitCross: `\(symbol)` is not implemented yet", file: file, line: line)
 }

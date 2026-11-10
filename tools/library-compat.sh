@@ -2,7 +2,7 @@
 # Builds Examples/LibraryCompat, the third-party SwiftUI library compatibility example
 # (docs/compatibility/swiftui-libraries.md), on any platform.
 #
-# The third-party packages do not depend on AppKitWin, so AppKitWin's SwiftUI module has
+# The third-party packages do not depend on AppKitCross, so AppKitCross's SwiftUI module has
 # to be in the build's Modules directory before they compile: step 1 builds it, step 2
 # builds the libraries and the example. With --probe, each library target is built on its
 # own first and its error count and first error are printed, which is how the report's
@@ -19,7 +19,7 @@ PROBE=0; RUN=0
 for arg in "$@"; do case "$arg" in --probe) PROBE=1 ;; --run) RUN=1 ;; esac; done
 # On macOS the host build's modules declare macOS 14 while the libraries declare 10.15-12,
 # which the compiler refuses to mix; raising every target's deployment target to 14 is the
-# only way to type-check them against AppKitWin's SwiftUI there (Windows and Linux have no
+# only way to type-check them against AppKitCross's SwiftUI there (Windows and Linux have no
 # deployment targets).
 # Plain diagnostics: swiftc colours them on Windows, which would hide "error:" from the greps.
 FLAGS=(-Xswiftc -no-color-diagnostics)
@@ -27,7 +27,7 @@ if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-
 # Windows (Swift 6.4.1): the frontend's debug-type round-trip check asserts on some of
 # SwiftUICharts' shape files; skipping the check gives the library's own verdict.
 case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types) ;; esac
-# AppKitWin's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
+# AppKitCross's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
 # dependency, so they are passed to every compile here: the hand-written maps in Sources
 # and the ones SwiftPM synthesises for the other C targets in the build directory (after
@@ -62,7 +62,7 @@ if [ "$(uname)" = Linux ] && command -v pkg-config >/dev/null; then
     for flag in $(pkg-config --cflags-only-I pangocairo x11 dbus-1 2>/dev/null); do FLAGS+=(-Xcc "$flag"); done
 fi
 
-echo "== step 1: AppKitWin's SwiftUI (and AppKit) into the Modules directory"
+echo "== step 1: AppKitCross's SwiftUI (and AppKit) into the Modules directory"
 # A second full build of the package lands here; say how much room it has (CI runners).
 df -h . 2>/dev/null | tail -1 || true
 # Runs a build, printing its last lines on success and the whole log on failure.

@@ -47,7 +47,7 @@ final class SwiftUIStateTests: XCTestCase, @unchecked Sendable {
 
     func testAppStoragePersistsThroughUserDefaults() {
         MainActor.assumeIsolated {
-            let suite = "AppKitWinSwiftUIStateTests"
+            let suite = "AppKitCrossSwiftUIStateTests"
             let defaults = UserDefaults(suiteName: suite)!
             defaults.removePersistentDomain(forName: suite)
             enum Theme: String { case light, dark }

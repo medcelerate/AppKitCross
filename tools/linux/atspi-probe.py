@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Walks an AppKitWin application's AT-SPI2 tree over D-Bus (ADR-0013).
+"""Walks an AppKitCross application's AT-SPI2 tree over D-Bus (ADR-0013).
 
 Finds the application on the accessibility bus by its toolkit name, prints the tree
 (role, name, states) and checks the HelloWindow controls: a push button "Clear dots",
@@ -82,7 +82,7 @@ def dump(node, depth=0, out=None):
     return out
 
 
-def find_app(bus, toolkit="AppKitWin", timeout=10):
+def find_app(bus, toolkit="AppKitCross", timeout=10):
     deadline = time.time() + timeout
     while time.time() < deadline:
         desktop = Node(bus, "org.a11y.atspi.Registry", ROOT)
@@ -100,7 +100,7 @@ def main():
     bus = a11y_bus()
     app = find_app(bus)
     if app is None:
-        print("probe: no AppKitWin application on the accessibility bus", file=sys.stderr)
+        print("probe: no AppKitCross application on the accessibility bus", file=sys.stderr)
         return 2
     print("application %r (%s)" % (app.label, app.name))
     nodes = dump(app)

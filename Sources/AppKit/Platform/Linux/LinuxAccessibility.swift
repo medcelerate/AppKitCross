@@ -384,7 +384,7 @@ final class AtspiBridge {
         case "GetAttributes":
             reply(message) { iter in
                 DBus.appendArray(&iter, signature: "{ss}") { a in
-                    DBus.appendDictEntry(&a, "toolkit", "AppKitWin")
+                    DBus.appendDictEntry(&a, "toolkit", "AppKitCross")
                     if case .element(let l) = target {
                         DBus.appendDictEntry(&a, "role", l.element.role)
                         if let s = l.element.subrole { DBus.appendDictEntry(&a, "subrole", s) }
@@ -465,7 +465,7 @@ final class AtspiBridge {
         case ("org.a11y.atspi.Accessible", "AccessibleId"):
             if case .element(let l) = target { return .string(l.element.identifier ?? "") }
             return .string(Bundle.main.bundleIdentifier ?? "")
-        case ("org.a11y.atspi.Application", "ToolkitName"): return .string("AppKitWin")
+        case ("org.a11y.atspi.Application", "ToolkitName"): return .string("AppKitCross")
         case ("org.a11y.atspi.Application", "Version"): return .string("1.0")
         case ("org.a11y.atspi.Application", "AtspiVersion"): return .string("2.1")
         case ("org.a11y.atspi.Application", "Id"): return .int32(0)

@@ -1,4 +1,4 @@
-# Listens to UI Automation events from an AppKitWin window and prints them (ADR-0013).
+# Listens to UI Automation events from an AppKitCross window and prints them (ADR-0013).
 #
 #   powershell -ExecutionPolicy Bypass -File tools\windows\uia-events.ps1 -Title "Hello, AppKit on Windows" -Seconds 30
 #   powershell -ExecutionPolicy Bypass -File tools\windows\uia-events.ps1 -SelfTest

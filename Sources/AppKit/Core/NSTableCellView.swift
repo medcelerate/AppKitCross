@@ -64,7 +64,7 @@ import CoreGraphics
     /// A cell view with one label filling it, for tables whose delegate provides no views.
     internal static func _makeLabelCell(frame: NSRect) -> NSTableCellView {
         let cell = NSTableCellView(frame: frame)
-        cell.identifier = NSUserInterfaceItemIdentifier("AppKitWin.TextCell")
+        cell.identifier = NSUserInterfaceItemIdentifier("AppKitCross.TextCell")
         let label = NSTextField(labelWithString: "")
         label.lineBreakMode = .byTruncatingTail
         label.frame = NSRect(x: 2, y: 0, width: max(0, frame.width - 4), height: frame.height)

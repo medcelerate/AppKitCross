@@ -31,7 +31,7 @@ open class AVAudioUnit: AVAudioNode {
     open override var numberOfInputs: Int { 1 }
     open var audioComponentDescription: AudioComponentDescription { _description }
     open var name: String { "AVAudioUnit" }
-    open var manufacturerName: String { "AppKitWin" }
+    open var manufacturerName: String { "AppKitCross" }
     open var version: Int { 1 }
     open func loadAudioUnitPreset(at url: URL) throws { throw _osStatusError(-10851, "AVAudioUnit: presets are not supported") }
     override func _defaultOutputFormat(forBus bus: AVAudioNodeBus) -> AVAudioFormat {

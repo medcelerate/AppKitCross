@@ -1,4 +1,4 @@
-# Developing AppKitWin
+# Developing AppKitCross
 
 Where things live, how the generated code is produced, and how each platform is built and
 tested. The user-facing introduction is the [README](../README.md); the design is in
@@ -85,7 +85,7 @@ docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/run.sh -
 
 `Examples/LibraryCompat` is a separate SwiftPM package (so the core package has no
 dependencies) that pulls in third-party SwiftUI libraries and builds them against this
-`SwiftUI`. Those packages do not declare a dependency on AppKitWin, so its modules must be in
+`SwiftUI`. Those packages do not declare a dependency on AppKitCross, so its modules must be in
 the build's `Modules` directory before they compile, and a client of `AppKit` needs the C
 shim module maps (`CCairo`, `CD2D`, …) that SwiftPM only passes to declared dependents;
 `tools/library-compat.sh` does both, on every platform:

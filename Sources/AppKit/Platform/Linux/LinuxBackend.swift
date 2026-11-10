@@ -47,7 +47,7 @@ final class LinuxBackend: PlatformBackend {
 
     init() {
         guard let d = XOpenDisplay(nil) else {
-            fatalError("AppKitWin: cannot open the X display (is DISPLAY set?)")
+            fatalError("AppKitCross: cannot open the X display (is DISPLAY set?)")
         }
         display = d
         screen = XDefaultScreen(d)

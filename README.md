@@ -1,6 +1,6 @@
-# AppKitWin
+# AppKitCross
 
-[![CI](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml/badge.svg)](https://github.com/medcelerate/AppKitWin/actions/workflows/ci.yml)
+[![CI](https://github.com/medcelerate/AppKitCross/actions/workflows/ci.yml/badge.svg)](https://github.com/medcelerate/AppKitCross/actions/workflows/ci.yml)
 
 AppKit and SwiftUI for Windows and Linux, in Swift. Code written against Apple's
 frameworks compiles unchanged and runs on native Windows APIs (Win32, Direct2D,
@@ -62,8 +62,8 @@ X11, Wayland and xkbcommon development packages (or the container in `tools/linu
 macOS Xcode 16 or the swift.org toolchain.
 
 ```bash
-git clone https://github.com/medcelerate/AppKitWin.git
-cd AppKitWin
+git clone https://github.com/medcelerate/AppKitCross.git
+cd AppKitCross
 swift build
 swift run HelloWindow            # the AppKit sample: drawing, controls, menus, a glass window
 swift run HelloWindow --swiftui  # opens the SwiftUI demo window too
@@ -90,10 +90,10 @@ Add the package to your own app and import the modules by their Apple names:
 
 ```swift
 // Package.swift
-dependencies: [.package(url: "https://github.com/medcelerate/AppKitWin.git", branch: "main")],
+dependencies: [.package(url: "https://github.com/medcelerate/AppKitCross.git", branch: "main")],
 targets: [.executableTarget(name: "MyApp", dependencies: [
-    .product(name: "AppKit", package: "AppKitWin"),
-    .product(name: "SwiftUI", package: "AppKitWin"),
+    .product(name: "AppKit", package: "AppKitCross"),
+    .product(name: "SwiftUI", package: "AppKitCross"),
 ])]
 ```
 
@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "Hello from AppKit"
-        window.contentView = NSTextField(labelWithString: "Drawn by AppKitWin")
+        window.contentView = NSTextField(labelWithString: "Drawn by AppKitCross")
         window.center()
         window.makeKeyAndOrderFront(nil)
     }
@@ -147,6 +147,6 @@ app.run()
 
 ## License
 
-AppKitWin is released under the Apache License, Version 2.0 (see [LICENSE](LICENSE)).
+AppKitCross is released under the Apache License, Version 2.0 (see [LICENSE](LICENSE)).
 Bundled third-party code is listed in [NOTICE](NOTICE). AppKit and SwiftUI are Apple's
 frameworks; this project implements their public API and is not affiliated with Apple.

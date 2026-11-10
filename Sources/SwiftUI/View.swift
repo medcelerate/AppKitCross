@@ -1,4 +1,4 @@
-// SwiftUI for AppKitWin (ADR-0010): the View protocol, the result builder and the
+// SwiftUI for AppKitCross (ADR-0010): the View protocol, the result builder and the
 // structural views the builder produces.
 
 import Foundation

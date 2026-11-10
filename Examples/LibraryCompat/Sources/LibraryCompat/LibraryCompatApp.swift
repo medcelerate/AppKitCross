@@ -1,4 +1,4 @@
-// LibraryCompat: popular third-party SwiftUI packages built against AppKitWin's SwiftUI,
+// LibraryCompat: popular third-party SwiftUI packages built against AppKitCross's SwiftUI,
 // one tab each, exercising the headline feature of every library that compiles on this
 // platform. The verdicts and the API gaps are in docs/compatibility/swiftui-libraries.md;
 // tools/library-compat.sh builds and probes the libraries.
@@ -292,7 +292,7 @@ struct MarkdownDemo: View {
         #if HAS_MARKDOWNUI
         ScrollView {
             Markdown("""
-            # AppKitWin
+            # AppKitCross
             A **source-compatible** port of AppKit and SwiftUI to Windows and Linux.
 
             - Direct2D and DirectComposition on Windows

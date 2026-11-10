@@ -559,7 +559,7 @@ import CoreGraphics
             return v
         }
         let value = _dataSource?.tableView(self, objectValueFor: c, row: row)
-        let id = NSUserInterfaceItemIdentifier("AppKitWin.TextCell")
+        let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell")
         let cell = (makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? NSTableCellView._makeLabelCell(frame: frame)
         cell.frame = frame
         cell.objectValue = value

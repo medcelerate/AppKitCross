@@ -137,7 +137,7 @@ final class AtspiTests: XCTestCase, @unchecked Sendable {
 
             let me = bridge.uniqueName
             let root = AtspiBridge.rootPath
-            XCTAssertEqual(client.string(me, root, "org.freedesktop.DBus.Properties", "Get") { DBus.appendString(&$0, "org.a11y.atspi.Application"); DBus.appendString(&$0, "ToolkitName") }, "AppKitWin")
+            XCTAssertEqual(client.string(me, root, "org.freedesktop.DBus.Properties", "Get") { DBus.appendString(&$0, "org.a11y.atspi.Application"); DBus.appendString(&$0, "ToolkitName") }, "AppKitCross")
             XCTAssertEqual(client.string(me, root, "org.a11y.atspi.Accessible", "GetRoleName"), "application")
             let windows = client.children(me, root)
             let windowPath = AtspiBridge.elementPathPrefix + String(w._accessibilityElementID)

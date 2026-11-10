@@ -12,7 +12,7 @@ final class PipeWireAudioBackend: PlatformAudioBackend {
         var error = [CChar](repeating: 0, count: 256)
         guard cpw_available(&error, error.count) else {
             if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
-                FileHandle.standardError.write("AppKitWin audio: PipeWire unavailable: \(String(cString: error))\n".data(using: .utf8)!)
+                FileHandle.standardError.write("AppKitCross audio: PipeWire unavailable: \(String(cString: error))\n".data(using: .utf8)!)
             }
             return nil
         }

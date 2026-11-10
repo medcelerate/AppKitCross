@@ -1,4 +1,4 @@
-// SwiftUI over AppKitWin: the runtime (state, bindings, reconciliation, environment),
+// SwiftUI over AppKitCross: the runtime (state, bindings, reconciliation, environment),
 // layout (stacks, spacers, frames, padding) and rendering through AppKit views.
 
 import XCTest

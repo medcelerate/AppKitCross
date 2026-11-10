@@ -6,7 +6,7 @@ import Foundation
 
 /// - SeeAlso: ADR-0004
 public final class MTLReferenceDevice: MTLDevice, @unchecked Sendable {
-    public let name = "AppKitWin Reference Device"
+    public let name = "AppKitCross Reference Device"
     public let registryID: UInt64 = 1
     public let isLowPower = true
     public let isHeadless = true
