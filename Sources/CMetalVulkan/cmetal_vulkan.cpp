@@ -348,7 +348,7 @@ static void transitionToGeneral(VkCommandBuffer cb, CMVTexture *t) {
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT, const VkDebugUtilsMessengerCallbackDataEXT *data, void *) {
     const char *level = severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT ? "error" : severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT ? "warning" : "info";
-    fprintf(stderr, "AppKitWin Vulkan %s: %s\n", level, data && data->pMessage ? data->pMessage : "");
+    fprintf(stderr, "AppKitCross Vulkan %s: %s\n", level, data && data->pMessage ? data->pMessage : "");
     return VK_FALSE;
 }
 
@@ -376,7 +376,7 @@ CMVDevice *cmv_device_create(bool debug) {
         if (n) vk.vkEnumerateInstanceLayerProperties(&n, props.data());
         for (auto &p : props) if (strcmp(p.layerName, "VK_LAYER_KHRONOS_validation") == 0) { layers.push_back("VK_LAYER_KHRONOS_validation"); d->validation = true; }
         if (d->validation && hasExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-        if (!d->validation) fprintf(stderr, "AppKitWin: APPKITWIN_VULKAN_DEBUG=1 but VK_LAYER_KHRONOS_validation is not installed\n");
+        if (!d->validation) fprintf(stderr, "AppKitCross: APPKITWIN_VULKAN_DEBUG=1 but VK_LAYER_KHRONOS_validation is not installed\n");
     }
     for (const char *name : {"VK_KHR_surface", "VK_KHR_xlib_surface", "VK_KHR_xcb_surface", "VK_KHR_wayland_surface"}) if (hasExtension(name)) extensions.push_back(name);
     bool hasSurface = hasExtension("VK_KHR_surface");
@@ -384,8 +384,8 @@ CMVDevice *cmv_device_create(bool debug) {
     d->waylandSurfaces = hasSurface && hasExtension("VK_KHR_wayland_surface");
 
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-    app.pApplicationName = "AppKitWin";
-    app.pEngineName = "AppKitWin Metal";
+    app.pApplicationName = "AppKitCross";
+    app.pEngineName = "AppKitCross Metal";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;

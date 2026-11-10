@@ -651,7 +651,7 @@ STDMETHODIMP Provider::GetPropertyValue(PROPERTYID propertyId, VARIANT *out) {
     case UIA_ControlTypePropertyId: setInt(n->controlType); break;
     case UIA_NamePropertyId: if (n->hasName) setStr(n->name); break;
     case UIA_HelpTextPropertyId: if (n->hasHelp) setStr(n->help); break;
-    case UIA_AutomationIdPropertyId: if (n->hasAutomationId) setStr(n->automationId); else setStr(L"AppKitWin." + std::to_wstring(n->id)); break;
+    case UIA_AutomationIdPropertyId: if (n->hasAutomationId) setStr(n->automationId); else setStr(L"AppKitCross." + std::to_wstring(n->id)); break;
     case UIA_LocalizedControlTypePropertyId: if (n->hasItemType) setStr(n->itemType); break;
     case UIA_ItemTypePropertyId: if (n->hasItemType) setStr(n->itemType); break;
     case UIA_IsEnabledPropertyId: setBool(n->flags & CUIA_ENABLED); break;
@@ -661,9 +661,9 @@ STDMETHODIMP Provider::GetPropertyValue(PROPERTYID propertyId, VARIANT *out) {
     case UIA_IsContentElementPropertyId: setBool(n->flags & CUIA_IS_CONTENT); break;
     case UIA_IsOffscreenPropertyId: setBool(n->rect.right <= n->rect.left || n->rect.bottom <= n->rect.top); break;
     case UIA_IsPasswordPropertyId: setBool(n->flags & CUIA_PASSWORD); break;
-    case UIA_FrameworkIdPropertyId: setStr(L"AppKitWin"); break;
-    case UIA_ProviderDescriptionPropertyId: setStr(L"AppKitWin NSAccessibility provider"); break;
-    case UIA_ClassNamePropertyId: setStr(L"AppKitWin.NSView"); break;
+    case UIA_FrameworkIdPropertyId: setStr(L"AppKitCross"); break;
+    case UIA_ProviderDescriptionPropertyId: setStr(L"AppKitCross NSAccessibility provider"); break;
+    case UIA_ClassNamePropertyId: setStr(L"AppKitCross.NSView"); break;
     case UIA_NativeWindowHandlePropertyId: if (isRoot() && root_->hwnd) setInt(static_cast<int>(reinterpret_cast<intptr_t>(root_->hwnd))); break;
     case UIA_ValueValuePropertyId: if (n->flags & CUIA_HAS_VALUE) setStr(n->value); break;
     case UIA_ValueIsReadOnlyPropertyId: if (n->flags & CUIA_HAS_VALUE) setBool(!((n->flags & CUIA_SETTABLE) && (n->flags & CUIA_ENABLED))); break;
