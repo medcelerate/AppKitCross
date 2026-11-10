@@ -35,6 +35,9 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
 
     var scale: CGFloat { backend.scale }
     var backingScaleFactor: CGFloat { scale }
+    var xDisplay: OpaquePointer { backend.display }
+    /// Child windows that GPU swap chains present into (ADR-0012).
+    private var presentationSurfaces: [LinuxPresentationSurface] = []
 
     init(backend: LinuxBackend, owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) {
         self.backend = backend
@@ -83,7 +86,13 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         applySizeHints()
     }
 
-    private struct PixelRect { var x: Int32, y: Int32, w: Int32, h: Int32 }
+    struct PixelRect { var x: Int32, y: Int32, w: Int32, h: Int32 }
+
+    /// A content rect (points, y up) as pixels within the window (y down from its top).
+    func childPixelRect(_ r: NSRect) -> PixelRect {
+        PixelRect(x: Int32((r.minX * scale).rounded()), y: Int32(((_frame.height - r.maxY) * scale).rounded()),
+                  w: max(1, Int32((r.width * scale).rounded())), h: max(1, Int32((r.height * scale).rounded())))
+    }
 
     /// AppKit frame (points, y up) -> X pixels (y down from the top of the screen).
     private func pixelRect(_ r: NSRect) -> PixelRect {
@@ -232,6 +241,7 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         guard !destroying else { return }
         destroying = true
         backend.unregister(self)
+        for s in presentationSurfaces { s.close() }
         releaseSurfaces()
         XDestroyWindow(backend.display, xid)
         XFlush(backend.display)
@@ -301,6 +311,38 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         cairo_surface_flush(xs)
         cairo_destroy(xcr)
         XFlush(backend.display)
+    }
+
+    // MARK: Presentation surfaces (ADR-0012)
+
+    func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? {
+        guard xid != 0, !destroying else { return nil }
+        let s = LinuxPresentationSurface(window: self, frame: frame)
+        presentationSurfaces.append(s)
+        return s
+    }
+
+    func presentationSurfaceClosed(_ s: LinuxPresentationSurface) { presentationSurfaces.removeAll { $0 === s } }
+
+    /// The window's pixels from the server (`XGetImage`), child windows included: what a
+    /// swap chain presented is in it once the server has processed the present.
+    func captureContent() -> CGImage? {
+        guard xid != 0, isVisible else { return nil }
+        let d = backend.display
+        XSync(d, 0)
+        let w = Int(max(1, (_frame.width * scale).rounded())), h = Int(max(1, (_frame.height * scale).rounded()))
+        guard let image = XGetImage(d, xid, 0, 0, UInt32(w), UInt32(h), ~UInt(0), ZPixmap) else { return nil }
+        defer { _ = image.pointee.f.destroy_image?(image) }
+        guard image.pointee.bits_per_pixel == 32, let src = image.pointee.data else { return nil }
+        let rowStride = w * 4
+        var data = Data(count: rowStride * h)
+        let rowBytes = Int(image.pointee.bytes_per_line)
+        data.withUnsafeMutableBytes { dst in
+            for y in 0..<h { memcpy(dst.baseAddress! + y * rowStride, src + y * rowBytes, rowStride) }
+            // A 24-bit visual leaves the top byte undefined: the window is opaque.
+            for i in Swift.stride(from: 3, to: rowStride * h, by: 4) { dst[i] = 255 }
+        }
+        return CGImage.fromBGRA(width: w, height: h, stride: rowStride, data: data)
     }
 
     // MARK: Cursor
@@ -477,6 +519,8 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         case DestroyNotify:
             backend.unregister(self)
             if !destroying { destroying = true; owner?.platformWindowWillClose() }
+            for s in presentationSurfaces { s.windowWasDestroyed() }
+            presentationSurfaces.removeAll()
             xid = 0
         case ClientMessage:
             if backend.x11DragDrop.handle(&event, window: self) { return }
@@ -533,6 +577,49 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         default:
             break
         }
+    }
+}
+
+/// A child X window at a content rect of a `LinuxWindow`, for a Vulkan swap chain
+/// (`VK_KHR_xlib_surface`). It selects no input, so pointer and key events propagate to
+/// the window as if the child were not there; its background is None, so the server
+/// never paints it and the swap chain's frames are all that shows.
+@MainActor
+final class LinuxPresentationSurface: PlatformPresentationSurface {
+    private unowned let window: LinuxWindow
+    private let display: OpaquePointer
+    private(set) var child: Window = 0
+
+    init(window: LinuxWindow, frame: NSRect) {
+        self.window = window
+        display = window.xDisplay
+        let px = window.childPixelRect(frame)
+        child = XCreateSimpleWindow(display, window.xid, px.x, px.y, UInt32(px.w), UInt32(px.h), 0, 0, 0)
+        XSetWindowBackgroundPixmap(display, child, 0)
+        XMapWindow(display, child)
+        XFlush(display)
+    }
+
+    var handle: PlatformPresentationSurfaceHandle {
+        PlatformPresentationSurfaceHandle(kind: .xlib, display: UnsafeMutableRawPointer(display), window: UInt(child))
+    }
+
+    func setFrame(_ frame: NSRect) {
+        guard child != 0 else { return }
+        let px = window.childPixelRect(frame)
+        XMoveResizeWindow(display, child, px.x, px.y, UInt32(px.w), UInt32(px.h))
+        XFlush(display)
+    }
+
+    /// The parent went away (with its children): nothing to destroy.
+    func windowWasDestroyed() { child = 0 }
+
+    func close() {
+        guard child != 0 else { return }
+        XDestroyWindow(display, child)
+        XFlush(display)
+        child = 0
+        window.presentationSurfaceClosed(self)
     }
 }
 #endif

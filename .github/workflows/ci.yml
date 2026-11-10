@@ -91,7 +91,7 @@ jobs:
     container: swift:6.2-noble
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools libpipewire-0.3-dev libasound2-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers glslang-tools libpipewire-0.3-dev libasound2-dev xvfb
       - run: swift build
       - name: Build every example
         shell: bash
@@ -100,3 +100,10 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device
         run: APPKITWIN_VULKAN_DEBUG=1 .build/debug/HelloWindow --metal-selftest
+      - name: Swap-chain presentation tests on the X11 backend under Xvfb (lavapipe presents to a child window)
+        run: xvfb-run -a -s "-screen 0 1280x800x24" env APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_VULKAN_DEBUG=1 swift test --filter MetalVulkanPresentationTests
+      - name: HelloWindow Metal tab presents through the swap chain under Xvfb
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" env APPKITWIN_LINUX_BACKEND=x11 timeout 8 .build/debug/HelloWindow --metal --metal-log --metal-static > metal.log 2>&1 || true
+          grep -E "^device|Vulkan|pipeline failed|^frame" metal.log | head -5
+          grep -q "presentation=swap chain" metal.log

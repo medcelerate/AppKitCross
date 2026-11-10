@@ -54,3 +54,14 @@ Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.s
 | Server-side (sway) | Client-side (the package) |
 |---|---|
 | ![sway frame](images/hellowindow-linux-wayland.png) | ![client-side decorations](images/hellowindow-linux-wayland-csd.png) |
+
+Metal on Linux (ADR-0012): the Layout Demo's Metal tab, an `MTKView` whose frames the Vulkan
+device presents through a `VkSwapchainKHR` on a native surface the window places under the
+view (a child window on X11, a subsurface on Wayland), from lavapipe in the container with
+`HelloWindow --metal --metal-static` (`tools/linux/run.sh` and `run-wayland.sh`, which also
+count the clear colour's pixels on screen). The device label the view carries as a subview
+is under the surface on Linux, where Windows composites it above the swap chain.
+
+| X11 (Xvfb) | Wayland (headless sway) |
+|---|---|
+| ![Metal tab on X11](images/hellowindow-linux-metal.png) | ![Metal tab on Wayland](images/hellowindow-linux-wayland-metal.png) |

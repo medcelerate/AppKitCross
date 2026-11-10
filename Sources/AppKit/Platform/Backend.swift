@@ -129,6 +129,48 @@ public protocol PlatformWindow: AnyObject {
     /// The accessibility tree changed (focus, a value, structure); platforms with
     /// assistive technology forward it (Accessibility.swift, ADR-0013).
     func accessibilityDidChange(_ change: PlatformAccessibilityChange)
+    /// A native surface placed within the content area at `frame` (content coordinates,
+    /// points) for a GPU swap chain to present into: a child X window or a Wayland
+    /// subsurface (ADR-0012). The platform's counterpart of a composition visual showing a
+    /// swap chain where it does not host the layer tree. Nil when it has none (the host
+    /// backend); the view then reads frames back and draws them.
+    func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)?
+    /// The content area as the window system shows it now, including presentation
+    /// surfaces (X11: `XGetImage`); nil where the platform cannot read it back (Wayland).
+    /// For tests and tooling.
+    func captureContent() -> CGImage?
+}
+
+/// A native surface within a window's content area that a swap chain presents into
+/// (`PlatformWindow.makePresentationSurface`). The surface sits above the content the
+/// window draws itself and follows the window's backing scale; the view that owns it
+/// moves it with `setFrame` and closes it when it leaves the window or is hidden.
+@MainActor
+public protocol PlatformPresentationSurface: AnyObject {
+    var handle: PlatformPresentationSurfaceHandle { get }
+    /// Places the surface at `frame` (content coordinates, points).
+    func setFrame(_ frame: NSRect)
+    /// Destroys the surface; the object is unusable afterwards.
+    func close()
+}
+
+/// What a Vulkan swap chain needs from a presentation surface: the window-system
+/// connection and the native window or surface.
+public struct PlatformPresentationSurfaceHandle: Sendable {
+    public enum Kind: Sendable {
+        /// `display` is the X11 `Display*`, `window` the child `Window` id.
+        case xlib
+        /// `display` is the `wl_display*`, `window` the `wl_surface*` as an integer.
+        case wayland
+    }
+    public var kind: Kind
+    public var display: UnsafeMutableRawPointer
+    public var window: UInt
+    public init(kind: Kind, display: UnsafeMutableRawPointer, window: UInt) {
+        self.kind = kind
+        self.display = display
+        self.window = window
+    }
 }
 
 /// A layer tree flattened for the platform compositor; see `_CALayerScene` in QuartzCore.
@@ -140,6 +182,8 @@ extension PlatformBackend {
 
 extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
+    public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
+    public func captureContent() -> CGImage? { nil }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }

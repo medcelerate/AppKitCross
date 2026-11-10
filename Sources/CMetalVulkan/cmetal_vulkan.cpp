@@ -56,7 +56,32 @@ struct Vk {
     PFN_vkGetInstanceProcAddr getInstanceProcAddr = nullptr;
     PFN_vkCreateDebugUtilsMessengerEXT createDebugUtilsMessengerEXT = nullptr;
     PFN_vkDestroyDebugUtilsMessengerEXT destroyDebugUtilsMessengerEXT = nullptr;
+    // Presentation (VK_KHR_surface / VK_KHR_swapchain and the window-system surfaces),
+    // resolved when the instance has them; NULL otherwise.
+    PFN_vkDestroySurfaceKHR destroySurfaceKHR = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceSupportKHR getPhysicalDeviceSurfaceSupportKHR = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR getPhysicalDeviceSurfaceCapabilitiesKHR = nullptr;
+    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR getPhysicalDeviceSurfaceFormatsKHR = nullptr;
+    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR getPhysicalDeviceSurfacePresentModesKHR = nullptr;
+    PFN_vkCreateSwapchainKHR createSwapchainKHR = nullptr;
+    PFN_vkDestroySwapchainKHR destroySwapchainKHR = nullptr;
+    PFN_vkGetSwapchainImagesKHR getSwapchainImagesKHR = nullptr;
+    PFN_vkAcquireNextImageKHR acquireNextImageKHR = nullptr;
+    PFN_vkQueuePresentKHR queuePresentKHR = nullptr;
+    PFN_vkCreateSemaphore createSemaphore = nullptr;
+    PFN_vkDestroySemaphore destroySemaphore = nullptr;
+    // The Xlib and Wayland surface creators take platform structs; they are declared here
+    // so the shim needs neither <X11/Xlib.h> nor <wayland-client.h> (the window backend
+    // hands over the Display*/Window and wl_display*/wl_surface* as plain pointers).
+    PFN_vkVoidFunction createXlibSurfaceKHR = nullptr;
+    PFN_vkVoidFunction createWaylandSurfaceKHR = nullptr;
 };
+struct CMVXlibSurfaceCreateInfo { VkStructureType sType; const void *pNext; VkFlags flags; void *dpy; unsigned long window; };
+struct CMVWaylandSurfaceCreateInfo { VkStructureType sType; const void *pNext; VkFlags flags; void *display; void *surface; };
+typedef VkResult (VKAPI_PTR *CMVCreateXlibSurface)(VkInstance, const CMVXlibSurfaceCreateInfo *, const VkAllocationCallbacks *, VkSurfaceKHR *);
+typedef VkResult (VKAPI_PTR *CMVCreateWaylandSurface)(VkInstance, const CMVWaylandSurfaceCreateInfo *, const VkAllocationCallbacks *, VkSurfaceKHR *);
+static const VkStructureType kXlibSurfaceCreateInfo = (VkStructureType)1000004000;      // VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR
+static const VkStructureType kWaylandSurfaceCreateInfo = (VkStructureType)1000006000;   // VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR
 static Vk vk;
 static void *g_loader = nullptr;
 static std::mutex g_loaderMutex;
@@ -86,6 +111,22 @@ static bool loadInstanceFunctions(VkInstance instance) {
 #undef CMV_LOAD
     vk.createDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vk.getInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT");
     vk.destroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vk.getInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
+#define CMV_LOAD_OPTIONAL(field, name) vk.field = (decltype(vk.field))vk.getInstanceProcAddr(instance, name);
+    CMV_LOAD_OPTIONAL(destroySurfaceKHR, "vkDestroySurfaceKHR")
+    CMV_LOAD_OPTIONAL(getPhysicalDeviceSurfaceSupportKHR, "vkGetPhysicalDeviceSurfaceSupportKHR")
+    CMV_LOAD_OPTIONAL(getPhysicalDeviceSurfaceCapabilitiesKHR, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
+    CMV_LOAD_OPTIONAL(getPhysicalDeviceSurfaceFormatsKHR, "vkGetPhysicalDeviceSurfaceFormatsKHR")
+    CMV_LOAD_OPTIONAL(getPhysicalDeviceSurfacePresentModesKHR, "vkGetPhysicalDeviceSurfacePresentModesKHR")
+    CMV_LOAD_OPTIONAL(createSwapchainKHR, "vkCreateSwapchainKHR")
+    CMV_LOAD_OPTIONAL(destroySwapchainKHR, "vkDestroySwapchainKHR")
+    CMV_LOAD_OPTIONAL(getSwapchainImagesKHR, "vkGetSwapchainImagesKHR")
+    CMV_LOAD_OPTIONAL(acquireNextImageKHR, "vkAcquireNextImageKHR")
+    CMV_LOAD_OPTIONAL(queuePresentKHR, "vkQueuePresentKHR")
+    CMV_LOAD_OPTIONAL(createSemaphore, "vkCreateSemaphore")
+    CMV_LOAD_OPTIONAL(destroySemaphore, "vkDestroySemaphore")
+    CMV_LOAD_OPTIONAL(createXlibSurfaceKHR, "vkCreateXlibSurfaceKHR")
+    CMV_LOAD_OPTIONAL(createWaylandSurfaceKHR, "vkCreateWaylandSurfaceKHR")
+#undef CMV_LOAD_OPTIONAL
     return ok;
 }
 
@@ -111,6 +152,11 @@ struct CMVTexture {
     uint32_t width = 0, height = 0, levels = 1, samples = 1;
     uint32_t texelSize = 4;
     bool storage = false;
+    /// GENERAL for the image's whole life (ADR-0012), except swap-chain images, which sit
+    /// in PRESENT_SRC_KHR between a present and the next acquire.
+    VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL;
+    /// False for swap-chain images: the chain owns the VkImage, the wrapper only its view.
+    bool ownsImage = true;
 };
 
 struct CMVShader {
@@ -166,6 +212,8 @@ struct CMVDevice {
     VkSampler dummySampler = VK_NULL_HANDLE;
     bool lost = false;
     bool presentable = false;
+    bool xlibSurfaces = false;
+    bool waylandSurfaces = false;
     bool validation = false;
     bool fillModeNonSolid = false;
     uint32_t subgroupSize = 32;
@@ -256,8 +304,10 @@ static void fullBarrier(VkCommandBuffer cb) {
     vk.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-/// Records one-shot work on the utility command buffer and waits for it.
-template <typename F> static bool runUtility(CMVDevice *d, F record) {
+/// Records one-shot work on the utility command buffer and waits for it. The submission
+/// waits on `waitSemaphore` and signals `signalSemaphore` when given (swap-chain
+/// acquire/present hand-offs).
+template <typename F> static bool runUtility(CMVDevice *d, F record, VkSemaphore waitSemaphore = VK_NULL_HANDLE, VkSemaphore signalSemaphore = VK_NULL_HANDLE) {
     std::lock_guard<std::mutex> lock(d->utilityMutex);
     vk.vkResetCommandPool(d->device, d->utilityPool, 0);
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr};
@@ -267,6 +317,9 @@ template <typename F> static bool runUtility(CMVDevice *d, F record) {
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &d->utilityBuffer;
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    if (waitSemaphore) { submit.waitSemaphoreCount = 1; submit.pWaitSemaphores = &waitSemaphore; submit.pWaitDstStageMask = &waitStage; }
+    if (signalSemaphore) { submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &signalSemaphore; }
     vk.vkResetFences(d->device, 1, &d->utilityFence);
     VkResult r;
     {
@@ -325,7 +378,10 @@ CMVDevice *cmv_device_create(bool debug) {
         if (d->validation && hasExtension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         if (!d->validation) fprintf(stderr, "AppKitWin: APPKITWIN_VULKAN_DEBUG=1 but VK_LAYER_KHRONOS_validation is not installed\n");
     }
-    for (const char *name : {"VK_KHR_surface", "VK_KHR_xcb_surface", "VK_KHR_wayland_surface"}) if (hasExtension(name)) extensions.push_back(name);
+    for (const char *name : {"VK_KHR_surface", "VK_KHR_xlib_surface", "VK_KHR_xcb_surface", "VK_KHR_wayland_surface"}) if (hasExtension(name)) extensions.push_back(name);
+    bool hasSurface = hasExtension("VK_KHR_surface");
+    d->xlibSurfaces = hasSurface && hasExtension("VK_KHR_xlib_surface");
+    d->waylandSurfaces = hasSurface && hasExtension("VK_KHR_wayland_surface");
 
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "AppKitWin";
@@ -499,6 +555,8 @@ void cmv_device_info(CMVDevice *d, CMVDeviceInfo *info) {
     info->isSoftware = d->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     info->isIntegrated = d->properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
     info->presentable = d->presentable;
+    info->xlibSurfaces = d->xlibSurfaces;
+    info->waylandSurfaces = d->waylandSurfaces;
     info->validation = d->validation;
     info->maxComputeWorkGroupInvocations = d->properties.limits.maxComputeWorkGroupInvocations;
     for (int i = 0; i < 3; i++) info->maxComputeWorkGroupSize[i] = d->properties.limits.maxComputeWorkGroupSize[i];
@@ -689,7 +747,7 @@ void cmv_texture_release(CMVTexture *t) {
     if (!t) return;
     VkDevice dev = t->device->device;
     if (t->view) vk.vkDestroyImageView(dev, t->view, nullptr);
-    if (t->image) vk.vkDestroyImage(dev, t->image, nullptr);
+    if (t->image && t->ownsImage) vk.vkDestroyImage(dev, t->image, nullptr);
     if (t->memory) vk.vkFreeMemory(dev, t->memory, nullptr);
     delete t;
 }
@@ -710,6 +768,20 @@ static void recordBufferToImage(VkCommandBuffer cb, CMVBuffer *src, uint64_t src
     vk.vkCmdCopyBufferToImage(cb, src->buffer, dst->image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
 }
 
+/// Moves an image between layouts (swap-chain images; everything else stays GENERAL).
+static void transitionLayout(VkCommandBuffer cb, CMVTexture *t, VkImageLayout from, VkImageLayout to) {
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.srcAccessMask = from == VK_IMAGE_LAYOUT_UNDEFINED ? 0 : VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.oldLayout = from;
+    barrier.newLayout = to;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = t->image;
+    barrier.subresourceRange = {t->aspect, 0, t->levels, 0, 1};
+    vk.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    t->layout = to;
+}
+
 static void recordImageToBuffer(VkCommandBuffer cb, CMVTexture *src, uint32_t level, uint32_t x, uint32_t y, uint32_t w, uint32_t h, CMVBuffer *dst, uint64_t dstOffset, uint32_t bytesPerRow) {
     VkBufferImageCopy region{};
     region.bufferOffset = dstOffset;
@@ -718,7 +790,12 @@ static void recordImageToBuffer(VkCommandBuffer cb, CMVTexture *src, uint32_t le
     region.imageSubresource = {copyAspect(src), level, 0, 1};
     region.imageOffset = {(int32_t)x, (int32_t)y, 0};
     region.imageExtent = {w, h, 1};
+    // A presented swap-chain image (PRESENT_SRC) is read through GENERAL and put back,
+    // so a frame's pixels can still be checked after its present (HelloWindow --metal-log).
+    VkImageLayout presented = src->layout;
+    if (presented != VK_IMAGE_LAYOUT_GENERAL) transitionLayout(cb, src, presented, VK_IMAGE_LAYOUT_GENERAL);
     vk.vkCmdCopyImageToBuffer(cb, src->image, VK_IMAGE_LAYOUT_GENERAL, dst->buffer, 1, &region);
+    if (presented != VK_IMAGE_LAYOUT_GENERAL) transitionLayout(cb, src, VK_IMAGE_LAYOUT_GENERAL, presented);
 }
 
 bool cmv_texture_upload(CMVDevice *d, CMVTexture *t, uint32_t level, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const void *rows, uint32_t bytesPerRow) {
@@ -1383,6 +1460,244 @@ uint64_t cmv_commandlist_execute(CMVCommandList *l, CMVQueue *q) {
     return value;
 }
 
+// MARK: Swap chains (presentation)
+
+struct CMVSwapChain {
+    CMVDevice *device = nullptr;
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkSwapchainKHR swapchain = VK_NULL_HANDLE;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    uint32_t width = 0, height = 0, requestedImages = 2;
+    bool vsync = true;
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    std::vector<CMVTexture *> images;             // wrappers over the chain's images (ownsImage = false)
+    std::vector<VkSemaphore> presentSemaphores;   // one per image: transition done → present may read
+    VkSemaphore acquireSemaphore = VK_NULL_HANDLE;
+    VkFence acquireFence = VK_NULL_HANDLE;
+    uint32_t current = UINT32_MAX;                // the acquired image, or none
+    bool outOfDate = false;
+    std::string lastError;
+};
+
+static void setChainError(CMVSwapChain *sc, const std::string &message) { sc->lastError = message; }
+
+static void destroyChainImages(CMVSwapChain *sc) {
+    for (CMVTexture *t : sc->images) cmv_texture_release(t);
+    sc->images.clear();
+    for (VkSemaphore s : sc->presentSemaphores) if (s) vk.destroySemaphore(sc->device->device, s, nullptr);
+    sc->presentSemaphores.clear();
+    sc->current = UINT32_MAX;
+}
+
+/// (Re)creates the VkSwapchainKHR for the chain's size, format and present mode.
+static bool createChain(CMVSwapChain *sc) {
+    CMVDevice *d = sc->device;
+    vk.vkDeviceWaitIdle(d->device);
+    VkSurfaceCapabilitiesKHR caps{};
+    if (vk.getPhysicalDeviceSurfaceCapabilitiesKHR(d->physical, sc->surface, &caps) != VK_SUCCESS) { setChainError(sc, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed"); return false; }
+    uint32_t count = 0;
+    vk.getPhysicalDeviceSurfaceFormatsKHR(d->physical, sc->surface, &count, nullptr);
+    std::vector<VkSurfaceFormatKHR> formats(count);
+    if (count) vk.getPhysicalDeviceSurfaceFormatsKHR(d->physical, sc->surface, &count, formats.data());
+    bool formatFound = false;
+    for (auto &f : formats) if (f.format == sc->format || (count == 1 && f.format == VK_FORMAT_UNDEFINED)) { sc->colorSpace = f.colorSpace; formatFound = true; break; }
+    if (!formatFound) { setChainError(sc, "the surface does not support VkFormat " + std::to_string((int)sc->format)); return false; }
+    count = 0;
+    vk.getPhysicalDeviceSurfacePresentModesKHR(d->physical, sc->surface, &count, nullptr);
+    std::vector<VkPresentModeKHR> modes(count);
+    if (count) vk.getPhysicalDeviceSurfacePresentModesKHR(d->physical, sc->surface, &count, modes.data());
+    auto hasMode = [&](VkPresentModeKHR m) { return std::find(modes.begin(), modes.end(), m) != modes.end(); };
+    sc->presentMode = VK_PRESENT_MODE_FIFO_KHR;   // always available
+    if (!sc->vsync) {
+        if (hasMode(VK_PRESENT_MODE_MAILBOX_KHR)) sc->presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        else if (hasMode(VK_PRESENT_MODE_IMMEDIATE_KHR)) sc->presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    VkExtent2D extent{sc->width, sc->height};
+    if (caps.currentExtent.width != UINT32_MAX && caps.currentExtent.width != 0 && caps.currentExtent.height != 0) {
+        // X11 reports the window's size; the chain must match it (the window backend sizes
+        // the child window before the chain), so take it when it disagrees.
+        extent = caps.currentExtent;
+    }
+    extent.width = std::max(caps.minImageExtent.width, std::min(caps.maxImageExtent.width, extent.width));
+    extent.height = std::max(caps.minImageExtent.height, std::min(caps.maxImageExtent.height, extent.height));
+    if (extent.width == 0 || extent.height == 0) { setChainError(sc, "the surface has no size yet"); return false; }
+    uint32_t imageCount = std::max(caps.minImageCount, sc->requestedImages);
+    if (caps.maxImageCount) imageCount = std::min(imageCount, caps.maxImageCount);
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    for (VkImageUsageFlags u : {(VkImageUsageFlags)VK_IMAGE_USAGE_TRANSFER_SRC_BIT, (VkImageUsageFlags)VK_IMAGE_USAGE_TRANSFER_DST_BIT, (VkImageUsageFlags)VK_IMAGE_USAGE_SAMPLED_BIT}) if (caps.supportedUsageFlags & u) usage |= u;
+    if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) { setChainError(sc, "the surface's images cannot be colour attachments"); return false; }
+    VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (!(caps.supportedCompositeAlpha & alpha)) {
+        for (VkCompositeAlphaFlagBitsKHR a : {VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR}) if (caps.supportedCompositeAlpha & a) { alpha = a; break; }
+    }
+    VkSwapchainCreateInfoKHR sci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+    sci.surface = sc->surface;
+    sci.minImageCount = imageCount;
+    sci.imageFormat = sc->format;
+    sci.imageColorSpace = sc->colorSpace;
+    sci.imageExtent = extent;
+    sci.imageArrayLayers = 1;
+    sci.imageUsage = usage;
+    sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    sci.preTransform = caps.currentTransform & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : caps.currentTransform;
+    sci.compositeAlpha = alpha;
+    sci.presentMode = sc->presentMode;
+    sci.clipped = VK_TRUE;
+    sci.oldSwapchain = sc->swapchain;
+    VkSwapchainKHR chain = VK_NULL_HANDLE;
+    VkResult r = vk.createSwapchainKHR(d->device, &sci, nullptr, &chain);
+    destroyChainImages(sc);
+    if (sc->swapchain) vk.destroySwapchainKHR(d->device, sc->swapchain, nullptr);
+    sc->swapchain = chain;
+    if (r != VK_SUCCESS) { setChainError(sc, "vkCreateSwapchainKHR failed (" + std::to_string((int)r) + ")"); return false; }
+    sc->width = extent.width;
+    sc->height = extent.height;
+    count = 0;
+    vk.getSwapchainImagesKHR(d->device, chain, &count, nullptr);
+    std::vector<VkImage> vkImages(count);
+    if (count) vk.getSwapchainImagesKHR(d->device, chain, &count, vkImages.data());
+    for (VkImage image : vkImages) {
+        auto *t = new CMVTexture();
+        t->device = d;
+        t->image = image;
+        t->ownsImage = false;
+        t->format = sc->format;
+        t->aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+        t->width = extent.width; t->height = extent.height; t->levels = 1; t->samples = 1;
+        t->texelSize = texelSizeOf(sc->format);
+        t->layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkImageViewCreateInfo vci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vci.image = image;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format = sc->format;
+        vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        if (vk.vkCreateImageView(d->device, &vci, nullptr, &t->view) != VK_SUCCESS) { delete t; setChainError(sc, "vkCreateImageView failed for a swap-chain image"); return false; }
+        sc->images.push_back(t);
+        VkSemaphoreCreateInfo semci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VkSemaphore s = VK_NULL_HANDLE;
+        vk.createSemaphore(d->device, &semci, nullptr, &s);
+        sc->presentSemaphores.push_back(s);
+    }
+    if (sc->images.empty()) { setChainError(sc, "vkGetSwapchainImagesKHR returned no images"); return false; }
+    sc->outOfDate = false;
+    sc->lastError.clear();
+    return true;
+}
+
+CMVSwapChain *cmv_swapchain_create(CMVDevice *d, uint32_t surfaceKind, void *display, uintptr_t window, uint32_t width, uint32_t height, uint32_t vkFormat, uint32_t imageCount, bool vsync) {
+    if (!d) return nullptr;
+    if (!d->presentable || !vk.createSwapchainKHR || !vk.acquireNextImageKHR || !vk.queuePresentKHR) { setError("the device has no VK_KHR_swapchain (no presentation support)"); return nullptr; }
+    if (!display || !window || width == 0 || height == 0) { setError("cmv_swapchain_create: no surface or an empty size"); return nullptr; }
+    auto *sc = new CMVSwapChain();
+    sc->device = d;
+    sc->format = (VkFormat)vkFormat;
+    sc->width = width; sc->height = height;
+    sc->requestedImages = std::max(1u, imageCount);
+    sc->vsync = vsync;
+    VkResult r = VK_ERROR_EXTENSION_NOT_PRESENT;
+    if (surfaceKind == CMV_SURFACE_XLIB) {
+        if (!d->xlibSurfaces || !vk.createXlibSurfaceKHR) { setError("VK_KHR_xlib_surface is not available"); delete sc; return nullptr; }
+        CMVXlibSurfaceCreateInfo ci{kXlibSurfaceCreateInfo, nullptr, 0, display, (unsigned long)window};
+        r = ((CMVCreateXlibSurface)vk.createXlibSurfaceKHR)(d->instance, &ci, nullptr, &sc->surface);
+    } else if (surfaceKind == CMV_SURFACE_WAYLAND) {
+        if (!d->waylandSurfaces || !vk.createWaylandSurfaceKHR) { setError("VK_KHR_wayland_surface is not available"); delete sc; return nullptr; }
+        CMVWaylandSurfaceCreateInfo ci{kWaylandSurfaceCreateInfo, nullptr, 0, display, (void *)window};
+        r = ((CMVCreateWaylandSurface)vk.createWaylandSurfaceKHR)(d->instance, &ci, nullptr, &sc->surface);
+    } else {
+        setError("unknown surface kind");
+        delete sc;
+        return nullptr;
+    }
+    if (r != VK_SUCCESS || !sc->surface) { setError("vkCreate*SurfaceKHR failed"); delete sc; return nullptr; }
+    VkBool32 supported = VK_FALSE;
+    if (vk.getPhysicalDeviceSurfaceSupportKHR(d->physical, d->family, sc->surface, &supported) != VK_SUCCESS || !supported) {
+        setError("the device's queue family cannot present to this surface");
+        vk.destroySurfaceKHR(d->instance, sc->surface, nullptr);
+        delete sc;
+        return nullptr;
+    }
+    VkSemaphoreCreateInfo semci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    vk.createSemaphore(d->device, &semci, nullptr, &sc->acquireSemaphore);
+    VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    vk.vkCreateFence(d->device, &fci, nullptr, &sc->acquireFence);
+    if (!createChain(sc)) { setError(sc->lastError.c_str()); cmv_swapchain_release(sc); return nullptr; }
+    g_lastError[0] = 0;
+    return sc;
+}
+
+void cmv_swapchain_release(CMVSwapChain *sc) {
+    if (!sc) return;
+    CMVDevice *d = sc->device;
+    vk.vkDeviceWaitIdle(d->device);
+    destroyChainImages(sc);
+    if (sc->swapchain) vk.destroySwapchainKHR(d->device, sc->swapchain, nullptr);
+    if (sc->acquireSemaphore) vk.destroySemaphore(d->device, sc->acquireSemaphore, nullptr);
+    if (sc->acquireFence) vk.vkDestroyFence(d->device, sc->acquireFence, nullptr);
+    if (sc->surface) vk.destroySurfaceKHR(d->instance, sc->surface, nullptr);
+    delete sc;
+}
+
+bool cmv_swapchain_resize(CMVSwapChain *sc, uint32_t width, uint32_t height) {
+    if (!sc || width == 0 || height == 0) return false;
+    sc->width = width;
+    sc->height = height;
+    return createChain(sc);
+}
+
+void cmv_swapchain_set_vsync(CMVSwapChain *sc, bool vsync) { if (sc) sc->vsync = vsync; }
+
+CMVTexture *cmv_swapchain_acquire(CMVSwapChain *sc) {
+    if (!sc || !sc->swapchain) return nullptr;
+    CMVDevice *d = sc->device;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (sc->outOfDate && !createChain(sc)) return nullptr;
+        uint32_t index = 0;
+        vk.vkResetFences(d->device, 1, &sc->acquireFence);
+        VkResult r = vk.acquireNextImageKHR(d->device, sc->swapchain, 2000000000ull, sc->acquireSemaphore, sc->acquireFence, &index);
+        if (r == VK_ERROR_OUT_OF_DATE_KHR) { sc->outOfDate = true; continue; }
+        if (r == VK_SUBOPTIMAL_KHR) sc->outOfDate = true;   // present this one, re-create afterwards
+        else if (r != VK_SUCCESS) { setChainError(sc, r == VK_TIMEOUT ? "vkAcquireNextImageKHR timed out" : "vkAcquireNextImageKHR failed (" + std::to_string((int)r) + ")"); if (r == VK_ERROR_DEVICE_LOST) d->lost = true; return nullptr; }
+        if (vk.vkWaitForFences(d->device, 1, &sc->acquireFence, VK_TRUE, 2000000000ull) != VK_SUCCESS) { setChainError(sc, "waiting for the acquired image timed out"); return nullptr; }
+        CMVTexture *t = sc->images[index];
+        // The image is ours: into GENERAL, after the presentation engine's semaphore.
+        VkImageLayout from = t->layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_UNDEFINED;
+        if (!runUtility(d, [&](VkCommandBuffer cb) { transitionLayout(cb, t, from, VK_IMAGE_LAYOUT_GENERAL); }, sc->acquireSemaphore)) { setChainError(sc, "the acquire transition failed"); return nullptr; }
+        sc->current = index;
+        return t;
+    }
+    return nullptr;
+}
+
+bool cmv_swapchain_present(CMVSwapChain *sc) {
+    if (!sc || sc->current == UINT32_MAX || !sc->swapchain) { if (sc) setChainError(sc, "present without an acquired image"); return false; }
+    CMVDevice *d = sc->device;
+    uint32_t index = sc->current;
+    sc->current = UINT32_MAX;
+    CMVTexture *t = sc->images[index];
+    VkSemaphore done = sc->presentSemaphores[index];
+    if (!runUtility(d, [&](VkCommandBuffer cb) { transitionLayout(cb, t, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR); }, VK_NULL_HANDLE, done)) { setChainError(sc, "the present transition failed"); return false; }
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &done;
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &sc->swapchain;
+    pi.pImageIndices = &index;
+    VkResult r;
+    {
+        std::lock_guard<std::mutex> lock(d->queueMutex);
+        r = vk.queuePresentKHR(d->queue, &pi);
+    }
+    if (r == VK_SUBOPTIMAL_KHR) { sc->outOfDate = true; return true; }
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) { sc->outOfDate = true; setChainError(sc, "the swap chain is out of date (re-created on the next acquire)"); return false; }
+    if (r != VK_SUCCESS) { if (r == VK_ERROR_DEVICE_LOST) d->lost = true; setChainError(sc, "vkQueuePresentKHR failed (" + std::to_string((int)r) + ")"); return false; }
+    return true;
+}
+
+uint32_t cmv_swapchain_present_mode(CMVSwapChain *sc) { return sc ? (uint32_t)sc->presentMode : 0; }
+uint32_t cmv_swapchain_image_count(CMVSwapChain *sc) { return sc ? (uint32_t)sc->images.size() : 0; }
+void cmv_swapchain_last_error(CMVSwapChain *sc, char *errorOut, uint32_t errorCapacity) { copyError(errorOut, errorCapacity, sc ? sc->lastError : "no swap chain"); }
+
 #else   // no <vulkan/vulkan.h>: stubs, the Metal module falls back to the reference device.
 
 bool cmv_available(void) { setError("built without the Vulkan headers (install libvulkan-dev)"); return false; }
@@ -1442,5 +1757,14 @@ void cmv_commandlist_copy_buffer_to_texture(CMVCommandList *, CMVBuffer *, uint6
 void cmv_commandlist_copy_texture_to_buffer(CMVCommandList *, CMVTexture *, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, CMVBuffer *, uint64_t, uint32_t) {}
 void cmv_commandlist_generate_mipmaps(CMVCommandList *, CMVTexture *) {}
 uint64_t cmv_commandlist_execute(CMVCommandList *, CMVQueue *) { return 0; }
+CMVSwapChain *cmv_swapchain_create(CMVDevice *, uint32_t, void *, uintptr_t, uint32_t, uint32_t, uint32_t, uint32_t, bool) { return nullptr; }
+void cmv_swapchain_release(CMVSwapChain *) {}
+bool cmv_swapchain_resize(CMVSwapChain *, uint32_t, uint32_t) { return false; }
+void cmv_swapchain_set_vsync(CMVSwapChain *, bool) {}
+CMVTexture *cmv_swapchain_acquire(CMVSwapChain *) { return nullptr; }
+bool cmv_swapchain_present(CMVSwapChain *) { return false; }
+uint32_t cmv_swapchain_present_mode(CMVSwapChain *) { return 0; }
+uint32_t cmv_swapchain_image_count(CMVSwapChain *) { return 0; }
+void cmv_swapchain_last_error(CMVSwapChain *, char *errorOut, uint32_t errorCapacity) { if (errorOut && errorCapacity) errorOut[0] = 0; }
 
 #endif
