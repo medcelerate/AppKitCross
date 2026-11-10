@@ -68,6 +68,8 @@ public struct PlatformAccessibilityElement: Sendable {
     public var isMultiline = false
     /// A selection container (table) that allows more than one selected child.
     public var allowsMultipleSelection = false
+    /// Assistive technology may select the element (a row, a collection view item).
+    public var isSelectable = false
     public var minValue: Double?
     public var maxValue: Double?
     public var selectedTextRange: NSRange?

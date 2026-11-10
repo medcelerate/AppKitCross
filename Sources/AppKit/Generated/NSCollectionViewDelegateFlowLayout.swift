@@ -35,21 +35,21 @@ public protocol NSCollectionViewDelegateFlowLayout: NSCollectionViewDelegate, NS
 extension NSCollectionViewDelegateFlowLayout {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:insetforsectionat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, insetForSectionAt section: Int) -> NSEdgeInsets { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, insetForSectionAt section: Int) -> NSEdgeInsets { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.sectionInset ?? NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:minimuminteritemspacingforsectionat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.minimumInteritemSpacing ?? 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:minimumlinespacingforsectionat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.minimumLineSpacing ?? 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:referencesizeforfooterinsection:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, referenceSizeForFooterInSection section: Int) -> NSSize { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, referenceSizeForFooterInSection section: Int) -> NSSize { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.footerReferenceSize ?? .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:referencesizeforheaderinsection:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> NSSize { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> NSSize { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.headerReferenceSize ?? .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegateflowlayout/collectionview(_:layout:sizeforitemat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> NSSize { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, layout collectionViewLayout: NSCollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> NSSize { return (collectionViewLayout as? NSCollectionViewFlowLayout)?.itemSize ?? .zero }
 }
 

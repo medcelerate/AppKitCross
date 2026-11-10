@@ -522,7 +522,7 @@ import CoreGraphics
     }
 
     /// The enclosing scroll view's width changed: refit the columns.
-    internal func _clipViewDidResize() { tile(); _layoutRowViews() }
+    internal override func _clipViewDidResize() { tile(); _layoutRowViews() }
 
     // MARK: Views
 

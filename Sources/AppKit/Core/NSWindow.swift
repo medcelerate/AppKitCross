@@ -1862,7 +1862,7 @@ extension NSWindow: PlatformAccessibilityProvider {
             return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityPerform(action) ?? false
         }
         switch action {
-        case .press: return v.accessibilityPerformPress()
+        case .press: return v.accessibilityPerformPress() || v._accessibilityPressThroughContainer()
         case .increment: return v.accessibilityPerformIncrement()
         case .decrement: return v.accessibilityPerformDecrement()
         case .showMenu: return v.accessibilityPerformShowMenu()
@@ -1891,8 +1891,6 @@ extension NSWindow: PlatformAccessibilityProvider {
             guard selected, let e = _contentView?._accessibilityVirtualElement(withID: elementID) else { return false }
             return e._accessibilityPerform(.press)
         }
-        if let row = v as? NSTableRowView { return row._accessibilitySetSelected(selected, extending: extending) }
-        v.setAccessibilitySelected(selected)
-        return true
+        return v._accessibilitySetSelected(selected, extending: extending)
     }
 }
