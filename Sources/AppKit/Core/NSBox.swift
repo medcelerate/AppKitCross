@@ -134,7 +134,7 @@ import CoreGraphics
     private var _titleSize: NSSize {
         guard _titlePosition != .noTitle else { return .zero }
         let s = (_title as NSString).size(withAttributes: [.font: _titleFont])
-        return NSSize(width: s.width.rounded(.up) + 8, height: _titleHeight)
+        return NSSize(width: s.width.rounded(.up) + 12, height: _titleHeight)
     }
     /// The thickness of the border line.
     private var _borderThickness: CGFloat {

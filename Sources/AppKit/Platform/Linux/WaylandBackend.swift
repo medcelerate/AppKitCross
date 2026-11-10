@@ -75,6 +75,22 @@ final class WaylandBackend: PlatformBackend {
     /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
     private(set) var dataDevice: WaylandDataDevice!
     var dragDrop: (any PlatformDragDrop)? { dataDevice }
+    /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
+    /// Wayland has no global coordinates: a host's position is taken as the top-left of
+    /// the first output.
+    private var statusNotifier: LinuxStatusNotifierHost?
+    private var statusNotifierTried = false
+    var statusItems: (any PlatformStatusItemHost)? {
+        if !statusNotifierTried {
+            statusNotifierTried = true
+            statusNotifier = LinuxStatusNotifierHost.connect { [weak self] x, y in
+                let d = self?.displays.first
+                let s = d?.backingScaleFactor ?? 1
+                return NSPoint(x: CGFloat(x) / s, y: (d?.frame.height ?? 0) - CGFloat(y) / s)
+            }
+        }
+        return statusNotifier
+    }
     /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013). Wayland has no global
     /// coordinates, so extents are reported against the primary output's logical size.
     private(set) var atspi: AtspiBridge?
@@ -306,6 +322,7 @@ final class WaylandBackend: PlatformBackend {
                    pollfd(fd: wakePipe[0], events: Int16(POLLIN), revents: 0),
                    pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
         if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
+        if let s = statusNotifier, s.fileDescriptor >= 0 { fds.append(pollfd(fd: s.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
         var timeout: Int32 = blocking ? -1 : 0
         if blocking {
             if let next = frameCallbacks.map(\.deadline).min() {
@@ -328,6 +345,7 @@ final class WaylandBackend: PlatformBackend {
             return
         }
         atspi?.dispatch()
+        statusNotifier?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }

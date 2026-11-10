@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 98 |
-| Types generated | 440 |
+| Types handwritten | 108 |
+| Types generated | 430 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10213 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1201 |
+| Members unimplemented-calls | 1199 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -288,7 +288,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |
 | NSMenuItemCell | class | handwritten | 20 | 0 | 0 | 1 |
 | NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |
-| NSMenuToolbarItem | class | generated | 2 | 0 | 0 |  |
+| NSMenuToolbarItem | class | handwritten | 2 | 0 | 0 | 0 |
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
 | NSMutableFontCollection | class | generated | 8 | 1 | 0 |  |
 | NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |
@@ -376,7 +376,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSearchField | class | generated | 18 | 1 | 1 |  |
 | NSSearchFieldCell | class | generated | 15 | 0 | 0 |  |
 | NSSearchFieldDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSSearchToolbarItem | class | generated | 5 | 0 | 0 |  |
+| NSSearchToolbarItem | class | handwritten | 5 | 0 | 0 | 0 |
 | NSSecureTextField | class | generated | 0 | 0 | 0 |  |
 | NSSecureTextFieldCell | class | generated | 1 | 0 | 0 |  |
 | NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 1 |
@@ -419,9 +419,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSStackView | class | handwritten | 43 | 0 | 3 | 0 |
 | NSStackViewDelegate | protocol | generated | 2 | 0 | 0 |  |
 | NSStandardKeyBindingResponding | protocol | generated | 96 | 0 | 0 |  |
-| NSStatusBar | class | generated | 5 | 0 | 0 |  |
-| NSStatusBarButton | class | generated | 1 | 0 | 0 |  |
-| NSStatusItem | class | generated | 26 | 0 | 2 |  |
+| NSStatusBar | class | handwritten | 5 | 0 | 0 | 0 |
+| NSStatusBarButton | class | handwritten | 1 | 0 | 0 | 0 |
+| NSStatusItem | class | handwritten | 26 | 0 | 2 | 0 |
 | NSStepper | class | generated | 5 | 0 | 0 |  |
 | NSStepperCell | class | generated | 5 | 0 | 0 |  |
 | NSStepperTouchBarItem | class | generated | 8 | 1 | 0 |  |
@@ -522,10 +522,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTokenFieldCell | class | generated | 6 | 0 | 0 |  |
 | NSTokenFieldCellDelegate | protocol | generated | 10 | 0 | 0 |  |
 | NSTokenFieldDelegate | protocol | generated | 10 | 0 | 0 |  |
-| NSToolbar | class | generated | 39 | 0 | 3 |  |
-| NSToolbarDelegate | protocol | generated | 8 | 0 | 0 |  |
-| NSToolbarItem | class | generated | 47 | 0 | 3 |  |
-| NSToolbarItemGroup | class | generated | 14 | 0 | 2 |  |
+| NSToolbar | class | handwritten | 39 | 0 | 3 | 0 |
+| NSToolbarDelegate | protocol | handwritten | 8 | 0 | 0 | 0 |
+| NSToolbarItem | class | handwritten | 47 | 0 | 3 | 0 |
+| NSToolbarItemGroup | class | handwritten | 14 | 0 | 2 | 0 |
 | NSToolbarItemValidation | protocol | generated | 1 | 0 | 0 |  |
 | NSToolbarUserInfoKey | struct | generated | 2 | 0 | 0 |  |
 | NSTouch | class | generated | 21 | 0 | 3 |  |
@@ -534,7 +534,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTouchBarItem | class | generated | 22 | 0 | 2 |  |
 | NSTouchBarProvider | protocol | generated | 1 | 0 | 0 |  |
 | NSTrackingArea | class | generated | 15 | 0 | 1 |  |
-| NSTrackingSeparatorToolbarItem | class | generated | 3 | 0 | 0 |  |
+| NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |
 | NSTreeController | class | generated | 34 | 0 | 0 |  |
 | NSTreeNode | class | generated | 9 | 0 | 0 |  |
 | NSTypesetter | class | generated | 53 | 2 | 0 |  |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 156 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 154 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

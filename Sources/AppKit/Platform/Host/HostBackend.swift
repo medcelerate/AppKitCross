@@ -66,6 +66,10 @@ final class HostBackend: PlatformBackend {
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 
+    /// The in-process status area (StatusItem.swift): tests click its items.
+    let hostStatusItems = HostStatusItems()
+    var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
+
     /// Test hook: what the next file dialog "chooses" (nil = cancel).
     var nextFileDialogResult: [URL]? = nil
     private(set) var lastFileDialogOptions: PlatformFileDialogOptions? = nil
@@ -399,4 +403,45 @@ final class HostPasteboard: PlatformPasteboard {
     private(set) var changeCount = 0
     func write(_ entries: [PlatformPasteboardEntry]) { self.entries = entries; changeCount += 1 }
     func read() -> [PlatformPasteboardEntry] { entries }
+}
+
+/// The host backend's status area: a registry of the items with what they show, and a
+/// `click` hook that delivers what a user would do in a real notification area.
+@MainActor
+final class HostStatusItems: PlatformStatusItemHost {
+    private(set) var items: [HostStatusItem] = []
+    var thickness: CGFloat { 22 }
+    func makeStatusItem(owner: PlatformStatusItemOwner) -> PlatformStatusItem {
+        let item = HostStatusItem(owner: owner, host: self)
+        items.append(item)
+        return item
+    }
+    fileprivate func forget(_ item: HostStatusItem) { items.removeAll { $0 === item } }
+    /// The items a user would see (visible, not removed).
+    var visibleItems: [HostStatusItem] { items.filter { $0.isVisible } }
+}
+
+@MainActor
+final class HostStatusItem: PlatformStatusItem {
+    private weak var owner: PlatformStatusItemOwner?
+    private unowned let host: HostStatusItems
+    var title = ""
+    var toolTip: String?
+    var isVisible = true
+    var appearsDisabled = false
+    private(set) var image: CGImage?
+    private(set) var imageScale: CGFloat = 1
+    private(set) var removed = false
+
+    init(owner: PlatformStatusItemOwner, host: HostStatusItems) {
+        self.owner = owner
+        self.host = host
+    }
+    func setImage(_ image: CGImage?, scale: CGFloat) { self.image = image; imageScale = scale }
+    func remove() { removed = true; isVisible = false; host.forget(self) }
+    /// Test hook: the user clicked the item at `screenPoint` (AppKit screen coordinates).
+    func click(_ click: PlatformStatusItemClick, at screenPoint: NSPoint = NSPoint(x: 1800, y: 1070)) {
+        guard isVisible, !removed else { return }
+        owner?.platformStatusItemClicked(click, at: screenPoint)
+    }
 }

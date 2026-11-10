@@ -28,6 +28,9 @@ final class Win32Backend: PlatformBackend {
     /// OLE drag and drop (Win32DragDrop.swift).
     private(set) var win32DragDrop: Win32DragDrop!
     var dragDrop: (any PlatformDragDrop)? { win32DragDrop }
+    /// The notification area (Win32StatusItem.swift).
+    private(set) var win32StatusItems: Win32StatusItems?
+    var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
@@ -50,6 +53,7 @@ final class Win32Backend: PlatformBackend {
         registerClasses()
         createMessageWindow()
         win32DragDrop = Win32DragDrop(backend: self)
+        if let hwnd = messageWindow { win32StatusItems = Win32StatusItems(backend: self, hwnd: hwnd) }
     }
 
     // MARK: Nested loops owned by the system
@@ -426,7 +430,14 @@ final class Win32Backend: PlatformBackend {
 
     /// Builds a color cursor (an icon with a hot spot) from premultiplied BGRA pixels.
     private func makeCursor(width: Int, height: Int, hotSpot: (Int, Int), bgra: [UInt8]) -> HCURSOR? {
-        guard bgra.count >= width * height * 4 else { return nil }
+        Win32Backend.makeIconHandle(width: width, height: height, hotSpot: hotSpot, isIcon: false, bgra: bgra)
+    }
+
+    /// An HICON/HCURSOR with alpha from premultiplied BGRA pixels (top-down rows): a
+    /// 32-bit DIB section as the colour plane, as the icon APIs document. Status items
+    /// (Win32StatusItem) and cursors share it.
+    static func makeIconHandle(width: Int, height: Int, hotSpot: (Int, Int), isIcon: Bool, bgra: [UInt8]) -> HICON? {
+        guard width > 0, height > 0, bgra.count >= width * height * 4 else { return nil }
         var bi = BITMAPV5HEADER()
         bi.bV5Size = DWORD(MemoryLayout<BITMAPV5HEADER>.size)
         bi.bV5Width = Int32(width)
@@ -445,7 +456,7 @@ final class Win32Backend: PlatformBackend {
         bgra.withUnsafeBytes { src in bits.copyMemory(from: src.baseAddress!, byteCount: width * height * 4) }
         let mask = CreateBitmap(Int32(width), Int32(height), 1, 1, nil)
         var info = ICONINFO()
-        info.fIcon = false
+        info.fIcon = WindowsBool(isIcon)
         info.xHotspot = DWORD(hotSpot.0)
         info.yHotspot = DWORD(hotSpot.1)
         info.hbmMask = mask
@@ -497,6 +508,17 @@ final class Win32Backend: PlatformBackend {
             if ptr != 0 {
                 let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
                 MainActor.assumeIsolated { backend.serviceWhileNested() }
+            }
+            return 0
+        }
+        if msg == Win32StatusItems.callbackMessage || msg == Win32StatusItems.taskbarCreated || msg == UINT(WM_KILLFOCUS) {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                MainActor.assumeIsolated {
+                    if msg == UINT(WM_KILLFOCUS) { backend.win32StatusItems?.foregroundLost() }
+                    else { backend.win32StatusItems?.handle(message: msg, wParam: wParam, lParam: lParam) }
+                }
             }
             return 0
         }
