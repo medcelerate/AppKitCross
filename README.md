@@ -84,6 +84,7 @@ README. All of them build and run with the same source on macOS, Windows and Lin
 | [Observable](Examples/Observable) | SwiftUI driven by an `ObservableObject` with `@Published` properties, a live-updating `List`, a detail pane editing through a `Binding`, and a Combine `Timer` publisher feeding the model | `swift run Observable` |
 | [LibraryCompat](Examples/LibraryCompat) | Popular third-party SwiftUI packages (Shimmer, ConfettiSwiftUI, WrappingHStack, Defaults, swift-markdown-ui, SwiftUI-Introspect, SwiftUICharts, Nuke) built against this SwiftUI, one tab each; a package of its own, with the verdicts and the API gaps they found in [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md) | `tools/library-compat.sh --run` (`--screenshot dir`) |
 | [AudioPlayer](Examples/AudioPlayer) | `AVAudioEngine` with two `AVAudioPlayerNode`s (a WAV or AIFF from `NSOpenPanel`, a generated sine), play/pause/loop/stop, a level meter from a mixer tap, the output device and its latency in the status line; `--render` writes two seconds offline through `AVAudioFile` | `swift run AudioPlayer` (`file.wav`, `--render out.wav`) |
+| [Toolbar](Examples/Toolbar) | `NSToolbar` with image items, a segmented group, a menu item, a search field, validation, chevron overflow and the customization sheet (autosaved); an `NSStatusItem` with a menu in the platform's status area | `swift run Toolbar` |
 
 Add the package to your own app and import the modules by their Apple names:
 
