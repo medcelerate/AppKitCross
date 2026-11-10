@@ -5,7 +5,8 @@
 //
 // The header draws one cell per visible column, aligned with the table's columns. A
 // click on a column with a sort descriptor prototype toggles the sort; dragging the
-// edge between two columns resizes the left one.
+// edge between two columns resizes the one before it in reading order (the left one; the
+// right one in a right-to-left table, whose first column sits at the right edge).
 
 import Foundation
 #if canImport(CoreGraphics)
@@ -87,8 +88,7 @@ import CoreGraphics
     private func resizeEdgeColumn(at point: NSPoint) -> Int {
         guard let t = _tableView, t.allowsColumnResizing else { return -1 }
         for (i, c) in t.tableColumns.enumerated() where !c.isHidden && c.resizingMask.contains(.userResizingMask) {
-            let r = headerRect(ofColumn: i)
-            if abs(point.x - r.maxX) <= 4 { return i }
+            if abs(point.x - t._trailingGapX(ofColumn: i)) <= 4 { return i }
         }
         return -1
     }
@@ -114,7 +114,9 @@ import CoreGraphics
         guard let t = _tableView else { return }
         let p = convert(event.locationInWindow, from: nil)
         if _resizedColumn >= 0 {
-            t.tableColumns[_resizedColumn].width = _resizeStartWidth + (p.x - _resizeStartX)
+            // Dragging the trailing edge away from the leading edge widens the column.
+            let delta = p.x - _resizeStartX
+            t.tableColumns[_resizedColumn].width = _resizeStartWidth + (t._isRightToLeft ? -delta : delta)
             return
         }
         if _pressedColumn >= 0 {
@@ -145,8 +147,7 @@ import CoreGraphics
     @MainActor open override func resetCursorRects() {
         guard let t = _tableView, t.allowsColumnResizing else { return }
         for (i, c) in t.tableColumns.enumerated() where !c.isHidden && c.resizingMask.contains(.userResizingMask) {
-            let r = headerRect(ofColumn: i)
-            addCursorRect(NSRect(x: r.maxX - 4, y: 0, width: 8, height: bounds.height), cursor: .resizeLeftRight)
+            addCursorRect(NSRect(x: t._trailingGapX(ofColumn: i) - 4, y: 0, width: 8, height: bounds.height), cursor: .resizeLeftRight)
         }
     }
 }

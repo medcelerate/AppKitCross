@@ -143,10 +143,12 @@ import CoreGraphics
     @MainActor open func column(withIdentifier identifier: NSUserInterfaceItemIdentifier) -> Int { _tableColumns.firstIndex { $0.identifier == identifier } ?? -1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/column(at:)
     @MainActor open func column(at point: NSPoint) -> Int {
-        var x: CGFloat = 0
-        for (i, c) in _tableColumns.enumerated() where !c.isHidden {
-            if point.x >= x && point.x < x + c.width + _intercellSpacing.width { return i }
-            x += c.width + _intercellSpacing.width
+        for i in _tableColumns.indices where !_tableColumns[i].isHidden {
+            let r = rect(ofColumn: i)
+            // The intercell gap belongs to the column before it (in reading order).
+            let gap = _intercellSpacing.width
+            let hit = _isRightToLeft ? (point.x >= r.minX - gap && point.x < r.maxX) : (point.x >= r.minX && point.x < r.maxX + gap)
+            if hit { return i }
         }
         return -1
     }
@@ -170,10 +172,20 @@ import CoreGraphics
         guard _tableColumns.indices.contains(column) else { return .zero }
         var x: CGFloat = 0
         for (i, c) in _tableColumns.enumerated() where !c.isHidden {
-            if i == column { return NSRect(x: x, y: 0, width: c.width, height: max(bounds.height, _totalRowHeight)) }
+            if i == column {
+                // Right to left: the first column sits at the right edge of the content width.
+                let origin = _isRightToLeft ? max(bounds.width, _visibleColumnsWidth) - x - c.width : x
+                return NSRect(x: origin, y: 0, width: c.width, height: max(bounds.height, _totalRowHeight))
+            }
             x += c.width + _intercellSpacing.width
         }
         return .zero
+    }
+    internal var _isRightToLeft: Bool { userInterfaceLayoutDirection == .rightToLeft }
+    /// The x of the gap after `column` in reading order (its trailing separator).
+    internal func _trailingGapX(ofColumn column: Int) -> CGFloat {
+        let c = rect(ofColumn: column)
+        return _isRightToLeft ? c.minX - _intercellSpacing.width : c.maxX
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/allowscolumnreordering
     @MainActor open var allowsColumnReordering: Bool {
@@ -731,8 +743,7 @@ import CoreGraphics
         }
         if _gridStyleMask.contains(.solidVerticalGridLineMask) {
             for i in _tableColumns.indices where !_tableColumns[i].isHidden {
-                let c = rect(ofColumn: i)
-                NSBezierPath(rect: NSRect(x: c.maxX + _intercellSpacing.width - 1, y: clipRect.minY, width: 1, height: clipRect.height)).fill()
+                NSBezierPath(rect: NSRect(x: _trailingGapX(ofColumn: i) + _intercellSpacing.width - 1, y: clipRect.minY, width: 1, height: clipRect.height)).fill()
             }
         }
     }
@@ -1061,7 +1072,12 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/userinterfacelayoutdirection
     @MainActor open override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
         get { super.userInterfaceLayoutDirection }
-        set { super.userInterfaceLayoutDirection = newValue }
+        set {
+            let was = userInterfaceLayoutDirection
+            super.userInterfaceLayoutDirection = newValue
+            // The columns mirror: re-place every cell view and redraw the header.
+            if userInterfaceLayoutDirection != was { tile(); _layoutRowViews() }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/verticalmotioncanbegindrag
     @MainActor open var verticalMotionCanBeginDrag: Bool {

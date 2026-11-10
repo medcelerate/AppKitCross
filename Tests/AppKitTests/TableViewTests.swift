@@ -229,6 +229,38 @@ final class TableViewTests: XCTestCase, @unchecked Sendable {
             w.close()
         }
     }
+
+    func testColumnsMirrorInRightToLeft() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+            let rows = Planets()
+            let (table, scroll) = makeTable(rows: rows, in: w)
+            table.tableColumns[0].width = 80
+            w.display()
+            let width = scroll.contentView.bounds.width
+            let ltrFirst = table.rect(ofColumn: 0), ltrSecond = table.rect(ofColumn: 1)
+            XCTAssertEqual(ltrFirst.minX, 0)
+            table.userInterfaceLayoutDirection = .rightToLeft
+            w.display()
+            let first = table.rect(ofColumn: 0), second = table.rect(ofColumn: 1)
+            XCTAssertEqual(first.maxX, width, accuracy: 0.5, "the first column sits at the right edge")
+            XCTAssertEqual(first.width, 80)
+            XCTAssertEqual(second.maxX, first.minX - table.intercellSpacing.width, accuracy: 0.5, "the second column follows to its left")
+            XCTAssertEqual(second.minX, 0, accuracy: 0.5)
+            XCTAssertEqual(second.width, ltrSecond.width, "widths do not change, only the order")
+            XCTAssertEqual(table.column(at: NSPoint(x: width - 10, y: 5)), 0)
+            XCTAssertEqual(table.column(at: NSPoint(x: 10, y: 5)), 1)
+            XCTAssertEqual(table.frameOfCell(atColumn: 0, row: 2).minX, first.minX, accuracy: 0.5)
+            let cell = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            XCTAssertEqual(cell?.frame.minX ?? -1, first.minX, accuracy: 0.5, "cell views moved with their columns")
+            let header = table.headerView!
+            XCTAssertEqual(header.headerRect(ofColumn: 0).minX, first.minX, accuracy: 0.5)
+            XCTAssertEqual(header.column(at: NSPoint(x: width - 10, y: 5)), 0)
+            table.userInterfaceLayoutDirection = .leftToRight
+            XCTAssertEqual(table.rect(ofColumn: 0), ltrFirst, "switching back restores the order")
+            w.close()
+        }
+    }
 }
 
 final class SegmentedControlTests: XCTestCase, @unchecked Sendable {
