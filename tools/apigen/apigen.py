@@ -658,7 +658,12 @@ class Generator:
                 out.append("%s%spublic var %s: %s %s" % (indent, attrs, pname, ptype, body))
                 return out, "emitted"
             head = "%s%s%svar %s: %s" % (indent, attrs, prefix, pname, ptype)
-            rv = self.raw_value_for(path) if is_static else None
+            is_global = kind == "swift.var" and len(path) == 1
+            rv = self.raw_value_for(path) if (is_static or is_global) else None
+            if rv and is_global:
+                # A global constant with a probed value (NSOutlineViewDropOnItemIndex).
+                out.append("%s { %s }" % (head, self.swift_literal(*rv)))
+                return out, "emitted"
             if rv:
                 ptype_clean = ptype.strip()
                 if ptype_clean.endswith("!"):
@@ -1026,6 +1031,13 @@ class Generator:
             # Class-bound ObjC protocols
             if "c:objc(pl)NSObject" in self.inv.conformances.get(pid, []) and "NSObjectProtocol" not in inherit:
                 inherit.append("NSObjectProtocol")
+            # Swift cannot redeclare an inherited property with another type, so a subclass
+            # whose delegate or data source protocol differs from its superclass's (NSOutlineView)
+            # keeps the inherited property; the config lists the superclass protocol as an extra
+            # parent so `outlineView.dataSource = self` still compiles.
+            for extra in self.config.get("protocolExtraParents", {}).get(".".join(path), []):
+                if extra not in inherit:
+                    inherit.insert(0, extra)
         else:
             inherit += confs
         if kind == "class" and len(path) > 1:

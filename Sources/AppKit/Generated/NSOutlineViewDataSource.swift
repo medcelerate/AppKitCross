@@ -16,7 +16,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdatasource
-public protocol NSOutlineViewDataSource: NSObjectProtocol {
+public protocol NSOutlineViewDataSource: NSTableViewDataSource, NSObjectProtocol {
     @MainActor func outlineView(_ outlineView: NSOutlineView, acceptDrop info: any NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool
     @MainActor func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any
     @MainActor func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation)
@@ -66,7 +66,7 @@ extension NSOutlineViewDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdatasource/outlineview(_:updatedraggingitemsfordrag:)
     @MainActor public func outlineView(_ outlineView: NSOutlineView, updateDraggingItemsForDrag draggingInfo: any NSDraggingInfo) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdatasource/outlineview(_:validatedrop:proposeditem:proposedchildindex:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation { unimplementedOptionalRequirement() }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdatasource/outlineview(_:writeitems:to:)
     public func outlineView(_ outlineView: NSOutlineView, writeItems items: [Any], to pasteboard: NSPasteboard) -> Bool { return false }
 }

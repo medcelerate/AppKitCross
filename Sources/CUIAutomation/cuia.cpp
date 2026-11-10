@@ -82,6 +82,7 @@ class Provider : public IRawElementProviderSimple,
                  public IRawElementProviderFragmentRoot,
                  public IInvokeProvider,
                  public IToggleProvider,
+                 public IExpandCollapseProvider,
                  public IValueProvider,
                  public IRangeValueProvider,
                  public ISelectionProvider,
@@ -103,6 +104,7 @@ public:
         else if (riid == __uuidof(IRawElementProviderFragmentRoot)) { if (!isRoot()) return E_NOINTERFACE; *out = static_cast<IRawElementProviderFragmentRoot *>(this); }
         else if (riid == __uuidof(IInvokeProvider)) *out = static_cast<IInvokeProvider *>(this);
         else if (riid == __uuidof(IToggleProvider)) *out = static_cast<IToggleProvider *>(this);
+        else if (riid == __uuidof(IExpandCollapseProvider)) *out = static_cast<IExpandCollapseProvider *>(this);
         else if (riid == __uuidof(IValueProvider)) *out = static_cast<IValueProvider *>(this);
         else if (riid == __uuidof(IRangeValueProvider)) *out = static_cast<IRangeValueProvider *>(this);
         else if (riid == __uuidof(ISelectionProvider)) *out = static_cast<ISelectionProvider *>(this);
@@ -215,6 +217,24 @@ public:
         if (!n) return UIA_E_ELEMENTNOTAVAILABLE;
         *out = n->toggleState == 1 ? ToggleState_On : n->toggleState == 2 ? ToggleState_Indeterminate : ToggleState_Off;
         return S_OK;
+    }
+
+    // IExpandCollapseProvider
+    STDMETHODIMP Expand() override { return expandCollapse(true); }
+    STDMETHODIMP Collapse() override { return expandCollapse(false); }
+    STDMETHODIMP get_ExpandCollapseState(ExpandCollapseState *out) override {
+        if (!out) return E_POINTER;
+        Node *n = node();
+        if (!n) return UIA_E_ELEMENTNOTAVAILABLE;
+        *out = (n->flags & CUIA_HAS_EXPAND_COLLAPSE) ? ((n->flags & CUIA_EXPANDED) ? ExpandCollapseState_Expanded : ExpandCollapseState_Collapsed) : ExpandCollapseState_LeafNode;
+        return S_OK;
+    }
+    HRESULT expandCollapse(bool expand) {
+        Node *n = node();
+        if (!n) return UIA_E_ELEMENTNOTAVAILABLE;
+        if (!(n->flags & CUIA_ENABLED)) return UIA_E_ELEMENTNOTENABLED;
+        if (root_->callbacks.expandCollapse && root_->callbacks.expandCollapse(root_->callbacks.context, id_, expand)) return S_OK;
+        return UIA_E_INVALIDOPERATION;
     }
 
     // IValueProvider
@@ -628,6 +648,7 @@ STDMETHODIMP Provider::GetPatternProvider(PATTERNID patternId, IUnknown **out) {
     switch (patternId) {
     case UIA_InvokePatternId: if (n->flags & CUIA_HAS_INVOKE) *out = static_cast<IInvokeProvider *>(this); break;
     case UIA_TogglePatternId: if (n->flags & CUIA_HAS_TOGGLE) *out = static_cast<IToggleProvider *>(this); break;
+    case UIA_ExpandCollapsePatternId: if (n->flags & CUIA_HAS_EXPAND_COLLAPSE) *out = static_cast<IExpandCollapseProvider *>(this); break;
     case UIA_ValuePatternId: if (n->flags & CUIA_HAS_VALUE) *out = static_cast<IValueProvider *>(this); break;
     case UIA_RangeValuePatternId: if (n->flags & CUIA_HAS_RANGE) *out = static_cast<IRangeValueProvider *>(this); break;
     case UIA_SelectionPatternId: if (n->flags & CUIA_HAS_SELECTION) *out = static_cast<ISelectionProvider *>(this); break;
@@ -668,6 +689,7 @@ STDMETHODIMP Provider::GetPropertyValue(PROPERTYID propertyId, VARIANT *out) {
     case UIA_ValueValuePropertyId: if (n->flags & CUIA_HAS_VALUE) setStr(n->value); break;
     case UIA_ValueIsReadOnlyPropertyId: if (n->flags & CUIA_HAS_VALUE) setBool(!((n->flags & CUIA_SETTABLE) && (n->flags & CUIA_ENABLED))); break;
     case UIA_ToggleToggleStatePropertyId: if (n->flags & CUIA_HAS_TOGGLE) setInt(n->toggleState == 1 ? ToggleState_On : n->toggleState == 2 ? ToggleState_Indeterminate : ToggleState_Off); break;
+    case UIA_ExpandCollapseExpandCollapseStatePropertyId: if (n->flags & CUIA_HAS_EXPAND_COLLAPSE) setInt((n->flags & CUIA_EXPANDED) ? ExpandCollapseState_Expanded : ExpandCollapseState_Collapsed); break;
     case UIA_RangeValueValuePropertyId: if (n->flags & CUIA_HAS_RANGE) { out->vt = VT_R8; out->dblVal = n->rangeValue; } break;
     case UIA_RangeValueMinimumPropertyId: if (n->flags & CUIA_HAS_RANGE) { out->vt = VT_R8; out->dblVal = n->rangeMin; } break;
     case UIA_RangeValueMaximumPropertyId: if (n->flags & CUIA_HAS_RANGE) { out->vt = VT_R8; out->dblVal = n->rangeMax; } break;
@@ -1001,6 +1023,14 @@ bool cuia_debug_toggle(CUIARoot *root, int32_t id) {
     IToggleProvider *p = patternOf<IToggleProvider>(root, id, UIA_TogglePatternId);
     if (!p) return false;
     HRESULT hr = p->Toggle();
+    p->Release();
+    return SUCCEEDED(hr);
+}
+
+bool cuia_debug_expand_collapse(CUIARoot *root, int32_t id, bool expand) {
+    IExpandCollapseProvider *p = patternOf<IExpandCollapseProvider>(root, id, UIA_ExpandCollapsePatternId);
+    if (!p) return false;
+    HRESULT hr = expand ? p->Expand() : p->Collapse();
     p->Release();
     return SUCCEEDED(hr);
 }

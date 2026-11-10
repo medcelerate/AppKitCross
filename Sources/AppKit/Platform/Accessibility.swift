@@ -35,7 +35,7 @@ public enum PlatformAccessibilityValue: Equatable, Sendable {
 /// and friends). Platforms map these onto their patterns (UIA Invoke/Toggle, AT-SPI
 /// Action).
 public enum PlatformAccessibilityAction: String, Sendable, CaseIterable {
-    case press, increment, decrement, showMenu, confirm, cancel, pick, raise
+    case press, increment, decrement, showMenu, confirm, cancel, pick, raise, expand, collapse
 }
 
 /// One node of the accessibility tree a window exposes: a snapshot of what the
@@ -70,6 +70,9 @@ public struct PlatformAccessibilityElement: Sendable {
     public var allowsMultipleSelection = false
     /// Assistive technology may select the element (a row, a collection view item).
     public var isSelectable = false
+    /// Expanded (true) or collapsed (false) for elements that can expand (outline rows,
+    /// disclosure triangles); nil for everything else.
+    public var isExpanded: Bool? = nil
     public var minValue: Double?
     public var maxValue: Double?
     public var selectedTextRange: NSRange?

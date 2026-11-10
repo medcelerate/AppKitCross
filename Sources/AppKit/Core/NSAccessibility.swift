@@ -220,6 +220,7 @@ extension NSView {
         e.isMultiline = _accessibilityIsMultiline()
         e.allowsMultipleSelection = _accessibilityAllowsMultipleSelection()
         e.isSelectable = _accessibilityIsSelectable()
+        e.isExpanded = _accessibilityExpandedState()
         e.minValue = NSAccessibility._double(accessibilityMinValue())
         e.maxValue = NSAccessibility._double(accessibilityMaxValue())
         let range = accessibilitySelectedTextRange()
@@ -227,6 +228,7 @@ extension NSView {
         let index = accessibilityIndex()
         e.index = index < 0 ? nil : index
         e.actions = NSAccessibility._actions(for: role)
+        if e.isExpanded != nil { e.actions += [.expand, .collapse] }
         e.children = _accessibilityChildElements()
         return e
     }

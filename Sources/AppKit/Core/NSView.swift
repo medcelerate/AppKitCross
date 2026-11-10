@@ -1652,6 +1652,13 @@ import CoreText
     }
     /// The enclosing scroll view's clip view changed size (NSScrollView.tile).
     @MainActor internal func _clipViewDidResize() { }
+    /// Expanded or collapsed (outline rows, disclosure triangles); nil when the element
+    /// cannot expand.
+    @MainActor internal func _accessibilityExpandedState() -> Bool? { nil }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityexpanded()
+    open func isAccessibilityExpanded() -> Bool { MainActor.assumeIsolated { _accessibilityExpandedState() ?? false } }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilityexpanded(_:)
+    open func setAccessibilityExpanded(_ accessibilityExpanded: Bool) { }
     @MainActor internal func _accessibilityIsFocusable() -> Bool { acceptsFirstResponder && isAccessibilityEnabled() && !isHiddenOrHasHiddenAncestor }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityelement()

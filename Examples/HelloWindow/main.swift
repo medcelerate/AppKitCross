@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|collection|grid|box picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|collection|grid|box picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -426,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "collection", "grid", "box"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "collection", "grid", "box"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -553,6 +553,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(split)
         tabs.addChild(TableDemoViewController())
         tabs.addChild(MetalDemoViewController())
+        tabs.addChild(ComboDemoViewController())
+        tabs.addChild(OutlineDemoViewController())
         tabs.addChild(CollectionDemoViewController())
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
@@ -987,6 +989,167 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
         case "rowClicked:": return true
         default: return false
         }
+    }
+}
+
+/// Two NSComboBoxes: one over its own items with completion, one over a data source.
+/// APPKITWIN_COMBO_POPUP=1 opens the first one's list on launch (for screenshots).
+final class ComboDemoViewController: NSViewController, NSComboBoxDataSource, NSComboBoxDelegate, NSSelectorHandling {
+    let fruits = ["Apple", "Apricot", "Banana", "Blueberry", "Cherry", "Fig", "Grape", "Kiwi", "Lemon", "Mango", "Orange", "Pear"]
+    let sizes = ["Small", "Medium", "Large", "Extra large"]
+    let fruit = NSComboBox(frame: .zero)
+    let size = NSComboBox(frame: .zero)
+    let status = NSTextField(labelWithString: "Type a fruit (it completes), or open the list; Down opens it too.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Combo"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let fruitLabel = NSTextField(labelWithString: "Fruit:")
+        let sizeLabel = NSTextField(labelWithString: "Size:")
+        fruit.addItems(withObjectValues: fruits)
+        fruit.completes = true
+        fruit.placeholderString = "Pick or type a fruit"
+        fruit.numberOfVisibleItems = 6
+        fruit.delegate = self
+        fruit.target = self
+        fruit.action = Selector(("fruitChanged:"))
+        size.usesDataSource = true
+        size.dataSource = self
+        size.delegate = self
+        size.isEditable = false
+        size.selectItem(at: 1)
+        size.target = self
+        size.action = Selector(("sizeChanged:"))
+        for v in [fruitLabel, sizeLabel, fruit, size, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            fruitLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            fruitLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            fruit.centerYAnchor.constraint(equalTo: fruitLabel.centerYAnchor),
+            fruit.leadingAnchor.constraint(equalTo: fruitLabel.trailingAnchor, constant: 8),
+            fruit.widthAnchor.constraint(equalToConstant: 200),
+            sizeLabel.topAnchor.constraint(equalTo: fruitLabel.bottomAnchor, constant: 24),
+            sizeLabel.leadingAnchor.constraint(equalTo: fruitLabel.leadingAnchor),
+            size.centerYAnchor.constraint(equalTo: sizeLabel.centerYAnchor),
+            size.leadingAnchor.constraint(equalTo: fruit.leadingAnchor),
+            size.widthAnchor.constraint(equalTo: fruit.widthAnchor),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+        ])
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if ProcessInfo.processInfo.environment["APPKITWIN_COMBO_POPUP"] == "1" {
+            fruit.selectItem(at: 2)
+            // Once the windows are laid out and mapped and the initial key-window hand-off is
+            // over (an X11 window resigning key dismisses the list), so it hangs under the field.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [fruit] in
+                fruit.window?.layoutIfNeeded()
+                _ = fruit.accessibilityPerformShowMenu()
+            }
+        }
+    }
+
+    func numberOfItems(in comboBox: NSComboBox) -> Int { sizes.count }
+    func comboBox(_ comboBox: NSComboBox, objectValueForItemAt index: Int) -> Any? { sizes[index] }
+    func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int { sizes.firstIndex(of: string) ?? NSNotFound }
+    func comboBoxSelectionDidChange(_ notification: Notification) {
+        guard let c = notification.object as? NSComboBox else { return }
+        status.stringValue = "\(c === fruit ? "Fruit" : "Size") selected: \(c.objectValueOfSelectedItem.map { "\($0)" } ?? "none") (item \(c.indexOfSelectedItem))"
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "fruitChanged:": status.stringValue = "Fruit: \(fruit.stringValue)"; return true
+        case "sizeChanged:": status.stringValue = "Size: \(size.stringValue)"; return true
+        default: return false
+        }
+    }
+}
+
+/// An NSOutlineView over a small folder tree: disclosure triangles, two columns,
+/// Option-click and the arrow keys expand and collapse.
+final class OutlineDemoViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    final class Node {
+        let name: String
+        let kind: String
+        let children: [Node]
+        init(_ name: String, kind: String = "Folder", _ children: [Node] = []) { self.name = name; self.kind = kind; self.children = children }
+    }
+    let roots: [Node] = [
+        Node("Documents", [
+            Node("Reports", [Node("Q1.pdf", kind: "PDF"), Node("Q2.pdf", kind: "PDF")]),
+            Node("Notes.txt", kind: "Text"),
+            Node("Budget.numbers", kind: "Spreadsheet"),
+        ]),
+        Node("Pictures", [Node("Holiday", [Node("beach.png", kind: "Image"), Node("sunset.png", kind: "Image")]), Node("cat.jpg", kind: "Image")]),
+        Node("Music", [Node("song.mp3", kind: "Audio")]),
+        Node("README.md", kind: "Markdown"),
+    ]
+    let outline = NSOutlineView(frame: .zero)
+    let status = NSTextField(labelWithString: "Click a triangle (Option-click for the subtree); Left and Right collapse and expand.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Outline"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        name.title = "Name"
+        name.width = 220
+        let kind = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("kind"))
+        kind.title = "Kind"
+        kind.width = 110
+        outline.addTableColumn(name)
+        outline.addTableColumn(kind)
+        outline.dataSource = self
+        outline.delegate = self
+        outline.rowHeight = 22
+        outline.usesAlternatingRowBackgroundColors = true
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = outline
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(scroll)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+        outline.expandItem(roots[0])
+        outline.expandItem(roots[1], expandChildren: true)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int { ((item as? Node)?.children ?? roots).count }
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any { ((item as? Node)?.children ?? roots)[index] }
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { !((item as? Node)?.children.isEmpty ?? true) }
+    func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?) -> Any? {
+        guard let n = item as? Node else { return nil }
+        return tableColumn?.identifier.rawValue == "kind" ? n.kind : n.name
+    }
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        if let n = outline.item(atRow: outline.selectedRow) as? Node { status.stringValue = "Selected: \(n.name) (level \(outline.level(forItem: n)))" }
+        else { status.stringValue = "Nothing selected." }
     }
 }
 
