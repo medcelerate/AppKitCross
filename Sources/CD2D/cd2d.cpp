@@ -943,7 +943,6 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
     dlg->SetOptions(flags);
     if (title && title[0]) dlg->SetTitle(reinterpret_cast<LPCWSTR>(title));
     if (okLabel && okLabel[0]) dlg->SetOkButtonLabel(reinterpret_cast<LPCWSTR>(okLabel));
-    if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
     if (directory && directory[0]) {
         IShellItem *folder = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(reinterpret_cast<LPCWSTR>(directory), nullptr, IID_PPV_ARGS(&folder))) && folder) {
@@ -1009,6 +1008,10 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
         if (!filters.empty()) dlg->SetFileTypeIndex((UINT)selected + 1);
         if (!defaultExt.empty()) dlg->SetDefaultExtension(defaultExt.c_str());
     }
+    // The name goes in after the file types, the selected type and the default extension:
+    // changing the type index afterwards makes the dialog re-derive the name from the new
+    // filter, which drops the extension of a name set earlier.
+    if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
     hr = dlg->Show((HWND)ownerHwnd);
     if (FAILED(hr)) { dlg->Release(); return false; }
     std::wstring joined;
