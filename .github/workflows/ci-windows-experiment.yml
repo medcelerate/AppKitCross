@@ -90,7 +90,7 @@ jobs:
             Remove-Item -Force "$b\Modules\AppKit.*" -ErrorAction SilentlyContinue
             $t = Get-Date
             $p = Start-Process -FilePath $exe -ArgumentList $argline -NoNewWindow -Wait -PassThru -RedirectStandardOutput "replay\out$i.txt" -RedirectStandardError "replay\err$i.txt"
-            "== replay $i: exit $('0x{0:X8}' -f $p.ExitCode) after $([int]((Get-Date) - $t).TotalSeconds)s, AppKit.swiftmodule $(Test-Path "$b\Modules\AppKit.swiftmodule")"
+            "== replay ${i}: exit $('0x{0:X8}' -f $p.ExitCode) after $([int]((Get-Date) - $t).TotalSeconds)s, AppKit.swiftmodule $(Test-Path "$b\Modules\AppKit.swiftmodule")"
             "-- parseable-output kinds:"; Select-String -Path "replay\out$i.txt" -Pattern '"kind": "(\w+)"' -AllMatches | ForEach-Object { $_.Matches.Groups[1].Value } | Group-Object | Format-Table Count,Name -HideTableHeaders
             "-- emit-module messages:"; Select-String -Path "replay\out$i.txt" -Pattern '"name": "emit-module"' -Context 0,3 | Select-Object -First 4 | ForEach-Object { $_.ToString().Substring(0, [Math]::Min(300, $_.ToString().Length)) }
             "-- signalled/failed/skipped:"; Select-String -Path "replay\out$i.txt" -Pattern '"kind": "(signalled|failed|skipped|abnormal)"' -Context 2,8 | Select-Object -First 3 | ForEach-Object { $_.ToString().Substring(0, [Math]::Min(1500, $_.ToString().Length)) }
