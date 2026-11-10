@@ -71,7 +71,10 @@ df -h . 2>/dev/null | tail -1 || true
 build() {
     local out status
     # The log is read as CR-stripped text (Windows) so grep never treats it as binary.
-    out=$(swift build "$@" "${FLAGS[@]}" 2>&1 | tr -d '\r'); status=$?   # pipefail: the build's status
+    # `|| status=$?`: under `set -e` a failing substitution in a plain assignment would end
+    # the script here, before anything below could say why (pipefail: the build's status).
+    status=0
+    out=$(swift build "$@" "${FLAGS[@]}" 2>&1 | tr -d '\r') || status=$?
     if [ "$status" = 0 ]; then
         echo "$out" | grep -aE "error:|Build complete|Compiling" | tail -3 || true
     else
