@@ -20,7 +20,8 @@ open class NSTextAttachment: NSObject, NSTextAttachmentLayout, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment/init(data:oftype:)
     @available(macOS 10.11, *)
     public init(data contentData: Data?, ofType uti: String?) { unimplemented() }
-    // SKIPPED (Foundation.FileWrapper not in corelibs): convenience init(fileWrapper: FileWrapper?)
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment/init(filewrapper:)
+    public convenience init(fileWrapper: FileWrapper?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment/allowstextattachmentview
     @available(macOS 12.0, *)
     open var allowsTextAttachmentView: Bool {
@@ -52,7 +53,11 @@ open class NSTextAttachment: NSObject, NSTextAttachmentLayout, NSSecureCoding, N
         get { unimplemented() }
         set { unimplemented() }
     }
-    // SKIPPED (Foundation.FileWrapper not in corelibs): var fileWrapper: FileWrapper? { get set }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment/filewrapper
+    open var fileWrapper: FileWrapper? {
+        get { unimplemented() }
+        set { unimplemented() }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment/image
     @available(macOS 10.11, *)
     open var image: NSImage? {
