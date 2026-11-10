@@ -67,17 +67,26 @@ echo "== step 1: AppKitWin's SwiftUI (and AppKit) into the Modules directory"
 df -h . 2>/dev/null | tail -1 || true
 # Runs a build, printing its last lines on success and the whole log on failure.
 build() {
-    local out
-    if out=$(swift build "$@" "${FLAGS[@]}" 2>&1); then
-        echo "$out" | grep -E "error:|Build complete|Compiling" | tail -3 || true
+    local out status
+    # The log is read as CR-stripped text (Windows) so grep never treats it as binary.
+    out=$(swift build "$@" "${FLAGS[@]}" 2>&1 | tr -d '\r'); status=$?   # pipefail: the build's status
+    if [ "$status" = 0 ]; then
+        echo "$out" | grep -aE "error:|Build complete|Compiling" | tail -3 || true
     else
         # The diagnostics first (the tail alone can be all warnings): lines of the form
         # path:line:col: error:, <unknown>:0: error: or a bare error:, not the source
         # snippets the compiler prints under them (which may contain "error:" as text).
         # `|| true`: under `set -eo pipefail` a grep with no match would end the script
         # before the log is shown.
-        echo "$out" | grep -E "error:|undefined symbol|lld-link" | grep -vE "willPresentError|^\s*[0-9]+ \||^\s*\||warning:" | head -30 || true
-        echo "$out" | grep -vE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\|" | tail -40 || true
+        echo "swift build exited with status $status"
+        echo "$out" | grep -aE "error:|undefined symbol|lld-link|Assertion|Stack dump|signal|exception|killed|out of memory" | grep -avE "willPresentError|^\s*[0-9]+ \||^\s*\||warning:" | head -30 || true
+        # Then the last compile steps and non-warning lines, so a build that dies without a
+        # diagnostic (a killed compiler) at least shows where it stopped.
+        echo "$out" | grep -aE "^\[[0-9]+/[0-9]+\]" | tail -5 || true
+        echo "$out" | grep -avE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\||^\s*$|SendableClosureCaptures" | tail -40 || true
+        case "$(uname)" in MINGW*|MSYS*|CYGWIN*)
+            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List" 2>/dev/null || true ;;
+        esac
         return 1
     fi
 }
