@@ -26,7 +26,9 @@ FLAGS=(-Xswiftc -no-color-diagnostics)
 if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
 # Windows (Swift 6.4.1): the frontend's debug-type round-trip check asserts on some of
 # SwiftUICharts' shape files; skipping the check gives the library's own verdict.
-case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types) ;; esac
+# ... and two compiler jobs at a time there, since the 7 GB CI runner killed frontends
+# mid-compile with no diagnostic.
+case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types -j 2) ;; esac
 # AppKitCross's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
 # dependency, so they are passed to every compile here: the hand-written maps in Sources

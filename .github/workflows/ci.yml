@@ -49,14 +49,16 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       - run: swift --version
-      - run: swift build -c debug
+      # Two compiler jobs at a time: the 7 GB runner has killed a frontend mid-compile with
+      # no diagnostic (the root build and the library-compat step both died that way).
+      - run: swift build -c debug -j 2
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build -j 2 --product $p; done
       - name: AudioPlayer example offline render (WASAPI absent on the runner)
         run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: Tests on the host backend
-        run: swift test
+        run: swift test -j 2
         env:
           APPKITWIN_HOST_BACKEND: "1"
           # The Direct3D 12 shim's log (device, shader compiler, swap-chain and readback
