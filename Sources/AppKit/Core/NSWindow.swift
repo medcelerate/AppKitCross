@@ -188,6 +188,7 @@ import CoreText
             if let cv = _contentView { let cr = contentRect(forFrameRect: frame); if cv.frame.size != cr.size { cv.setFrameSize(cr.size) } }
         }
         _ensureWindowButtons()
+        _contentView?.needsLayout = true     // contentLayoutRect changed with the band
         _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
         _platform?.setNeedsDisplay(nil)

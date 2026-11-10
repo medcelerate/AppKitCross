@@ -509,6 +509,33 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A toolbar band over the content (fullSizeContentView) shrinks `contentLayoutRect`
+    /// and relayouts the content view, so apps laying out inside the rect stay clear of it.
+    func testContentRelayoutsWhenTheBandCoversIt() {
+        MainActor.assumeIsolated {
+            final class Tracking: NSView { var layouts = 0; override func layout() { super.layout(); layouts += 1 } }
+            let w = makeWindow()
+            defer { w.close() }
+            let cv = Tracking(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+            w.contentView = cv
+            w.display()
+            let before = cv.layouts
+            let d = Delegate()
+            let tb = NSToolbar(identifier: "test.relayout")
+            tb.delegate = d
+            w.toolbar = tb
+            w.display()
+            XCTAssertGreaterThan(cv.layouts, before, "attaching the toolbar relayouts the content")
+            XCTAssertEqual(w.contentLayoutRect.height, cv.bounds.height, "under the title bar the band is outside the content")
+            let mid = cv.layouts
+            w.styleMask.insert(.fullSizeContentView)
+            w.toolbarStyle = .unified
+            w.display()
+            XCTAssertGreaterThan(cv.layouts, mid, "the band moving over the content relayouts it")
+            XCTAssertLessThan(w.contentLayoutRect.height, cv.bounds.height, "over the content the rect excludes the band")
+        }
+    }
+
     /// The band under a system title bar drags the window: the chrome tells the backend
     /// to ask the window's hit test for client points (Win32 WM_NCHITTEST → HTCAPTION).
     func testToolbarBandIsDraggableChrome() {

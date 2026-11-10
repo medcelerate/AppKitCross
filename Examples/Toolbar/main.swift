@@ -90,9 +90,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NST
 
     // MARK: Window content
 
+    /// Lays the stack out inside the window's `contentLayoutRect`: when the content covers
+    /// the title bar, the toolbar band sits over the content and the rect excludes it.
+    final class ContentView: NSView {
+        var stack: NSStackView?
+        override func layout() {
+            super.layout()
+            guard let stack, let window else { return }
+            stack.frame = window.contentLayoutRect.insetBy(dx: 20, dy: 20)
+        }
+    }
+
     private func makeContent() -> NSView {
-        let content = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
+        let content = ContentView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
         let stack = NSStackView(frame: NSRect(x: 20, y: 20, width: 600, height: 320))
+        content.stack = stack
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
