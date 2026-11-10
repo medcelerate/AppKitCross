@@ -25,6 +25,9 @@ import CoreGraphics
     private var _selectionHighlightStyle: NSTableView.SelectionHighlightStyle = .regular
     /// Set by the table: the row index this view currently shows.
     internal var _row = -1
+    /// The cell views, one per visible column in column order. They are subviews, but not
+    /// the only ones: an outline row also holds its disclosure button.
+    internal var _cellViews: [NSView] = []
     /// Rounded selection and inset grid (NSTableView.Style.inset).
     internal var _insetStyle = false
 
@@ -124,14 +127,14 @@ import CoreGraphics
         set { _isTargetForDropOperation = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/numberofcolumns
-    @MainActor open var numberOfColumns: Int { subviews.count }
+    @MainActor open var numberOfColumns: Int { _cellViews.count }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/selectionhighlightstyle
     @MainActor open var selectionHighlightStyle: NSTableView.SelectionHighlightStyle {
         get { _selectionHighlightStyle }
         set { _selectionHighlightStyle = newValue; _updateCellBackgroundStyles(); needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/view(atcolumn:)
-    @MainActor open func view(atColumn column: Int) -> Any? { subviews.indices.contains(column) ? subviews[column] : nil }
+    @MainActor open func view(atColumn column: Int) -> Any? { _cellViews.indices.contains(column) ? _cellViews[column] : nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilityindex()
     open override func accessibilityIndex() -> Int { MainActor.assumeIsolated { _a11y.index ?? _row } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilitydisclosurelevel()
@@ -139,7 +142,7 @@ import CoreGraphics
 
     private func _updateCellBackgroundStyles() {
         let style = interiorBackgroundStyle
-        for v in subviews { (v as? NSTableCellView)?.backgroundStyle = style }
+        for v in _cellViews { (v as? NSTableCellView)?.backgroundStyle = style }
     }
 
     @MainActor open override func draw(_ dirtyRect: NSRect) {
@@ -172,7 +175,7 @@ import CoreGraphics
     @MainActor open override func accessibilitySubrole() -> NSAccessibility.Subrole? { _a11y.subrole ?? .tableRow }
     @MainActor open override func accessibilityLabel() -> String? {
         if let l = _a11y.label { return l }
-        let texts = subviews.compactMap { ($0 as? NSTableCellView)?.textField?.stringValue ?? ($0 as? NSTextField)?.stringValue }.filter { !$0.isEmpty }
+        let texts = _cellViews.compactMap { ($0 as? NSTableCellView)?.textField?.stringValue ?? ($0 as? NSTextField)?.stringValue }.filter { !$0.isEmpty }
         return texts.isEmpty ? nil : texts.joined(separator: ", ")
     }
     @MainActor open override func isAccessibilitySelected() -> Bool { _a11y.isSelected ?? _isSelected }

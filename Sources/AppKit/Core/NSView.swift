@@ -1615,6 +1615,13 @@ import CoreText
     @MainActor internal func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
     @MainActor internal func _accessibilityIsMultiline() -> Bool { false }
     @MainActor internal func _accessibilityAllowsMultipleSelection() -> Bool { false }
+    /// Expanded or collapsed (outline rows, disclosure triangles); nil when the element
+    /// cannot expand.
+    @MainActor internal func _accessibilityExpandedState() -> Bool? { nil }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityexpanded()
+    open func isAccessibilityExpanded() -> Bool { MainActor.assumeIsolated { _accessibilityExpandedState() ?? false } }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilityexpanded(_:)
+    open func setAccessibilityExpanded(_ accessibilityExpanded: Bool) { }
     @MainActor internal func _accessibilityIsFocusable() -> Bool { acceptsFirstResponder && isAccessibilityEnabled() && !isHiddenOrHasHiddenAncestor }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/isaccessibilityelement()

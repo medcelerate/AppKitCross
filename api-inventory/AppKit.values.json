@@ -1750,6 +1750,7 @@
   "NSOutlineView.selectionDidChangeNotification" : "String|NSOutlineViewSelectionDidChangeNotification",
   "NSOutlineView.selectionIsChangingNotification" : "String|NSOutlineViewSelectionIsChangingNotification",
   "NSOutlineView.showHideButtonIdentifier" : "String|NSOutlineViewShowHideButtonKey",
+  "NSOutlineViewDropOnItemIndex" : "Int|-1",
   "NSPageController.TransitionStyle.horizontalStrip" : "Int|2",
   "NSPageController.TransitionStyle.stackBook" : "Int|1",
   "NSPageController.TransitionStyle.stackHistory" : "Int|0",

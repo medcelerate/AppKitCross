@@ -28,7 +28,7 @@ extension NSComboBoxDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscomboboxdatasource/combobox(_:completedstring:)
     @MainActor public func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscomboboxdatasource/combobox(_:indexofitemwithstringvalue:)
-    @MainActor public func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int { unimplementedOptionalRequirement() }
+    @MainActor public func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int { return NSNotFound }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscomboboxdatasource/combobox(_:objectvalueforitemat:)
     @MainActor public func comboBox(_ comboBox: NSComboBox, objectValueForItemAt index: Int) -> Any? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscomboboxdatasource/numberofitems(in:)

@@ -73,16 +73,17 @@ import CoreGraphics
     private var _editedRow = -1
     private var _editedColumn = -1
     private var _pressedRow = -1
+    private var _pressPoint = NSPoint.zero
     private var _pressDidToggle = false
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/columndidmovenotification
-    static public var columnDidMoveNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewColumnDidMoveNotification") }
+    open class var columnDidMoveNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewColumnDidMoveNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/columndidresizenotification
-    static public var columnDidResizeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewColumnDidResizeNotification") }
+    open class var columnDidResizeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewColumnDidResizeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/selectiondidchangenotification
-    static public var selectionDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionDidChangeNotification") }
+    open class var selectionDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/selectionischangingnotification
-    static public var selectionIsChangingNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionIsChangingNotification") }
+    open class var selectionIsChangingNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionIsChangingNotification") }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/init(coder:)
     public required init?(coder: NSCoder) { unimplemented() }
@@ -130,8 +131,9 @@ import CoreGraphics
         let c = _tableColumns.remove(at: oldIndex)
         _tableColumns.insert(c, at: newIndex)
         _columnsDidChange()
-        NotificationCenter.default.post(name: NSTableView.columnDidMoveNotification, object: self, userInfo: ["NSOldColumn": oldIndex, "NSNewColumn": newIndex])
-        _delegate?.tableViewColumnDidMove(Notification(name: NSTableView.columnDidMoveNotification, object: self))
+        let n = Notification(name: type(of: self).columnDidMoveNotification, object: self, userInfo: ["NSOldColumn": oldIndex, "NSNewColumn": newIndex])
+        NotificationCenter.default.post(n)
+        _delegateColumnDidMove(n)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/tablecolumns
     @MainActor open var tableColumns: [NSTableColumn] { _tableColumns }
@@ -156,7 +158,7 @@ import CoreGraphics
     @MainActor open func column(for view: NSView) -> Int {
         var v: NSView? = view
         while let cur = v, !(cur.superview is NSTableRowView) { v = cur.superview }
-        guard let cell = v, let row = cell.superview as? NSTableRowView, let i = row.subviews.firstIndex(where: { $0 === cell }) else { return -1 }
+        guard let cell = v, let row = cell.superview as? NSTableRowView, let i = row._cellViews.firstIndex(where: { $0 === cell }) else { return -1 }
         // Cell views are ordered like the visible columns.
         let visible = _tableColumns.indices.filter { !_tableColumns[$0].isHidden }
         return visible.indices.contains(i) ? visible[i] : -1
@@ -255,8 +257,9 @@ import CoreGraphics
         _layoutRowViews()
         needsDisplay = true
         _headerView?.needsDisplay = true
-        NotificationCenter.default.post(name: NSTableView.columnDidResizeNotification, object: self, userInfo: ["NSTableColumn": column])
-        _delegate?.tableViewColumnDidResize(Notification(name: NSTableView.columnDidResizeNotification, object: self, userInfo: ["NSTableColumn": column]))
+        let n = Notification(name: type(of: self).columnDidResizeNotification, object: self, userInfo: ["NSTableColumn": column])
+        NotificationCenter.default.post(n)
+        _delegateColumnDidResize(n)
     }
 
     /// A click on a column header: sorts by the column's prototype (toggling direction when
@@ -271,8 +274,45 @@ import CoreGraphics
             highlightedTableColumn = c
         }
         _clickedColumn = column
-        _delegate?.tableView(self, didClick: c)
+        _delegateDidClick(column: c)
     }
+
+    // MARK: Subclass hooks
+    //
+    // NSOutlineView maps its tree onto the row model through these: every data source and
+    // delegate call that depends on the row model goes through one, so the outline view can
+    // answer from its flattened rows and its own protocols without forking the table.
+
+    internal func _rowCountFromDataSource() -> Int { max(0, _dataSource?.numberOfRows(in: self) ?? 0) }
+    internal func _delegateHeightOfRow(_ row: Int) -> CGFloat { _delegate?.tableView(self, heightOfRow: row) ?? _rowHeight }
+    internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? { _delegate?.tableView(self, viewFor: column, row: row) }
+    internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? { _dataSource?.tableView(self, objectValueFor: column, row: row) }
+    internal func _delegateRowView(forRow row: Int) -> NSTableRowView? { _delegate?.tableView(self, rowViewForRow: row) }
+    internal func _delegateIsGroupRow(_ row: Int) -> Bool { _delegate?.tableView(self, isGroupRow: row) ?? false }
+    internal func _delegateDidAdd(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didAdd: rowView, forRow: row) }
+    internal func _delegateDidRemove(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didRemove: rowView, forRow: row) }
+    internal func _delegateSelectionShouldChange() -> Bool { _delegate?.selectionShouldChange(in: self) ?? true }
+    internal func _delegateSelectionIndexes(forProposed rows: IndexSet) -> IndexSet { _delegate?.tableView(self, selectionIndexesForProposedSelection: rows) ?? rows }
+    internal func _delegateShouldSelectRow(_ row: Int) -> Bool { _delegate?.tableView(self, shouldSelectRow: row) ?? true }
+    internal func _delegateSelectionDidChange(_ notification: Notification) { _delegate?.tableViewSelectionDidChange(notification) }
+    internal func _delegateDidClick(column: NSTableColumn) { _delegate?.tableView(self, didClick: column) }
+    internal func _delegateColumnDidMove(_ notification: Notification) { _delegate?.tableViewColumnDidMove(notification) }
+    internal func _delegateColumnDidResize(_ notification: Notification) { _delegate?.tableViewColumnDidResize(notification) }
+    internal func _dataSourceSortDescriptorsDidChange(_ old: [NSSortDescriptor]) { _dataSource?.tableView(self, sortDescriptorsDidChange: old) }
+    internal func _delegateDataCell(for column: NSTableColumn, row: Int) -> NSCell? { _delegate?.tableView(self, dataCellFor: column, row: row) }
+    internal func _delegateWillDisplayCell(_ cell: NSCell, for column: NSTableColumn, row: Int) { _delegate?.tableView(self, willDisplayCell: cell, for: column, row: row) }
+    /// The frame of each visible column's cell inside a row view of `height`.
+    internal func _cellFrames(forRow row: Int, height: CGFloat) -> [(column: Int, frame: NSRect)] {
+        _tableColumns.indices.filter { !_tableColumns[$0].isHidden }.map { i in
+            let cf = rect(ofColumn: i)
+            return (i, NSRect(x: cf.minX, y: 0, width: cf.width, height: height))
+        }
+    }
+    /// The row view has its cells (made or re-laid out); an outline adds its disclosure button.
+    internal func _rowViewDidLayout(_ rowView: NSTableRowView, row: Int) { }
+    /// The mouse moved far enough from the press on `row` to start a drag: a subclass that
+    /// drags rows starts the session and returns true. The table itself extends the selection.
+    internal func _beginRowDrag(with event: NSEvent, row: Int) -> Bool { false }
 
     // MARK: Rows
 
@@ -322,10 +362,10 @@ import CoreGraphics
     private func _reloadIfNeeded() {
         guard _needsReload else { return }
         _needsReload = false
-        _numberOfRows = max(0, _dataSource?.numberOfRows(in: self) ?? 0)
+        _numberOfRows = _rowCountFromDataSource()
         _rowHeights = (0..<_numberOfRows).map { row in
             if _hiddenRows.contains(row) { return 0 }
-            return max(1, _delegate?.tableView(self, heightOfRow: row) ?? _rowHeight)
+            return max(1, _delegateHeightOfRow(row))
         }
         var origins: [CGFloat] = [0]
         origins.reserveCapacity(_numberOfRows + 1)
@@ -550,8 +590,8 @@ import CoreGraphics
     @MainActor open func view(atColumn column: Int, row: Int, makeIfNecessary: Bool) -> NSView? {
         guard let rv = rowView(atRow: row, makeIfNecessary: makeIfNecessary) else { return nil }
         let visible = _tableColumns.indices.filter { !_tableColumns[$0].isHidden }
-        guard let i = visible.firstIndex(of: column), rv.subviews.indices.contains(i) else { return nil }
-        return rv.subviews[i]
+        guard let i = visible.firstIndex(of: column), rv._cellViews.indices.contains(i) else { return nil }
+        return rv._cellViews[i]
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/enumerateavailablerowviews(_:)
     @MainActor open func enumerateAvailableRowViews(_ handler: (NSTableRowView, Int) -> Void) {
@@ -566,11 +606,11 @@ import CoreGraphics
     /// source's object value.
     private func _makeCellView(column: Int, row: Int, frame: NSRect) -> NSView {
         let c = _tableColumns[column]
-        if let v = _delegate?.tableView(self, viewFor: c, row: row) {
+        if let v = _delegateView(for: c, row: row) {
             v.frame = frame
             return v
         }
-        let value = _dataSource?.tableView(self, objectValueFor: c, row: row)
+        let value = _objectValue(for: c, row: row)
         let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell")
         let cell = (makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? NSTableCellView._makeLabelCell(frame: frame)
         cell.frame = frame
@@ -587,33 +627,37 @@ import CoreGraphics
 
     private func _makeRowView(_ row: Int) -> NSTableRowView {
         let r = rect(ofRow: row)
-        let rv = _delegate?.tableView(self, rowViewForRow: row) ?? _spareRowViews.popLast() ?? NSTableRowView(frame: r)
+        let rv = _delegateRowView(forRow: row) ?? _spareRowViews.popLast() ?? NSTableRowView(frame: r)
         rv.frame = r
         rv._row = row
         rv._insetStyle = effectiveStyle == .inset
         rv.selectionHighlightStyle = _selectionHighlightStyle
-        rv.isGroupRowStyle = _delegate?.tableView(self, isGroupRow: row) ?? false
+        rv.isGroupRowStyle = _delegateIsGroupRow(row)
         for v in rv.subviews { v.removeFromSuperview() }
-        for (i, c) in _tableColumns.enumerated() where !c.isHidden {
-            let cf = rect(ofColumn: i)
-            rv.addSubview(_makeCellView(column: i, row: row, frame: NSRect(x: cf.minX, y: 0, width: cf.width, height: r.height)))
+        rv._cellViews = []
+        for (i, frame) in _cellFrames(forRow: row, height: r.height) {
+            let cell = _makeCellView(column: i, row: row, frame: frame)
+            rv._cellViews.append(cell)
+            rv.addSubview(cell)
         }
+        _rowViewDidLayout(rv, row: row)
         _applyRowState(rv, row: row)
         _rowViews[row] = rv
         addSubview(rv)
-        _delegate?.tableView(self, didAdd: rv, forRow: row)
+        _delegateDidAdd(rv, row: row)
         didAdd(rv, forRow: row)
         return rv
     }
 
     private func _recycle(_ rv: NSTableRowView, row: Int) {
         _rowViews[row] = nil
-        _delegate?.tableView(self, didRemove: rv, forRow: row)
+        _delegateDidRemove(rv, row: row)
         didRemove(rv, forRow: row)
         for v in rv.subviews {
             v.removeFromSuperview()
-            if let id = v.identifier { _spareCellViews[id, default: []].append(v) }
+            if rv._cellViews.contains(where: { $0 === v }), let id = v.identifier { _spareCellViews[id, default: []].append(v) }
         }
+        rv._cellViews = []
         rv.removeFromSuperview()
         rv._row = -1
         rv.isSelected = false
@@ -648,12 +692,9 @@ import CoreGraphics
         for (row, rv) in _rowViews {
             let r = rect(ofRow: row)
             rv.frame = r
-            for (i, cell) in rv.subviews.enumerated() {
-                let visible = _tableColumns.indices.filter { !_tableColumns[$0].isHidden }
-                guard visible.indices.contains(i) else { continue }
-                let cf = rect(ofColumn: visible[i])
-                cell.frame = NSRect(x: cf.minX, y: 0, width: cf.width, height: r.height)
-            }
+            let frames = _cellFrames(forRow: row, height: r.height)
+            for (i, cell) in rv._cellViews.enumerated() where frames.indices.contains(i) { cell.frame = frames[i].frame }
+            _rowViewDidLayout(rv, row: row)
         }
     }
 
@@ -832,19 +873,17 @@ import CoreGraphics
     /// Sets the selection after asking the delegate, updates the row views and notifies.
     private func _applySelection(_ proposed: IndexSet, notify: Bool) {
         var rows = proposed
-        if let d = _delegate {
-            guard d.selectionShouldChange(in: self) else { return }
-            rows = d.tableView(self, selectionIndexesForProposedSelection: rows)
-            rows = IndexSet(rows.filter { d.tableView(self, shouldSelectRow: $0) })
-        }
+        guard _delegateSelectionShouldChange() else { return }
+        rows = _delegateSelectionIndexes(forProposed: rows)
+        rows = IndexSet(rows.filter { _delegateShouldSelectRow($0) })
         guard rows != _selectedRows else { return }
         _selectedRows = rows
         for (row, v) in _rowViews { _applyRowState(v, row: row) }
         needsDisplay = true
         guard notify else { return }
-        let n = Notification(name: NSTableView.selectionDidChangeNotification, object: self)
+        let n = Notification(name: type(of: self).selectionDidChangeNotification, object: self)
         NotificationCenter.default.post(n)
-        _delegate?.tableViewSelectionDidChange(n)
+        _delegateSelectionDidChange(n)
         _accessibilityNotify(.selection(_accessibilityElementID))
     }
 
@@ -896,6 +935,7 @@ import CoreGraphics
             return
         }
         _pressedRow = row
+        _pressPoint = p
         let flags = event.modifierFlags
         if _allowsMultipleSelection && flags.contains(.command) {
             var s = _selectedRows
@@ -914,8 +954,13 @@ import CoreGraphics
     }
 
     @MainActor open override func mouseDragged(with event: NSEvent) {
-        guard _pressedRow >= 0, _allowsMultipleSelection, !_pressDidToggle else { return }
+        guard _pressedRow >= 0 else { return }
         let p = convert(event.locationInWindow, from: nil)
+        if abs(p.x - _pressPoint.x) > 3 || abs(p.y - _pressPoint.y) > 3, _beginRowDrag(with: event, row: _pressedRow) {
+            _pressedRow = -1
+            return
+        }
+        guard _allowsMultipleSelection, !_pressDidToggle else { return }
         let row = self.row(at: p)
         guard row >= 0, row != _pressedRow || _selectedRows.count > 1 else { return }
         let lo = min(_pressedRow, row), hi = max(_pressedRow, row)
@@ -1013,7 +1058,7 @@ import CoreGraphics
             let old = _sortDescriptors
             _sortDescriptors = newValue
             _headerView?.needsDisplay = true
-            _dataSource?.tableView(self, sortDescriptorsDidChange: old)
+            _dataSourceSortDescriptorsDidChange(old)
         }
     }
 
@@ -1051,9 +1096,9 @@ import CoreGraphics
     @MainActor open func preparedCell(atColumn column: Int, row: Int) -> NSCell? {
         guard _tableColumns.indices.contains(column) else { return nil }
         let c = _tableColumns[column]
-        guard let cell = (_delegate?.tableView(self, dataCellFor: c, row: row) ?? c.dataCell(forRow: row) as? NSCell) else { return nil }
-        cell.objectValue = _dataSource?.tableView(self, objectValueFor: c, row: row)
-        _delegate?.tableView(self, willDisplayCell: cell, for: c, row: row)
+        guard let cell = (_delegateDataCell(for: c, row: row) ?? c.dataCell(forRow: row) as? NSCell) else { return nil }
+        cell.objectValue = _objectValue(for: c, row: row)
+        _delegateWillDisplayCell(cell, for: c, row: row)
         return cell
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/rowactionsvisible
