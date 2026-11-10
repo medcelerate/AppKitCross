@@ -672,6 +672,18 @@ extension View {
     public func accessibilityHint(_ hint: Text) -> some View { _accessibility { $0.hint = hint._string } }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/accessibilityelement(children:)
     public func accessibilityElement(children: AccessibilityChildBehavior = .ignore) -> some View { _accessibility { $0.childBehavior = children } }
+
+    // The SwiftUI 1 spellings, deprecated as Apple's are (SwiftUI-Introspect still uses `.accessibility(hidden:)`).
+    @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityLabel(_:)")
+    public func accessibility(label: Text) -> some View { accessibilityLabel(label) }
+    @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityValue(_:)")
+    public func accessibility(value: Text) -> some View { accessibilityValue(value) }
+    @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityHidden(_:)")
+    public func accessibility(hidden: Bool) -> some View { accessibilityHidden(hidden) }
+    @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityIdentifier(_:)")
+    public func accessibility(identifier: String) -> some View { accessibilityIdentifier(identifier) }
+    @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityHint(_:)")
+    public func accessibility(hint: Text) -> some View { accessibilityHint(hint) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/accessibilitychildbehavior

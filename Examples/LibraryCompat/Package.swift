@@ -36,8 +36,13 @@ linked += [
     // Its NetworkImage dependency extends URLSession in a file that imports only Foundation,
     // which on corelibs is FoundationNetworking's.
     .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+    // `#if !os(macOS) import UIKit` keeps it off Windows and Linux; on the macOS host build
+    // it compiles against the port's AppKit (Sendable NSImage/NSColor, AppKit re-exporting
+    // ImageIO and Core Image, AsyncImage, Material).
+    .product(name: "Nuke", package: "Nuke"),
+    .product(name: "NukeUI", package: "Nuke"),
 ]
-defines += [.define("HAS_WRAPPINGHSTACK"), .define("HAS_DEFAULTS"), .define("HAS_CHARTS"), .define("HAS_MARKDOWNUI")]
+defines += [.define("HAS_WRAPPINGHSTACK"), .define("HAS_DEFAULTS"), .define("HAS_CHARTS"), .define("HAS_MARKDOWNUI"), .define("HAS_NUKE")]
 #else
 linked += [
     // The modules Apple's AppKit re-exports and the libraries import by name.
@@ -49,7 +54,7 @@ linked += [
 // Not linked anywhere (see the report):
 //   SwiftUIIntrospect: `import ObjectiveC`, MapKit/WebKit/AVKit view types, and it reaches
 //     into AppKit's private hierarchy (the macOS SDK's MapKit crashes the compiler there);
-//   Nuke / NukeUI: `#if !os(macOS) import UIKit`, Core Image, the ImageIO C API.
+//   (Nuke / NukeUI on Windows and Linux: `#if !os(macOS) import UIKit`.)
 
 let package = Package(
     name: "LibraryCompat",

@@ -15,7 +15,8 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor
-open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, NSCoding, NSPasteboardReading, NSPasteboardWriting {
+/// `@unchecked Sendable` as Apple's (`NS_SWIFT_SENDABLE`): a colour is immutable once made.
+open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, NSCoding, NSPasteboardReading, NSPasteboardWriting, @unchecked Sendable {
     // MARK: Storage
     //
     // Colors are stored as sRGB components (or a gray level). Semantic (system) colors

@@ -21,6 +21,8 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
     private var _bitmapFormat: NSBitmapImageRep.Format = []
 
     @MainActor internal override func _cgImage() -> CGImage? { _image }
+    /// The decoded pixels, readable from any thread (a bitmap rep renders nothing).
+    internal var _bitmapImage: CGImage? { _image }
 
     private func _adopt(_ image: CGImage) {
         _image = image
@@ -31,10 +33,9 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
         _bitsPerSample = image.bitsPerComponent
     }
 
-    /// Decodes with the platform image backend.
+    /// Decodes with the platform image codec, on the calling thread as Apple's does.
     public convenience init?(data: Data) {
-        let decoded: CGImage? = MainActor.assumeIsolated { Platform.backend.image.decode(data) }
-        guard let image = decoded else { return nil }
+        guard let image = Platform.imageCodec.decode(data) else { return nil }
         self.init(cgImage: image)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/init(bitmapdataplanes:pixelswide:pixelshigh:bitspersample:samplesperpixel:hasalpha:isplanar:colorspacename:bitmapformat:bytesperrow:bitsperpixel:)
@@ -128,7 +129,7 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
         guard let image = _image else { return nil }
         let format = storageType == .jpeg ? "public.jpeg" : "public.png"
         let quality = (properties[.compressionFactor] as? Double) ?? 0.9
-        return MainActor.assumeIsolated { Platform.backend.image.encode(image, format: format, quality: quality) }
+        return Platform.imageCodec.encode(image, format: format, quality: quality)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/representationofimagereps(in:using:properties:)
     public class func representationOfImageReps(in imageReps: [NSImageRep], using storageType: NSBitmapImageRep.FileType, properties: [NSBitmapImageRep.PropertyKey : Any]) -> Data? {

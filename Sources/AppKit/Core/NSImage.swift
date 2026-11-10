@@ -15,7 +15,9 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage
-open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardReading, NSPasteboardWriting {
+/// `@unchecked Sendable` as Apple's: callers share images across tasks (Nuke keeps one in a
+/// `Sendable` struct); mutation after setup is the caller's responsibility, as on macOS.
+open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardReading, NSPasteboardWriting, @unchecked Sendable {
     // MARK: Storage
     private var _size: NSSize
     private var _representations: [NSImageRep] = []
@@ -214,7 +216,16 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     static public var cautionName: String { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/cgimage(forproposedrect:context:hints:)
     open func cgImage(forProposedRect proposedDestRect: UnsafeMutablePointer<NSRect>?, context referenceContext: NSGraphicsContext?, hints: [NSImageRep.HintKey : Any]?) -> CGImage? {
-        MainActor.assumeIsolated { _cgImage() }
+        if !Thread.isMainThread {
+            // Off the main actor (Nuke decompresses decoded images on its pipeline's tasks):
+            // a bitmap rep's pixels need no rendering. Drawing handlers and other reps
+            // render through the main-actor backend and are not available here.
+            for rep in _representations {
+                if let bitmap = rep as? NSBitmapImageRep, let image = bitmap._bitmapImage { return image }
+            }
+            return nil
+        }
+        return MainActor.assumeIsolated { _cgImage() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/colorpanelname
     static public var colorPanelName: String { unimplemented() }
@@ -444,7 +455,7 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     open var symbolConfiguration: NSImage.SymbolConfiguration { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/tiffrepresentation
     open var tiffRepresentation: Data? {
-        MainActor.assumeIsolated { _cgImage().flatMap { Platform.backend.image.encode($0, format: "public.png", quality: 1) } }   // PNG stands in for TIFF
+        MainActor.assumeIsolated { _cgImage().flatMap { Platform.imageCodec.encode($0, format: "public.png", quality: 1) } }   // PNG stands in for TIFF
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/tiffrepresentation(using:factor:)
     open func tiffRepresentation(using comp: NSBitmapImageRep.TIFFCompression, factor: Float) -> Data? { tiffRepresentation }

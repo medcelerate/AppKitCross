@@ -52,7 +52,8 @@ final class Win32BitmapOffscreen: PlatformOffscreenSurface {
 
 @MainActor
 final class Win32ImageBackend: PlatformImageBackend {
-    func decode(_ data: Data) -> CGImage? {
+    nonisolated init() {}
+    nonisolated func decode(_ data: Data) -> CGImage? {
         var w: UInt32 = 0, h: UInt32 = 0, stride: UInt32 = 0
         var pixels: UnsafeMutablePointer<UInt8>? = nil
         let ok = data.withUnsafeBytes { buf -> Bool in
@@ -64,7 +65,7 @@ final class Win32ImageBackend: PlatformImageBackend {
         return CGImage.fromBGRA(width: Int(w), height: Int(h), stride: Int(stride), data: copy)
     }
 
-    func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
+    nonisolated func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
         let fmt = format.contains("jpeg") || format.contains("jpg") ? "jpeg" : "png"
         var bytes: UnsafeMutablePointer<UInt8>? = nil
         var length: UInt32 = 0

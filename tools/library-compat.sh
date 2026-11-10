@@ -12,6 +12,7 @@
 #     tools/library-compat.sh            # build the example
 #     tools/library-compat.sh --probe    # per-library build results, then the example
 #     tools/library-compat.sh --run      # build, then run it (on macOS: headless screenshot)
+#     PROBE_LOGS=dir tools/library-compat.sh --probe   # also keep each library's full build log
 # pipefail: the greps that trim the build output must not hide a failed build (CI).
 set -eo pipefail
 cd "$(dirname "$0")/../Examples/LibraryCompat"
@@ -115,6 +116,7 @@ if [ "$PROBE" = 1 ]; then
             first=$(echo "$first" | sed -E 's|^.*/checkouts/||')
             echo "$target: FAILS ($errors errors); first: $first"
         fi
+        if [ -n "$PROBE_LOGS" ]; then mkdir -p "$PROBE_LOGS" && tr -d '\r' < "$log" > "$PROBE_LOGS/$target.log"; fi
         rm -f "$log" "$log.txt"
     done
 fi
