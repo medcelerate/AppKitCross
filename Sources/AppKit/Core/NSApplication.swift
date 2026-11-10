@@ -84,7 +84,9 @@ import CoreText
         _windows.removeAll { $0 === window }
         if _keyWindow === window { _keyWindow = nil }
         if _mainWindow === window { _mainWindow = nil }
-        if _windows.isEmpty, _isRunning, delegate?.applicationShouldTerminateAfterLastWindowClosed(self) == true {
+        // The last window closed: hidden windows (ended sheets, ordered-out panels) do not
+        // keep the application running, as in AppKit.
+        if !_windows.contains(where: { $0.isVisible }), _isRunning, delegate?.applicationShouldTerminateAfterLastWindowClosed(self) == true {
             terminate(nil)
         }
     }
@@ -218,9 +220,11 @@ import CoreText
         if !_modalStack.isEmpty { _modalStack.removeLast() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:)
-    @MainActor open func endSheet(_ sheet: NSWindow) { unimplemented() }
+    @MainActor open func endSheet(_ sheet: NSWindow) { endSheet(sheet, returnCode: NSApplication.ModalResponse.stop.rawValue) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:returncode:)
-    @MainActor open func endSheet(_ sheet: NSWindow, returnCode: Int) { unimplemented() }
+    @MainActor open func endSheet(_ sheet: NSWindow, returnCode: Int) {
+        sheet.sheetParent?.endSheet(sheet, returnCode: NSApplication.ModalResponse(rawValue: returnCode))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enumeratewindows(options:using:)
     @available(macOS 10.12, *)
     @MainActor open func enumerateWindows(options: NSApplication.WindowListOptions = [], using block: (NSWindow, UnsafeMutablePointer<ObjCBool>) -> Void) {
