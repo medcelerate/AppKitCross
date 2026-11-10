@@ -491,6 +491,9 @@ import CoreText
         if NSView._traceInvalidation { NSView._trace("addSubview \(type(of: view)) to \(type(of: self))\(view._superview === self ? " (re-add)" : "")") }
         if view._superview === self {
             _subviews.removeAll { $0 === view }
+            // Re-adding moves the view in the stacking order: its layer must move with it
+            // (the attach below only inserts a layer that is not in the superlayer yet).
+            if let l = view._layer, let sl = _layer, l.superlayer === sl { l.removeFromSuperlayer() }
         } else {
             view.removeFromSuperviewWithoutNeedingDisplay()
         }

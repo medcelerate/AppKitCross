@@ -387,6 +387,7 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let (cv, scroll, source) = makeCollection(in: w, height: 100, headers: true)
             defer { withExtendedLifetime(source) {} }
+            cv.wantsLayer = true
             w.display()
             let header = cv._supplementaryView(ofKind: NSCollectionView.elementKindSectionHeader, at: ip(0, 0)) as? HeaderView
             XCTAssertEqual(header?.label.stringValue, "Section 0")
@@ -404,6 +405,15 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
             let headerIndex = cv.subviews.firstIndex { $0 === pinned }!
             let lastItemIndex = cv.subviews.lastIndex { $0 is ColorItem.ItemView }!
             XCTAssertGreaterThan(headerIndex, lastItemIndex, "the pinned header is stacked above the items")
+            // Layer-backed (Windows composition): the layers follow the subview order even
+            // when items made after the header (a scroll into the next section) appended
+            // their layers above it.
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 60))
+            w.display()
+            let layers = cv.layer!.sublayers ?? []
+            let headerLayerIndex = layers.firstIndex { $0 === pinned.layer }!
+            let lastItemLayerIndex = cv.subviews.filter { $0 is ColorItem.ItemView }.compactMap { v in layers.firstIndex { $0 === v.layer } }.max()!
+            XCTAssertGreaterThan(headerLayerIndex, lastItemLayerIndex, "the header's layer is above the items' layers: \(layers.map { l in cv.subviews.first { $0.layer === l }.map { "\(type(of: $0))" } ?? "?" })")
             w.close()
         }
     }
