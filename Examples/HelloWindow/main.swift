@@ -1048,7 +1048,12 @@ final class ComboDemoViewController: NSViewController, NSComboBoxDataSource, NSC
         super.viewDidAppear()
         if ProcessInfo.processInfo.environment["APPKITWIN_COMBO_POPUP"] == "1" {
             fruit.selectItem(at: 2)
-            _ = fruit.accessibilityPerformShowMenu()
+            // Once the windows are laid out and mapped and the initial key-window hand-off is
+            // over (an X11 window resigning key dismisses the list), so it hangs under the field.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [fruit] in
+                fruit.window?.layoutIfNeeded()
+                _ = fruit.accessibilityPerformShowMenu()
+            }
         }
     }
 
