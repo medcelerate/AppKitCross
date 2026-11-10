@@ -2091,6 +2091,7 @@ import CoreText
             guard !_ignoresMouseEvents else { return }
             _lastMouseLocation = event.locationInWindow
             let hit = _hitTest(event.locationInWindow)
+            if NSView._traceInvalidation { NSView._trace("mouse down '\(_title)' at \(event.locationInWindow) -> \(hit.map { String(describing: type(of: $0)) } ?? "window") accessory host \(_accessoryHost.map { "\($0.frame) hidden \($0.isHidden) bands \($0.paintedBands)" } ?? "none")") }
             _mouseDownView = hit
             if let v = hit, v.acceptsFirstResponder, firstResponder !== v { _ = makeFirstResponder(v) }
             _dispatchMouse(event, to: hit ?? self)

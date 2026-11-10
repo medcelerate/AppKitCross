@@ -55,6 +55,9 @@ import CoreText
     private var _awaitingCompletion = false
     /// Horizontal scroll steps of a wheel (no phases) are debounced per transition.
     private var _wheelAccumulator: CGFloat = 0
+    /// A scroll gesture began and has not yet shown its direction.
+    private var _gesturePending = false
+    private var _gestureDeltaX: CGFloat = 0, _gestureDeltaY: CGFloat = 0
 
     open override func loadView() {
         view = _NSPageControllerView(frame: NSRect(x: 0, y: 0, width: 480, height: 320))
@@ -134,7 +137,9 @@ import CoreText
     @discardableResult
     private func _transition(to index: Int, animated: Bool) -> Bool {
         guard _arrangedObjects.indices.contains(index) else { return false }
-        if let t = _transition, t.live { return false }     // the user's gesture owns the pages
+        // A navigation is explicit: a live gesture in flight (or one whose end went
+        // elsewhere) settles first, past the middle onto its page and back otherwise.
+        if _transition?.live == true { _endLiveTransition() }
         _cancelTransition()
         let fromIndex = _selectedIndex
         _selectedIndex = index
@@ -142,6 +147,7 @@ import CoreText
         guard index != fromIndex || _current == nil else { return true }
         let from = _current
         let to = _viewController(forPageAt: index, avoiding: from.map { [$0] } ?? [])
+        if NSView._traceInvalidation { NSView._trace("page controller \(fromIndex) -> \(index) animated \(animated) width \(view.bounds.width) window \(view.window.map { "'\($0.title)'" } ?? "none") frame clock \(CARuntime.frameRequester != nil)") }
         var t = Transition(from: from, fromIndex: fromIndex, to: to, toIndex: index, live: false)
         _addPage(to, for: index)
         if animated, view.bounds.width > 0, from != nil {
@@ -238,6 +244,7 @@ import CoreText
         t.progress = t.animationFrom + (t.animationTo - t.animationFrom) * CGFloat(fraction)
         _transition = t
         _layoutTransition()
+        if NSView._traceInvalidation { NSView._trace("page controller tick progress \(t.progress) elapsed \(elapsed)") }
         if fraction >= 1 {
             _stopDisplayLink()
             if t.animationTo >= 1 { _finishTransition() } else { _abandonTransition() }
@@ -262,6 +269,7 @@ import CoreText
         }
         _current = t.to
         _awaitingCompletion = true
+        if NSView._traceInvalidation { NSView._trace("page controller arrived at \(t.toIndex)") }
         if _arrangedObjects.indices.contains(t.toIndex) {
             _delegate?.pageController(self, didTransitionTo: _arrangedObjects[t.toIndex])
         }
@@ -288,7 +296,8 @@ import CoreText
         guard _transition != nil else { return }
         _stopDisplayLink()
         if let t = _transition {
-            if t.to != nil, !t.live || t.progress >= 0.5 { _finishTransition() } else { _abandonTransition() }
+            let lands = t.to != nil && (t.live ? t.progress >= 0.5 : t.animationTo >= 1)
+            if lands { _finishTransition() } else { _abandonTransition() }
         }
         _transition = nil
     }
@@ -363,11 +372,31 @@ import CoreText
 
     /// A horizontal two-finger scroll pages live; a wheel without phases pages a step.
     open override func scrollWheel(with event: NSEvent) {
-        let dx = event.scrollingDeltaX
+        let dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
         if event.phase.contains(.began) {
-            _beginLiveTransition()
+            // A gesture starts: it pages only once it proves horizontal, so a vertical
+            // scroll over the pages goes on up the chain and never arms a live transition.
+            _gesturePending = true
+            _gestureDeltaX = 0
+            _gestureDeltaY = 0
+            if _transition?.live == true { _endLiveTransition() }
             return
         }
+        if _gesturePending, event.phase.contains(.changed) {
+            _gestureDeltaX += dx
+            _gestureDeltaY += dy
+            if abs(_gestureDeltaX) > abs(_gestureDeltaY), abs(_gestureDeltaX) >= 2 {
+                _gesturePending = false
+                _beginLiveTransition()
+            } else if abs(_gestureDeltaY) >= 4 {
+                _gesturePending = false       // vertical: not ours
+                super.scrollWheel(with: event)
+                return
+            } else {
+                return
+            }
+        }
+        if _gesturePending, event.phase.contains(.ended) || event.phase.contains(.cancelled) { _gesturePending = false; return }
         if let t = _transition, t.live {
             if event.phase.contains(.changed) {
                 guard view.bounds.width > 0 else { return }
@@ -378,6 +407,10 @@ import CoreText
             if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
                 _endLiveTransition()
                 return
+            }
+            if event.phase.isEmpty, event.momentumPhase.isEmpty {
+                // A gesture that never ended (its end went elsewhere): a plain event closes it.
+                _endLiveTransition()
             }
         }
         if !event.momentumPhase.isEmpty { return }
@@ -397,6 +430,17 @@ import CoreText
         if event.deltaX < 0 { if _forwardDirection > 0 { navigateForward(nil) } else { navigateBack(nil) } }
         else if event.deltaX > 0 { if _forwardDirection > 0 { navigateBack(nil) } else { navigateForward(nil) } }
         else { super.swipe(with: event) }
+    }
+
+    /// A click on a page that takes no keyboard focus gives it to the page controller's
+    /// view, so the arrow keys page from there.
+    open override func mouseDown(with event: NSEvent) {
+        if let w = view.window, let fr = w.firstResponder as? NSView, fr.isDescendant(of: view) {
+            // Something inside already has it.
+        } else if let w = view.window, w.firstResponder !== view {
+            _ = w.makeFirstResponder(view)
+        }
+        super.mouseDown(with: event)
     }
 
     /// Left and right arrows page (mirrored right to left).
@@ -522,4 +566,6 @@ import CoreText
 
 /// The page controller's own view: clips its pages while they slide.
 @MainActor
-final class _NSPageControllerView: NSView {}
+final class _NSPageControllerView: NSView {
+    override var acceptsFirstResponder: Bool { true }
+}

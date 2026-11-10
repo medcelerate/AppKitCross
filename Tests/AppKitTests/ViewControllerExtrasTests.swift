@@ -773,9 +773,10 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
                 }
                 d.log = []
                 scroll(0, phase: .began)
-                XCTAssertTrue(pc._isLiveTransition)
-                XCTAssertEqual(d.log, ["willStartLive"])
+                XCTAssertFalse(pc._isLiveTransition, "a gesture arms nothing until it proves horizontal")
+                XCTAssertEqual(d.log, [])
                 scroll(-100, phase: .changed)      // fingers moving left: forward, a quarter of the way
+                XCTAssertTrue(pc._isLiveTransition)
                 XCTAssertEqual(pc._transitionProgress!, 0.25, accuracy: 0.01)
                 XCTAssertEqual(first.view.frame.minX, -100, accuracy: 1)
                 let incoming = pc.children.first { $0 !== first }!
@@ -805,6 +806,24 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
                 XCTAssertEqual(incoming.view.frame.minX, 0)
                 XCTAssertEqual(pc.view.subviews.count, 1, "the peeked page left")
                 XCTAssertEqual(d.log, ["willStartLive", "prepare:one", "didEndLive"])
+                // A vertical two-finger scroll over the pages is not paging.
+                d.log = []
+                scroll(0, phase: .began)
+                let vertical = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: 0, deltaY: -30, precise: true, phase: .changed)
+                NSApplication.shared.sendEvent(vertical)
+                XCTAssertFalse(pc._isLiveTransition)
+                scroll(0, phase: .ended)
+                XCTAssertEqual(d.log, [])
+                // A gesture that began and moved a little but whose end never arrived does not block navigation.
+                scroll(0, phase: .began)
+                scroll(-10, phase: .changed)
+                XCTAssertTrue(pc._isLiveTransition)
+                pc.navigateForward(nil)
+                XCTAssertEqual(pc.selectedIndex, 2, "the stale gesture gave way")
+                clock.time += 1
+                CARuntime.tick()
+                XCTAssertNil(pc._transitionProgress)
+                pc.selectedIndex = 1
                 // Against the last page the strip resists and comes back.
                 pc.selectedIndex = 2
                 let last = pc.selectedViewController!
@@ -886,6 +905,125 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
                 XCTAssertEqual(pc2.selectedIndex, 0)
                 XCTAssertEqual(pc2.selectedViewController?.representedObject as? String, "only")
             }
+        }
+    }
+}
+
+// MARK: - The Layout Demo's Pages tab, end to end
+
+/// The Pages tab as the Layout Demo builds it: a tab view controller in a system-framed
+/// window, a bar of controls over a page controller, and a trailing accessory added
+/// while the tab shows (so the window carries the strip under its title bar).
+final class PagesTabTests: XCTestCase, @unchecked Sendable {
+    @MainActor private final class PagesTab: NSViewController, NSPageControllerDelegate {
+        let pages = NSPageController()
+        let next = NSButton(title: "Next", target: nil, action: nil)
+        let picker = NSSegmentedControl(labels: ["Red", "Green", "Blue"], trackingMode: .selectOne, target: nil, action: nil)
+        let accessory = NSTitlebarAccessoryViewController()
+        var transitions: [String] = []
+        override func loadView() {
+            let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+            next.target = pages
+            next.action = Selector(("navigateForward:"))
+            picker.target = pages
+            picker.action = Selector(("takeSelectedIndexFrom:"))
+            pages.delegate = self
+            pages.arrangedObjects = ["Red", "Green", "Blue"]
+            let bar = NSStackView(views: [next, picker])
+            bar.orientation = .horizontal
+            for v in [bar, pages.view] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
+            NSLayoutConstraint.activate([
+                bar.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+                bar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+                pages.view.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 8),
+                pages.view.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+                pages.view.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+                pages.view.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            ])
+            let label = NSTextField(labelWithString: "Pages ⌘")
+            label.sizeToFit()
+            accessory.view = label
+            accessory.layoutAttribute = .trailing
+            view = root
+        }
+        override func viewDidAppear() {
+            super.viewDidAppear()
+            if let w = view.window, !w.titlebarAccessoryViewControllers.contains(where: { $0 === accessory }) { w.addTitlebarAccessoryViewController(accessory) }
+        }
+        override func viewDidDisappear() { super.viewDidDisappear(); accessory.removeFromParent() }
+        func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { "page" }
+        func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController {
+            let vc = NSViewController()
+            vc.view = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+            return vc
+        }
+        func pageController(_ pageController: NSPageController, didTransitionTo object: Any) { transitions.append(object as? String ?? "?"); pageController.completeTransition() }
+    }
+
+    func testClickingNextOnThePagesTabAdvancesWithTheStripInstalled() {
+        MainActor.assumeIsolated {
+            let savedNow = CARuntime.now, savedRequester = CARuntime.frameRequester
+            let clock = PageControllerTests.Clock()
+            CARuntime.now = { clock.time }
+            CARuntime.frameRequester = { }
+            defer { CARuntime.now = savedNow; CARuntime.frameRequester = savedRequester }
+            let tabs = NSTabViewController()
+            let other = NSViewController()
+            other.view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+            other.title = "Other"
+            let pagesTab = PagesTab()
+            pagesTab.title = "Pages"
+            tabs.addChild(other)
+            tabs.addChild(pagesTab)
+            tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
+            let w = NSWindow(contentViewController: tabs)
+            w.title = "Layout Demo"
+            w.makeKeyAndOrderFront(nil)
+            defer { w.close() }
+            let frameBefore = w.frame
+            tabs.selectedTabViewItemIndex = 1
+            w.display()
+            XCTAssertEqual(w.titlebarAccessoryViewControllers.count, 1, "the tab installed its accessory")
+            XCTAssertGreaterThan(w._accessoryBandHeight, 0, "a system-framed window gets the strip")
+            XCTAssertEqual(w.frame.height, frameBefore.height + w._accessoryBandHeight)
+            let host = w._accessoryHost!
+            XCTAssertEqual(host.frame.height, w._platformContentSize.height, "the host spans the platform content area")
+            // Points in the content are not the host's: the controls under it get the clicks.
+            let nextPoint = pagesTab.next.convert(NSPoint(x: pagesTab.next.bounds.midX, y: pagesTab.next.bounds.midY), to: nil)
+            XCTAssertNil(host.hitTest(nextPoint), "the host does not take points outside its bands")
+            XCTAssertTrue(w._hitTestForTests(nextPoint)?.isDescendant(of: pagesTab.next) ?? false, "the Next button is under the pointer")
+            XCTAssertEqual(w.platformWindowHitTest(nextPoint), .client)
+            let stripPoint = NSPoint(x: 20, y: w._platformContentSize.height - 4)
+            XCTAssertTrue(host.hitTest(stripPoint) === host, "the strip's empty part is the host (it drags the window)")
+            @MainActor func click(_ p: NSPoint) {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    NSApplication.shared.sendEvent(NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
+                }
+            }
+            click(nextPoint)
+            XCTAssertEqual(pagesTab.pages.selectedIndex, 1, "Next paged")
+            clock.time += 1
+            CARuntime.tick()
+            XCTAssertEqual(pagesTab.transitions, ["Green"])
+            // The segmented control's Blue segment.
+            let seg = pagesTab.picker
+            let bluePoint = seg.convert(NSPoint(x: seg.bounds.maxX - 10, y: seg.bounds.midY), to: nil)
+            click(bluePoint)
+            XCTAssertEqual(seg.selectedSegment, 2)
+            XCTAssertEqual(pagesTab.pages.selectedIndex, 2, "takeSelectedIndexFrom: paged")
+            clock.time += 1
+            CARuntime.tick()
+            XCTAssertEqual(pagesTab.transitions, ["Green", "Blue"])
+            // Clicking the page gives it the keyboard; Left pages back.
+            let pagePoint = pagesTab.pages.view.convert(NSPoint(x: 50, y: 50), to: nil)
+            click(pagePoint)
+            XCTAssertTrue((w.firstResponder as? NSView)?.isDescendant(of: pagesTab.pages.view) ?? false, "the page took the focus")
+            NSApplication.shared.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, characters: "\u{F702}", charactersIgnoringModifiers: "\u{F702}", isARepeat: false, keyCode: 123)!)
+            XCTAssertEqual(pagesTab.pages.selectedIndex, 1, "Left arrow paged back")
+            // Leaving the tab removes the strip and the frame shrinks back.
+            tabs.selectedTabViewItemIndex = 0
+            XCTAssertTrue(w.titlebarAccessoryViewControllers.isEmpty)
+            XCTAssertEqual(w.frame, frameBefore)
         }
     }
 }

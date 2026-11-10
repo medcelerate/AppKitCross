@@ -481,6 +481,14 @@ import CoreText
     @MainActor internal func _setCurrentEvent(_ event: NSEvent) { _currentEvent = event }
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
+        // The pointer left a window (the backends report it as a move to a far-away point):
+        // only that window's tracking areas and hover states care, so it goes straight
+        // there. A menu, a drag or a pop-up list keeps the pointer it tracks (Windows posts
+        // the leave the moment a menu window opens under the cursor).
+        if event.type == .mouseMoved, event.locationInWindow.x <= -50_000 || event.locationInWindow.y <= -50_000 {
+            event.window?.sendEvent(event)
+            return
+        }
         // A drag in progress owns the mouse (and Escape) until it drops or cancels.
         if let drag = _NSDragTracker.current {
             switch event.type {
