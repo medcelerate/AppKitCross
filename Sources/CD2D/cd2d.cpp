@@ -1526,7 +1526,7 @@ HGLOBAL duplicateGlobal(HGLOBAL h) {
 }
 
 CLIPFORMAT appKitFormat(const std::wstring &type) {
-    std::wstring name = L"AppKitWin:" + type;
+    std::wstring name = L"AppKitCross:" + type;
     return (CLIPFORMAT)RegisterClipboardFormatW(name.c_str());
 }
 
@@ -1783,7 +1783,7 @@ CD2DDragEntry *cd2d_drag_data_read(CD2DDragData *data, uint32_t *count) {
             wchar_t name[256] = {};
             if (GetClipboardFormatNameW(f.cfFormat, name, 256) == 0) continue;
             std::wstring n(name);
-            if (n.rfind(L"AppKitWin:", 0) != 0) continue;
+            if (n.rfind(L"AppKitCross:", 0) != 0) continue;
             type = n.substr(10);
         }
         FORMATETC request = { f.cfFormat, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
