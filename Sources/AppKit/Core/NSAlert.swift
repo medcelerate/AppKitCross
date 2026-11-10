@@ -127,6 +127,7 @@ import CoreText
         // The panel is attached to the window as a sheet (ADR-0019); a button ends it with
         // its response, Escape or closing the parent with `.cancel`.
         let panel = _buildWindow()
+        panel._closesAfterSheetEnds = true      // the panel goes with the session; `window` rebuilds it
         _sheetCompletion = { handler?($0) }
         _retainedWhileSheetIsUp = self
         sheetWindow.beginSheet(panel) { [weak self] response in self?._sheetDidEnd(response) }

@@ -328,6 +328,13 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(code, .alertFirstButtonReturn)
             XCTAssertTrue(w.sheets.isEmpty)
             XCTAssertTrue(w.isKeyWindow)
+            XCTAssertFalse(NSApplication.shared.windows.contains { $0 === panel! }, "the ended panel is closed, not left hidden in the window list")
+            // The alert still shows again after that (its window reopens).
+            alert.beginSheetModal(for: w) { code = $0 }
+            XCTAssertTrue(w.attachedSheet === alert.window)
+            XCTAssertTrue(alert.window.isVisible)
+            alert.buttons[1].performClick(nil)
+            XCTAssertEqual(code, .alertSecondButtonReturn)
             w.close()
         }
     }

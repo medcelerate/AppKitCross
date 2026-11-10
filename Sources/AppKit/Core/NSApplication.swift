@@ -67,7 +67,9 @@ import CoreText
         _windows.removeAll { $0 === window }
         if _keyWindow === window { _keyWindow = nil }
         if _mainWindow === window { _mainWindow = nil }
-        if _windows.isEmpty, _isRunning, delegate?.applicationShouldTerminateAfterLastWindowClosed(self) == true {
+        // The last window closed: hidden windows (ended sheets, ordered-out panels) do not
+        // keep the application running, as in AppKit.
+        if !_windows.contains(where: { $0.isVisible }), _isRunning, delegate?.applicationShouldTerminateAfterLastWindowClosed(self) == true {
             terminate(nil)
         }
     }

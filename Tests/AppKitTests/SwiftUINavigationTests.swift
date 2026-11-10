@@ -173,6 +173,7 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(w.sheets.isEmpty, "dismiss ends the sheet")
             XCTAssertFalse(sheet.isVisible)
+            XCTAssertFalse(NSApplication.shared.windows.contains { $0 === sheet }, "the dismissed sheet's window is closed")
             XCTAssertTrue(w.isKeyWindow)
             // Escape dismisses a SwiftUI sheet, as on macOS, and the binding follows.
             buttons(h).first { $0.title == "Open" }?.performClick(nil)

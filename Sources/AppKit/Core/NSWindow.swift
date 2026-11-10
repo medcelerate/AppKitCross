@@ -736,6 +736,10 @@ import CoreText
     /// How long the slide in takes (the slide out takes four fifths); 0 skips the
     /// animation, which tests use. Not part of Apple's API.
     public static var _sheetAnimationDuration: TimeInterval = 0.25
+    /// The window is closed once its sheet session ends (after the slide out): for sheets
+    /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
+    /// linger hidden in the application's window list. Not part of Apple's API.
+    public var _closesAfterSheetEnds = false
 
     /// A window with an attached sheet does not take input; the sheet does.
     private var _isBlockedBySheet: Bool { attachedSheet != nil }
@@ -1224,13 +1228,17 @@ import CoreText
                     s.orderOut(nil)
                     s._applySheetSlide(fraction: 1, target: target)     // full size again, hidden
                     s._attachAsSheet(to: nil)
+                    if s._closesAfterSheetEnds { s.close() }
                 }
                 sheetWindow._sheetSlide = slide
                 slide.start()
             } else {
                 sheetWindow.orderOut(nil)
                 sheetWindow._attachAsSheet(to: nil)
+                if sheetWindow._closesAfterSheetEnds { sheetWindow.close() }
             }
+        } else if sheetWindow._closesAfterSheetEnds {
+            sheetWindow.close()                         // ended while still queued
         }
         completion?(returnCode)
         post(NSWindow.didEndSheetNotification)

@@ -83,6 +83,10 @@ attaches the sheet with its native mechanism behind that hook.
   `NSApplication.endSheet(_:)` forwards to the sheet's parent.
 - `NSAlert.beginSheetModal(for:)` begins its panel as a sheet of the window and ends it
   from its buttons; the open and save panels and SwiftUI go through `beginSheet` unchanged.
+- Sheets the framework makes and nobody keeps (alert panels, SwiftUI sheets) are closed
+  once their session ends (`_closesAfterSheetEnds`), so they do not linger hidden in the
+  application's window list; and the application terminates after the last *visible*
+  window closes, as in AppKit, so an ended sheet never keeps it running.
 
 ### Platform hook
 

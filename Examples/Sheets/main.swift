@@ -92,8 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         title.font = NSFont.boldSystemFont(ofSize: 22)
         let hint = NSTextField(wrappingLabelWithString: "Each button attaches a sheet under this title bar. While it is up the window takes no clicks and the keyboard goes to the sheet; drag or minimise the window and the sheet follows. The window's close button refuses until the sheet ends.")
         hint.preferredMaxLayoutWidth = 500
-        status = NSTextField(labelWithString: "ready")
+        status = NSTextField(wrappingLabelWithString: "ready")
         status.textColor = .secondaryLabelColor
+        status.preferredMaxLayoutWidth = 500
 
         let alert = NSButton(title: "Alert sheet", target: self, action: Selector(("showAlert:")))
         let open = NSButton(title: "Open panel sheet", target: self, action: Selector(("showOpenPanel:")))
@@ -138,8 +139,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         }
     }
 
+    /// The status line keeps the last three reports, so two sheets ending in a row both show.
+    private var reports: [String] = []
     private func report(_ what: String) {
-        status.stringValue = what
+        reports.append(what)
+        if reports.count > 3 { reports.removeFirst() }
+        status.stringValue = reports.joined(separator: "\n")
         print(what)
         fflush(nil)
     }
@@ -230,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     func showCustom() {
         let (sheet, field) = makeCustomSheet(title: "A custom sheet", nested: true)
         window.beginSheet(sheet) { [weak self] response in
-            self?.report("custom sheet ended: \(self?.describe(response) ?? "") text \"\(field.stringValue)\"")
+            self?.report("custom sheet ended: \(self?.describe(response) ?? "")" + (field.stringValue.isEmpty ? "" : " text \"\(field.stringValue)\""))
         }
         sheet.makeFirstResponder(field)
     }
@@ -244,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         sheet.makeFirstResponder(field)
         let response = NSApp.runModal(for: sheet)
         window.endSheet(sheet, returnCode: response)
-        report("modal sheet ended: \(describe(response)) text \"\(field.stringValue)\"")
+        report("modal sheet ended: \(describe(response))" + (field.stringValue.isEmpty ? "" : " text \"\(field.stringValue)\""))
     }
 
     /// Two sheets begun at once: the second waits until the first ends.
