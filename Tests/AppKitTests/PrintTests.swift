@@ -7,6 +7,25 @@ import XCTest
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
+#if os(Windows)
+import WinSDK
+#endif
+
+/// Sets (or with nil removes) an environment variable for this process: `setenv` is
+/// POSIX, Windows has `SetEnvironmentVariableW` (what TextEdit's helper does too).
+func _setTestEnvironment(_ name: String, _ value: String?) {
+    #if os(Windows)
+    let n = Array(name.utf16) + [0]
+    if let value {
+        let v = Array(value.utf16) + [0]
+        _ = n.withUnsafeBufferPointer { n in v.withUnsafeBufferPointer { v in SetEnvironmentVariableW(n.baseAddress, v.baseAddress) } }
+    } else {
+        _ = n.withUnsafeBufferPointer { n in SetEnvironmentVariableW(n.baseAddress, nil) }
+    }
+    #else
+    if let value { setenv(name, value, 1) } else { unsetenv(name) }
+    #endif
+}
 
 /// A tall view: a gradient of bars so every page draws something.
 @MainActor
@@ -595,8 +614,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
 
     func testNativePanelIsAskedForWhenTheEnvironmentSaysSo() {
         MainActor.assumeIsolated {
-            setenv("APPKITWIN_PRINT_PANEL", "native", 1)
-            defer { unsetenv("APPKITWIN_PRINT_PANEL") }
+            _setTestEnvironment("APPKITWIN_PRINT_PANEL", "native")
+            defer { _setTestEnvironment("APPKITWIN_PRINT_PANEL", nil) }
             guard ProcessInfo.processInfo.environment["APPKITWIN_PRINT_PANEL"] == "native" else { return }   // the environment is cached on some Foundations
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
             printing.nativePanelAnswer = false
