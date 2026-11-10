@@ -4,6 +4,10 @@
 
 import XCTest
 @testable import AppKit
+#if os(Linux)
+import Glibc
+import CDBus
+#endif
 
 final class StatusItemTests: XCTestCase, @unchecked Sendable {
     @MainActor private var host: HostStatusItems { (Platform.backend as! HostBackend).hostStatusItems }
@@ -130,8 +134,8 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
     #if os(Linux)
     /// With a session bus (the container's run.sh starts one), the StatusNotifierItem host
     /// serves the item's properties over D-Bus; without a watcher it is merely unregistered.
-    func testStatusNotifierItemServesPropertiesOnTheSessionBus() {
-        MainActor.assumeIsolated {
+    func testStatusNotifierItemServesPropertiesOnTheSessionBus() throws {
+        try MainActor.assumeIsolated {
             guard ProcessInfo.processInfo.environment["DBUS_SESSION_BUS_ADDRESS"] != nil else { throw XCTSkip("no session bus") }
             guard let host = LinuxStatusNotifierHost.connect(screenPoint: { x, y in NSPoint(x: CGFloat(x), y: CGFloat(y)) }) else { return XCTFail("no connection") }
             final class Owner: PlatformStatusItemOwner { var clicks: [PlatformStatusItemClick] = []; func platformStatusItemClicked(_ c: PlatformStatusItemClick, at p: NSPoint) { clicks.append(c) } }

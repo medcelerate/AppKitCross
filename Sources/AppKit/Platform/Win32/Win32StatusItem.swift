@@ -52,8 +52,8 @@ final class Win32StatusItems: PlatformStatusItemHost {
             for i in items { i.add() }
             return
         }
-        let event = UINT(UInt(lParam) & 0xFFFF)
-        let id = UINT((UInt(lParam) >> 16) & 0xFFFF)
+        let event = UINT(UInt(bitPattern: lParam) & 0xFFFF)
+        let id = UINT((UInt(bitPattern: lParam) >> 16) & 0xFFFF)
         guard let item = items.first(where: { $0.id == id }) else { return }
         let click: PlatformStatusItemClick
         switch event {

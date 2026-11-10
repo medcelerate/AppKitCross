@@ -48,7 +48,7 @@ final class LinuxBackend: PlatformBackend {
     var statusItems: (any PlatformStatusItemHost)? {
         if !statusNotifierTried {
             statusNotifierTried = true
-            statusNotifier = LinuxStatusNotifierHost.connect { [self] x, y in NSPoint(x: CGFloat(x) / scale, y: (screenHeightPx - CGFloat(y)) / scale) }
+            statusNotifier = LinuxStatusNotifierHost.connect { [unowned self] x, y in NSPoint(x: CGFloat(x) / scale, y: (screenHeightPx - CGFloat(y)) / scale) }
         }
         return statusNotifier
     }
