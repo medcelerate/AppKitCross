@@ -158,6 +158,12 @@ public protocol PlatformWindow: AnyObject {
     /// surfaces (X11: `XGetImage`); nil where the platform cannot read it back (Wayland).
     /// For tests and tooling.
     func captureContent() -> CGImage?
+    /// Attaches the (hidden) window to `parent` as a sheet, or detaches it with nil
+    /// (ADR-0019). While attached the window shows no frame of its own, so
+    /// `frameRect(forContentRect:)` is the identity; it is stacked above the parent, hidden
+    /// and minimised with it, and listed nowhere (taskbar, window list). The core sets the
+    /// frame after attaching and moves the sheet when the parent moves.
+    func attachSheet(to parent: PlatformWindow?)
 }
 
 /// A native surface within a window's content area that a swap chain presents into
@@ -205,6 +211,7 @@ extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
+    public func attachSheet(to parent: PlatformWindow?) { }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }

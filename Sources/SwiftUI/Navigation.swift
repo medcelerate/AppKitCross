@@ -566,6 +566,8 @@ final class _SheetPrimitive: _Primitive {
         hosting.frame = w.contentView!.bounds
         hosting.autoresizingMask = [.width, .height]
         w.contentView = hosting
+        w._cancelsSheetOnEscape = true          // Escape dismisses a SwiftUI sheet, as on macOS
+        w._closesAfterSheetEnds = true          // nothing keeps the window once it is dismissed
         window = w
         host.beginSheet(w) { [weak self] _ in
             guard let self, self.window === w else { return }
@@ -581,7 +583,7 @@ final class _SheetPrimitive: _Primitive {
         if let p = parentWindow, p.sheets.contains(where: { $0 === w }) {
             p.endSheet(w)
         } else {
-            w.orderOut(nil)
+            w.close()
         }
         if notify { onDismiss?() }
     }
