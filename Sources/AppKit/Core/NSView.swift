@@ -513,7 +513,7 @@ import CoreText
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
-        if _window != nil { view._accessibilityStructureChanged() }
+        if _window != nil { view._accessibilityStructureChanged(.added) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtooltip(_:owner:userdata:)
     @MainActor open func addToolTip(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?) -> NSView.ToolTipTag { unimplemented() }
@@ -939,7 +939,7 @@ import CoreText
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
-            if _window != nil { _accessibilityStructureChanged() }
+            if _window != nil { _accessibilityStructureChanged(newValue ? .removed : .added) }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishiddenorhashiddenancestor
@@ -1223,7 +1223,7 @@ import CoreText
         }
         sup._setNeedsConstraintLayout(force: sup._engine != nil)
         viewWillMove(toSuperview: nil)
-        if _window != nil { _accessibilityStructureChanged() }
+        if _window != nil { _accessibilityStructureChanged(isHidden ? nil : .removed) }
         _superview = nil
         nextResponder = nil
         if let w = _window, w.firstResponder === self { _ = w.makeFirstResponder(nil) }
@@ -1715,6 +1715,14 @@ import CoreText
     open func accessibilityPerformCancel() -> Bool { false }
     open func accessibilityPerformPick() -> Bool { false }
     open func accessibilityPerformRaise() -> Bool { false }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/accessibilitycustomactions()
+    open func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { _a11y.customActions }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilitycustomactions(_:)
+    open func setAccessibilityCustomActions(_ accessibilityCustomActions: [NSAccessibilityCustomAction]?) {
+        _a11y.customActions = accessibilityCustomActions
+        // UI Automation shows them as child buttons: the element's children changed.
+        if window != nil { _accessibilityNotify(.structure(_accessibilityElementID)) }
+    }
 }
 
 

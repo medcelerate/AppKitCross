@@ -117,7 +117,9 @@ final class AccessibilityTests: XCTestCase, @unchecked Sendable {
 
             let popup = element(tree, role: .popUpButton)!
             XCTAssertEqual(popup.value, .string("Blue"))
-            XCTAssertEqual(popup.actions, [.press, .showMenu])
+            XCTAssertEqual(popup.actions, [.press, .showMenu, .expand, .collapse])
+            XCTAssertEqual(popup.isExpanded, false, "a closed pop-up is collapsed")
+            XCTAssertEqual(popup.children, [], "its items are children only while the menu is open")
 
             let image = element(tree, role: .image)!
             XCTAssertEqual(image.label, "Badge", "the tool tip names an image")
@@ -314,13 +316,24 @@ final class AccessibilityTests: XCTestCase, @unchecked Sendable {
             let host = hostWindow(f.window)!
             host.clearAccessibilityChanges()
             let extra = NSButton(title: "Extra", target: nil, action: nil)
+            let windowID = f.window._accessibilityElementID
             f.canvas.addSubview(extra)
-            XCTAssertEqual(host.accessibilityChanges.last, .structure(f.window._accessibilityElementID), "the canvas is ignored, so the window's children changed")
+            XCTAssertEqual(host.accessibilityChanges, [.structure(windowID), .childAdded(parent: windowID, child: extra._accessibilityElementID)],
+                           "the canvas is ignored, so the window's children changed: the event names the new child")
+            host.clearAccessibilityChanges()
             extra.removeFromSuperview()
-            XCTAssertEqual(host.accessibilityChanges.count, 2)
+            XCTAssertEqual(host.accessibilityChanges, [.structure(windowID), .childRemoved(parent: windowID, child: extra._accessibilityElementID)])
             host.clearAccessibilityChanges()
             f.clear.isHidden = true
-            XCTAssertEqual(host.accessibilityChanges, [.structure(f.window._accessibilityElementID)])
+            XCTAssertEqual(host.accessibilityChanges, [.structure(windowID), .childRemoved(parent: windowID, child: f.clear._accessibilityElementID)])
+            host.clearAccessibilityChanges()
+            // An ignored container brings the elements inside it.
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 50))
+            let inner = NSButton(checkboxWithTitle: "Inner", target: nil, action: nil)
+            box.addSubview(inner)
+            f.canvas.addSubview(box)
+            XCTAssertEqual(host.accessibilityChanges.last, .childAdded(parent: windowID, child: inner._accessibilityElementID))
+            box.removeFromSuperview()
             host.clearAccessibilityChanges()
             f.clear.title = "Wipe"
             XCTAssertEqual(host.accessibilityChanges, [.name(f.clear._accessibilityElementID)])

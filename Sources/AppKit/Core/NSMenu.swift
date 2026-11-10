@@ -360,12 +360,24 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
+    // MARK: Accessibility (ADR-0013, NSMenuAccessibility.swift)
+    // AXMenuBar for the main menu, AXMenu otherwise; the items are the children. An open
+    // menu has the frame of its window.
+    internal var _accessibilityID = 0
+    open func accessibilityRole() -> NSAccessibility.Role? { MainActor.assumeIsolated { _a11yRole } }
+    open func accessibilityTitle() -> String? { _title }
+    open func accessibilityLabel() -> String? { _title.isEmpty ? nil : _title }
+    open func isAccessibilityElement() -> Bool { true }
+    open func isAccessibilityEnabled() -> Bool { true }
+    open func accessibilityChildren() -> [Any]? { MainActor.assumeIsolated { _a11yChildren } }
+    open func accessibilityPerformCancel() -> Bool { MainActor.assumeIsolated { _a11yCancel() } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _a11yFrame } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
+    /// The item whose submenu this is; the application for the main menu; nil otherwise.
+    open func accessibilityParent() -> Any? { MainActor.assumeIsolated { _a11yParent } }
     // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
+    open func isAccessibilityFocused() -> Bool { false }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { _identifier?.rawValue ?? "" }
 }

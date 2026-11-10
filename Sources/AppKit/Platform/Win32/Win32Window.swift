@@ -1044,6 +1044,7 @@ final class Win32Window: PlatformWindow {
             }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            accessibilityGeometryChanged()      // rectangles moved (ADR-0013)
             if reportedIconic { reportedIconic = false; owner?.platformWindowDidDeminiaturize() }
             checkPresentationMonitor()
             return 0
@@ -1051,6 +1052,9 @@ final class Win32Window: PlatformWindow {
             if let hwnd, IsIconic(hwnd) { return 0 }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            // UI Automation clients hold providers across moves: their rectangles are
+            // recomputed on the next request rather than served from the old position.
+            accessibilityGeometryChanged()
             checkPresentationMonitor()
             return 0
         case WM_DISPLAYCHANGE:
@@ -1078,6 +1082,7 @@ final class Win32Window: PlatformWindow {
                 SetWindowPos(hwnd, nil, r.left, r.top, width, height, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
             }
             owner?.platformWindowDidChangeBackingScaleFactor(scale)
+            accessibilityGeometryChanged()
             return 0
         case WM_GETMINMAXINFO:
             if let info = UnsafeMutablePointer<MINMAXINFO>(bitPattern: Int(lParam)) {

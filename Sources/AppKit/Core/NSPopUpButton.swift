@@ -200,6 +200,21 @@ import CoreText
         return true
     }
     @MainActor open override func accessibilityPerformShowMenu() -> Bool { accessibilityPerformPress() }
+    /// While the menu is open it is the pop-up's child: an AXMenu of AXMenuItems that a
+    /// press (or pick) chooses.
+    @MainActor open override func accessibilityChildren() -> [Any]? {
+        if let c = _a11y.children { return c }
+        guard let m = menu, _NSMenuTracker.current?.rootMenu === m else { return [] }
+        return [m]
+    }
+    /// Expanded while the menu is open (UI Automation's ExpandCollapse on the combo box,
+    /// AT-SPI's expanded state); expanding opens it, collapsing closes it.
+    @MainActor override func _accessibilityExpandedState() -> Bool? { menu.map { _NSMenuTracker.current?.rootMenu === $0 } ?? false }
+    @MainActor open override func setAccessibilityExpanded(_ accessibilityExpanded: Bool) {
+        let open = _accessibilityExpandedState() ?? false
+        if accessibilityExpanded && !open { performClick(self) }
+        else if !accessibilityExpanded && open { _ = menu?._a11yCancel() }
+    }
     @MainActor open override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 49, 36, 76, 125, 126: performClick(self)      // space, return, enter, down, up

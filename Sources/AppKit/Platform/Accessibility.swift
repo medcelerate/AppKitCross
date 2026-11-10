@@ -77,6 +77,19 @@ public struct PlatformAccessibilityElement: Sendable {
     /// Row index inside a table, tab index, ...
     public var index: Int?
     public var actions: [PlatformAccessibilityAction] = []
+    /// The element's `accessibilityCustomActions`, by name; performing one goes through
+    /// `accessibilityPerform(.press, on:)` with the action's own id.
+    public var customActions: [PlatformAccessibilityCustomAction] = []
+    /// A menu item's check mark: 0 off, 1 on, 2 mixed; nil for everything else.
+    public var checkedState: Int? = nil
+    /// A menu item's key equivalent as drawn ("Ctrl+S"); nil when it has none.
+    public var keyEquivalent: String? = nil
+    /// The window root only: the platform window's client area (what
+    /// `PlatformWindow.contentRect(forFrameRect:)` gives for the root's frame), in the same
+    /// screen points as every frame of the tree. Backends anchor it to the client area's
+    /// physical origin so frames reach the screen through the window's own scale, whatever
+    /// monitor the window is on (`PlatformAccessibilityScreenMapping`).
+    public var clientFrame: NSRect? = nil
     public var children: [PlatformAccessibilityElement] = []
 
     public init(id: Int, role: String, frame: NSRect) {
@@ -109,6 +122,57 @@ public struct PlatformAccessibilityElement: Sendable {
     }
 }
 
+/// An `NSAccessibilityCustomAction` as the platform sees it: the name a screen reader
+/// lists and the id that performs it.
+public struct PlatformAccessibilityCustomAction: Sendable, Equatable {
+    public var id: Int
+    public var name: String
+    public init(id: Int, name: String) { self.id = id; self.name = name }
+}
+
+/// How one window's accessibility frames (AppKit screen points) become physical screen
+/// pixels (top-left origin, y down) for UI Automation and AT-SPI.
+///
+/// AppKit's global point space is not a linear image of the physical desktop once
+/// monitors have different scales: a window on a 100% monitor next to a 150% primary has
+/// frames in points that only its own scale turns back into the pixels it covers. So every
+/// frame is taken relative to the window's client area in points, scaled by the window's
+/// own backing scale, and added to the client area's physical origin as the window system
+/// reports it (`ClientToScreen` on Windows, the X window's root position on X11). Nothing
+/// depends on the primary monitor's height or scale.
+public struct PlatformAccessibilityScreenMapping: Sendable, Equatable {
+    /// The client area in AppKit screen points (the tree root's `clientFrame`).
+    public var clientFrame: NSRect
+    /// The client area's top-left corner in physical screen pixels.
+    public var clientOriginX: Double
+    public var clientOriginY: Double
+    /// The window's backing scale factor (physical pixels per point).
+    public var scale: Double
+
+    public init(clientFrame: NSRect, clientOriginX: Double, clientOriginY: Double, scale: Double) {
+        self.clientFrame = clientFrame
+        self.clientOriginX = clientOriginX
+        self.clientOriginY = clientOriginY
+        self.scale = scale
+    }
+
+    /// A frame as a physical-pixel rectangle: left, top, width, height. The edges are
+    /// rounded (not the size), so adjacent elements stay adjacent.
+    public func pixelRect(_ frame: NSRect) -> (x: Int32, y: Int32, width: Int32, height: Int32) {
+        let left = (clientOriginX + Double(frame.minX - clientFrame.minX) * scale).rounded()
+        let right = (clientOriginX + Double(frame.maxX - clientFrame.minX) * scale).rounded()
+        let top = (clientOriginY + Double(clientFrame.maxY - frame.maxY) * scale).rounded()
+        let bottom = (clientOriginY + Double(clientFrame.maxY - frame.minY) * scale).rounded()
+        return (Int32(clamping: Int(left)), Int32(clamping: Int(top)), Int32(clamping: Int(right - left)), Int32(clamping: Int(bottom - top)))
+    }
+
+    /// A physical screen pixel as AppKit screen points in this window's space (hit tests).
+    public func point(pixelX: Double, pixelY: Double) -> NSPoint {
+        NSPoint(x: clientFrame.minX + CGFloat((pixelX - clientOriginX) / scale),
+                y: clientFrame.maxY - CGFloat((pixelY - clientOriginY) / scale))
+    }
+}
+
 /// What a backend tells the platform's assistive technology when the tree changes.
 public enum PlatformAccessibilityChange: Sendable, Equatable {
     /// Keyboard focus moved to the element (nil: the window has no focused element).
@@ -121,6 +185,14 @@ public enum PlatformAccessibilityChange: Sendable, Equatable {
     case structure(Int)
     /// The selection inside the element (a table's rows) changed.
     case selection(Int)
+    /// A child element appeared under `parent` (sent after `.structure(parent)`, so
+    /// platforms that only know "children invalidated" can ignore it).
+    case childAdded(parent: Int, child: Int)
+    /// A child element left `parent`; the child is no longer in the tree.
+    case childRemoved(parent: Int, child: Int)
+    /// A menu (an `AXMenu` element) opened in this window / is about to close.
+    case menuOpened(Int)
+    case menuClosed(Int)
 }
 
 /// Implemented by `NSWindow`: the window's accessibility tree, queried by the platform
@@ -143,4 +215,20 @@ public protocol PlatformAccessibilityProvider: AnyObject {
 extension PlatformWindow {
     /// The tree changed; backends with assistive technology forward this (default: nothing).
     public func accessibilityDidChange(_ change: PlatformAccessibilityChange) { }
+}
+
+extension PlatformAccessibilityElement {
+    /// The client area a mapping anchors to: the root's `clientFrame`, else its frame.
+    public var mappingClientFrame: NSRect { clientFrame ?? frame }
+}
+
+/// Implemented by `NSApplication` (through `PlatformMenuHost`): the application-level
+/// elements that belong to no window, the main menu as an `AXMenuBar`. Backends whose menu
+/// bar the system does not expose (AT-SPI) list it next to the windows.
+@MainActor
+public protocol PlatformAccessibilityApplication: AnyObject {
+    /// The main menu as an AXMenuBar tree (nil when there is none).
+    func accessibilityMenuBarTree() -> PlatformAccessibilityElement?
+    /// Performs an action on an element of the menu bar tree.
+    func accessibilityPerformMenuBarAction(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool
 }

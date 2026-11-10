@@ -49,10 +49,13 @@ import CoreText
 
     @MainActor open override func performClick(_ sender: Any?) {
         guard isEnabled else { return }
-        if let c = _buttonCell, !c.showsStateBy.isEmpty || c._isSwitchLike { setNextState() }
         highlight(true)
         window?.displayIfNeeded()
         highlight(false)
+        // The state changes after the highlight is shown and just before the action, as a
+        // click's mouse-up does: a display pass in between (a SwiftUI host re-rendering)
+        // would otherwise put the old state back before the action reads it.
+        if let c = _buttonCell, !c.showsStateBy.isEmpty || c._isSwitchLike { setNextState() }
         _fireAction()
     }
     @MainActor open override func mouseDown(with event: NSEvent) {

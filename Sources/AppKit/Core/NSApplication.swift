@@ -662,8 +662,11 @@ import CoreText
     open func isAccessibilityFrontmost() -> Bool { MainActor.assumeIsolated { _isActive } }
     open func setAccessibilityFrontmost(_ accessibilityFrontmost: Bool) { if accessibilityFrontmost { MainActor.assumeIsolated { activate(ignoringOtherApps: true) } } }
     open func accessibilityIdentifier() -> String { Bundle.main.bundleIdentifier ?? "" }
-    /// The visible windows, key window first.
-    open func accessibilityChildren() -> [Any]? { accessibilityWindows() }
+    /// The visible windows, key window first, then the menu bar (the main menu).
+    open func accessibilityChildren() -> [Any]? {
+        let windows = accessibilityWindows() ?? []
+        return MainActor.assumeIsolated { mainMenu.map { windows + [$0] } ?? windows }
+    }
     open func accessibilityVisibleChildren() -> [Any]? { accessibilityWindows() }
     open func accessibilityWindows() -> [Any]? {
         MainActor.assumeIsolated {

@@ -309,6 +309,15 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
     var atspiIsVisible: Bool { isVisible }
     var atspiIsKey: Bool { isKey }
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { backend.atspi?.windowDidChange(self, change) }
+    /// The X window is the client area: its root-relative position (physical pixels) is the
+    /// anchor, the window's scale converts the points below it.
+    func accessibilityScreenMapping(clientFrame: NSRect) -> PlatformAccessibilityScreenMapping? {
+        guard xid != 0 else { return nil }
+        var x: Int32 = 0, y: Int32 = 0
+        var child: Window = 0
+        XTranslateCoordinates(backend.display, xid, backend.root, 0, 0, &x, &y, &child)
+        return PlatformAccessibilityScreenMapping(clientFrame: clientFrame, clientOriginX: Double(x), clientOriginY: Double(y), scale: Double(backingScaleFactor))
+    }
 
     func close() {
         guard !destroying else { return }

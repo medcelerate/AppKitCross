@@ -601,6 +601,12 @@ final class _AccessibilityPrimitive: _Primitive {
         /// `.accessibilityElement(children:)`: `.ignore` and `.combine` make the first
         /// backing view the element and hide the rest from assistive technology.
         var childBehavior: AccessibilityChildBehavior? = nil
+        /// Internal (views drawn from shapes that stand for a control, ProgressView): the
+        /// first backing view's role and numeric range.
+        var role: NSAccessibility.Role? = nil
+        var numericValue: Double? = nil
+        var minValue: Double? = nil
+        var maxValue: Double? = nil
     }
     var traits: Traits
     init(traits: Traits, content: _AnyViewBox) {
@@ -633,6 +639,10 @@ final class _AccessibilityPrimitive: _Primitive {
             if let id = traits.identifier { v.setAccessibilityIdentifier(id) }
             if let hint = traits.hint { v.setAccessibilityHelp(hint) }
             if let e = traits.isElement { v.setAccessibilityElement(e) }
+            if let r = traits.role, v.accessibilityRole() != r { v.setAccessibilityRole(r); v.setAccessibilityElement(true) }
+            if let d = traits.numericValue, (v.accessibilityValue() as? Double) != d { v.setAccessibilityValue(d) }
+            if let m = traits.minValue { v.setAccessibilityMinValue(m) }
+            if let m = traits.maxValue { v.setAccessibilityMaxValue(m) }
         }
     }
 }
@@ -645,6 +655,18 @@ struct _AccessibilityModified<Content: View>: View, _PrimitiveView {
 }
 
 extension View {
+    /// Internal: makes the content's first backing view an element with a role and a
+    /// numeric value in a range (a progress bar drawn from shapes).
+    func _accessibilityRange(role: NSAccessibility.Role, value: Double?, in range: ClosedRange<Double>, label: String?) -> some View {
+        _accessibility {
+            $0.role = role
+            $0.numericValue = value
+            $0.minValue = range.lowerBound
+            $0.maxValue = range.upperBound
+            if let label, !label.isEmpty { $0.label = label }
+            $0.childBehavior = .ignore
+        }
+    }
     private func _accessibility(_ change: (inout _AccessibilityPrimitive.Traits) -> Void) -> some View {
         var t = _AccessibilityPrimitive.Traits()
         change(&t)

@@ -51,10 +51,20 @@ public struct NSAccessibility {
     public static func raiseBadArgumentException(_ element: Any!, _ attribute: NSAccessibility.Attribute!, _ value: Any!) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/screenpoint(fromview:point:)
     @available(macOS 10.10, *)
-    public static func screenPoint(fromView parentView: NSView, point: NSPoint) -> NSPoint { unimplemented() }
+    public static func screenPoint(fromView parentView: NSView, point: NSPoint) -> NSPoint {
+        MainActor.assumeIsolated {
+            let inWindow = parentView.convert(point, to: nil)
+            return parentView.window?.convertPoint(toScreen: inWindow) ?? inWindow
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/screenrect(fromview:rect:)
     @available(macOS 10.10, *)
-    public static func screenRect(fromView parentView: NSView, rect frame: NSRect) -> NSRect { unimplemented() }
+    public static func screenRect(fromView parentView: NSView, rect frame: NSRect) -> NSRect {
+        MainActor.assumeIsolated {
+            let inWindow = parentView.convert(frame, to: nil)
+            return parentView.window?.convertToScreen(inWindow) ?? inWindow
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/setmaycontainprotectedcontent(_:)
     public static func setMayContainProtectedContent(_ flag: Bool) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/unignoredancestor(of:)
@@ -100,12 +110,27 @@ internal struct _NSAccessibilityOverrides {
     var minValue: Any? = nil
     var maxValue: Any? = nil
     var index: Int? = nil
+    var customActions: [NSAccessibilityCustomAction]? = nil
 }
 
-/// Element ids: one counter for views and windows, never reused.
+/// Element ids: one counter for views, windows, virtual elements and custom actions,
+/// never reused.
 internal enum _NSAccessibilityIDs {
     @MainActor private static var last = 0
     @MainActor static func next() -> Int { last += 1; return last }
+
+    /// Objects that are not views (virtual elements, custom actions) by id, so an action
+    /// arriving from the platform finds them without walking every tree. Weak: an element
+    /// the application dropped is simply not found.
+    private final class Weak { weak var object: AnyObject?; init(_ o: AnyObject) { object = o } }
+    @MainActor private static var objects: [Int: Weak] = [:]
+    @MainActor static func next(registering object: AnyObject) -> Int {
+        let id = next()
+        if objects.count > 256 && objects.count % 256 == 0 { objects = objects.filter { $0.value.object != nil } }
+        objects[id] = Weak(object)
+        return id
+    }
+    @MainActor static func object(withID id: Int) -> AnyObject? { objects[id]?.object }
 }
 
 extension NSAccessibility {
@@ -114,7 +139,9 @@ extension NSAccessibility {
     /// `accessibilityPerform...` when one is used.
     internal static func _actions(for role: NSAccessibility.Role) -> [PlatformAccessibilityAction] {
         switch role {
-        case .button, .checkBox, .radioButton, .link, .disclosureTriangle, .menuItem, .menuBarItem, .cell, .row: return [.press]
+        case .button, .checkBox, .radioButton, .link, .disclosureTriangle, .cell, .row: return [.press]
+        case .menuItem, .menuBarItem: return [.press, .pick]
+        case .menu: return [.cancel]
         case .popUpButton, .menuButton, .comboBox: return [.press, .showMenu]
         case .slider, .incrementor, .scrollBar, .levelIndicator: return [.increment, .decrement]
         case .textField: return [.confirm]
@@ -162,15 +189,65 @@ internal protocol _NSAccessibilityVirtualElement: AnyObject {
     var _accessibilityOwnerView: NSView? { get }
     func _accessibilityElement() -> PlatformAccessibilityElement
     func _accessibilityPerform(_ action: PlatformAccessibilityAction) -> Bool
+    /// Virtual elements below this one (an `NSAccessibilityElement`'s children, a menu's
+    /// items), searched when an action arrives by id.
+    var _accessibilityVirtualChildren: [any _NSAccessibilityVirtualElement] { get }
+    /// Sets the value (default: not settable).
+    func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool
+}
+
+extension _NSAccessibilityVirtualElement {
+    var _accessibilityVirtualChildren: [any _NSAccessibilityVirtualElement] { [] }
+    func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
+    /// This element or one below it with an id.
+    func _accessibilityVirtualElement(withID id: Int) -> (any _NSAccessibilityVirtualElement)? {
+        if _accessibilityElementID == id { return self }
+        for c in _accessibilityVirtualChildren { if let v = c._accessibilityVirtualElement(withID: id) { return v } }
+        return nil
+    }
+}
+
+extension NSAccessibility {
+    /// The platform form of `accessibilityCustomActions` (ids registered so a press finds
+    /// the action again).
+    @MainActor internal static func _platformCustomActions(_ actions: [NSAccessibilityCustomAction]?) -> [PlatformAccessibilityCustomAction] {
+        (actions ?? []).map { PlatformAccessibilityCustomAction(id: $0._accessibilityElementID, name: $0.name) }
+    }
+
+    /// The children of an element as snapshot nodes: views (not hidden) and virtual elements.
+    @MainActor internal static func _childElements(_ children: [Any]?) -> [PlatformAccessibilityElement] {
+        var out: [PlatformAccessibilityElement] = []
+        for c in children ?? [] {
+            if let v = c as? NSView {
+                if v.isHidden || v.isAccessibilityHidden() { continue }
+                out.append(v._accessibilityElement())
+            } else if let v = c as? any _NSAccessibilityVirtualElement {
+                out.append(v._accessibilityElement())
+            }
+        }
+        return out
+    }
+
+    /// Performs a platform action on an id that is not a view: a custom action (press
+    /// runs it) or a virtual element registered under the id.
+    @MainActor internal static func _performOnRegistered(_ action: PlatformAccessibilityAction, id: Int) -> Bool? {
+        switch _NSAccessibilityIDs.object(withID: id) {
+        case let a as NSAccessibilityCustomAction: return action == .press || action == .pick ? a._perform() : false
+        case let v as any _NSAccessibilityVirtualElement: return v._accessibilityPerform(action)
+        default: return nil
+        }
+    }
 }
 
 extension NSView {
     /// The virtual element with an id among this subtree's children, if any.
     @MainActor internal func _accessibilityVirtualElement(withID id: Int) -> (any _NSAccessibilityVirtualElement)? {
         for c in accessibilityChildren() ?? [] {
-            if let v = c as? any _NSAccessibilityVirtualElement, v._accessibilityElementID == id { return v }
+            if let v = c as? any _NSAccessibilityVirtualElement, let hit = v._accessibilityVirtualElement(withID: id) { return hit }
         }
         for s in subviews { if let v = s._accessibilityVirtualElement(withID: id) { return v } }
+        if let v = _NSAccessibilityIDs.object(withID: id) as? any _NSAccessibilityVirtualElement,
+           let owner = v._accessibilityOwnerView, owner === self || owner.isDescendant(of: self) { return v }
         return nil
     }
 
@@ -185,17 +262,7 @@ extension NSView {
 
     /// The elements of `accessibilityChildren()`.
     @MainActor internal func _accessibilityChildElements() -> [PlatformAccessibilityElement] {
-        guard let children = accessibilityChildren() else { return [] }
-        var out: [PlatformAccessibilityElement] = []
-        for c in children {
-            if let v = c as? NSView {
-                if v.isHidden || v.isAccessibilityHidden() { continue }
-                out.append(v._accessibilityElement())
-            } else if let v = c as? any _NSAccessibilityVirtualElement {
-                out.append(v._accessibilityElement())
-            }
-        }
-        return out
+        NSAccessibility._childElements(accessibilityChildren())
     }
 
     /// This view as one node of the snapshot, with its children below it.
@@ -228,6 +295,7 @@ extension NSView {
         e.index = index < 0 ? nil : index
         e.actions = NSAccessibility._actions(for: role)
         if e.isExpanded != nil { e.actions += [.expand, .collapse] }
+        e.customActions = NSAccessibility._platformCustomActions(accessibilityCustomActions())
         e.children = _accessibilityChildElements()
         return e
     }
@@ -257,7 +325,10 @@ extension NSView {
     }
     @MainActor internal func _accessibilityValueChanged() { if window != nil { _accessibilityNotify(.value(_accessibilityElementID)) } }
     @MainActor internal func _accessibilityNameChanged() { if window != nil { _accessibilityNotify(.name(_accessibilityElementID)) } }
-    @MainActor internal func _accessibilityStructureChanged() {
+    /// What happened to this view, for the structure event that names the child.
+    internal enum _AccessibilityChildChange { case added, removed }
+
+    @MainActor internal func _accessibilityStructureChanged(_ change: _AccessibilityChildChange? = nil) {
         // The parent element's children changed; an ignored view's parent is the
         // nearest element above it. A field editor coming and going is not a change:
         // the text field stands for it.
@@ -265,6 +336,29 @@ extension NSView {
         if let t = self as? NSText, t.isFieldEditor { return }
         var v: NSView? = superview
         while let cur = v, !cur.isAccessibilityElement() { v = cur.superview }
-        _accessibilityNotify(.structure(v?._accessibilityElementID ?? w._accessibilityElementID))
+        let parent = v?._accessibilityElementID ?? w._accessibilityElementID
+        _accessibilityNotify(.structure(parent))
+        // Name the elements this view brings or takes away: itself when it is an element,
+        // else the elements its subtree contributes in its place.
+        guard let change, !isAccessibilityHidden() else { return }
+        for child in _accessibilityContributedElementIDs() {
+            _accessibilityNotify(change == .added ? .childAdded(parent: parent, child: child) : .childRemoved(parent: parent, child: child))
+        }
+    }
+
+    /// The ids of the elements this view puts into its parent's children, ignoring its
+    /// own `isHidden` (a view being hidden takes away what it showed).
+    @MainActor internal func _accessibilityContributedElementIDs() -> [Int] {
+        if isAccessibilityElement() { return [_accessibilityElementID] }
+        var ids: [Int] = []
+        for c in accessibilityChildren() ?? [] {
+            if let s = c as? NSView {
+                if s.isHidden || s.isAccessibilityHidden() { continue }
+                ids.append(contentsOf: s.isAccessibilityElement() ? [s._accessibilityElementID] : s._accessibilityContributedElementIDs())
+            } else if let e = c as? any _NSAccessibilityVirtualElement {
+                ids.append(e._accessibilityElementID)
+            }
+        }
+        return ids
     }
 }
