@@ -33,7 +33,15 @@ public protocol MTKViewDelegate: AnyObject {
     private var _frameCount = 0
 
     open weak var delegate: (any MTKViewDelegate)?
-    open var colorPixelFormat: MTLPixelFormat = .bgra8Unorm { didSet { _dropTextures() } }
+    open var colorPixelFormat: MTLPixelFormat = .bgra8Unorm {
+        didSet {
+            // As on macOS, the view's format is the layer's: on Windows the D3D12 swap chain
+            // under the layer takes it (an `.rgba16Float` chain is presented as scRGB, so a
+            // view wanting HDR output picks that format, ADR-0016).
+            (layer as? CAMetalLayer)?.pixelFormat = colorPixelFormat.rawValue
+            _dropTextures()
+        }
+    }
     open var depthStencilPixelFormat: MTLPixelFormat = .invalid { didSet { _dropTextures() } }
     open var sampleCount = 1
     open var clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
@@ -58,7 +66,11 @@ public protocol MTKViewDelegate: AnyObject {
     public required init?(coder: NSCoder) { return nil }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/makebackinglayer()
-    open override func makeBackingLayer() -> CALayer { CAMetalLayer() }
+    open override func makeBackingLayer() -> CALayer {
+        let l = CAMetalLayer()
+        l.pixelFormat = colorPixelFormat.rawValue
+        return l
+    }
 
     /// True while frames go straight to a DXGI swap chain shown by the window's
     /// DirectComposition tree (Windows); false on the CoreGraphics readback path.

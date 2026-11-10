@@ -47,7 +47,20 @@ final class Win32Window: PlatformWindow {
         self.owner = owner
         self.ownerWantsMenuBar = owner.platformWantsMenuBar
         self._styleMask = styleMask
-        let (style, ex) = Win32Backend.styles(for: styleMask)
+        let style = windowStyle(for: styleMask)
+        var ex = Win32Backend.styles(for: styleMask).1
+        // Windows presented through a flip-model swap chain or a DirectComposition visual
+        // need no redirection surface: DWM would allocate one per window and copy into
+        // it every frame. Windows honours the bit only at CreateWindowExW (verified on
+        // build 26200), so it is decided here, from whether swap chains work at all, not
+        // from the chrome (which arrives after creation). Windows painted through the
+        // legacy ID2D1HwndRenderTarget (APPKITWIN_LEGACY_D2D=1, or no D3D11 device)
+        // keep the surface: that target blits into it.
+        let noRedirectionBitmap = !Win32Window.useLegacyHwndTarget && cd2d_presentation_available()
+        if noRedirectionBitmap { ex |= Win32Window.wsExNoRedirectionBitmap }
+        if NSView._traceInvalidation {
+            NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(noRedirectionBitmap ? "none" : "kept") (\(Win32Window.useLegacyHwndTarget ? "legacy HWND target" : noRedirectionBitmap ? "swap-chain presentation" : "no D3D11/DXGI 1.2 device: HWND target"))")
+        }
         let frame = backend.frameRect(forContentRect: contentRect, styleMask: styleMask)
         let scale = CGFloat(GetDpiForSystem()) / 96
         let r = Win32Backend.win32Rect(frame, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
@@ -103,11 +116,48 @@ final class Win32Window: PlatformWindow {
 
     private var isResizable: Bool { _styleMask.contains(.resizable) }
 
+    private static let wsExNoRedirectionBitmap: DWORD = 0x0020_0000   // WS_EX_NOREDIRECTIONBITMAP
+
+    /// A borderless window has no frame DWM could draw a shadow for (a resizable one has
+    /// WS_THICKFRAME): WS_THICKFRAME gives it one, so `DwmExtendFrameIntoClientArea`
+    /// below produces the drop shadow macOS shows. The client area still covers the
+    /// whole window (WM_NCCALCSIZE) and WM_NCHITTEST never reports a resize edge for a
+    /// non-resizable window, so the frame is invisible and inert. Dropped again when
+    /// `hasShadow` is false.
+    private func wantsShadowFrame(_ mask: NSWindow.StyleMask) -> Bool {
+        !mask.contains(.titled) && !mask.contains(.resizable) && _chrome.hasShadow
+    }
+
+    /// The WS_* style for the mask, with the shadow frame when the chrome wants it.
+    private func windowStyle(for mask: NSWindow.StyleMask) -> DWORD {
+        var style = Win32Backend.styles(for: mask).0
+        if wantsShadowFrame(mask) { style |= DWORD(WS_THICKFRAME) }
+        return style
+    }
+
+    /// Whether the HWND carries WS_THICKFRAME (resizable, or the shadow frame).
+    private var hasThickFrame: Bool { isResizable || wantsShadowFrame(_styleMask) }
+
+    /// Re-applies the style when the shadow frame came or went (the mask itself is set
+    /// by `styleMask`), so WM_NCCALCSIZE re-runs and DWM re-evaluates the frame.
+    private func updateShadowFrameStyle() {
+        guard let hwnd else { return }
+        let current = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_STYLE))
+        let wanted = windowStyle(for: _styleMask)
+        guard (current & DWORD(WS_THICKFRAME)) != (wanted & DWORD(WS_THICKFRAME)) else { return }
+        let style = (current & ~DWORD(WS_THICKFRAME)) | (wanted & DWORD(WS_THICKFRAME))
+        SetWindowLongPtrW(hwnd, GWL_STYLE, LONG_PTR(style))
+        SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
+    }
+
     // dwmapi.h values (the enums import awkwardly); Windows 11 22H2+ for the backdrop.
     private static let dwmwaNCRenderingPolicy: DWORD = 2
     private static let dwmwaUseImmersiveDarkMode: DWORD = 20
     private static let dwmwaWindowCornerPreference: DWORD = 33
     private static let dwmwaSystemBackdropType: DWORD = 38
+    private static let dwmwaBorderColor: DWORD = 34
+    /// DWMWA_COLOR_NONE / DWMWA_COLOR_DEFAULT for DWMWA_BORDER_COLOR (Windows 11).
+    private static let dwmColorNone = Int32(bitPattern: 0xFFFF_FFFE), dwmColorDefault = Int32(bitPattern: 0xFFFF_FFFF)
     private static let dwmncrpUseWindowStyle: Int32 = 0, dwmncrpDisabled: Int32 = 2
     private static let dwmwcpDoNotRound: Int32 = 1, dwmwcpRound: Int32 = 2
     private static let dwmsbtNone: Int32 = 1, dwmsbtMainWindow: Int32 = 2, dwmsbtTransientWindow: Int32 = 3, dwmsbtTabbedWindow: Int32 = 4
@@ -157,11 +207,22 @@ final class Win32Window: PlatformWindow {
         }
 
         // Frame: keep the DWM shadow, border and rounded corners while the client area
-        // covers the frame by extending the frame one pixel into the client area.
-        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: usesCustomFrame ? 1 : 0, cyBottomHeight: 0)
+        // covers the frame by extending the frame one pixel into the client area. A
+        // borderless window gets a frame to extend (WS_THICKFRAME) while it wants a
+        // shadow; without a shadow nothing is extended and DWM draws no frame at all.
+        updateShadowFrameStyle()
+        let shadowFrame = usesCustomFrame && _chrome.hasShadow
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: shadowFrame ? 1 : 0, cyBottomHeight: 0)
         _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
         if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
+        }
+        // A borderless window shows no border line (macOS draws none), only the shadow;
+        // so the extended pixel of a translucent window stays invisible too.
+        setDwmAttribute(Win32Window.dwmwaBorderColor, _styleMask.contains(.titled) ? Win32Window.dwmColorDefault : Win32Window.dwmColorNone)
+        if NSView._traceInvalidation {
+            let frame = _styleMask.contains(.titled) ? "system caption" : isResizable ? "thick frame" : wantsShadowFrame(_styleMask) ? "shadow frame (WS_THICKFRAME added)" : "none"
+            NSView._trace("win32 chrome '\(_title)' shadow \(_chrome.hasShadow ? "on" : "off") frame \(frame) extended \(margins.cyTopHeight) px transparent \(_chrome.isTransparent)")
         }
 
         let backdrop: Int32
@@ -198,7 +259,9 @@ final class Win32Window: PlatformWindow {
         set {
             _styleMask = newValue
             guard let hwnd else { return }
-            let (style, ex) = Win32Backend.styles(for: newValue)
+            let style = windowStyle(for: newValue)
+            // The redirection-bitmap bit is creation-only: keep whatever the window has.
+            let ex = Win32Backend.styles(for: newValue).1 | (DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & Win32Window.wsExNoRedirectionBitmap)
             SetWindowLongPtrW(hwnd, GWL_STYLE, LONG_PTR(style))
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, LONG_PTR(ex))
             // WM_NCCALCSIZE re-runs for the new mask (custom frame or system caption).
@@ -252,7 +315,7 @@ final class Win32Window: PlatformWindow {
     /// which WM_NCCALCSIZE trims off the client area.
     private func nonClientInsets(dpi: UINT) -> (left: Int32, top: Int32, right: Int32, bottom: Int32) {
         if usesCustomFrame {
-            guard let hwnd, IsZoomed(hwnd), isResizable else { return (0, 0, 0, 0) }
+            guard let hwnd, IsZoomed(hwnd), hasThickFrame else { return (0, 0, 0, 0) }
             let padded = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
             let x = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + padded
             let y = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + padded
@@ -396,16 +459,37 @@ final class Win32Window: PlatformWindow {
             // under DirectComposition, so the DWM backdrop shows through unpainted pixels.
             // Windows hosting their layer tree (Milestone 9) need the same chain: the
             // visuals hang under its DirectComposition visual.
-            if _chrome.isTransparent || hostedScene != nil {
-                rt = cd2d_target_create_composition_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            let composition = _chrome.isTransparent || hostedScene != nil
+            // HDR (ADR-0016): on a monitor in HDR mode the chain is FP16 scRGB and the
+            // frames are scaled by the SDR white level; elsewhere 8-bit sRGB as before.
+            let monitor = MonitorFromWindow(hwnd, DWORD(MONITOR_DEFAULTTONEAREST))
+            let hdr = Win32Backend.displayHDR(for: monitor)
+            presentationMonitor = monitor
+            presentationSDRWhite = hdr.sdrWhiteNits
+            var options = CD2DSwapChainOptions(composition: composition, hdr: hdr.hdr, sdrWhiteNits: hdr.sdrWhiteNits)
+            var hdrRefused = false
+            rt = cd2d_target_create_swapchain_with_options(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi), &options)
+            if rt == nil, options.hdr {
+                hdrRefused = true
+                options.hdr = false
+                rt = cd2d_target_create_swapchain_with_options(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi), &options)
             }
-            if rt == nil {
-                rt = cd2d_target_create_swapchain(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            if rt == nil, composition {
+                options.composition = false
+                rt = cd2d_target_create_swapchain_with_options(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi), &options)
+            }
+            if NSView._traceInvalidation {
+                let chain = rt.map { cd2d_target_is_hdr($0) ? "hdr R16G16B16A16_FLOAT scRGB sdr white \(hdr.sdrWhiteNits) nits" : "sdr B8G8R8A8_UNORM sRGB" } ?? "none (HWND target)"
+                let colour = hdr.advancedColorEnabled ? "on" : hdr.advancedColorSupported ? "off" : "unsupported"
+                NSView._trace("win32 window '\(_title)' swap chain \(chain)\(hdrRefused ? " (HDR chain refused)" : "") \(options.composition ? "composition" : "hwnd") monitor \(currentDisplay?.localizedName ?? "?") colour space \(hdr.colorSpace) max \(hdr.maxLuminance) nits advanced colour \(colour) \(hdr.bitsPerColor) bpc")
             }
         }
         if rt == nil {
             // Legacy path, or no usable D3D11/DXGI device: the HWND render target still works.
             rt = cd2d_target_create_hwnd(factory, UnsafeMutableRawPointer(hwnd), width, height, Float(dpi))
+            if NSView._traceInvalidation, !Win32Window.useLegacyHwndTarget, (DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & Win32Window.wsExNoRedirectionBitmap) != 0 {
+                NSView._trace("win32 window '\(_title)' fell back to the HWND target without a redirection bitmap: its frames cannot reach the screen")
+            }
         }
         renderTarget = rt
         if Win32Window.reportsLiveObjects, let rt {
@@ -503,6 +587,31 @@ final class Win32Window: PlatformWindow {
     /// Nodes whose visual shows a swap chain instead of a surface (MTKView, M7).
     private var nativeContents: [Int: UnsafeMutableRawPointer] = [:]
     private var painting = false
+    /// The monitor the swap chain was made for, and the SDR white level it scales by:
+    /// a move to a monitor of the other kind (HDR / SDR) rebuilds the chain, a changed
+    /// white level on the same kind adjusts the scale (ADR-0016).
+    private var presentationMonitor: HMONITOR?
+    private var presentationSDRWhite: Float = 80
+
+    /// After a move, resize or display change: does the window's monitor still match the
+    /// chain it presents through?
+    private func checkPresentationMonitor(force: Bool = false) {
+        guard let hwnd, let rt = renderTarget, cd2d_target_is_swapchain(rt), !painting else { return }
+        let monitor = MonitorFromWindow(hwnd, DWORD(MONITOR_DEFAULTTONEAREST))
+        guard force || monitor != presentationMonitor else { return }
+        presentationMonitor = monitor
+        let hdr = Win32Backend.displayHDR(for: monitor)
+        if hdr.hdr != cd2d_target_is_hdr(rt) {
+            if NSView._traceInvalidation { NSView._trace("win32 window '\(_title)' monitor \(currentDisplay?.localizedName ?? "?") is \(hdr.hdr ? "HDR" : "SDR"): rebuilding the swap chain") }
+            discardRenderTarget()
+            setNeedsDisplay(nil)
+        } else if hdr.hdr, hdr.sdrWhiteNits != presentationSDRWhite {
+            if NSView._traceInvalidation { NSView._trace("win32 window '\(_title)' sdr white \(presentationSDRWhite) -> \(hdr.sdrWhiteNits) nits") }
+            presentationSDRWhite = hdr.sdrWhiteNits
+            cd2d_target_set_sdr_white_level(rt, hdr.sdrWhiteNits)
+            setNeedsDisplay(nil)
+        }
+    }
 
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
         guard let scene else { tearDownLayerHosting(); return true }
@@ -881,12 +990,20 @@ final class Win32Window: PlatformWindow {
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
             if reportedIconic { reportedIconic = false; owner?.platformWindowDidDeminiaturize() }
+            checkPresentationMonitor()
             return 0
         case WM_MOVE:
             if let hwnd, IsIconic(hwnd) { return 0 }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            checkPresentationMonitor()
             return 0
+        case WM_DISPLAYCHANGE:
+            // Monitors came, went or changed mode (HDR toggled): what the shim knows
+            // about them is stale.
+            cd2d_display_hdr_invalidate()
+            checkPresentationMonitor(force: true)
+            return nil
         case WM_DPICHANGED:
             // Keep the content size in points exact: size the frame from the point size at
             // the new DPI rather than taking the suggested rect's size (which rounds).

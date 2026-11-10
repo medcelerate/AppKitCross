@@ -1508,6 +1508,17 @@ static CMSwapChain *createSwapChain(CMDevice *d, CMQueue *queue, HWND hwnd, uint
     logf("swap chain created (%s, %ux%u, format %u, %u buffers)", composition ? "composition" : "hwnd", width, height, dxgiFormat, sc->bufferCount);
     logDeviceState(d, "after swap chain creation");
     if (hwnd) d->factory->MakeWindowAssociation(sc->hwnd, DXGI_MWA_NO_ALT_ENTER);
+    if (sc->format == DXGI_FORMAT_R16G16B16A16_FLOAT) {
+        // FP16 buffers are scRGB (linear, 709 primaries, 1.0 = 80 nits): say so, as the
+        // window's own HDR chain does (ADR-0016), so DWM composes them as HDR content.
+        UINT support = 0;
+        if (SUCCEEDED(sc->swapChain->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &support)) && (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)) {
+            HRESULT cs = sc->swapChain->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+            logf("swap chain colour space scRGB (G10 P709): 0x%08lX", cs);
+        } else {
+            logf("swap chain colour space scRGB not supported for presentation; left at the default");
+        }
+    }
     char error[256] = {};
     if (!acquireSwapChainBuffers(sc, error, sizeof error)) { logf("%s", error); cm_swapchain_release(sc); return nullptr; }
     logDeviceState(d, "after acquiring the back buffers");

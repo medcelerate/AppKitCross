@@ -51,6 +51,56 @@ CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint3
 /// begin_draw/end_draw/resize/set_dpi and all drawing calls work unchanged. Returns
 /// NULL when D3D11, DXGI 1.2 or DirectComposition is unavailable.
 CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi);
+/// Swap-chain presentation options beyond the two constructors above (HDR, ADR-0016).
+typedef struct CD2DSwapChainOptions {
+    /// A composition swap chain under DirectComposition (cd2d_target_create_composition_swapchain).
+    bool composition;
+    /// An HDR chain: DXGI_FORMAT_R16G16B16A16_FLOAT back buffers in scRGB
+    /// (DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, linear, 1.0 = 80 nits). Drawing is
+    /// unchanged: every frame still goes into the 8-bit sRGB canvas, which end_draw
+    /// converts to linear and scales by `sdrWhiteNits` / 80 on its way into the back
+    /// buffer, so the window's white matches the desktop's SDR white. Creation fails
+    /// (returns NULL) when the chain refuses the format or colour space; the caller then
+    /// creates the 8-bit chain instead.
+    bool hdr;
+    /// The monitor's SDR white level in nits (DISPLAYCONFIG_SDR_WHITE_LEVEL; 80 = none).
+    float sdrWhiteNits;
+} CD2DSwapChainOptions;
+CD2DTarget *cd2d_target_create_swapchain_with_options(CD2DFactory *factory, void *hwnd, uint32_t pixelWidth, uint32_t pixelHeight, float dpi, const CD2DSwapChainOptions *options);
+/// True when the target is an HDR (FP16 scRGB) swap chain.
+bool cd2d_target_is_hdr(CD2DTarget *target);
+/// Changes the SDR white level an HDR target scales its frames by (the user moved the
+/// SDR brightness slider, or the window moved to another HDR monitor). Ignored otherwise.
+void cd2d_target_set_sdr_white_level(CD2DTarget *target, float sdrWhiteNits);
+/// Whether a D3D11 device and DXGI 1.2 are available, so windows will present through a
+/// flip-model swap chain (and can be created with WS_EX_NOREDIRECTIONBITMAP, which only
+/// works at CreateWindowExW). Probed once; the answer is cached.
+bool cd2d_presentation_available(void);
+
+/// What a monitor's output reports about HDR (DXGI_OUTPUT_DESC1, DISPLAYCONFIG_*).
+typedef struct CD2DDisplayHDR {
+    /// The output's current DXGI_COLOR_SPACE_TYPE (12 = RGB_FULL_G2084_NONE_P2020 while
+    /// Windows HDR is on).
+    uint32_t colorSpace;
+    uint32_t bitsPerColor;
+    /// Luminances in nits from the output description.
+    float minLuminance, maxLuminance, maxFullFrameLuminance;
+    /// The SDR white level (DISPLAYCONFIG_SDR_WHITE_LEVEL) in nits; 80 when Windows
+    /// does not report one (HDR off).
+    float sdrWhiteNits;
+    /// DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO: the monitor can do HDR / HDR is on.
+    bool advancedColorSupported, advancedColorEnabled;
+    /// The decision: present this monitor's windows through an HDR chain (the colour
+    /// space is G2084/P2020, or advanced colour is on and the panel exceeds 80 nits).
+    /// `APPKITWIN_HDR=0` forces false, `APPKITWIN_HDR=1` forces true.
+    bool hdr;
+} CD2DDisplayHDR;
+/// Fills `out` for the monitor (an HMONITOR cast to void*). Returns false when the
+/// monitor has no DXGI output (a remote session, no adapter); `out` then describes an
+/// SDR display. Answers are cached for a second per monitor.
+bool cd2d_display_hdr_info(void *hmonitor, CD2DDisplayHDR *out);
+/// Forgets the cached answers (WM_DISPLAYCHANGE).
+void cd2d_display_hdr_invalidate(void);
 /// True when the target presents through a swap chain (created with
 /// cd2d_target_create_swapchain or cd2d_target_create_composition_swapchain).
 bool cd2d_target_is_swapchain(CD2DTarget *target);

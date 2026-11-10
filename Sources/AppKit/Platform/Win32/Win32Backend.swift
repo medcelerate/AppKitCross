@@ -92,11 +92,32 @@ final class Win32Backend: PlatformBackend {
         let name = withUnsafePointer(to: &info.szDevice) { p -> String in
             p.withMemoryRebound(to: WCHAR.self, capacity: 32) { String(decodingCString: $0, as: UTF16.self) }
         }
+        let edr = extendedDynamicRange(for: hMonitor)
         return PlatformDisplay(
             frame: appKitRect(info.rcMonitor, scale: scale, primaryHeight: primaryHeight),
             visibleFrame: appKitRect(info.rcWork, scale: scale, primaryHeight: primaryHeight),
             backingScaleFactor: scale, localizedName: name,
-            isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0)
+            isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0,
+            maximumEDRValue: edr.current, maximumPotentialEDRValue: edr.potential, maximumReferenceEDRValue: 0)
+    }
+
+    /// What the monitor reports about HDR (DXGI output description, SDR white level and
+    /// advanced-colour state through the shim; cached there for a second).
+    static func displayHDR(for hMonitor: HMONITOR?) -> CD2DDisplayHDR {
+        var info = CD2DDisplayHDR()
+        _ = cd2d_display_hdr_info(hMonitor.map { UnsafeMutableRawPointer($0) }, &info)
+        return info
+    }
+
+    /// `NSScreen`'s EDR headroom: colour component 1.0 is the SDR white level, so the
+    /// headroom is the panel's peak luminance over that level while HDR is on (1 while
+    /// it is off: nothing brighter than white can be shown), and what it would be with
+    /// HDR on for a monitor that supports it. Windows has no reference modes.
+    static func extendedDynamicRange(for hMonitor: HMONITOR) -> (current: CGFloat, potential: CGFloat) {
+        let hdr = displayHDR(for: hMonitor)
+        let white = hdr.sdrWhiteNits > 0 ? CGFloat(hdr.sdrWhiteNits) : 80
+        let headroom = max(1, CGFloat(hdr.maxLuminance) / white)
+        return (hdr.hdr ? headroom : 1, hdr.advancedColorSupported || hdr.hdr ? headroom : 1)
     }
 
     var displays: [PlatformDisplay] {

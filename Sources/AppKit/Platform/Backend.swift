@@ -20,12 +20,23 @@ public struct PlatformDisplay: Sendable {
     public var backingScaleFactor: CGFloat
     public var localizedName: String
     public var isMain: Bool
-    public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool) {
+    /// Extended dynamic range (`NSScreen.maximumExtendedDynamicRangeColorComponentValue`
+    /// and friends): the largest colour component value the display shows now, the
+    /// largest it could show (HDR off but supported), and the largest in a reference
+    /// mode (0 when the display has none). 1 / 1 / 0 for an SDR display.
+    public var maximumEDRValue: CGFloat
+    public var maximumPotentialEDRValue: CGFloat
+    public var maximumReferenceEDRValue: CGFloat
+    public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool,
+                maximumEDRValue: CGFloat = 1, maximumPotentialEDRValue: CGFloat = 1, maximumReferenceEDRValue: CGFloat = 0) {
         self.frame = frame
         self.visibleFrame = visibleFrame
         self.backingScaleFactor = backingScaleFactor
         self.localizedName = localizedName
         self.isMain = isMain
+        self.maximumEDRValue = maximumEDRValue
+        self.maximumPotentialEDRValue = maximumPotentialEDRValue
+        self.maximumReferenceEDRValue = maximumReferenceEDRValue
     }
 }
 
