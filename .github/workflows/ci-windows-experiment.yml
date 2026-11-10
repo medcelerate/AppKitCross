@@ -1,0 +1,92 @@
+name: Windows runner experiment
+
+# Temporary: experiments for docs/ci-windows-runner.md. Builds AppKit from scratch on the
+# CI runner with the frontend monitor, Windows Error Reporting dumps and the event logs.
+on:
+  push:
+    branches: ['claude/ci-runner-rootcause-*']
+  workflow_dispatch:
+
+concurrency:
+  group: winexp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appkit:
+    name: AppKit from scratch (${{ matrix.variant }} ${{ matrix.rep }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [control]
+        rep: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.2-release
+          tag: 6.2-RELEASE
+      - name: Runner facts (page file, Defender, WER)
+        shell: pwsh
+        run: |
+          Get-CimInstance Win32_ComputerSystem | Select-Object AutomaticManagedPagefile,TotalPhysicalMemory,NumberOfLogicalProcessors | Format-List
+          Get-CimInstance Win32_PageFileSetting | Format-List
+          Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize,CurrentUsage,PeakUsage | Format-List
+          Get-CimInstance Win32_OperatingSystem | Select-Object TotalVirtualMemorySize,FreeVirtualMemory,TotalVisibleMemorySize,FreePhysicalMemory | Format-List
+          try { Get-MpComputerStatus | Select-Object AMRunningMode,RealTimeProtectionEnabled,OnAccessProtectionEnabled | Format-List } catch { "Defender: $_" }
+          try { (Get-MpPreference).ExclusionPath } catch {}
+          Get-Service WerSvc | Format-List Name,Status,StartType
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -ErrorAction SilentlyContinue | Format-List
+      - name: Enable crash dumps and the frontend monitor
+        shell: pwsh
+        run: |
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Path $k -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpFolder -PropertyType ExpandString -Value "$env:RUNNER_TEMP\dumps" -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpType -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpCount -PropertyType DWord -Value 10 -Force | Out-Null
+          New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name DontShowUI -PropertyType DWord -Value 1 -Force | Out-Null
+          New-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name Disabled -PropertyType DWord -Value 0 -Force | Out-Null
+          Set-Service WerSvc -StartupType Manual; Start-Service WerSvc
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\dumps" | Out-Null
+          Start-Process pwsh -ArgumentList '-NoProfile','-File',"$pwd\tools\windows\frontend-monitor.ps1",'-Out',"$env:RUNNER_TEMP\frontends" -WindowStyle Hidden
+      - name: Build AppKit from scratch
+        id: build
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          flags=(-c debug -j 2)
+          start=$(date +%s)
+          status=0
+          swift build "${flags[@]}" --target AppKit -v > build.log 2>&1 || status=$?
+          echo "status=$status after $(( $(date +%s) - start ))s"
+          tr -d '\r' < build.log | grep -aE "^\[[0-9]+/[0-9]+\] (Emitting module AppKit|Compiling AppKit Unimplemented)|error:|Build complete|exit code|exception|signal" | grep -avE "warning:|^\s*[0-9]* *\|" | head -20
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: What the frontends and Windows said
+        if: always()
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 2
+          "== frontends (exit codes and peaks)"; Get-Content "$env:RUNNER_TEMP\frontends\frontends.csv"
+          "== peak system commit"; Import-Csv "$env:RUNNER_TEMP\frontends\samples.csv" | Sort-Object { [int]$_.commitMB } -Descending | Select-Object -First 3 | Format-Table
+          "== dumps"; Get-ChildItem "$env:RUNNER_TEMP\dumps" -ErrorAction SilentlyContinue | Format-Table Name,Length
+          "== Application log: crashes"
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001, 1026 } -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
+          "== System log: resource exhaustion and page file"
+          Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-Resource-Exhaustion-Detector' } -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
+          Get-WinEvent -FilterHashtable @{ LogName = 'System'; Level = 1, 2 } -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Id,Message
+          "== Defender detections"; try { Get-MpThreatDetection | Format-List } catch {}
+          Copy-Item build.log "$env:RUNNER_TEMP\frontends\" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: winexp-${{ matrix.variant }}-${{ matrix.rep }}
+          path: |
+            ${{ runner.temp }}/frontends
+            ${{ runner.temp }}/dumps
+          retention-days: 7
+      - name: Verdict
+        shell: bash
+        run: test "${{ steps.build.outputs.status }}" = 0
