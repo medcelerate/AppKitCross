@@ -79,6 +79,8 @@ public protocol PlatformBackend: AnyObject {
     func contentRect(forFrameRect frameRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect
     /// Drags to and from other applications (see DragDrop.swift); nil when the platform has none.
     var dragDrop: (any PlatformDragDrop)? { get }
+    /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
+    var statusItems: (any PlatformStatusItemHost)? { get }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.

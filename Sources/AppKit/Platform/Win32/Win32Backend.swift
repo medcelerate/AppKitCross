@@ -28,6 +28,9 @@ final class Win32Backend: PlatformBackend {
     /// OLE drag and drop (Win32DragDrop.swift).
     private(set) var win32DragDrop: Win32DragDrop!
     var dragDrop: (any PlatformDragDrop)? { win32DragDrop }
+    /// The notification area (Win32StatusItem.swift).
+    private(set) var win32StatusItems: Win32StatusItems?
+    var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
@@ -50,6 +53,7 @@ final class Win32Backend: PlatformBackend {
         registerClasses()
         createMessageWindow()
         win32DragDrop = Win32DragDrop(backend: self)
+        if let hwnd = messageWindow { win32StatusItems = Win32StatusItems(backend: self, hwnd: hwnd) }
     }
 
     // MARK: Nested loops owned by the system
@@ -497,6 +501,17 @@ final class Win32Backend: PlatformBackend {
             if ptr != 0 {
                 let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
                 MainActor.assumeIsolated { backend.serviceWhileNested() }
+            }
+            return 0
+        }
+        if msg == Win32StatusItems.callbackMessage || msg == Win32StatusItems.taskbarCreated || msg == UINT(WM_KILLFOCUS) {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                MainActor.assumeIsolated {
+                    if msg == UINT(WM_KILLFOCUS) { backend.win32StatusItems?.foregroundLost() }
+                    else { backend.win32StatusItems?.handle(message: msg, wParam: wParam, lParam: lParam) }
+                }
             }
             return 0
         }
