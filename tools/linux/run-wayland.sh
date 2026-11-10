@@ -55,6 +55,22 @@ echo "frame trace: ${FRAME_LINE:-<no 500x400 frame line>}"
 if [ "$CSD_RECT" != "500x400" ] || [ -z "$FRAME_LINE" ]; then
     echo "FAIL: the window geometry does not match the compositor's rectangle"; grep -E "frame|unimplemented|Fatal" /tmp/hellowindow-wayland-csd.log | tail -5; kill $SWAY; exit 1
 fi
+# A sheet under sway (ADR-0019): the alert is a wl_subsurface of the window, so sway's tree
+# holds one AppKitCross toplevel, not two, and the screenshot shows the alert over the window.
+echo "== Sheets --alert under sway (the sheet is a subsurface of its window)"
+APPKITWIN_TRACE=1 ./.build/debug/Sheets --alert >/tmp/sheets-wayland.log 2>&1 &
+APP=$!
+sleep 3
+if ! kill -0 $APP 2>/dev/null; then echo "Sheets exited:"; cat /tmp/sheets-wayland.log; kill $SWAY; exit 1; fi
+grim /tmp/sheets-linux-wayland.png
+TOPLEVELS=$(swaymsg -t get_tree | jq -r '[.. | select(.app_id? == "AppKitCross")] | length')
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+echo "screenshot: /tmp/sheets-linux-wayland.png ($(stat -c %s /tmp/sheets-linux-wayland.png) bytes); AppKitCross toplevels in sway's tree: $TOPLEVELS"
+grep -E "wayland sheet|unimplemented|Fatal" /tmp/sheets-wayland.log | head -3
+if [ "$TOPLEVELS" != "1" ] || ! grep -q "wayland sheet .* subsurface of" /tmp/sheets-wayland.log; then
+    echo "FAIL: the sheet is not a subsurface of its window"; kill $SWAY; exit 1
+fi
 # The Metal tab on the Vulkan device (ADR-0012), presented through a VkSwapchainKHR on a
 # subsurface of the Wayland window; the log lines are as in run.sh (device, then corner and
 # centre pixels every 30 frames and the presentation path), and the screenshot must show
