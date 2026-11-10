@@ -456,7 +456,7 @@ final class Win32Backend: PlatformBackend {
         bgra.withUnsafeBytes { src in bits.copyMemory(from: src.baseAddress!, byteCount: width * height * 4) }
         let mask = CreateBitmap(Int32(width), Int32(height), 1, 1, nil)
         var info = ICONINFO()
-        info.fIcon = isIcon
+        info.fIcon = WindowsBool(isIcon)
         info.xHotspot = DWORD(hotSpot.0)
         info.yHotspot = DWORD(hotSpot.1)
         info.hbmMask = mask
