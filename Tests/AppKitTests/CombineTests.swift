@@ -378,4 +378,287 @@ final class CombineTests: XCTestCase, @unchecked Sendable {
         spin { later }
         XCTAssertTrue(later)
     }
+
+    // MARK: collect(.byTime) / collect(.byTimeOrCount)
+    //
+    // Driven by `VirtualTimeScheduler`, so the same expectations run against Apple's
+    // Combine on macOS (where they were first observed) and the port elsewhere.
+
+    private final class ArraySubscriber: Subscriber {
+        typealias Input = [Int]
+        typealias Failure = TestError
+        let initialDemand: Subscribers.Demand
+        var subscription: Subscription?
+        var values: [[Int]] = []
+        var completion: Subscribers.Completion<TestError>?
+        init(initialDemand: Subscribers.Demand) { self.initialDemand = initialDemand }
+        func receive(subscription: Subscription) {
+            self.subscription = subscription
+            subscription.request(initialDemand)
+        }
+        func receive(_ input: [Int]) -> Subscribers.Demand { values.append(input); return .none }
+        func receive(completion: Subscribers.Completion<TestError>) { self.completion = completion }
+    }
+
+    func testCollectByTimeEmitsEachInterval() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        let sub = ArraySubscriber(initialDemand: .unlimited)
+        subject.collect(.byTime(scheduler, .seconds(1))).subscribe(sub)
+        XCTAssertEqual(scheduler.activeTimers, 1)        // the timer starts on subscription
+        subject.send(1); subject.send(2)
+        scheduler.advance(by: .milliseconds(999))
+        XCTAssertEqual(sub.values, [])
+        scheduler.advance(by: .milliseconds(1))
+        XCTAssertEqual(sub.values, [[1, 2]])
+        scheduler.advance(by: .seconds(1))               // empty interval: nothing sent
+        XCTAssertEqual(sub.values, [[1, 2]])
+        subject.send(3)
+        subject.send(completion: .finished)
+        XCTAssertEqual(scheduler.activeTimers, 0)        // completion stops the timer
+        XCTAssertNil(sub.completion)                     // flush and completion go through the scheduler
+        scheduler.advance(by: 0)
+        XCTAssertEqual(sub.values, [[1, 2], [3]])
+        XCTAssertEqual(sub.completion, .finished)
+    }
+
+    func testCollectByTimeFailureDropsBuffer() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        let sub = ArraySubscriber(initialDemand: .unlimited)
+        subject.collect(.byTime(scheduler, .seconds(1))).subscribe(sub)
+        subject.send(1)
+        subject.send(completion: .failure(TestError()))
+        scheduler.advance(by: .seconds(2))
+        XCTAssertEqual(sub.values, [])
+        XCTAssertEqual(sub.completion, .failure(TestError()))
+    }
+
+    func testCollectByTimeWaitsForDemand() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        let sub = ArraySubscriber(initialDemand: .max(1))
+        subject.collect(.byTime(scheduler, .seconds(1))).subscribe(sub)
+        subject.send(1)
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1]])
+        subject.send(2)
+        scheduler.advance(by: .seconds(1))               // no demand: the buffer is kept
+        XCTAssertEqual(sub.values, [[1]])
+        subject.send(3)
+        sub.subscription?.request(.max(1))
+        XCTAssertEqual(sub.values, [[1]])                // sent on the next interval, not at once
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1], [2, 3]])
+        subject.send(4)
+        subject.send(completion: .finished)              // finishing flushes even without demand
+        scheduler.advance(by: 0)
+        XCTAssertEqual(sub.values, [[1], [2, 3], [4]])
+        XCTAssertEqual(sub.completion, .finished)
+    }
+
+    func testCollectByTimeOrCount() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        let sub = ArraySubscriber(initialDemand: .unlimited)
+        subject.collect(.byTimeOrCount(scheduler, .seconds(1), 2)).subscribe(sub)
+        subject.send(1); subject.send(2)
+        XCTAssertEqual(sub.values, [])                   // a full buffer is sent through the scheduler
+        scheduler.advance(by: 0)
+        XCTAssertEqual(sub.values, [[1, 2]])
+        subject.send(3)
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1, 2], [3]])
+        subject.send(4); subject.send(5); subject.send(6)
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1, 2], [3], [4, 5], [6]])
+    }
+
+    func testCollectByTimeOrCountRequestsCountPerDemand() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        var requests: [Subscribers.Demand] = []
+        let sub = ArraySubscriber(initialDemand: .max(1))
+        subject.handleEvents(receiveRequest: { requests.append($0) })
+            .collect(.byTimeOrCount(scheduler, .seconds(1), 2))
+            .subscribe(sub)
+        XCTAssertEqual(requests, [.max(2)])
+        subject.send(1); subject.send(2)
+        subject.send(3)                                  // beyond upstream demand: the subject drops it
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1, 2]])
+        sub.subscription?.request(.max(2))
+        XCTAssertEqual(requests, [.max(2), .max(4)])
+        subject.send(4)
+        scheduler.advance(by: .seconds(1))
+        XCTAssertEqual(sub.values, [[1, 2], [4]])
+        subject.send(completion: .finished)
+        scheduler.advance(by: 0)
+        XCTAssertEqual(sub.completion, .finished)
+    }
+
+    func testCollectByTimeCancelStopsTimer() {
+        let scheduler = VirtualTimeScheduler()
+        let subject = PassthroughSubject<Int, TestError>()
+        let sub = ArraySubscriber(initialDemand: .unlimited)
+        subject.collect(.byTime(scheduler, .seconds(1))).subscribe(sub)
+        subject.send(1)
+        XCTAssertEqual(scheduler.activeTimers, 1)
+        sub.subscription?.cancel()
+        XCTAssertEqual(scheduler.activeTimers, 0)
+        scheduler.advance(by: .seconds(3))
+        subject.send(2)
+        XCTAssertEqual(sub.values, [])
+        XCTAssertNil(sub.completion)
+    }
+
+    func testCollectByTimeOnRunLoop() {
+        var batches: [[Int]] = []
+        var finished = false
+        let subject = PassthroughSubject<Int, Never>()
+        let c = subject.collect(.byTime(RunLoop.main, .milliseconds(30)))
+            .sink(receiveCompletion: { _ in finished = true }, receiveValue: { batches.append($0) })
+        subject.send(1); subject.send(2)
+        spin { !batches.isEmpty }
+        XCTAssertEqual(batches, [[1, 2]])
+        subject.send(3)
+        subject.send(completion: .finished)
+        spin { finished }
+        XCTAssertEqual(batches, [[1, 2], [3]])
+        c.cancel()
+    }
+
+    /// Full buffers, the final flush and the completion are scheduled on a concurrent
+    /// queue; the port delivers them in order (like its Delay). Apple's Combine makes no
+    /// such promise on a concurrent queue, so this checks the port only.
+    func testCollectByTimeOrCountKeepsOrderOnConcurrentQueue() throws {
+        #if canImport(Darwin)
+        throw XCTSkip("Apple's Combine does not order deliveries on a concurrent queue")
+        #endif
+        for _ in 0..<20 {
+            let expectation = expectation(description: "completed")
+            let lock = NSLock()
+            var batches: [[Int]] = []
+            let subject = PassthroughSubject<Int, Never>()
+            let c = subject.collect(.byTimeOrCount(DispatchQueue.global(), .milliseconds(5), 3))
+                .sink(receiveCompletion: { _ in expectation.fulfill() },
+                      receiveValue: { batch in lock.lock(); batches.append(batch); lock.unlock() })
+            for i in 0..<300 { subject.send(i) }
+            subject.send(completion: .finished)
+            wait(for: [expectation], timeout: 30)
+            lock.lock()
+            XCTAssertEqual(batches.flatMap { $0 }, Array(0..<300))
+            XCTAssertTrue(batches.allSatisfy { !$0.isEmpty && $0.count <= 3 })
+            lock.unlock()
+            c.cancel()
+        }
+    }
+
+    // MARK: Optional.Publisher / Result.Publisher (Apple's spelling, no OCombine namespace)
+
+    func testOptionalAndResultPublisherTypes() {
+        let optional: Optional<Int>.Publisher = Optional(3).publisher
+        let result: Result<Int, TestError>.Publisher = Result<Int, TestError>.success(4).publisher
+        var values: [Int] = []
+        let c1 = optional.sink { values.append($0) }
+        let c2 = result.sink(receiveCompletion: { _ in }, receiveValue: { values.append($0) })
+        let failed: Result<Int, TestError>.Publisher = .init(TestError())
+        var failure: Subscribers.Completion<TestError>?
+        let c3 = failed.sink(receiveCompletion: { failure = $0 }, receiveValue: { _ in })
+        XCTAssertEqual(values, [3, 4])
+        XCTAssertEqual(failure, .failure(TestError()))
+        XCTAssertEqual(Optional<Int>.none.publisher, Optional<Int>.Publisher(nil))
+        c1.cancel(); c2.cancel(); c3.cancel()
+    }
+}
+
+private struct TestError: Error, Equatable {}
+
+/// A scheduler whose clock moves only when a test advances it. Work runs in time order
+/// (insertion order for equal times); repeating work reschedules itself until cancelled.
+private final class VirtualTimeScheduler: Scheduler {
+    struct SchedulerTimeType: Strideable, Hashable {
+        var nanoseconds: Int
+
+        func distance(to other: Self) -> Stride { Stride(other.nanoseconds - nanoseconds) }
+        func advanced(by n: Stride) -> Self { Self(nanoseconds: nanoseconds + n.magnitude) }
+        static func < (a: Self, b: Self) -> Bool { a.nanoseconds < b.nanoseconds }
+
+        struct Stride: SchedulerTimeIntervalConvertible, Comparable, SignedNumeric, Hashable {
+            var magnitude: Int
+            init(_ value: Int) { magnitude = value }
+            init(integerLiteral value: Int) { magnitude = value }
+            init?<T: BinaryInteger>(exactly source: T) {
+                guard let value = Int(exactly: source) else { return nil }
+                magnitude = value
+            }
+            static func seconds(_ s: Int) -> Stride { Stride(s * 1_000_000_000) }
+            static func seconds(_ s: Double) -> Stride { Stride(Int(s * 1e9)) }
+            static func milliseconds(_ ms: Int) -> Stride { Stride(ms * 1_000_000) }
+            static func microseconds(_ us: Int) -> Stride { Stride(us * 1_000) }
+            static func nanoseconds(_ ns: Int) -> Stride { Stride(ns) }
+            static func < (a: Stride, b: Stride) -> Bool { a.magnitude < b.magnitude }
+            static func + (a: Stride, b: Stride) -> Stride { Stride(a.magnitude + b.magnitude) }
+            static func - (a: Stride, b: Stride) -> Stride { Stride(a.magnitude - b.magnitude) }
+            static func * (a: Stride, b: Stride) -> Stride { Stride(a.magnitude * b.magnitude) }
+            static func += (a: inout Stride, b: Stride) { a = a + b }
+            static func -= (a: inout Stride, b: Stride) { a = a - b }
+            static func *= (a: inout Stride, b: Stride) { a = a * b }
+        }
+    }
+    typealias SchedulerOptions = Never
+
+    private(set) var now = SchedulerTimeType(nanoseconds: 0)
+    var minimumTolerance: SchedulerTimeType.Stride { 0 }
+    private(set) var activeTimers = 0
+    private var sequence = 0
+    private var queue: [(time: SchedulerTimeType, order: Int, work: () -> Void)] = []
+
+    private func enqueue(_ time: SchedulerTimeType, _ work: @escaping () -> Void) {
+        sequence += 1
+        queue.append((time, sequence, work))
+    }
+
+    func schedule(options: Never?, _ action: @escaping () -> Void) {
+        enqueue(now, action)
+    }
+
+    func schedule(after date: SchedulerTimeType, tolerance: SchedulerTimeType.Stride,
+                  options: Never?, _ action: @escaping () -> Void) {
+        enqueue(date, action)
+    }
+
+    func schedule(after date: SchedulerTimeType, interval: SchedulerTimeType.Stride,
+                  tolerance: SchedulerTimeType.Stride, options: Never?,
+                  _ action: @escaping () -> Void) -> Cancellable {
+        final class Flag { var cancelled = false }
+        let flag = Flag()
+        activeTimers += 1
+        func fire(at time: SchedulerTimeType) {
+            enqueue(time) {
+                guard !flag.cancelled else { return }
+                action()
+                fire(at: time.advanced(by: interval))
+            }
+        }
+        fire(at: date)
+        return AnyCancellable { [weak self] in
+            guard !flag.cancelled else { return }
+            flag.cancelled = true
+            self?.activeTimers -= 1
+        }
+    }
+
+    /// Runs everything due up to `now + stride`, then moves the clock there.
+    func advance(by stride: SchedulerTimeType.Stride) {
+        let target = now.advanced(by: stride)
+        while let index = queue.indices
+            .filter({ queue[$0].time.nanoseconds <= target.nanoseconds })
+            .min(by: { (queue[$0].time.nanoseconds, queue[$0].order) < (queue[$1].time.nanoseconds, queue[$1].order) }) {
+            let item = queue.remove(at: index)
+            if item.time.nanoseconds > now.nanoseconds { now = item.time }
+            item.work()
+        }
+        now = target
+    }
 }
