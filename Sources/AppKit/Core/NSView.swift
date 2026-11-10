@@ -64,7 +64,7 @@ import CoreText
     private var _postsBoundsChangedNotifications = false
     private var _focusRingType: NSFocusRingType = .default
     private var _layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy = .never
-    private var _userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection = .leftToRight
+    private var _userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection?   // nil: inherited
     private var _frameRotation: CGFloat = 0
     private var _boundsRotation: CGFloat = 0
     private var _preparedContentRect: NSRect? = nil
@@ -1493,8 +1493,15 @@ import CoreText
     @MainActor open func updateTrackingAreas() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/userinterfacelayoutdirection
     @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
-        get { _userInterfaceLayoutDirection }
-        set { _userInterfaceLayoutDirection = newValue }
+        get { _userInterfaceLayoutDirection ?? superview?.userInterfaceLayoutDirection ?? NSApplication._resolvedLayoutDirection }
+        set {
+            guard newValue != _userInterfaceLayoutDirection else { return }
+            _userInterfaceLayoutDirection = newValue
+            // Leading and trailing edges swap sides: constraints and layout run again.
+            _setNeedsConstraintLayout()
+            needsLayout = true
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/viewdidchangebackingproperties()
     @MainActor open func viewDidChangeBackingProperties() { }

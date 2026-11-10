@@ -321,7 +321,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             switch style?.alignment ?? .natural {
             case .center: flush = 0.5
             case .right: flush = 1
-            default: flush = 0
+            case .left: flush = 0
+            default: flush = style?.baseWritingDirection == .rightToLeft ? 1 : 0   // natural follows the paragraph's direction
             }
             let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
             let flushOffset = max(0, width - (lineWidth - trailing)) * flush
@@ -548,7 +549,10 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         for f in _fragments where f.container == ci { r = r.union(f.usedRect) }
         if _extraContainer == ci { r = r.union(_extraUsedRect) }
         if r.isNull { return .zero }
-        return NSRect(x: 0, y: 0, width: r.maxX, height: r.maxY)
+        // The union of the fragments' used rects, as AppKit reports it: its origin is the
+        // leftmost glyph run, so right-aligned text in a wide container measures its own
+        // width rather than the container's.
+        return NSRect(x: r.minX, y: 0, width: r.width, height: r.maxY)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/boundingrect(forglyphrange:in:)
     open func boundingRect(forGlyphRange glyphRange: NSRange, in container: NSTextContainer) -> NSRect {

@@ -49,7 +49,7 @@ Animation, Metal, the text system and the SwiftUI runtime are in place and verif
 Windows 11 machine and in a Linux container; the macOS build is headless and runs the test
 suite against Apple's own frameworks as the specification.
 
-Not there yet: right-to-left layout, Wayland client-side decorations, Metal presentation on Linux,
+Not there yet: Wayland client-side decorations, Metal presentation on Linux,
 accessibility. The full milestone table is
 in [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
 lists every type with what is implemented.
