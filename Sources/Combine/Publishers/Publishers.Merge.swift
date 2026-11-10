@@ -2,7 +2,7 @@
 //  Publishers.Merge.swift
 //  Combine (ported from OpenCombine)
 //
-//  AppKitWin addition: OpenCombine 0.14.0 lists Merge/MergeMany in its remaining
+//  AppKitCross addition: OpenCombine 0.14.0 lists Merge/MergeMany in its remaining
 //  interface and does not implement them. The declarations below are Apple's; the
 //  implementation is shared by all arities through `MergeInner`, which subscribes to the
 //  type-erased upstreams, interleaves their values, buffers while downstream demand is

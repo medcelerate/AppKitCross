@@ -312,7 +312,7 @@ final class CombineTests: XCTestCase, @unchecked Sendable {
     // MARK: Foundation integration
 
     func testNotificationCenterPublisher() {
-        let name = Notification.Name("AppKitWinCombineTest")
+        let name = Notification.Name("AppKitCrossCombineTest")
         let sender = Counter()
         var names: [String] = []
         let c = NotificationCenter.default.publisher(for: name, object: sender)

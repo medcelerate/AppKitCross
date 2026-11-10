@@ -44,7 +44,7 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
 
     private static func system(_ size: CGFloat, weight: CGFloat = 0, monospaced: Bool = false) -> NSFont {
         guard let f = make(family: nil, size: size, weight: weight, monospaced: monospaced) else {
-            fatalError("AppKitWin: the platform text backend has no system font")
+            fatalError("AppKitCross: the platform text backend has no system font")
         }
         return f
     }

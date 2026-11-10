@@ -1,4 +1,4 @@
-# Third-party SwiftUI libraries on AppKitWin
+# Third-party SwiftUI libraries on AppKitCross
 
 How eight popular open-source SwiftUI packages fare when built against this package's
 `SwiftUI` instead of Apple's, measured by `Examples/LibraryCompat` (one tab per library)
@@ -6,7 +6,7 @@ and `tools/library-compat.sh --probe` (each library built on its own, first erro
 recorded). The point of the exercise is the last section: the concrete API gaps the
 libraries ran into, which are the port's to-do list for library compatibility.
 
-"macOS" below means the macOS host build compiling the library against AppKitWin's
+"macOS" below means the macOS host build compiling the library against AppKitCross's
 SwiftUI (the script raises every deployment target to 14.0 so the compiler accepts the
 mix), not Apple's SwiftUI, where all of them build by definition. Results as of
 2026-11-04, Swift 6.2 on macOS and in the Linux container, Swift 6.2/6.4 on Windows.
@@ -52,10 +52,10 @@ the pull request.
 
 ## How the example is built
 
-The third-party packages do not depend on AppKitWin, so three things are needed before
+The third-party packages do not depend on AppKitCross, so three things are needed before
 `import SwiftUI` in one of them resolves to the port (all in `tools/library-compat.sh`):
 
-1. AppKitWin's `SwiftUI` (and on Windows and Linux `ImageIO`) must already be in the
+1. AppKitCross's `SwiftUI` (and on Windows and Linux `ImageIO`) must already be in the
    build's `Modules` directory: `swift build --target SwiftUI`, then `swift build`.
 2. Every compile gets the C shim module maps (`-Xcc -fmodule-map-file=…` for `CCairo`,
    `CD2D`, …) and on Linux the pkg-config include paths, because a client of `AppKit`

@@ -86,7 +86,7 @@ public enum PlatformAudio {
         if requested == nil || requested == "alsa", let alsa = ALSAAudioBackend.makeIfAvailable() { return alsa }
         #endif
         if let requested, requested != "null" {
-            FileHandle.standardError.write("AppKitWin audio: backend '\(requested)' is unavailable, using the null backend\n".data(using: .utf8)!)
+            FileHandle.standardError.write("AppKitCross audio: backend '\(requested)' is unavailable, using the null backend\n".data(using: .utf8)!)
         }
         return NullAudioBackend()
     }

@@ -1,11 +1,11 @@
 // swift-tools-version:6.0
 // LibraryCompat: a compatibility example that builds popular third-party SwiftUI packages
-// against AppKitWin's SwiftUI and reports how well they work (docs/compatibility/
+// against AppKitCross's SwiftUI and reports how well they work (docs/compatibility/
 // swiftui-libraries.md). It is a package of its own so the core package stays
 // dependency-free.
 //
 // Build with tools/library-compat.sh: the third-party packages do not declare a dependency
-// on AppKitWin, so its modules must already be in the build's Modules directory when they
+// on AppKitCross, so its modules must already be in the build's Modules directory when they
 // compile, which takes two steps (`swift build --target SwiftUI`, then `swift build`), and
 // on macOS a deployment-target override.
 //
@@ -17,8 +17,8 @@ import PackageDescription
 // A probe leaves a partial module behind for a library that failed, so `canImport` is not
 // enough: each linked library also defines HAS_<NAME> for the source.
 var linked: [Target.Dependency] = [
-    .product(name: "AppKit", package: "AppKitWin"),
-    .product(name: "SwiftUI", package: "AppKitWin"),
+    .product(name: "AppKit", package: "AppKitCross"),
+    .product(name: "SwiftUI", package: "AppKitCross"),
     // Build on macOS (the host build against this SwiftUI), Windows and Linux.
     .product(name: "Shimmer", package: "SwiftUI-Shimmer"),
     .product(name: "ConfettiSwiftUI", package: "ConfettiSwiftUI"),
@@ -41,9 +41,9 @@ defines += [.define("HAS_WRAPPINGHSTACK"), .define("HAS_DEFAULTS"), .define("HAS
 #else
 linked += [
     // The modules Apple's AppKit re-exports and the libraries import by name.
-    .product(name: "ImageIO", package: "AppKitWin"),
-    .product(name: "UniformTypeIdentifiers", package: "AppKitWin"),
-    .product(name: "Combine", package: "AppKitWin"),
+    .product(name: "ImageIO", package: "AppKitCross"),
+    .product(name: "UniformTypeIdentifiers", package: "AppKitCross"),
+    .product(name: "Combine", package: "AppKitCross"),
 ]
 #endif
 // Not linked anywhere (see the report):
@@ -55,7 +55,7 @@ let package = Package(
     name: "LibraryCompat",
     platforms: [.macOS(.v14)],
     dependencies: [
-        .package(name: "AppKitWin", path: "../.."),
+        .package(name: "AppKitCross", path: "../.."),
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", exact: "2.4.1"),
         .package(url: "https://github.com/siteline/swiftui-introspect", exact: "27.1.0"),
         .package(url: "https://github.com/simibac/ConfettiSwiftUI", exact: "3.0.0"),

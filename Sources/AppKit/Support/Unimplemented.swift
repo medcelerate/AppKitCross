@@ -4,7 +4,7 @@
 /// Terminates with a message naming the unimplemented AppKit symbol.
 @inline(never)
 public func unimplemented(_ symbol: String = #function, file: StaticString = #fileID, line: UInt = #line) -> Never {
-    fatalError("AppKitWin: `\(symbol)` is not implemented yet", file: file, line: line)
+    fatalError("AppKitCross: `\(symbol)` is not implemented yet", file: file, line: line)
 }
 
 /// Default body for an optional protocol requirement whose AppKit default behaviour is
@@ -13,5 +13,5 @@ public func unimplemented(_ symbol: String = #function, file: StaticString = #fi
 /// extension provides the real AppKit default.
 @inline(never)
 public func unimplementedOptionalRequirement(_ symbol: String = #function, file: StaticString = #fileID, line: UInt = #line) -> Never {
-    fatalError("AppKitWin: optional requirement `\(symbol)` has no default yet", file: file, line: line)
+    fatalError("AppKitCross: optional requirement `\(symbol)` has no default yet", file: file, line: line)
 }

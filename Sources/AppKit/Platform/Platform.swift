@@ -21,7 +21,7 @@ public enum Platform {
         case "x11":
             return LinuxBackend()
         case "wayland":
-            guard let wayland = WaylandBackend() else { fatalError("AppKitWin: cannot connect to the Wayland display (is WAYLAND_DISPLAY set?)") }
+            guard let wayland = WaylandBackend() else { fatalError("AppKitCross: cannot connect to the Wayland display (is WAYLAND_DISPLAY set?)") }
             return wayland
         default:
             if env["WAYLAND_DISPLAY"] != nil, let wayland = WaylandBackend() { return wayland }

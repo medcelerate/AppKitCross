@@ -1051,7 +1051,7 @@ struct Translator {
 
     func assemble() -> String {
         var lines: [String] = []
-        lines.append("// Translated from Metal Shading Language by AppKitWin's MSLTranslator (ADR-0006).")
+        lines.append("// Translated from Metal Shading Language by AppKitCross's MSLTranslator (ADR-0006).")
         lines.append("#pragma pack_matrix(column_major)")
         for (_, def) in helpers.sorted(by: { $0.key < $1.key }) { lines.append(def) }
         var emittedResources: Set<String> = []

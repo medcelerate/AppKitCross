@@ -1,6 +1,6 @@
 # LibraryCompat
 
-Popular third-party SwiftUI packages built against AppKitWin's `SwiftUI`, one tab each:
+Popular third-party SwiftUI packages built against AppKitCross's `SwiftUI`, one tab each:
 SwiftUI-Shimmer, ConfettiSwiftUI, WrappingHStack, Defaults, swift-markdown-ui,
 SwiftUI-Introspect, SwiftUICharts and Nuke. The verdicts per platform and the API gaps
 they ran into are in [docs/compatibility/swiftui-libraries.md](../../docs/compatibility/swiftui-libraries.md).

@@ -310,7 +310,7 @@ final class WaylandBackend: PlatformBackend {
         if fds[2].revents != 0 { PlatformMainQueue.service() }
         wl_display_dispatch_pending(display)
         if wl_display_get_error(display) != 0 {
-            FileHandle.standardError.write(Data("AppKitWin: Wayland display error \(wl_display_get_error(display)); stopping\n".utf8))
+            FileHandle.standardError.write(Data("AppKitCross: Wayland display error \(wl_display_get_error(display)); stopping\n".utf8))
             running = false
             return
         }

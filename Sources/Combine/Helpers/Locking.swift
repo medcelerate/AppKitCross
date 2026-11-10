@@ -4,7 +4,7 @@
 //
 //  Created by Sergej Jaskiewicz on 11.06.2019.
 //
-//  AppKitWin: OpenCombine implements these locks in a C++ helper target over
+//  AppKitCross: OpenCombine implements these locks in a C++ helper target over
 //  os_unfair_lock / pthread / std::mutex. This port is only built with corelibs
 //  Foundation (Windows and Linux), where `NSLock` and `NSRecursiveLock` are thin
 //  wrappers over SRWLOCK / pthread mutexes, so the locks are plain Swift here and the

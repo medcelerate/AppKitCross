@@ -2,7 +2,7 @@
 //  PlatformHelpers.swift
 //  Combine (ported from OpenCombine)
 //
-//  AppKitWin: the two remaining entry points of OpenCombine's `COpenCombineHelpers`
+//  AppKitCross: the two remaining entry points of OpenCombine's `COpenCombineHelpers`
 //  C++ target, in Swift. See Locking.swift for the locks.
 
 import Foundation

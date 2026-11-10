@@ -1,4 +1,4 @@
-# Linux build and headless run of AppKitWin (Milestone 8).
+# Linux build and headless run of AppKitCross (Milestone 8).
 #   docker build -t appkitwin-linux -f tools/linux/Dockerfile .
 #   docker run --rm appkitwin-linux            # builds, runs the tests on the host backend,
 #                                              # then runs HelloWindow under Xvfb and writes a screenshot

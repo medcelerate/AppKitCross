@@ -90,8 +90,8 @@ final class UIAutomationTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(property(root, 5, 30050), "200", "RangeValue.Maximum")
         XCTAssertEqual(property(root, 7, 30079), "true", "SelectionItem.IsSelected")
         XCTAssertEqual(property(root, 6, 30060), "true", "Selection.CanSelectMultiple")
-        XCTAssertEqual(property(root, 2, 30024), "AppKitWin", "FrameworkId")
-        XCTAssertEqual(property(root, 2, 30011), "AppKitWin.2", "AutomationId falls back to the element id")
+        XCTAssertEqual(property(root, 2, 30024), "AppKitCross", "FrameworkId")
+        XCTAssertEqual(property(root, 2, 30011), "AppKitCross.2", "AutomationId falls back to the element id")
         XCTAssertNil(property(root, 99, 30005), "an unknown id has no provider")
         // Navigation.
         XCTAssertEqual(cuia_root_debug_child_count(root, 1), 5)

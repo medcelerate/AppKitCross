@@ -2,7 +2,7 @@
 //  Publishers.CombineLatest.swift
 //  Combine (ported from OpenCombine)
 //
-//  AppKitWin addition: OpenCombine 0.14.0 lists CombineLatest in its remaining
+//  AppKitCross addition: OpenCombine 0.14.0 lists CombineLatest in its remaining
 //  interface and does not implement it. The declarations below are Apple's; the
 //  implementation is shared by the three arities through `CombineLatestInner`, which
 //  keeps the latest value of every type-erased upstream and emits a tuple whenever one

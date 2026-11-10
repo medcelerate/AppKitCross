@@ -55,7 +55,7 @@ the data. Foundation on Windows and Linux has no `NSItemProvider`.
     every window carries `XdndAware`.
   - Data moves as the platform expects: text as CF_UNICODETEXT / `text/plain;charset=utf-8`
     (also UTF8_STRING, STRING, TEXT on X11), files as CF_HDROP / `text/uri-list` with one
-    pasteboard item per file, other AppKit types as a registered `AppKitWin:<type>` format
+    pasteboard item per file, other AppKit types as a registered `AppKitCross:<type>` format
     or `application/x-appkitwin.<type>` MIME type. A foreign drag's representations load on
     demand through a pasteboard data provider (an X selection conversion, a Wayland pipe);
     a uri-list is read at enter so the item count is known.
