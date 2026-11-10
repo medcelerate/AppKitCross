@@ -4,7 +4,7 @@
 // an event loop over poll() that also serves posted blocks and the Core Animation frame
 // clock. Menus have no native bar on X11 (key equivalents still work), the pasteboard is
 // the CLIPBOARD selection and drags use XDND (LinuxSelection.swift, LinuxDragDrop.swift),
-// and file dialogs run zenity when it is installed.
+// and file dialogs go through the xdg-desktop-portal FileChooser (LinuxFileChooserPortal.swift).
 
 #if os(Linux)
 import Foundation
@@ -278,37 +278,18 @@ final class LinuxBackend: PlatformBackend {
     private(set) lazy var x11Pasteboard = X11Pasteboard(backend: self)
     var systemPasteboard: any PlatformPasteboard { x11Pasteboard }
 
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
-        LinuxBackend.runZenity(options)
-    }
-
-    /// Runs zenity when available; otherwise the dialog is cancelled. Shared with the
-    /// Wayland backend.
-    static func runZenity(_ options: PlatformFileDialogOptions) -> [URL]? {
-        let zenity = ["/usr/bin/zenity", "/usr/local/bin/zenity"].first { FileManager.default.isExecutableFile(atPath: $0) }
-        guard let zenity else { return nil }
-        var args = ["--file-selection"]
-        if options.isSave { args.append("--save"); args.append("--confirm-overwrite") }
-        if options.canChooseDirectories && !options.canChooseFiles { args.append("--directory") }
-        if options.allowsMultipleSelection { args += ["--multiple", "--separator=\n"] }
-        if let t = options.title { args.append("--title=\(t)") }
-        if let name = options.defaultName { args.append("--filename=\((options.directory?.path ?? NSHomeDirectory()) + "/" + name)") }
-        else if let dir = options.directory { args.append("--filename=\(dir.path)/") }
-        if !options.allowedExtensions.isEmpty {
-            args.append("--file-filter=Supported files | " + options.allowedExtensions.map { "*.\($0)" }.joined(separator: " "))
-            if options.allowsOtherTypes { args.append("--file-filter=All files | *") }
+    /// The xdg-desktop-portal FileChooser when a portal is on the session bus
+    /// (LinuxFileChooserPortal.swift, ADR-0017); otherwise nil and the panels draw themselves.
+    private var portalLookedUp = false
+    private var portal: LinuxFileChooserPortal?
+    var fileDialog: (any PlatformFileDialog)? {
+        guard PlatformFileDialogPolicy.allowsNative else { return nil }
+        if !portalLookedUp {
+            portalLookedUp = true
+            portal = LinuxFileChooserPortal.connect(pump: { [weak self] in self?.pump(blocking: false) },
+                                                   parentIdentifier: { ($0 as? LinuxWindow).map { "x11:" + String($0.xid, radix: 16) } ?? "" })
         }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: zenity)
-        p.arguments = args
-        let out = Pipe()
-        p.standardOutput = out
-        do { try p.run() } catch { return nil }
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        let paths = String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init).filter { !$0.isEmpty }
-        return paths.isEmpty ? nil : paths.map { URL(fileURLWithPath: $0) }
+        return portal
     }
 
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {

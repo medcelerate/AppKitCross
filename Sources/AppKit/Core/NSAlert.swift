@@ -31,6 +31,9 @@ import CoreText
     private var _window: NSPanel? = nil
     private var _response: NSApplication.ModalResponse = .cancel
     private var _sheetCompletion: ((NSApplication.ModalResponse) -> Void)? = nil
+    /// A sheet keeps its alert alive until a button ends it (the buttons only hold their
+    /// target weakly, and callers rarely keep the alert themselves).
+    private var _retainedWhileSheetIsUp: NSAlert? = nil
 
     @MainActor public override init() { super.init() }
 
@@ -101,7 +104,10 @@ import CoreText
         if let completion = _sheetCompletion {
             _sheetCompletion = nil
             _window?.orderOut(nil)
+            let keepAlive = _retainedWhileSheetIsUp
+            _retainedWhileSheetIsUp = nil
             completion(response)
+            _ = keepAlive
         } else {
             NSApplication.shared.stopModal(withCode: response)
         }
@@ -111,6 +117,7 @@ import CoreText
         // Sheets are shown as a centred modal panel for now (no sheet animation/attachment).
         let panel = _buildWindow()
         _sheetCompletion = { handler?($0) }
+        _retainedWhileSheetIsUp = self
         let parent = sheetWindow.frame
         panel.setFrameOrigin(NSPoint(x: parent.midX - panel.frame.width / 2, y: parent.maxY - panel.frame.height - 40))
         panel.makeKeyAndOrderFront(nil)

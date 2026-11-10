@@ -53,6 +53,7 @@ public protocol NSTextViewDelegate: NSTextDelegate, NSObjectProtocol {
     @MainActor func textViewWritingToolsDidEnd(_ textView: NSTextView)
     @available(macOS 15.0, *)
     @MainActor func textViewWritingToolsWillBegin(_ textView: NSTextView)
+    @MainActor func undoManager(for view: NSTextView) -> UndoManager?
 }
 
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
@@ -122,6 +123,7 @@ extension NSTextViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textviewwritingtoolswillbegin(_:)
     @available(macOS 15.0, *)
     @MainActor public func textViewWritingToolsWillBegin(_ textView: NSTextView) { }
-    // SKIPPED (Foundation.UndoManager not in corelibs): @MainActor func undoManager(for view: NSTextView) -> UndoManager?
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/undomanager(for:)
+    @MainActor public func undoManager(for view: NSTextView) -> UndoManager? { return nil }
 }
 
