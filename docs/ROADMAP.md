@@ -32,7 +32,11 @@ are concrete and testable.
 | M14 Documents and file panels | first version (ADR-0017): `NSDocument` (reading and writing through the URL/file-wrapper/data chains, `writeSafely`, the change count with the undo manager, save/save-as/save-to/revert/autosave, the unsaved-changes alert in `canClose`, window controllers and `windowForSheet`, menu validation), `NSDocumentController` (types from `CFBundleDocumentTypes` in the Info.plist named by `APPKITWIN_INFO_PLIST` or next to the executable, `NSDocumentClass` through the Swift runtime, `typeForContents(of:)` by UTI conformance, untitled naming, open/reopen with completion handlers and async, recent documents in the user defaults and the Open Recent submenu, close-all and review-unsaved flows, the New/Open/Save All actions at the end of the responder chain), `NSWindowController` title and edited-state synchronisation, `NSApplication` opening command-line files or an untitled document at launch and reviewing unsaved documents on quit; `UndoManager` and `FileWrapper` supplied on Windows and Linux; `NSSavePanel`/`NSOpenPanel` over the `PlatformFileDialog` seam (`IFileOpenDialog`/`IFileSaveDialog` on Windows, the xdg-desktop-portal FileChooser over D-Bus on Linux) with a package-drawn panel (path and name fields, an `NSTableView` listing, type filter, New Folder, keyboard and accessibility) where there is none, `allowedContentTypes`, the `NSOpenSavePanelDelegate` hooks; the edited dot in the package-drawn title bar and an asterisk in native title bars; RTF reading and writing for `NSAttributedString`; `Examples/TextEdit`; `DocumentTests` (awaiting the Windows PC walk-through: the real dialogs, Open Recent, the title mark, close with unsaved changes) |
 
 The macOS host build and the Linux container run the full test suite (110 tests); Windows verification is done by
-a remote session on a Windows 11 machine from the checklists in the commit history.
+a remote session on a Windows 11 machine from the checklists in the commit history. Before running an
+example there, make sure `APPKITWIN_HOST_BACKEND` is not set in the shell (the test suite is run with
+it): with it set, every example runs on the headless host backend and no window appears (the process
+stays alive, its views lay out, and the only HWND is COM's); since 2026-11-10 the package prints
+"APPKITWIN_HOST_BACKEND=1 selects the headless host backend" on stderr in that case.
 
 ## M0: Foundation (this milestone)
 
