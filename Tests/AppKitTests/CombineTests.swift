@@ -226,7 +226,9 @@ final class CombineTests: XCTestCase, @unchecked Sendable {
                 value = v
                 expectation.fulfill()
             }
-        wait(for: [expectation], timeout: 5)
+        // 30 s: the Windows CI runner has taken over 5 s to run a global-queue block
+        // while the test binary and two compiler jobs shared its four cores.
+        wait(for: [expectation], timeout: 30)
         XCTAssertEqual(value, 42)
         c.cancel()
     }

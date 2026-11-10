@@ -288,11 +288,27 @@ final class HostWindow: PlatformWindow {
             rasterCount += 1
             return image
         }
-        func draw(_ i: Int, alpha: CGFloat) {
+        /// The rect (node-local, y-down) the node's subtree reaches: its own rect plus
+        /// its children's, through their transforms.
+        func subtreeExtent(_ i: Int) -> CGRect {
             let n = scene.nodes[i]
-            ctx.saveGState()
-            ctx.concatenate(n.transform)                       // now in the node's local y-down space
-            let a = alpha * CGFloat(n.opacity)
+            var r = CGRect(origin: .zero, size: n.size)
+            if n.clipsToBounds { return r }
+            for c in children[i] ?? [] {
+                let child = scene.nodes[c]
+                let inner = subtreeExtent(c)
+                if let t3 = child.transform3D, let corners = _CAHomography(t3).corners(of: inner) {
+                    let xs = corners.map(\.x), ys = corners.map(\.y)
+                    r = r.union(CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!))
+                } else {
+                    r = r.union(inner.applying(child.transform))
+                }
+            }
+            return r
+        }
+        /// Clip, content and children, in the node's local space.
+        func drawLocal(_ i: Int, alpha a: CGFloat, into ctx: CGContext) {
+            let n = scene.nodes[i]
             let rect = CGRect(origin: .zero, size: n.size)
             if n.clipsToBounds {
                 if n.cornerRadius > 0 {
@@ -310,14 +326,37 @@ final class HostWindow: PlatformWindow {
                 ctx.draw(image, in: rect)
                 ctx.restoreGState()
             }
-            for c in children[i] ?? [] { draw(c, alpha: a) }
+            for c in children[i] ?? [] { draw(c, alpha: a, into: ctx) }
+        }
+        func draw(_ i: Int, alpha: CGFloat, into ctx: CGContext) {
+            let n = scene.nodes[i]
+            let a = alpha * CGFloat(n.opacity)
+            // A 3D node: its z = 0 plane map. Affine (a rotation without perspective) is
+            // placed exactly; projective is flattened to pixels and drawn through the
+            // projection as a mesh, as the software compositor does (CAProjective.swift).
+            // DirectComposition applies the 4x4 to the visual instead.
+            let plane = n.transform3D.map { _CAHomography($0) }
+            if let plane, !plane.isAffine {
+                let extent = subtreeExtent(i)
+                let s = scene.scale * plane.stretch(of: CGRect(origin: .zero, size: n.size))
+                guard let image = _CAPixels.render(extent: extent, scale: (s, s), yDown: true, draw: { off in
+                    drawLocal(i, alpha: 1, into: off)
+                }) else { return }
+                ctx.saveGState()
+                _CAProjective.draw(image, extent: extent, yDown: true, through: plane, into: ctx, alpha: a)
+                ctx.restoreGState()
+                return
+            }
+            ctx.saveGState()
+            ctx.concatenate(plane?.affine ?? n.transform)        // now in the node's local y-down space
+            drawLocal(i, alpha: a, into: ctx)
             ctx.restoreGState()
         }
         ctx.saveGState()
         // Window content y-up → the scene's y-down space.
         ctx.translateBy(x: 0, y: height)
         ctx.scaleBy(x: 1, y: -1)
-        for r in roots { draw(r, alpha: 1) }
+        for r in roots { draw(r, alpha: 1, into: ctx) }
         ctx.restoreGState()
     }
     #endif

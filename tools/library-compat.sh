@@ -91,7 +91,19 @@ build() {
         echo "$out" | grep -aE "^\[[0-9]+/[0-9]+\]" | tail -5 || true
         echo "$out" | grep -avE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\||^\s*$|SendableClosureCaptures" | tail -40 || true
         case "$(uname)" in MINGW*|MSYS*|CYGWIN*)
-            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List" 2>/dev/null || true ;;
+            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List" 2>/dev/null || true
+            # The Windows runner has ended a build with status 1 after its last compile step,
+            # with memory to spare and nothing said; resume the incremental build once,
+            # verbosely, so a second death at least names the command that died.
+            echo "== retrying once (verbose)"
+            status=0
+            out=$(swift build "$@" "${FLAGS[@]}" -v 2>&1 | tr -d '\r') || status=$?
+            if [ "$status" = 0 ]; then
+                echo "$out" | grep -aE "Build complete|Compiling|Linking|Emitting" | tail -3 || true
+                return 0
+            fi
+            echo "swift build (retry) exited with status $status"
+            echo "$out" | grep -avE "warning:|note:|^\s*[0-9]+ \||^\s*\||^\s*$|SendableClosure|ConformanceIsolation|MutableGlobalVariable" | tail -40 || true ;;
         esac
         return 1
     fi
