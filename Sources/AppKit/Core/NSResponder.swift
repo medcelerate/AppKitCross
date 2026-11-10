@@ -168,7 +168,8 @@ import CoreText
         if ActionRegistry.perform(action, on: self, with: object) { return true }
         return nextResponder?.tryToPerform(action, with: object) ?? false
     }
-    // SKIPPED (Foundation.UndoManager not in corelibs): @MainActor var undoManager: UndoManager? { get }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/undomanager
+    @MainActor open var undoManager: UndoManager? { nextResponder?.undoManager }
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor func updateUserActivityState(_ userActivity: NSUserActivity)
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor var userActivity: NSUserActivity? { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/validrequestor(forsendtype:returntype:)

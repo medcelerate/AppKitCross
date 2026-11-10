@@ -16,9 +16,9 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenpanel
 @MainActor open class NSOpenPanel: NSSavePanel {
-    private var _allowsMultipleSelection = false
-    private var _canChooseDirectories = false
-    private var _canChooseFiles = true
+    internal var _allowsMultipleSelection = false
+    internal var _canChooseDirectories = false
+    internal var _canChooseFiles = true
     private var _resolvesAliases = true
     private var _canDownloadUbiquitousContents = true
     private var _canResolveUbiquitousConflicts = true
@@ -34,20 +34,26 @@ import CoreText
         o.allowsMultipleSelection = _allowsMultipleSelection
         return o
     }
+
+    @MainActor internal override func _preparePackagePanel() {
+        super._preparePackagePanel()
+        _controller?.table.allowsMultipleSelection = _allowsMultipleSelection
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenpanel/allowsmultipleselection
     @MainActor open var allowsMultipleSelection: Bool {
         get { _allowsMultipleSelection }
-        set { _allowsMultipleSelection = newValue }
+        set { _allowsMultipleSelection = newValue; _controller?.table.allowsMultipleSelection = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenpanel/canchoosedirectories
     @MainActor open var canChooseDirectories: Bool {
         get { _canChooseDirectories }
-        set { _canChooseDirectories = newValue }
+        set { _canChooseDirectories = newValue; _controller?.reloadIfBuilt() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenpanel/canchoosefiles
     @MainActor open var canChooseFiles: Bool {
         get { _canChooseFiles }
-        set { _canChooseFiles = newValue }
+        set { _canChooseFiles = newValue; _controller?.reloadIfBuilt() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenpanel/candownloadubiquitouscontents
     @available(macOS 10.10, *)
