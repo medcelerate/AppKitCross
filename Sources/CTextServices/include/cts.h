@@ -63,6 +63,10 @@ int cts_document_ime_open(CTSDocument *document);
 int cts_document_candidate_count(CTSDocument *document);
 /// Reconversion: the input method converts the selected text again. Returns an HRESULT.
 int32_t cts_document_reconvert(CTSDocument *document);
+/// Forwards a key message to the text services; returns 1 when they took it (the app must not act on it).
+int cts_document_key(CTSDocument *document, uint64_t wParam, int64_t lParam, int down);
+/// Makes the Microsoft IME (Japanese) this process's active text service. Returns an HRESULT.
+int32_t cts_activate_microsoft_ime_jp(void);
 /// Whether a composition is active (TSF owns the marked text).
 int cts_document_composing(CTSDocument *document);
 

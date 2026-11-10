@@ -42,6 +42,10 @@ final class Win32Window: PlatformWindow {
     private func beginTextServices() {
         guard let hwnd, owner?.platformWindowTextInput() != nil else { return }
         if textServices == nil {
+            if ProcessInfo.processInfo.environment["APPKITWIN_IME_LAYOUT"] != nil {
+                let hr = Win32TextServices.activateMicrosoftIME()
+                if NSView._traceInvalidation { NSView._trace("win32 tsf activate microsoft ime jp hr 0x\(String(UInt32(bitPattern: hr), radix: 16))") }
+            }
             textServices = Win32TextServices(
                 hwnd: hwnd,
                 input: { [weak self] in self?.owner?.platformWindowTextInput() },
@@ -1348,9 +1352,12 @@ final class Win32Window: PlatformWindow {
             if let input = owner?.platformWindowTextInput(), input.hasMarkedText() { input.unmarkText() }
             return 0
         case WM_KEYDOWN, WM_SYSKEYDOWN:
+            // The input method's keys go to the text services first; what they eat is not ours.
+            if tsfOwnsInput, textServices?.key(wParam: wParam, lParam: lParam, down: true) == true { return 0 }
             key(.keyDown, wParam, lParam)
             return 0
         case WM_KEYUP, WM_SYSKEYUP:
+            if tsfOwnsInput, textServices?.key(wParam: wParam, lParam: lParam, down: false) == true { return 0 }
             key(.keyUp, wParam, lParam)
             return 0
         default:

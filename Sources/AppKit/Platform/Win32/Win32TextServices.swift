@@ -61,6 +61,10 @@ final class Win32TextServices {
         self.document = document
     }
 
+    /// Makes the Microsoft IME (Japanese) this process's text service (test hook: APPKITWIN_IME_LAYOUT). Returns the HRESULT.
+    @discardableResult
+    static func activateMicrosoftIME() -> Int32 { cts_activate_microsoft_ime_jp() }
+
     /// Releases the COM objects. Called when the window is destroyed (no `deinit` on the main actor).
     func invalidate() {
         if let document { cts_document_destroy(document) }
@@ -85,6 +89,12 @@ final class Win32TextServices {
 
     /// Candidates the input method is listing (0 when its candidate window is closed).
     var candidateCount: Int { document.map { Int(cts_document_candidate_count($0)) } ?? 0 }
+
+    /// Forwards a key message to the input method; true when it took the key.
+    func key(wParam: WPARAM, lParam: LPARAM, down: Bool) -> Bool {
+        guard let document else { return false }
+        return cts_document_key(document, UInt64(wParam), Int64(lParam), down ? 1 : 0) != 0
+    }
 
     /// Reconversion of the selected text. Returns the HRESULT (0 = S_OK).
     @discardableResult

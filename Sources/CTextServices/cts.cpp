@@ -641,3 +641,40 @@ int cts_document_composing(CTSDocument *document) {
 }
 
 } // extern "C"
+
+// Keys the text services may take (the input method's romaji and kana, its conversion keys).
+// The app forwards each key message here before its own handling; TSF returns whether it ate it.
+extern "C" int cts_document_key(CTSDocument *document, uint64_t wParam, int64_t lParam, int down) {
+    Document *d = reinterpret_cast<Document *>(document);
+    if (!d || !d->threadMgr) return 0;
+    ITfKeystrokeMgr *keys = nullptr;
+    if (FAILED(d->threadMgr->QueryInterface(IID_ITfKeystrokeMgr, reinterpret_cast<void **>(&keys))) || !keys) return 0;
+    BOOL eaten = FALSE;
+    WPARAM w = static_cast<WPARAM>(wParam);
+    LPARAM l = static_cast<LPARAM>(lParam);
+    if (down) {
+        keys->TestKeyDown(w, l, &eaten);
+        if (eaten) keys->KeyDown(w, l, &eaten);
+    } else {
+        keys->TestKeyUp(w, l, &eaten);
+        if (eaten) keys->KeyUp(w, l, &eaten);
+    }
+    keys->Release();
+    return eaten ? 1 : 0;
+}
+
+// Makes the Microsoft IME for Japanese this process's active text service (the profile of its
+// keyboard layout). Only this process's profile changes (TF_IPPMF_FORPROCESS).
+extern "C" int32_t cts_activate_microsoft_ime_jp(void) {
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    ITfInputProcessorProfileMgr *mgr = nullptr;
+    hr = CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER, IID_ITfInputProcessorProfileMgr, reinterpret_cast<void **>(&mgr));
+    if (FAILED(hr) || !mgr) return hr;
+    // The Microsoft IME (Japanese) text service and its profile.
+    static const GUID imeClsid = {0x03B5835F, 0xF03C, 0x411B, {0x9C, 0xE2, 0xAA, 0x23, 0xE1, 0x17, 0x1E, 0x36}};
+    static const GUID imeProfile = {0xA76C93D9, 0x5523, 0x4E90, {0xAA, 0xFA, 0x4D, 0xB1, 0x12, 0xF9, 0xAC, 0x76}};
+    hr = mgr->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, 0x0411, imeClsid, imeProfile, nullptr,
+                              TF_IPPMF_FORPROCESS | TF_IPPMF_ENABLEPROFILE);
+    mgr->Release();
+    return hr;
+}
