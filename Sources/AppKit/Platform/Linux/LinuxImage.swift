@@ -24,13 +24,14 @@ final class LinuxOffscreen: PlatformOffscreenSurface {
 /// not linked yet.
 @MainActor
 final class LinuxImageBackend: PlatformImageBackend {
+    nonisolated init() {}
     private final class Reader {
         let data: Data
         var offset = 0
         init(_ d: Data) { data = d }
     }
 
-    func decode(_ data: Data) -> CGImage? {
+    nonisolated func decode(_ data: Data) -> CGImage? {
         guard data.count > 8, data[0] == 0x89, data[1] == 0x50 else { return nil }   // PNG signature
         let reader = Reader(data)
         let unmanaged = Unmanaged.passRetained(reader)
@@ -62,7 +63,7 @@ final class LinuxImageBackend: PlatformImageBackend {
 
     private final class Writer { var data = Data() }
 
-    func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
+    nonisolated func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
         guard format.lowercased().hasSuffix("png") else { return nil }   // "png" or "public.png"
         guard let surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, Int32(image.width), Int32(image.height)),
               let dst = cairo_image_surface_get_data(surface) else { return nil }

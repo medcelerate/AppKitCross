@@ -74,7 +74,7 @@ targets += [
     .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
-appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation"]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -139,7 +139,7 @@ targets += [
     .target(name: "CALSA", path: "Sources/CALSA", linkerSettings: [.linkedLibrary("dl")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
-appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus"]
+appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]

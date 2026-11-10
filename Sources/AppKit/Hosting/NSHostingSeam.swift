@@ -89,7 +89,10 @@ extension NSHostingRoot {
     public func responder(at point: NSPoint) -> NSResponder? { nil }
 }
 
-/// Content that can be hosted: SwiftUI's `View` refines this in the port.
+/// Content that can be hosted: SwiftUI's `View` refines this in the port. Main-actor
+/// isolated with `@preconcurrency` like `View` itself, so a nonisolated struct's conformance
+/// (every library view) is not rejected as an isolated conformance in Swift 6.
+@MainActor @preconcurrency
 public protocol NSHostingContent {
     /// Creates the root for this content. The host calls `contentDidChange()` on the
     /// root whenever a new content value replaces the previous one.

@@ -15,12 +15,13 @@ final class HostOffscreen: PlatformOffscreenSurface {
 
 @MainActor
 final class HostImageBackend: PlatformImageBackend {
-    func decode(_ data: Data) -> CGImage? {
+    nonisolated init() {}
+    nonisolated func decode(_ data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
+    nonisolated func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
         let out = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, format as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(dest, image, [kCGImageDestinationLossyCompressionQuality as String: quality] as CFDictionary)
