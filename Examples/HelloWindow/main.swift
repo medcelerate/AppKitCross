@@ -558,7 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(CollectionDemoViewController())
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 520, height: 300)   // wide enough for the nine tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1199,10 +1199,16 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             let b = NSButton(title: "Hide", target: nil, action: Selector(("toggleSectionCollapse:")))
             b.controlSize = .small
             b.bezelStyle = .rounded
-            b.frame = NSRect(x: 300, y: 0, width: 60, height: 22)
-            b.autoresizingMask = [.minXMargin]
             addSubview(b)
             sectionCollapseButton = b
+            placeButton()
+        }
+        // The header is made with a zero frame and sized by the collection view afterwards,
+        // so the button is placed from the bounds rather than by an autoresizing mask.
+        private func placeButton() { sectionCollapseButton?.frame = NSRect(x: max(0, bounds.width - 66), y: 0, width: 60, height: 22) }
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            placeButton()
         }
         override func draw(_ dirtyRect: NSRect) {
             NSColor.windowBackgroundColor.setFill()
@@ -1393,7 +1399,7 @@ final class BoxDemoViewController: NSViewController {
         custom.boxType = .custom
         custom.title = "Custom"
         custom.titlePosition = .belowTop
-        custom.fillColor = NSColor(red: 0.93, green: 0.96, blue: 1, alpha: 1)
+        custom.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12)     // reads in light and dark appearances
         custom.borderColor = .systemBlue
         custom.borderWidth = 2
         custom.cornerRadius = 10
