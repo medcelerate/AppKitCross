@@ -49,9 +49,31 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       - run: swift --version
-      # Two compiler jobs at a time: the 7 GB runner has killed a frontend mid-compile with
-      # no diagnostic (the root build and the library-compat step both died that way).
-      - run: swift build -c debug -j 2
+      - name: Runner resources
+        shell: bash
+        run: |
+          powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize,FreeVirtualMemory,TotalVirtualMemorySize | Format-List"
+          powershell -NoProfile -Command "Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize,CurrentUsage | Format-List"
+          df -h C: D: || true
+          nproc || true
+      # Two compiler jobs at a time, and one retry: the runner kills a frontend mid-compile
+      # now and then (the log ends in warning notes, no diagnostic, exit code 1), in the
+      # root build as well as in the library-compat step. The retry resumes the
+      # incremental build; the resource dump says what the runner looked like when it died.
+      - name: Build (two compiler jobs, one retry)
+        shell: bash
+        run: |
+          set -o pipefail
+          build() { swift build -c debug -j 2 2>&1 | tr -d '\r' | tee build.log; }
+          if ! build; then
+            echo "== swift build failed: runner resources at that point"
+            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize,FreeVirtualMemory,TotalVirtualMemorySize | Format-List"
+            df -h C: D: || true
+            echo "== lines that are not warnings"
+            grep -aE "error|Assertion|Stack dump|exception|signal|killed" build.log | grep -avE "warning:|^\s*\||^\s*[0-9]+ \||Swift 6 language|SendableClosure" | head -20 || true
+            echo "== retrying once"
+            build
+          fi
       - name: Build every example
         shell: bash
         run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer; do swift build -j 2 --product $p; done
