@@ -112,6 +112,16 @@ import CoreText
     internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
     /// Traffic lights at the left (macOS, Linux) or Windows caption buttons at the right (ADR-0022).
     internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.backend.windowButtonStyle }
+    /// What the standard buttons occupy at each edge of the title band (plus a gap), 0 when
+    /// no buttons show there: what a toolbar or a title bar accessory lays out inside.
+    internal var _windowButtonsLeadingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.leadingInset ?? _NSWindowButtonsView.leadingInset(for: _windowButtonStyle)
+    }
+    internal var _windowButtonsTrailingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.trailingInset ?? _NSWindowButtonsView.trailingInset(for: _windowButtonStyle)
+    }
 
     /// Creates the overlay when first needed and keeps it placed and styled.
     @discardableResult

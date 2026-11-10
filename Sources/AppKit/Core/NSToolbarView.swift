@@ -62,8 +62,8 @@ struct _NSToolbarMetrics: Equatable {
         }
         return _NSToolbarMetrics(placement: contentCoversTitleBar ? .overContent : .belowTitleBar, height: height + topInset, topInset: topInset,
                                  iconSize: icon, buttonSize: button, showsLabels: labels, showsIcons: icons, labelFontSize: labelSize,
-                                 leadingInset: contentCoversTitleBar && unified && buttonStyle == .trafficLights ? _NSWindowButtonsView.width + 4 : 8,
-                                 trailingInset: contentCoversTitleBar && unified && buttonStyle == .caption ? _NSWindowButtonsView.captionWidth + 4 : 8, itemGap: 8)
+                                 leadingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.leadingInset(for: buttonStyle)) : 8,
+                                 trailingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.trailingInset(for: buttonStyle)) : 8, itemGap: 8)
     }
 }
 

@@ -135,8 +135,11 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             let band = w.contentView!.bounds.height - 14
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 106, y: band)), .closeButton)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: band)), .caption, "where the close button was is the draggable band")
+            XCTAssertEqual(w._windowButtonsLeadingInset, 100 + 12 + 8 + 4, "the inset follows the moved button")
+            XCTAssertEqual(w._windowButtonsTrailingInset, 0)
             close.isHidden = true
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 106, y: band)), .caption, "a hidden button is not hit")
+            XCTAssertEqual(w._windowButtonsLeadingInset, _NSWindowButtonsView.width + 4, "and a hidden one no longer counts")
         }
     }
 
@@ -171,6 +174,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 150, y: 186)), .caption, "left of the buttons the band drags")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 186)), .caption, "nothing at the left any more")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 290, y: 150)), .client, "below the band is content")
+            XCTAssertEqual(w._windowButtonsLeadingInset, 0)
+            XCTAssertEqual(w._windowButtonsTrailingInset, _NSWindowButtonsView.captionWidth + 4)
             // Resizing keeps them at the right edge.
             w.setFrame(NSRect(x: 0, y: 0, width: 500, height: 300), display: false)
             XCTAssertEqual(close.frame.origin.x, 500 - 46)

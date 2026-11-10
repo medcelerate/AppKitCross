@@ -203,9 +203,9 @@ final class _NSWindowButtonsView: NSView {
     var buttons: [_NSWindowButton] { style == .caption ? [miniaturize, zoom, close] : [close, miniaturize, zoom] }
     static let height: CGFloat = 28
     /// The width the traffic lights take at the leading edge (three circles and their margins).
-    static let width: CGFloat = 72
+    nonisolated static let width: CGFloat = 72
     /// The width the caption buttons take at the trailing edge.
-    static let captionWidth: CGFloat = 3 * _NSWindowButton.captionSize.width
+    nonisolated static let captionWidth: CGFloat = 138
     /// The horizontal extent the buttons of a style occupy, from the edge they sit at.
     static func extent(for style: PlatformWindowButtonStyle) -> CGFloat { style == .caption ? captionWidth : width }
 
@@ -260,6 +260,25 @@ final class _NSWindowButtonsView: NSView {
         for b in visible.dropFirst() { r = r.union(b.frame) }
         return style == .caption ? r : r.insetBy(dx: -8, dy: -8)
     }
+
+    /// The space the buttons take from the leading edge of the band (the traffic lights,
+    /// plus a gap) or from its trailing edge (the caption buttons); 0 at the other edge.
+    /// Measured from the buttons' actual frames, so a button the application moved or hid
+    /// counts as it is. Views laid out in the band (toolbars, title bar accessories) keep
+    /// clear of these rather than of fixed button positions.
+    var leadingInset: CGFloat {
+        let f = buttonsFrame
+        guard !f.isNull, style == .trafficLights else { return 0 }
+        return max(0, f.maxX + 4)
+    }
+    var trailingInset: CGFloat {
+        let f = buttonsFrame
+        guard !f.isNull, style == .caption else { return 0 }
+        return max(0, bounds.width - f.minX + 4)
+    }
+    /// The insets of a style's default placement, for layouts made before a row exists.
+    nonisolated static func leadingInset(for style: PlatformWindowButtonStyle) -> CGFloat { style == .trafficLights ? width + 4 : 0 }
+    nonisolated static func trailingInset(for style: PlatformWindowButtonStyle) -> CGFloat { style == .caption ? captionWidth + 4 : 0 }
 
     /// Only the buttons (and the strip around them) answer; the rest of the band belongs to
     /// the toolbar and the content below.
