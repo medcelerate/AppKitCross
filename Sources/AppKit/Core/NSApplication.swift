@@ -417,7 +417,15 @@ import CoreText
         return s.response ?? .continue
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/runpagelayout(_:)
-    @MainActor open func runPageLayout(_ sender: Any?) { unimplemented() }
+    /// Page Setup for the shared print info, as a sheet on the key window when there is one.
+    @MainActor open func runPageLayout(_ sender: Any?) {
+        let layout = NSPageLayout()
+        if let w = keyWindow ?? mainWindow, w.isVisible {
+            layout._beginSheet(with: NSPrintInfo.shared, modalFor: w) { _ in }
+        } else {
+            _ = layout.runModal()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/searchstring(_:inuserinterfaceitemstring:range:found:)
     @MainActor open func searchString(_ searchString: String, inUserInterfaceItemString stringToSearch: String, range searchRange: NSRange, found foundRange: UnsafeMutablePointer<NSRange>?) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendaction(_:to:from:)

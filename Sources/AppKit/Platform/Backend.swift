@@ -81,6 +81,9 @@ public protocol PlatformBackend: AnyObject {
     var dragDrop: (any PlatformDragDrop)? { get }
     /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
     var statusItems: (any PlatformStatusItemHost)? { get }
+    /// Printers, PDF documents and device jobs (see Printing.swift, ADR-0022); nil when the
+    /// platform cannot print.
+    var printing: (any PlatformPrintBackend)? { get }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.

@@ -24,7 +24,10 @@ targets += [
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
-                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
+                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
+                         // ADR-0022: printers (winspool), the PrintDlgEx dialog (comdlg32) and the
+                         // print document package target's CLSID/IIDs (uuid).
+                         .linkedLibrary("winspool"), .linkedLibrary("comdlg32"), .linkedLibrary("uuid")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
     // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).

@@ -121,7 +121,9 @@ open class NSGraphicsContext: NSObject {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/isdrawingtoscreen
-    open var isDrawingToScreen: Bool { true }
+    open var isDrawingToScreen: Bool { !NSGraphicsContext._printing }
+    /// True while `NSPrintOperation` draws a page (`isDrawingToScreen` is then false).
+    nonisolated(unsafe) internal static var _printing = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/isflipped
     open var isFlipped: Bool { _flipped }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/patternphase

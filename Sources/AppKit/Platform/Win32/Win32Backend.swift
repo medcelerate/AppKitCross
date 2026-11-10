@@ -31,6 +31,10 @@ final class Win32Backend: PlatformBackend {
     /// The notification area (Win32StatusItem.swift).
     private(set) var win32StatusItems: Win32StatusItems?
     var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
+    /// Printing (Win32Printing.swift): the PDF writer, print jobs through Direct2D's print
+    /// control, the PrintDlgEx dialog.
+    private(set) lazy var win32Printing = Win32PrintBackend(backend: self)
+    var printing: (any PlatformPrintBackend)? { win32Printing }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })

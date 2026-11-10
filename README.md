@@ -76,7 +76,7 @@ README. All of them build and run with the same source on macOS, Windows and Lin
 
 | Example | Shows | Run |
 | --- | --- | --- |
-| [HelloWindow](Examples/HelloWindow) | The big tour: AppKit drawing, controls, menus, a glass window, the Layout Demo (form, split view, table, Metal) and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`) |
+| [HelloWindow](Examples/HelloWindow) | The big tour: AppKit drawing, controls, menus, a glass window, the Layout Demo (form, split view, table, Metal) and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`, `--print-pdf out.pdf`) |
 | [Calculator](Examples/Calculator) | A SwiftUI `App` with a `WindowGroup`, a button grid, keyboard input through `keyboardShortcut`, a fixed-size window and the standard menu bar with a `CommandMenu` | `swift run Calculator` |
 | [FramelessWindow](Examples/FramelessWindow) | A title-bar-less `.fullSizeContentView` window with the standard window buttons, a rounded non-opaque shape, movable by background, the system backdrop through `NSVisualEffectView`, close/minimize/zoom, and a `.borderless` panel | `swift run FramelessWindow` (`--panel`) |
 | [Animation](Examples/Animation) | Core Animation: explicit `CABasicAnimation`s (position, opacity, 3D flip under a perspective transform), a `CAKeyframeAnimation` along a path, implicit animations in a `CATransaction`, play/pause/reset, and a SwiftUI `withAnimation` pane | `swift run Animation` (`--paused`) |
