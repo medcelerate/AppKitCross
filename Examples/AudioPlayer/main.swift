@@ -364,8 +364,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         switch action {
         case Selector(("openFile:")):
             let panel = NSOpenPanel()
-            panel.title = "Open WAV"
-            panel.allowedFileTypes = ["wav", "aif", "aiff", "aifc"]
+            panel.title = "Open Audio File"
+            panel.allowedFileTypes = ["wav", "aif", "aiff", "aifc", "caf"]
             if panel.runModal() == .OK, let url = panel.url { open(url) }
             return true
         case Selector(("playPause:")):

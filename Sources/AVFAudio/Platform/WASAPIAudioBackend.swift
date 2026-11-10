@@ -43,6 +43,7 @@ final class WASAPIAudioBackend: PlatformAudioInputBackend {
     private let watchLock = NSLock()
     private var watchHandler: (@Sendable (PlatformAudioDeviceChange) -> Void)?
     private var watching = false
+    private var watchContext: Unmanaged<WASAPIAudioBackend>?
 
     func setDeviceChangeHandler(_ handler: (@Sendable (PlatformAudioDeviceChange) -> Void)?) {
         watchLock.lock(); defer { watchLock.unlock() }
@@ -62,12 +63,15 @@ final class WASAPIAudioBackend: PlatformAudioInputBackend {
             h?(change)
         }
         if handler != nil && !watching {
-            // The backend lives for the process (PlatformAudio keeps it), so the context is
-            // not retained.
-            watching = cwasapi_watch_devices(callback, Unmanaged.passUnretained(self).toOpaque())
+            // The watch holds the backend until it is removed.
+            let context = Unmanaged.passRetained(self)
+            watching = cwasapi_watch_devices(callback, context.toOpaque())
+            if watching { watchContext = context } else { context.release() }
         } else if handler == nil && watching {
             _ = cwasapi_watch_devices(nil, nil)
             watching = false
+            watchContext?.release()
+            watchContext = nil
         }
     }
 
