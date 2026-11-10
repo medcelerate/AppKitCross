@@ -60,7 +60,7 @@ import CoreText
         if _editor != nil { return true }
         guard let editor = w.fieldEditor(true, for: self) as? NSTextView else { return false }
         if let cell = _fieldCell { cell._hidesText = true }
-        editor.string = stringValue
+        editor.string = _editorInitialString
         editor.font = font
         editor.textColor = textColor
         editor.drawsBackground = false
@@ -92,12 +92,32 @@ import CoreText
         needsDisplay = true
     }
 
+    // MARK: Editor hooks for subclasses (the search and token fields)
+
+    /// The field editor, while editing (typed `NSTextView`).
+    @MainActor internal var _fieldEditor: NSTextView? { _editor }
+    /// Re-places the field editor over the (possibly changed) text rect.
+    @MainActor internal func _relayoutEditor() { _editor?.frame = _editorFrame() }
+    /// What the field editor starts with when editing begins.
+    @MainActor internal var _editorInitialString: String { stringValue }
+    /// The editor's text changed: keep the model current without redrawing the editor's text.
+    @MainActor internal func _editorTextDidChange(_ editor: NSTextView) { _cell?.stringValue = editor.string }
+    /// Editing ended (or Return was pressed): take the editor's text as the value.
+    @MainActor internal func _takeEditorValue(_ editor: NSTextView) { stringValue = editor.string }
+    /// A key-binding command the field editor is about to perform (`cancelOperation:`,
+    /// `moveUp:`, ...). The delegate's `control(_:textView:doCommandBy:)` sees it first;
+    /// subclasses then take what they need. Returns true when the command was handled.
+    @MainActor internal func _editorDoCommand(by selector: Selector) -> Bool {
+        guard let editor = _editor else { return false }
+        return _delegate?.control(self, textView: editor, doCommandBy: selector) ?? false
+    }
+
     /// The editor reported the end of a session: take the text and send the action.
     /// Return keeps the field editing with everything selected, as AppKit does; Tab moves
     /// focus; anything else detaches the editor.
     private func _finishEditing(movement: NSTextMovement) {
         guard let editor = _editor else { return }
-        stringValue = editor.string
+        _takeEditorValue(editor)
         if movement == .return {
             _fireAction()
             _editedSinceBegin = false
@@ -339,7 +359,7 @@ import CoreText
     @MainActor open func textDidChange(_ notification: Notification) {
         if let e = _editor, (notification.object as? NSTextView) === e {
             _editedSinceBegin = true
-            _cell?.stringValue = e.string      // keep the model current without redrawing the editor's text
+            _editorTextDidChange(e)
             _accessibilityValueChanged()
         }
         NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)

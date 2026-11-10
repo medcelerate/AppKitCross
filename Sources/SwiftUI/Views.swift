@@ -1349,18 +1349,290 @@ public struct ProgressView<Label: View, CurrentValueLabel: View>: View {
     let value: Double?
     let total: Double
     let label: Label?
-    public init() where Label == EmptyView, CurrentValueLabel == EmptyView { value = nil; total = 1; label = nil }
+    let currentValueLabel: CurrentValueLabel?
+    public init() where Label == EmptyView, CurrentValueLabel == EmptyView { value = nil; total = 1; label = nil; currentValueLabel = nil }
     public init<V: BinaryFloatingPoint>(value: V?, total: V = 1) where Label == EmptyView, CurrentValueLabel == EmptyView {
-        self.value = value.map { Double($0) }; self.total = Double(total); label = nil
+        self.value = value.map { Double($0) }; self.total = Double(total); label = nil; currentValueLabel = nil
     }
-    public init(_ title: String) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(title) }
+    public init<V: BinaryFloatingPoint>(value: V?, total: V = 1, @ViewBuilder label: () -> Label) where CurrentValueLabel == EmptyView {
+        self.value = value.map { Double($0) }; self.total = Double(total); self.label = label(); currentValueLabel = nil
+    }
+    public init<V: BinaryFloatingPoint>(value: V?, total: V = 1, @ViewBuilder label: () -> Label, @ViewBuilder currentValueLabel: () -> CurrentValueLabel) {
+        self.value = value.map { Double($0) }; self.total = Double(total); self.label = label(); self.currentValueLabel = currentValueLabel()
+    }
+    public init(@ViewBuilder label: () -> Label) where CurrentValueLabel == EmptyView { value = nil; total = 1; self.label = label(); currentValueLabel = nil }
+    public init(_ title: String) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(title); currentValueLabel = nil }
+    public init(_ titleKey: LocalizedStringKey) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(titleKey); currentValueLabel = nil }
+    public init<V: BinaryFloatingPoint>(_ title: String, value: V?, total: V = 1) where Label == Text, CurrentValueLabel == EmptyView {
+        self.value = value.map { Double($0) }; self.total = Double(total); label = Text(title); currentValueLabel = nil
+    }
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let label { label }
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.3)).frame(height: 6)
-                RoundedRectangle(cornerRadius: 3).fill(Color.accentColor).frame(width: max(0, 160 * CGFloat((value ?? 0) / max(total, 0.0001))), height: 6)
-            }.frame(width: 160)
+            _ProgressIndicator(value: value, total: total)
+            if let currentValueLabel { currentValueLabel.font(.caption) }
         }
     }
+}
+
+/// The indicator itself: an `NSProgressIndicator`, a bar (determinate when there is a
+/// value) or, under `.progressViewStyle(.circular)`, a spinner.
+struct _ProgressIndicator: View, _PrimitiveView {
+    typealias Body = Never
+    let value: Double?
+    let total: Double
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ProgressPrimitive(value: value, total: total) }
+}
+
+@MainActor
+final class _ProgressPrimitive: _ControlPrimitive<NSProgressIndicator> {
+    var value: Double?
+    var total: Double
+    init(value: Double?, total: Double) {
+        self.value = value; self.total = total
+        let p = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 160, height: 20))
+        p.minValue = 0
+        p.maxValue = max(total, 0.0001)
+        super.init(control: p)
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _ProgressPrimitive else { return }
+        value = o.value; total = o.total
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    override func detach() { control.stopAnimation(nil); super.detach() }
+    private func apply() {
+        let circular = node?.environment.progressViewStyle == .circular
+        let style: NSProgressIndicator.Style = circular ? .spinning : .bar
+        if control.style != style { control.style = style }
+        control.maxValue = max(total, 0.0001)
+        if let v = value {
+            if control.isIndeterminate { control.isIndeterminate = false }
+            control.doubleValue = v
+            control.stopAnimation(nil)
+        } else {
+            if !control.isIndeterminate { control.isIndeterminate = true }
+            control.startAnimation(nil)
+        }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        if control.style == .spinning { let s = control.intrinsicContentSize; return CGSize(width: s.width, height: s.height) }
+        return CGSize(width: max(20, proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160), height: 20)
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/stepper
+public struct Stepper<Label: View>: View {
+    let label: Label
+    let onIncrement: (() -> Void)?
+    let onDecrement: (() -> Void)?
+    let value: Binding<Double>?
+    let range: ClosedRange<Double>?
+    let step: Double
+    let onEditingChanged: (Bool) -> Void
+    public init(@ViewBuilder label: () -> Label, onIncrement: (() -> Void)?, onDecrement: (() -> Void)?, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.label = label(); self.onIncrement = onIncrement; self.onDecrement = onDecrement; value = nil; range = nil; step = 1; self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = nil; self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound); self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0.rounded()) })
+        range = nil; self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0.rounded()) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound); self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public var body: some View {
+        HStack(spacing: 6) {
+            label
+            _StepperControl(value: value, range: range, step: step, onIncrement: onIncrement, onDecrement: onDecrement, onEditingChanged: onEditingChanged)
+        }
+    }
+}
+extension Stepper where Label == Text {
+    public init(_ title: String, onIncrement: (() -> Void)?, onDecrement: (() -> Void)?, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.init(label: { Text(title) }, onIncrement: onIncrement, onDecrement: onDecrement, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.init(value: value, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.init(value: value, in: bounds, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.init(value: value, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.init(value: value, in: bounds, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+}
+
+/// The stepper's buttons: an `NSStepper`.
+struct _StepperControl: View, _PrimitiveView {
+    typealias Body = Never
+    let value: Binding<Double>?
+    let range: ClosedRange<Double>?
+    let step: Double
+    let onIncrement: (() -> Void)?
+    let onDecrement: (() -> Void)?
+    let onEditingChanged: (Bool) -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _StepperPrimitive(view: self) }
+}
+
+@MainActor
+final class _StepperPrimitive: _ControlPrimitive<NSStepper> {
+    var view: _StepperControl
+    init(view: _StepperControl) {
+        self.view = view
+        let s = NSStepper(frame: NSRect(x: 0, y: 0, width: 15, height: 24))
+        super.init(control: s)
+        s.target = s
+        s.action = Selector(("swiftUIStepperAction:"))
+        s.setActionHandler(for: Selector(("swiftUIStepperAction:"))) { [weak self] _ in self?.stepped() }
+    }
+    private var lastValue: Double = 0
+    private func stepped() {
+        let v = control.doubleValue
+        view.onEditingChanged(true)
+        if let binding = view.value {
+            if binding.wrappedValue != v { binding.wrappedValue = v }
+        } else {
+            if v > lastValue { view.onIncrement?() } else if v < lastValue { view.onDecrement?() }
+            lastValue = v
+        }
+        view.onEditingChanged(false)
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _StepperPrimitive else { return }
+        view = o.view
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        control.increment = view.step
+        if let binding = view.value {
+            control.valueWraps = false
+            control.minValue = view.range?.lowerBound ?? -Double.greatestFiniteMagnitude
+            control.maxValue = view.range?.upperBound ?? Double.greatestFiniteMagnitude
+            if control.doubleValue != binding.wrappedValue { control.doubleValue = binding.wrappedValue }
+        } else {
+            // Without a value the stepper counts: the direction of each step is the callback.
+            control.minValue = -1e9; control.maxValue = 1e9
+            control.valueWraps = false
+            lastValue = control.doubleValue
+        }
+        control.isEnabled = node?.environment.isEnabled ?? true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepickercomponents
+public struct DatePickerComponents: OptionSet, Sendable {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+    public static let hourAndMinute = DatePickerComponents(rawValue: 1)
+    public static let date = DatePickerComponents(rawValue: 2)
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepicker
+public struct DatePicker<Label: View>: View {
+    let label: Label
+    let selection: Binding<Date>
+    let minimum: Date?
+    let maximum: Date?
+    let components: DatePickerComponents
+    public init(selection: Binding<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = nil; maximum = nil; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: ClosedRange<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = range.lowerBound; maximum = range.upperBound; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: PartialRangeFrom<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = range.lowerBound; maximum = nil; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: PartialRangeThrough<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = nil; maximum = range.upperBound; components = displayedComponents
+    }
+    public var body: some View {
+        HStack(spacing: 6) {
+            label
+            _DatePickerControl(selection: selection, minimum: minimum, maximum: maximum, components: components)
+        }
+    }
+}
+extension DatePicker where Label == Text {
+    public init(_ title: String, selection: Binding<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: ClosedRange<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: PartialRangeFrom<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: PartialRangeThrough<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+}
+
+/// The picker itself: an `NSDatePicker` (textual with a stepper; graphical under
+/// `.datePickerStyle(.graphical)`).
+struct _DatePickerControl: View, _PrimitiveView {
+    typealias Body = Never
+    let selection: Binding<Date>
+    let minimum: Date?
+    let maximum: Date?
+    let components: DatePickerComponents
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _DatePickerPrimitive(view: self) }
+}
+
+@MainActor
+final class _DatePickerPrimitive: _ControlPrimitive<NSDatePicker> {
+    var view: _DatePickerControl
+    init(view: _DatePickerControl) {
+        self.view = view
+        let p = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 160, height: 22))
+        super.init(control: p)
+        p.target = p
+        p.action = Selector(("swiftUIDatePickerAction:"))
+        p.setActionHandler(for: Selector(("swiftUIDatePickerAction:"))) { [weak self] _ in
+            guard let self else { return }
+            if self.view.selection.wrappedValue != self.control.dateValue { self.view.selection.wrappedValue = self.control.dateValue }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _DatePickerPrimitive else { return }
+        view = o.view
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        var flags: NSDatePicker.ElementFlags = []
+        if view.components.contains(.date) { flags.insert(.yearMonthDay) }
+        if view.components.contains(.hourAndMinute) { flags.insert(.hourMinute) }
+        if control.datePickerElements != flags { control.datePickerElements = flags }
+        let style: NSDatePicker.Style = node?.environment.datePickerStyle == .graphical ? .clockAndCalendar : (node?.environment.datePickerStyle == .field ? .textField : .textFieldAndStepper)
+        if control.datePickerStyle != style { control.datePickerStyle = style }
+        control.minDate = view.minimum
+        control.maxDate = view.maximum
+        if control.dateValue != view.selection.wrappedValue { control.dateValue = view.selection.wrappedValue }
+        control.locale = node?.environment.locale
+        control.isEnabled = node?.environment.isEnabled ?? true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }
 }
