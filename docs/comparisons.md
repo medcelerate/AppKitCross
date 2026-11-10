@@ -13,6 +13,9 @@ by a capture of the live window.
 | Layout Demo, Date tab: the date picker's textual, stepper and graphical styles | ![macOS](images/compare/layout-date-macos.png) | ![Linux](images/compare/layout-date-linux.png) | (Windows capture pending) |
 | SwiftUI demo, Controls tab: stacks, text, controls, shapes, list | ![macOS](images/compare/swiftui-demo-macos.png) | ![Linux](images/compare/swiftui-demo-linux.png) | ![Windows](images/compare/swiftui-demo-windows.png) |
 | SwiftUI demo, Data tab: a sortable Table with selection | ![macOS](images/compare/swiftui-data-macos.png) | ![Linux](images/compare/swiftui-data-linux.png) | ![Windows](images/compare/swiftui-data-windows.png) |
+| Layout Demo, Combo tab: two `NSComboBox`es (one over its items with completion, one over a data source) | ![macOS](images/compare/layout-combo-macos.png) | ![Linux](images/compare/layout-combo-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
+| Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
@@ -33,10 +36,17 @@ Regenerate the macOS and Linux columns with:
 ```bash
 swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # macOS, headless
 APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
+APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
 APPKITWIN_LAYOUT_TAB=controls swift run HelloWindow --layout --screenshot docs/images/compare   # the Controls tab
 APPKITWIN_LAYOUT_TAB=date swift run HelloWindow --layout --screenshot docs/images/compare       # the Date tab
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
+
+The combo box's list opens in a window of its own, which the headless renders do not
+include; `tools/linux/compare.sh` also captures the X screen with the Fruit list open
+(`APPKITWIN_COMBO_POPUP=1`):
+
+![Combo box list open on Linux](images/compare/layout-combo-open-linux.png)
 
 The Windows column is captured by the Windows test machine (window captures of the live
 app). More Windows captures show the SwiftUI demo's other tabs and the menus, which are drawn

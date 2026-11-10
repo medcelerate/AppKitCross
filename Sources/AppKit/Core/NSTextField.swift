@@ -142,6 +142,16 @@ import CoreText
         return _beginEditing()
     }
 
+    /// Sets the text, in the field editor too while editing (the editor's text is the
+    /// model's source during a session).
+    @MainActor internal func _setStringValueUpdatingEditor(_ string: String) {
+        stringValue = string
+        if let e = _editor, e.string != string {
+            e.string = string
+            e.selectedRange = NSRange(location: (string as NSString).length, length: 0)
+        }
+    }
+
     @MainActor open override func resignFirstResponder() -> Bool {
         // The window moves first-responder status to the editor during the handoff.
         _handingOffToEditor || _editor == nil

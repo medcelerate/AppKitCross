@@ -1027,7 +1027,7 @@ import CoreText
     open func doCommand(by selector: Selector) {
         MainActor.assumeIsolated {
             if let d = _viewDelegate, d.textView(self, doCommandBy: selector) { return }
-            if isFieldEditor, let field = delegate as? NSTextField, field._editorDoCommand(by: selector) { return }
+            if isFieldEditor, let f = _textDelegate as? NSTextField, f._editorDoCommand(by: selector) { return }
             if let action = NSTextView._selectorDispatch[NSStringFromSelector(selector)] { action(self, nil) }
         }
     }

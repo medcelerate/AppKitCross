@@ -77,6 +77,10 @@ extension List {
 
 // MARK: Rows
 
+/// A view whose body contributes rows to a List one by one (OutlineGroup), instead of
+/// being one row itself.
+protocol _ListRowsProvider {}
+
 /// Rows stacked with padding, separators and a selection highlight.
 struct _ListRows<Content: View>: View, _PrimitiveView {
     typealias Body = Never
@@ -176,12 +180,15 @@ final class _ListRowsPrimitive: _Primitive {
         }
     }
 
-    /// The rows: direct items of the content, through groups and ForEach, stopping at
-    /// tagged items so a row's tag is its selection value.
+    /// The rows: direct items of the content, through groups, ForEach and views that
+    /// declare themselves row providers (OutlineGroup), stopping at tagged items so a
+    /// row's tag is its selection value.
     private func collectRows(_ node: _ViewNode, into out: inout [_ViewNode]) {
         for c in node.children {
             if c.box.value is _MetadataView { out.append(c); continue }
-            if let p = c.primitive, p.isLayoutTransparent { collectRows(c, into: &out) } else { out.append(c) }
+            if let p = c.primitive, p.isLayoutTransparent { collectRows(c, into: &out) }
+            else if c.primitive == nil, c.box.value is any _ListRowsProvider { collectRows(c, into: &out) }
+            else { out.append(c) }
         }
     }
     private func rows(_ node: _ViewNode) -> [_ViewNode] {
