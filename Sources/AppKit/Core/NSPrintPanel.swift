@@ -168,8 +168,10 @@ internal final class _NSPrintPanelForm {
         originalPrinter = printInfo.printer
         let showsSetup = options.contains(.showsPageSetupAccessory)
         let showsPreview = options.contains(.showsPreview)
-        let formWidth: CGFloat = 340
-        let previewWidth: CGFloat = showsPreview ? 300 : 0
+        // 20 + 260 + 20 + 320 + 20 = 640 with the preview: the width of TextEdit's window, so
+        // the sheet attaches without overhanging it.
+        let formWidth: CGFloat = 320
+        let previewWidth: CGFloat = showsPreview ? 260 : 0
         let margin: CGFloat = 20
         let width = margin + previewWidth + (showsPreview ? margin : 0) + formWidth + margin
         rows = _NSPrintFormRows(width: formWidth)
