@@ -229,7 +229,7 @@ let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
 
-var appKitTestDependencies: [Target.Dependency] = ["AppKit", "Metal", "MetalKit", "SwiftUI"]
+var appKitTestDependencies: [Target.Dependency] = ["AppKit", "Cocoa", "Metal", "MetalKit", "SwiftUI"]
 appKitTestDependencies += combineTestDependencies
 appKitTestDependencies += leafModuleTestDependencies
 appKitTestDependencies += platformTestDependencies
@@ -250,6 +250,8 @@ targets += [
             .enableUpcomingFeature("StrictConcurrency"),
         ]
     ),
+    // The Cocoa umbrella (AppKit + Foundation; the port has no Core Data to re-export).
+    .target(name: "Cocoa", dependencies: ["AppKit"], path: "Sources/Cocoa", swiftSettings: [.swiftLanguageMode(.v5)]),
     .target(name: "MetalKit", dependencies: ["AppKit", "QuartzCore", "Metal"], path: "Sources/MetalKit", swiftSettings: [.swiftLanguageMode(.v5), .enableUpcomingFeature("StrictConcurrency")]),
     .executableTarget(
         name: "HelloWindow",
@@ -277,6 +279,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "AppKit", targets: ["AppKit"]),
+        .library(name: "Cocoa", targets: ["Cocoa"]),
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
