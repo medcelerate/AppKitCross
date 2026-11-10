@@ -41,12 +41,12 @@ sleep 3
 if ! kill -0 $APP 2>/dev/null; then echo "HelloWindow (CSD) exited:"; cat /tmp/hellowindow-wayland-csd.log; kill $SWAY; exit 1; fi
 grim /tmp/hellowindow-linux-wayland-csd.png
 echo "screenshot: /tmp/hellowindow-linux-wayland-csd.png ($(stat -c %s /tmp/hellowindow-linux-wayland-csd.png) bytes)"
-rects() { swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitWin") | "rect \(.rect.width)x\(.rect.height) window_rect \(.window_rect.width)x\(.window_rect.height) geometry \(.geometry.x),\(.geometry.y) \(.geometry.width)x\(.geometry.height)"' | head -1; }
+rects() { swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitCross") | "rect \(.rect.width)x\(.rect.height) window_rect \(.window_rect.width)x\(.window_rect.height) geometry \(.geometry.x),\(.geometry.y) \(.geometry.width)x\(.geometry.height)"' | head -1; }
 echo "sway sees: $(rects)"
-swaymsg '[app_id="AppKitWin"] resize set width 500 px height 400 px' >/dev/null
+swaymsg '[app_id="AppKitCross"] resize set width 500 px height 400 px' >/dev/null
 sleep 2
 echo "after resize set 500x400: $(rects)"
-CSD_RECT=$(swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitWin") | "\(.rect.width)x\(.rect.height)"' | head -1)
+CSD_RECT=$(swaymsg -t get_tree | jq -r '.. | select(.app_id? == "AppKitCross") | "\(.rect.width)x\(.rect.height)"' | head -1)
 FRAME_LINE=$(grep -E "frame '.*width: 500\\.0, height: 400\\.0" /tmp/hellowindow-wayland-csd.log | tail -1)
 grim /tmp/hellowindow-linux-wayland-csd-resized.png
 kill $APP 2>/dev/null || true
