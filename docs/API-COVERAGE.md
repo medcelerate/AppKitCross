@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 86 |
-| Types generated | 452 |
+| Types handwritten | 97 |
+| Types generated | 441 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10213 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1128 |
+| Members unimplemented-calls | 1168 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -108,7 +108,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCell | class | handwritten | 128 | 0 | 5 | 41 |
 | NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |
 | NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |
-| NSClickGestureRecognizer | class | generated | 3 | 0 | 0 |  |
+| NSClickGestureRecognizer | class | handwritten | 3 | 0 | 0 | 0 |
 | NSClipView | class | handwritten | 15 | 0 | 0 | 2 |
 | NSCloudSharingServiceDelegate | protocol | generated | 1 | 3 | 0 |  |
 | NSCloudSharingValidation | protocol | generated | 0 | 1 | 0 |  |
@@ -167,8 +167,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSColorSpace | class | generated | 30 | 0 | 1 |  |
 | NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |
 | NSColorWell | class | generated | 17 | 0 | 1 |  |
-| NSComboBox | class | generated | 31 | 1 | 0 |  |
-| NSComboBoxCell | class | generated | 28 | 0 | 0 |  |
+| NSComboBox | class | handwritten | 31 | 1 | 0 | 2 |
+| NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |
 | NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSComboBoxDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSComboBoxDelegate | protocol | generated | 4 | 0 | 0 |  |
@@ -212,7 +212,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSEPSImageRep | class | generated | 4 | 0 | 0 |  |
 | NSEditor | protocol | generated | 4 | 0 | 0 |  |
 | NSEditorRegistration | protocol | generated | 2 | 0 | 0 |  |
-| NSEvent | class | handwritten | 282 | 0 | 12 | 42 |
+| NSEvent | class | handwritten | 282 | 0 | 12 | 40 |
 | NSFilePromiseProvider | class | generated | 5 | 0 | 0 |  |
 | NSFilePromiseProviderDelegate | protocol | generated | 3 | 0 | 0 |  |
 | NSFilePromiseReceiver | class | generated | 4 | 0 | 0 |  |
@@ -229,14 +229,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFontCollectionOptions | struct | generated | 1 | 0 | 0 |  |
 | NSFontDescriptor | class | generated | 67 | 0 | 6 |  |
 | NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |
-| NSFontManager | class | generated | 47 | 0 | 0 |  |
+| NSFontManager | class | handwritten | 47 | 0 | 0 | 40 |
 | NSFontPanel | class | generated | 19 | 0 | 1 |  |
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
 | NSForm | class | generated | 21 | 0 | 0 |  |
 | NSFormCell | class | generated | 13 | 0 | 0 |  |
-| NSGestureRecognizer | class | generated | 52 | 0 | 1 |  |
+| NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |
 | NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |
 | NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |
 | NSGlassEffectView | class | generated | 6 | 0 | 1 |  |
@@ -278,7 +278,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLevelIndicator | class | generated | 25 | 0 | 2 |  |
 | NSLevelIndicatorCell | class | generated | 11 | 0 | 0 |  |
 | NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |
-| NSMagnificationGestureRecognizer | class | generated | 1 | 0 | 0 |  |
+| NSMagnificationGestureRecognizer | class | handwritten | 1 | 0 | 0 | 0 |
 | NSMatrix | class | generated | 83 | 0 | 1 |  |
 | NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
 | NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
@@ -302,7 +302,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSOpenGLView | class | generated | 10 | 0 | 0 |  |
 | NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |
 | NSOpenSavePanelDelegate | protocol | generated | 6 | 2 | 0 |  |
-| NSOutlineView | class | generated | 35 | 6 | 0 |  |
+| NSOutlineView | class | handwritten | 35 | 6 | 0 | 2 |
 | NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |
 | NSOutlineViewDelegate | protocol | generated | 39 | 0 | 0 |  |
 | NSPDFImageRep | class | generated | 5 | 0 | 0 |  |
@@ -312,7 +312,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPageController | class | generated | 14 | 0 | 2 |  |
 | NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |
 | NSPageLayout | class | generated | 10 | 0 | 1 |  |
-| NSPanGestureRecognizer | class | generated | 5 | 0 | 0 |  |
+| NSPanGestureRecognizer | class | handwritten | 5 | 0 | 0 | 0 |
 | NSPanel | class | handwritten | 3 | 0 | 0 | 2 |
 | NSParagraphStyle | class | handwritten | 31 | 0 | 2 | 0 |
 | NSPasteboard | class | handwritten | 91 | 11 | 11 | 5 |
@@ -336,7 +336,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPopoverTouchBarItem | class | generated | 9 | 1 | 0 |  |
 | NSPredicateEditor | class | generated | 1 | 0 | 0 |  |
 | NSPredicateEditorRowTemplate | class | generated | 13 | 3 | 0 |  |
-| NSPressGestureRecognizer | class | generated | 4 | 0 | 0 |  |
+| NSPressGestureRecognizer | class | handwritten | 4 | 0 | 0 | 0 |
 | NSPressureConfiguration | class | generated | 3 | 0 | 0 |  |
 | NSPreviewRepresentableActivityItem | protocol | generated | 2 | 2 | 0 |  |
 | NSPreviewRepresentingActivityItem | class | generated | 1 | 1 | 0 |  |
@@ -348,14 +348,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSProgressIndicator | class | generated | 17 | 0 | 1 |  |
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
 | NSResponder | class | handwritten | 68 | 3 | 0 | 17 |
-| NSRotationGestureRecognizer | class | generated | 2 | 0 | 0 |  |
+| NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
 | NSRuleEditor | class | generated | 44 | 0 | 3 |  |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSRulerMarker | class | generated | 14 | 0 | 0 |  |
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
 | NSRunningApplication | class | generated | 22 | 2 | 0 |  |
 | NSSavePanel | class | handwritten | 24 | 4 | 0 | 2 |
-| NSScreen | class | handwritten | 30 | 0 | 0 | 18 |
+| NSScreen | class | handwritten | 30 | 0 | 0 | 15 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
 | NSScrollView | class | handwritten | 61 | 0 | 2 | 4 |
 | NSScroller | class | handwritten | 42 | 0 | 6 | 3 |
@@ -401,7 +401,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |
 | NSSliderCell | class | handwritten | 21 | 0 | 0 | 3 |
 | NSSliderTouchBarItem | class | generated | 10 | 2 | 0 |  |
-| NSSound | class | generated | 24 | 2 | 3 |  |
+| NSSound | class | handwritten | 24 | 2 | 3 | 5 |
 | NSSoundDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSSpeechRecognizer | class | generated | 7 | 1 | 0 |  |
 | NSSpeechRecognizerDelegate | protocol | generated | 1 | 0 | 0 |  |
@@ -552,7 +552,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 139 |
+| NSView | class | handwritten | 361 | 3 | 19 | 135 |
 | NSViewAnimation | class | generated | 8 | 0 | 2 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
@@ -561,7 +561,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 156 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 154 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 52 | 1 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |

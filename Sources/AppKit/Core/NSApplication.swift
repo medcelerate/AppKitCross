@@ -465,6 +465,9 @@ import CoreText
                 break
             }
         }
+        // An open combo box list takes the mouse over it and its navigation keys; typing
+        // still reaches the field.
+        if let popUp = _NSComboBoxPopUp.current, popUp.handle(event) { return }
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.
         if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {

@@ -16,7 +16,7 @@ import QuartzCore
 import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate
-public protocol NSOutlineViewDelegate: NSControlTextEditingDelegate, NSObjectProtocol {
+public protocol NSOutlineViewDelegate: NSTableViewDelegate, NSControlTextEditingDelegate, NSObjectProtocol {
     @MainActor func outlineView(_ outlineView: NSOutlineView, dataCellFor tableColumn: NSTableColumn?, item: Any) -> NSCell?
     @MainActor func outlineView(_ outlineView: NSOutlineView, didAdd rowView: NSTableRowView, forRow row: Int)
     @MainActor func outlineView(_ outlineView: NSOutlineView, didClick tableColumn: NSTableColumn)
@@ -82,7 +82,7 @@ extension NSOutlineViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:didremove:forrow:)
     @MainActor public func outlineView(_ outlineView: NSOutlineView, didRemove rowView: NSTableRowView, forRow row: Int) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:heightofrowbyitem:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { unimplementedOptionalRequirement() }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat { return outlineView.rowHeight }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:isgroupitem:)
     @MainActor public func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:mousedowninheaderof:)
@@ -92,27 +92,27 @@ extension NSOutlineViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:rowviewforitem:)
     @MainActor public func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:selectionindexesforproposedselection:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet { unimplementedOptionalRequirement() }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, selectionIndexesForProposedSelection proposedSelectionIndexes: IndexSet) -> IndexSet { return proposedSelectionIndexes }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldcollapseitem:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldedit:item:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldEdit tableColumn: NSTableColumn?, item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldEdit tableColumn: NSTableColumn?, item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldexpanditem:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldreordercolumn:tocolumn:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldselect:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldSelect tableColumn: NSTableColumn?) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldSelect tableColumn: NSTableColumn?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldselectitem:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldshowcellexpansionfor:item:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldShowCellExpansionFor tableColumn: NSTableColumn?, item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldShowCellExpansionFor tableColumn: NSTableColumn?, item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldshowoutlinecellforitem:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldShowOutlineCellForItem item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldShowOutlineCellForItem item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldtrackcell:for:item:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldTrackCell cell: NSCell, for tableColumn: NSTableColumn?, item: Any) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldTrackCell cell: NSCell, for tableColumn: NSTableColumn?, item: Any) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:shouldtypeselectfor:withcurrentsearch:)
-    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldTypeSelectFor event: NSEvent, withCurrentSearch searchString: String?) -> Bool { return false }
+    @MainActor public func outlineView(_ outlineView: NSOutlineView, shouldTypeSelectFor event: NSEvent, withCurrentSearch searchString: String?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:sizetofitwidthofcolumn:)
     @MainActor public func outlineView(_ outlineView: NSOutlineView, sizeToFitWidthOfColumn column: Int) -> CGFloat { unimplementedOptionalRequirement() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/outlineview(_:tintconfigurationforitem:)
@@ -159,6 +159,6 @@ extension NSOutlineViewDelegate {
     @available(macOS 10.10, *)
     @MainActor public func outlineViewSelectionIsChanging(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdelegate/selectionshouldchange(in:)
-    @MainActor public func selectionShouldChange(in outlineView: NSOutlineView) -> Bool { return false }
+    @MainActor public func selectionShouldChange(in outlineView: NSOutlineView) -> Bool { return true }
 }
 

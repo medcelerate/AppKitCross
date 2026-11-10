@@ -122,6 +122,24 @@ import CoreText
         return _beginEditing()
     }
 
+    /// A command the field editor received (moveDown:, insertNewline:, ...): the delegate
+    /// may take it through `control(_:textView:doCommandBy:)`, as in AppKit; subclasses
+    /// (NSComboBox) take some themselves.
+    @MainActor internal func _editorDoCommand(by selector: Selector) -> Bool {
+        guard let editor = _editor else { return false }
+        return _delegate?.control(self, textView: editor, doCommandBy: selector) ?? false
+    }
+
+    /// Sets the text, in the field editor too while editing (the editor's text is the
+    /// model's source during a session).
+    @MainActor internal func _setStringValueUpdatingEditor(_ string: String) {
+        stringValue = string
+        if let e = _editor, e.string != string {
+            e.string = string
+            e.selectedRange = NSRange(location: (string as NSString).length, length: 0)
+        }
+    }
+
     @MainActor open override func resignFirstResponder() -> Bool {
         // The window moves first-responder status to the editor during the handoff.
         _handingOffToEditor || _editor == nil

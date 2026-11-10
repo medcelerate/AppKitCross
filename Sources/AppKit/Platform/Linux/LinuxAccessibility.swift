@@ -558,6 +558,8 @@ final class AtspiBridge {
         case .cancel: return "cancel"
         case .pick: return "pick"
         case .raise: return "raise"
+        case .expand: return "expand"
+        case .collapse: return "collapse"
         }
     }
 
@@ -688,6 +690,7 @@ final class AtspiBridge {
             if (e.role == "AXCheckBox" || e.role == "AXRadioButton") && !isTab { bits.append(41); if (e.value?.doubleValue ?? 0) != 0 { bits.append(4) } }
             if e.isMultiline { bits.append(17) } else if e.role == "AXTextField" { bits.append(26) }
             if e.allowsMultipleSelection { bits.append(18) }
+            if let expanded = e.isExpanded { bits.append(9); bits.append(expanded ? 10 : 5) }
             if l.isWindow { bits.append(21); if l.entry.window?.atspiIsKey == true { bits.append(1) } }
         }
         var w0: UInt32 = 0, w1: UInt32 = 0
