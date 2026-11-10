@@ -18,8 +18,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [control]
+        # One variable per variant; each against the control runs of E0/E1.
+        variant: [lifecycle, nosep, j1]
         rep: [1, 2, 3, 4]
+        exclude:
+          - { variant: lifecycle, rep: 3 }
+          - { variant: lifecycle, rep: 4 }
     steps:
       - uses: actions/checkout@v4
       - uses: compnerd/gha-setup-swift@main
@@ -56,7 +60,14 @@ jobs:
         env:
           VARIANT: ${{ matrix.variant }}
         run: |
+          set +e +o pipefail   # the greps below must not decide the step; the verdict step does
           flags=(-c debug -j 2)
+          case "$VARIANT" in
+            lifecycle) flags+=(-Xswiftc -driver-show-job-lifecycle) ;;
+            nosep) flags+=(-Xswiftc -no-emit-module-separately) ;;
+            j1) flags=(-c debug -j 1) ;;
+          esac
+          echo "flags: ${flags[*]}"
           start=$(date +%s)
           status=0
           swift build "${flags[@]}" --target AppKit -v > build.log 2> build.err || status=$?
