@@ -199,16 +199,20 @@ final class _PDFRecorder: CGContextRecorder {
     private var alpha: (CGFloat, CGFloat) = (-1, -1)
     init(writer: _PDFWriter) { self.writer = writer }
 
+    /// The path's elements through `applyWithBlock`, the CoreGraphics API the port's CGPath shares with Apple's.
     private func elements(_ path: CGPath) -> [_PDFPathElement] {
-        path.elements.map { e in
-            switch e {
-            case let .move(p): return .move(p)
-            case let .line(p): return .line(p)
-            case let .quad(c, p): return .quad(c, p)
-            case let .curve(c1, c2, p): return .curve(c1, c2, p)
-            case .close: return .close
+        var out: [_PDFPathElement] = []
+        path.applyWithBlock { element in
+            let e = element.pointee
+            switch e.type {
+            case .moveToPoint: out.append(.move(e.points[0]))
+            case .addLineToPoint: out.append(.line(e.points[0]))
+            case .addQuadCurveToPoint: out.append(.quad(e.points[0], e.points[1]))
+            case .addCurveToPoint: out.append(.curve(e.points[0], e.points[1], e.points[2]))
+            case .closeSubpath: out.append(.close)
             }
         }
+        return out
     }
     private func setAlpha(fill: CGFloat, stroke: CGFloat) {
         if alpha != (fill, stroke) { writer.setAlpha(fill: fill, stroke: stroke); alpha = (fill, stroke) }
@@ -241,28 +245,24 @@ final class _PDFRecorder: CGContextRecorder {
     func recordImage(_ image: CGImage, in rect: CGRect, alpha: CGFloat, flippedRows: Bool) {
         // The port's images are premultiplied BGRA, top row first.
         let w = image.width, h = image.height
-        var rgb = Data(count: w * h * 3)
-        var mask = Data(count: w * h)
+        var rgb = [UInt8](repeating: 0, count: w * h * 3)
+        var mask = [UInt8](repeating: 0, count: w * h)
         var opaque = true
-        image.data.withUnsafeBytes { src in
-            rgb.withUnsafeMutableBytes { dst in
-                mask.withUnsafeMutableBytes { m in
-                    for y in 0..<h {
-                        let row = flippedRows ? h - 1 - y : y
-                        for x in 0..<w {
-                            let i = row * image.bytesPerRow + x * 4
-                            let b = CGFloat(src[i]), g = CGFloat(src[i + 1]), r = CGFloat(src[i + 2]), a = CGFloat(src[i + 3])
-                            let o = (y * w + x)
-                            let un: CGFloat = a > 0 ? 255 / a : 0
-                            dst[o * 3] = UInt8(min(255, r * un)); dst[o * 3 + 1] = UInt8(min(255, g * un)); dst[o * 3 + 2] = UInt8(min(255, b * un))
-                            m[o] = UInt8(min(255, a * alpha))
-                            if a < 255 || alpha < 1 { opaque = false }
-                        }
-                    }
-                }
+        let src = [UInt8](image.data)
+        for y in 0..<h {
+            let row = flippedRows ? h - 1 - y : y
+            for x in 0..<w {
+                let i = row * image.bytesPerRow + x * 4
+                guard i + 3 < src.count else { continue }
+                let b = CGFloat(src[i]), g = CGFloat(src[i + 1]), r = CGFloat(src[i + 2]), a = CGFloat(src[i + 3])
+                let o = y * w + x
+                let un: CGFloat = a > 0 ? 255 / a : 0
+                rgb[o * 3] = UInt8(min(255, r * un)); rgb[o * 3 + 1] = UInt8(min(255, g * un)); rgb[o * 3 + 2] = UInt8(min(255, b * un))
+                mask[o] = UInt8(min(255, a * alpha))
+                if a < 255 || alpha < 1 { opaque = false }
             }
         }
-        writer.drawImage(width: w, height: h, rgb: rgb, alpha: opaque ? nil : mask, in: rect)
+        writer.drawImage(width: w, height: h, rgb: Data(rgb), alpha: opaque ? nil : Data(mask), in: rect)
     }
 }
 #endif
