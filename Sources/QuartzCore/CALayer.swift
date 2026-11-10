@@ -129,6 +129,13 @@ public struct CALayerCornerCurve: RawRepresentable, Hashable, Sendable {
     public static let continuous = CALayerCornerCurve(rawValue: "continuous")
 }
 
+/// A superlayer's sublayerTransform as its sublayers see it while compositing.
+struct _CAComposeParent {
+    var sublayerTransform: CATransform3D
+    var bounds: CGRect
+    var anchor: CGPoint
+}
+
 public let kCAOnOrderIn = "onOrderIn"
 public let kCAOnOrderOut = "onOrderOut"
 public let kCATransition = "transition"
@@ -165,6 +172,10 @@ open class CALayer: NSObject, CAMediaTiming {
     var _shadowRadius: CGFloat = 3
     var _shadowPath: CGPath?
     var _mask: CALayer?
+    /// Set by the superlayer around `_compose`: its sublayerTransform, which the layer's
+    /// own placement goes through (combined in 3D, so a perspective there projects this
+    /// layer's plane).
+    var _composeParent: _CAComposeParent?
 
     public var beginTime: CFTimeInterval = 0
     public var duration: CFTimeInterval = 0
@@ -648,24 +659,29 @@ open class CALayer: NSObject, CAMediaTiming {
 
     // MARK: Coordinate conversion
 
-    /// Own bounds space -> superlayer space.
-    private func _toSuperlayer(_ p: CGPoint, flipped parentFlipped: Bool) -> CGPoint {
-        let ax = _bounds.minX + _anchorPoint.x * _bounds.width
-        let ay = _bounds.minY + _anchorPoint.y * _bounds.height
-        var q = p
-        if _isGeometryFlipped != parentFlipped { q.y = _bounds.minY + _bounds.maxY - q.y }
-        q = CGPoint(x: q.x - ax, y: q.y - ay).applying(_transform)
-        return CGPoint(x: q.x + _position.x, y: q.y + _position.y)
+    /// The map from this layer's oriented bounds space into the superlayer's: the anchor,
+    /// `transform` and `position`, then the superlayer's `sublayerTransform`. A 3D rotation
+    /// under perspective makes it projective; points go through it with the divide, so
+    /// `convert` and `hitTest` agree with what the compositor draws.
+    private func _planeToSuperlayer(flipped parentFlipped: Bool) -> _CAHomography {
+        let s = superlayer
+        return _CAHomography(CALayer._planeTransform(self, parentFlipped: parentFlipped,
+                                                     parentSublayerTransform: s?._sublayerTransform ?? CATransform3DIdentity,
+                                                     parentBounds: s?._bounds ?? .zero, parentAnchor: s?._anchorPoint ?? .zero))
     }
 
+    /// Own bounds space -> superlayer space.
+    private func _toSuperlayer(_ p: CGPoint, flipped parentFlipped: Bool) -> CGPoint {
+        let h = _planeToSuperlayer(flipped: parentFlipped)
+        return h.apply(p) ?? p.applying(h.affine)
+    }
+
+    /// Superlayer space -> own bounds space, through the inverse projection. A point whose
+    /// ray never meets the plane in front of the eye falls back to the affine part.
     private func _fromSuperlayer(_ p: CGPoint, flipped parentFlipped: Bool) -> CGPoint {
-        var q = CGPoint(x: p.x - _position.x, y: p.y - _position.y)
-        q = q.applying(CATransform3DInvert(_transform))
-        let ax = _bounds.minX + _anchorPoint.x * _bounds.width
-        let ay = _bounds.minY + _anchorPoint.y * _bounds.height
-        q = CGPoint(x: q.x + ax, y: q.y + ay)
-        if _isGeometryFlipped != parentFlipped { q.y = _bounds.minY + _bounds.maxY - q.y }
-        return q
+        let h = _planeToSuperlayer(flipped: parentFlipped)
+        if let inv = h.inverted(), let q = inv.apply(p) { return q }
+        return p.applying(h.affine.inverted())
     }
 
     private var _parentFlipped: Bool { superlayer?._isGeometryFlipped ?? _isGeometryFlipped }
@@ -726,9 +742,11 @@ open class CALayer: NSObject, CAMediaTiming {
     /// The deepest layer containing `p`, given in the superlayer's space.
     open func hitTest(_ p: CGPoint) -> CALayer? {
         guard !_isHidden else { return nil }
-        let local = _fromSuperlayer(p, flipped: _parentFlipped)
+        let h = _planeToSuperlayer(flipped: _parentFlipped)
+        if !_isDoubleSided, !h.showsFront(of: _bounds) { return nil }
+        guard let inv = h.inverted(), let local = inv.apply(p) else { return nil }
         if _masksToBounds && !_bounds.contains(local) { return nil }
-        for s in _sublayers.sorted(by: { $0._zPosition < $1._zPosition }).reversed() {
+        for s in _orderedSublayers(_sublayers, of: self).reversed() {
             if let hit = s.hitTest(local) { return hit }
         }
         return contains(local) ? self : nil
@@ -1029,25 +1047,81 @@ open class CALayer: NSObject, CAMediaTiming {
         hasPresentation = true
         let p = animations.isEmpty ? self : _presentation(at: time)
         guard !p._isHidden, p._opacity > 0 else { return }
-        if let dirty, p._transform.isIdentity, !p.frame.intersects(dirty), p._masksToBounds { return }
+        let parent = _composeParent
+        let plain = p._transform.isIdentity && parent == nil
+        if let dirty, plain, !p.frame.intersects(dirty), p._masksToBounds { return }
         if _needsLayout { _needsLayout = false; layoutSublayers() }
         if _needsDisplay { display() }
 
-        ctx.saveGState()
-        ctx.translateBy(x: p._position.x, y: p._position.y)
-        if !p._transform.isIdentity { ctx.concatenate(p._transform.affineTransform) }
-        let ax = p._bounds.minX + p._anchorPoint.x * p._bounds.width
-        let ay = p._bounds.minY + p._anchorPoint.y * p._bounds.height
-        ctx.translateBy(x: -ax, y: -ay)
-        let flip = p._isGeometryFlipped != parentFlipped
-        if flip {
-            // Mirror the content within the layer's own rect; the frame itself does not move.
-            ctx.translateBy(x: 0, y: p._bounds.minY + p._bounds.maxY)
-            ctx.scaleBy(x: 1, y: -1)
+        // The layer's plane in the superlayer's space: the geometry flip (which mirrors the
+        // content within the layer's own rect), the anchor, `transform`, `position`, and
+        // the superlayer's `sublayerTransform`, combined in 3D. Affine for most layers; a 3D
+        // rotation under a perspective sublayerTransform makes it projective.
+        let plane: _CAHomography
+        if parent == nil, p._transform.isAffine {
+            // The common case without the 4x4 arithmetic: the same product as _planeTransform.
+            let ax = p._bounds.minX + p._anchorPoint.x * p._bounds.width
+            let ay = p._bounds.minY + p._anchorPoint.y * p._bounds.height
+            var t = p._isGeometryFlipped != parentFlipped
+                ? CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: 0, y: p._bounds.minY + p._bounds.maxY))
+                : CGAffineTransform.identity
+            t = t.concatenating(CGAffineTransform(translationX: -ax, y: -ay))
+            if !p._transform.isIdentity { t = t.concatenating(p._transform.affineTransform) }
+            plane = _CAHomography(t.concatenating(CGAffineTransform(translationX: p._position.x, y: p._position.y)))
+        } else {
+            plane = _CAHomography(CALayer._planeTransform(p, parentFlipped: parentFlipped,
+                                                          parentSublayerTransform: parent?.sublayerTransform ?? CATransform3DIdentity,
+                                                          parentBounds: parent?.bounds ?? .zero, parentAnchor: parent?.anchor ?? .zero))
         }
-        let localDirty: CGRect? = (dirty != nil && p._transform.isIdentity) ? _localRect(dirty!, p: p, flip: flip) : nil
+        if !p._isDoubleSided, !plane.showsFront(of: p._bounds) { return }   // back-face culling
+        guard plane.isAffine else {
+            _composeProjected(into: ctx, presentation: p, through: plane, alpha: alpha * CGFloat(p._opacity), time: time)
+            return
+        }
+        ctx.saveGState()
+        ctx.concatenate(plane.affine)
+        let flip = p._isGeometryFlipped != parentFlipped
+        let localDirty: CGRect? = (dirty != nil && plain) ? _localRect(dirty!, p: p, flip: flip) : nil
         _composeInBoundsSpace(into: ctx, presentation: p, alpha: alpha * CGFloat(p._opacity), time: time, dirty: localDirty)
         ctx.restoreGState()
+    }
+
+    /// A layer whose plane is in perspective: the subtree is flattened into the plane as
+    /// pixels (at the context's scale, more where the projection magnifies) and drawn
+    /// through the projection as a mesh of affine cells (CAProjective.swift). The opacity
+    /// applies to the flattened image, as to any offscreen pass.
+    private func _composeProjected(into ctx: CGContext, presentation p: CALayer, through plane: _CAHomography, alpha a: CGFloat, time: CFTimeInterval) {
+        let extent = _subtreeExtent(presentation: p)
+        let ctm = ctx.ctm
+        let stretch = plane.stretch(of: p._bounds)
+        let scale = (x: max(0.01, hypot(ctm.a, ctm.b)) * stretch, y: max(0.01, hypot(ctm.c, ctm.d)) * stretch)
+        let yDown = p._isGeometryFlipped
+        guard let image = _CAPixels.render(extent: extent, scale: scale, yDown: yDown, draw: { off in
+            _composeInBoundsSpace(into: off, presentation: p, alpha: 1, time: time, dirty: nil)
+        }) else { return }
+        _CAProjective.draw(image, extent: extent, yDown: yDown, through: plane, into: ctx, alpha: a)
+    }
+
+    /// Siblings in painter's order: by `zPosition`, then sublayer order, as Core Animation
+    /// composites a layer that flattens its sublayers. A `CATransformLayer` keeps its
+    /// sublayers in 3D, so there they go by projected depth (the anchor's z after the
+    /// sublayer's transform and the sublayerTransform).
+    func _orderedSublayers(_ subs: [CALayer], of p: CALayer) -> [CALayer] {
+        let byDepth = self is CATransformLayer
+        func key(_ s: CALayer) -> CGFloat { byDepth ? _depth(of: s, in: p) : s._zPosition }
+        return subs.enumerated().sorted { l, r in
+            let kl = key(l.element), kr = key(r.element)
+            return kl != kr ? kl < kr : l.offset < r.offset
+        }.map(\.element)
+    }
+
+    private func _depth(of s: CALayer, in p: CALayer) -> CGFloat {
+        let px = p._bounds.minX + p._anchorPoint.x * p._bounds.width, py = p._bounds.minY + p._anchorPoint.y * p._bounds.height
+        let x = s._position.x - px, y = s._position.y - py, z = s._zPosition + s._transform.m43
+        let st = p._sublayerTransform
+        let zz = x * st.m13 + y * st.m23 + z * st.m33 + st.m43
+        let w = x * st.m14 + y * st.m24 + z * st.m34 + st.m44
+        return w > 1e-9 ? zz / w : zz
     }
 
     /// Whether the mask can be a clip path (a shape, or a plain rounded rectangle) rather
@@ -1122,21 +1196,15 @@ open class CALayer: NSObject, CAMediaTiming {
         _drawOwnContent(into: ctx, presentation: p)
         let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
         if !subs.isEmpty {
-            let ax = p._bounds.minX + p._anchorPoint.x * p._bounds.width
-            let ay = p._bounds.minY + p._anchorPoint.y * p._bounds.height
-            ctx.saveGState()
-            if !p._sublayerTransform.isIdentity {
-                ctx.translateBy(x: ax, y: ay)
-                ctx.concatenate(p._sublayerTransform.affineTransform)
-                ctx.translateBy(x: -ax, y: -ay)
+            // The sublayerTransform reaches each sublayer's placement in 3D (a perspective
+            // projects the sublayer's plane) rather than as an affine part of the CTM.
+            let parent: _CAComposeParent? = p._sublayerTransform.isIdentity ? nil
+                : _CAComposeParent(sublayerTransform: p._sublayerTransform, bounds: p._bounds, anchor: p._anchorPoint)
+            for s in _orderedSublayers(subs, of: p) {
+                s._composeParent = parent
+                s._compose(into: ctx, parentFlipped: p._isGeometryFlipped, alpha: a, time: time, dirty: parent == nil ? dirty : nil)
+                s._composeParent = nil
             }
-            let ordered = subs.enumerated().sorted { l, r in
-                l.element._zPosition != r.element._zPosition ? l.element._zPosition < r.element._zPosition : l.offset < r.offset
-            }.map(\.element)
-            for s in ordered {
-                s._compose(into: ctx, parentFlipped: p._isGeometryFlipped, alpha: a, time: time, dirty: dirty)
-            }
-            ctx.restoreGState()
         }
         ctx.setAlpha(a)
         p._drawBorder(into: ctx)
