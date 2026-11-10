@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NST
         stack.alignment = .leading
         stack.spacing = 10
         stack.autoresizingMask = [.width, .height]
-        let intro = NSTextField(labelWithString: "An NSToolbar drawn by the package under the title bar: image items, a segmented group, a menu item, a search field, and the\nstandard Customize item. Narrow the window to see items move into the » menu. Right-click the status area icon for its menu.")
+        let intro = NSTextField(labelWithString: "An NSToolbar drawn by the package under the title bar: image items, a group, a menu item,\na search field and Customize. Narrow the window: items move into the » menu.\nThe status area icon shows a menu when clicked.")
         intro.lineBreakMode = .byWordWrapping
         intro.maximumNumberOfLines = 3
         stack.addArrangedSubview(intro)
