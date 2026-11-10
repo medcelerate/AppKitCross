@@ -52,8 +52,9 @@ final class Win32StatusItems: PlatformStatusItemHost {
             for i in items { i.add() }
             return
         }
-        let event = UINT(UInt(bitPattern: lParam) & 0xFFFF)
-        let id = UINT((UInt(bitPattern: lParam) >> 16) & 0xFFFF)
+        let bits = UInt64(truncatingIfNeeded: lParam)
+        let event = UINT(bits & 0xFFFF)
+        let id = UINT((bits >> 16) & 0xFFFF)
         guard let item = items.first(where: { $0.id == id }) else { return }
         let click: PlatformStatusItemClick
         switch event {
@@ -65,7 +66,8 @@ final class Win32StatusItems: PlatformStatusItemHost {
         var point = backend.mouseLocation
         if event == Win32StatusItems.ninKeySelect || event == UINT(WM_CONTEXTMENU) {
             // Version 4 passes the anchor in wParam (pixels): where a keyboard selection wants the menu.
-            let x = Int32(truncatingIfNeeded: UInt(wParam) & 0xFFFF), y = Int32(truncatingIfNeeded: (UInt(wParam) >> 16) & 0xFFFF)
+            let anchor = UInt64(truncatingIfNeeded: wParam)
+            let x = Int32(truncatingIfNeeded: anchor & 0xFFFF), y = Int32(truncatingIfNeeded: (anchor >> 16) & 0xFFFF)
             let scale = CGFloat(GetDpiForSystem()) / 96
             point = NSPoint(x: CGFloat(x) / scale, y: CGFloat(Win32Backend.primaryHeightPixels - y) / scale)
         }
@@ -128,7 +130,7 @@ final class Win32StatusItem: PlatformStatusItem {
         var nid = data()
         if Shell_NotifyIconW(DWORD(NIM_ADD), &nid) {
             added = true
-            nid.DUMMYUNIONNAME.uVersion = 4           // NOTIFYICON_VERSION_4: NIN_SELECT / WM_CONTEXTMENU with anchors
+            nid.uVersion = 4           // NOTIFYICON_VERSION_4 (the anonymous union's member): NIN_SELECT / WM_CONTEXTMENU with anchors
             _ = Shell_NotifyIconW(DWORD(NIM_SETVERSION), &nid)
             if NSView._traceInvalidation { NSView._trace("win32 status: added item \(id) '\(title)'") }
         } else if NSView._traceInvalidation {
