@@ -96,16 +96,16 @@ open class NSScreen: NSObject {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumextendeddynamicrangecolorcomponentvalue
     @available(macOS 10.11, *)
-    open var maximumExtendedDynamicRangeColorComponentValue: CGFloat { unimplemented() }
+    open var maximumExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumEDRValue }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumframespersecond
     @available(macOS 12.0, *)
     open var maximumFramesPerSecond: Int { 60 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumpotentialextendeddynamicrangecolorcomponentvalue
     @available(macOS 10.15, *)
-    open var maximumPotentialExtendedDynamicRangeColorComponentValue: CGFloat { unimplemented() }
+    open var maximumPotentialExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumPotentialEDRValue }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumreferenceextendeddynamicrangecolorcomponentvalue
     @available(macOS 10.15, *)
-    open var maximumReferenceExtendedDynamicRangeColorComponentValue: CGFloat { unimplemented() }
+    open var maximumReferenceExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumReferenceEDRValue }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumrefreshinterval
     @available(macOS 12.0, *)
     open var maximumRefreshInterval: TimeInterval { unimplemented() }

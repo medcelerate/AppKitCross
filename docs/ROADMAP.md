@@ -3,15 +3,15 @@
 Milestones are ordered so that each one produces something runnable. "Done" criteria
 are concrete and testable.
 
-## Status at a glance (2026-11-04)
+## Status at a glance (2026-11-10)
 
 | Milestone | State |
 |---|---|
 | M0 Foundation | done |
 | M1 Window and drawing | done, verified on Windows |
 | M2 Controls and text | done, verified on Windows; field editor (NSText/NSTextView) on main, Win32 IME wiring with the Windows session; menu pop-ups (`NSMenu.popUp`, `popUpContextMenu`, `NSView.menu` on right click) and `NSPopUpButton` drawn by the package in non-activating windows; drag and drop (`beginDraggingSession`, `registerForDraggedTypes`, the NSDraggingDestination messages; ADR-0011) within the application and with other applications: OLE on Windows, XDND on X11 (tested end to end in the container against a second X client), the Wayland data device; the same selection machinery gives Linux its system clipboard; the Win32, X11 and Wayland event pumps service the main dispatch queue and RunLoop timers (DispatchQueue.main, @MainActor hops, Timer); `NSTableView` (view-based rows made for the visible rect and recycled on scroll, `NSTableColumn`/`NSTableHeaderView`/`NSTableHeaderCell`/`NSTableCellView`/`NSTableRowView`, header sorting through `sortDescriptorPrototype`, single/multiple selection with Cmd and Shift, arrows and Cmd-A, alternating rows, grid, column autoresizing, the header tiled by `NSScrollView`) and `NSSegmentedControl`/`NSSegmentedCell` (selectOne/selectAny/momentary tracking, labels and images, distributions, keyboard), both on the Layout Demo's Table tab |
-| M3a DXGI swap chain | done, verified on Windows (PR #1) |
-| M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain) |
+| M3a DXGI swap chain | done, verified on Windows (PR #1); windows presented through a swap chain or DirectComposition are created with `WS_EX_NOREDIRECTIONBITMAP` (2026-11-10, awaiting Windows verification); HDR (ADR-0016): on a monitor in HDR mode the chain is `R16G16B16A16_FLOAT` scRGB and frames are scaled by the SDR white level, `NSScreen`'s `maximumExtendedDynamicRangeColorComponentValue`/`maximumPotential…`/`maximumReference…` report the headroom, an `.rgba16Float` `MTKView` chain is presented as scRGB (2026-11-10, awaiting verification on the RTX 2070 PC) |
+| M3b Frameless glass window | done, verified on Windows (PR #2: custom frame, DWM backdrop, DirectComposition swap chain); borderless windows get a DWM drop shadow (`WS_THICKFRAME` as the frame to extend, no border line, removed for `hasShadow == false`; 2026-11-10, awaiting Windows verification) |
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
@@ -130,10 +130,28 @@ change), keeps its point size, text is crisp on both, nothing is clipped, a resi
 measurement). The trace shows `screen … scale` then `backing scale …` on each move;
 `NSWindow` posts `didChangeScreenNotification` on such moves. Not exercised: dragging the Glass window
 itself across monitors.
+No redirection bitmap (2026-11-10): every window that will present through a swap chain
+(a D3D11 device and DXGI 1.2 exist, `APPKITWIN_LEGACY_D2D` unset) is created with
+`WS_EX_NOREDIRECTIONBITMAP`, so DWM allocates no legacy redirection surface and copies
+nothing per frame; the bit is creation-only, so it is decided by `cd2d_presentation_available`
+(probed once) rather than by the chrome, kept across `styleMask` changes, and windows
+on the legacy `ID2D1HwndRenderTarget` keep their surface. Screenshot capture
+(`cacheDisplay`, `HelloWindow --screenshot`) draws the view tree itself and does not read
+the surface. HDR (2026-11-10, ADR-0016): `cd2d_display_hdr_info` reads the monitor's
+`DXGI_OUTPUT_DESC1` (colour space, luminances) and `DISPLAYCONFIG_SDR_WHITE_LEVEL` /
+`DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO`; while the colour space is G2084/P2020 (or
+advanced colour is on and the panel exceeds 80 nits) the window's chain is
+`R16G16B16A16_FLOAT` with `DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709`, the 8-bit sRGB canvas
+is unchanged and `end_draw` runs it through Direct2D's colour-management (sRGB → scRGB)
+and colour-matrix (× SDR white / 80) effects into the back buffer; a move onto a monitor
+of the other kind rebuilds the chain, a changed white level rescales. `APPKITWIN_HDR=0|1`
+forces the decision; `APPKITWIN_TRACE=1` prints `win32 window create … redirection
+bitmap`, `win32 chrome … shadow`, and `win32 window … swap chain hdr|sdr …` with the
+monitor's numbers. Awaiting verification on the PC (RTX 2070 SUPER).
 Known limitation: screen frames are converted to points at each monitor's own scale, so
 with mixed scales the point-space screen layout can overlap (window frames round-trip
 exactly; only `NSScreen.frame` of secondary monitors is affected). Open: D3D12 +
-D3D11On12 (only needed for Metal/M7 sharing), HDR, and DirectComposition hosting (M3b/M4b).
+D3D11On12 (only needed for Metal/M7 sharing).
 
 ## M4: Core Animation
 
@@ -252,10 +270,16 @@ and `NSWindow`'s caption/client decision; DWM attributes map the chrome (system 
 Mica/Mica Alt/Acrylic, corner preference, non-client rendering off for `hasShadow == false`,
 immersive dark mode from the app theme); transparent windows present through a
 premultiplied composition swap chain under a DirectComposition visual
-(`cd2d_target_create_composition_swapchain`), cleared to transparent each frame. Not done:
-`WS_EX_NOREDIRECTIONBITMAP` (Windows only honours it at creation and the chrome arrives
-later; the backdrop shows through without it), a shadow for non-resizable borderless
-windows (no DWM frame to extend). Window buttons (2026-11-03): a `.fullSizeContentView`
+(`cd2d_target_create_composition_swapchain`), cleared to transparent each frame.
+Borderless shadow (2026-11-10): a non-resizable borderless window has no frame DWM could
+shadow, so it gets `WS_THICKFRAME` while `hasShadow` is true (the client area still
+covers the window, `WM_NCHITTEST` reports no resize edges, maximised insets follow the
+frame), the frame is extended one pixel as for every custom frame and
+`DWMWA_BORDER_COLOR` is `DWMWA_COLOR_NONE` for borderless windows, so the shadow shows
+without a border line, on translucent windows too; `hasShadow = false` drops the frame,
+the extension and non-client rendering. The shadow is DWM's rectangular (rounded) one,
+not the alpha-shaped shadow of macOS. `WS_EX_NOREDIRECTIONBITMAP` is now set at
+creation for every swap-chain window (M3 status). Window buttons (2026-11-03): a `.fullSizeContentView`
 window draws AppKit's close/miniaturize/zoom buttons at its top-left on every platform
 (`NSWindowButtons.swift`, an overlay root above the content view, hit-tested first, grey
 when the window is not key, glyphs on hover); `standardWindowButton(_:)` returns them,

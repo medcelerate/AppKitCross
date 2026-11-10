@@ -8,7 +8,9 @@
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <dxgi1_3.h>
+#include <dxgi1_6.h>
 #include <dxgidebug.h>
+#include <d2d1effects.h>
 #include <dcomp.h>
 #include <d3d9types.h>
 #include <dwrite.h>
@@ -51,6 +53,14 @@ struct CD2DTarget {
     IDCompositionTarget *dcompTarget = nullptr;
     IDCompositionVisual *dcompVisual = nullptr;
     D2D1_ALPHA_MODE alphaMode = D2D1_ALPHA_MODE_IGNORE;   // of the swap-chain back buffer
+    // HDR presentation (ADR-0016): FP16 scRGB back buffers; the canvas stays 8-bit sRGB
+    // and end_draw runs it through sRGB → linear (colour management) and a white-level
+    // scale (colour matrix) instead of a copy.
+    DXGI_FORMAT chainFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bool hdr = false;
+    float sdrWhiteNits = 80;
+    ID2D1Effect *toLinear = nullptr;
+    ID2D1Effect *whiteScale = nullptr;
     float dpi = 96;
     bool lost = false;                            // device removed/reset: end_draw reports it
     // Composition surface targets (Milestone 9): BeginDraw hands out a region of a larger
@@ -112,7 +122,7 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
     if (FAILED(hr)) { t->lost = true; return false; }
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, t->alphaMode), t->dpi, t->dpi);
+        D2D1::PixelFormat(t->chainFormat, t->alphaMode), t->dpi, t->dpi);
     hr = t->dc->CreateBitmapFromDxgiSurface(surface, &props, &t->backBuffer);
     surface->Release();
     if (FAILED(hr)) { t->lost = true; return false; }
@@ -122,6 +132,10 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
         D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, t->alphaMode), t->dpi, t->dpi);
     hr = t->dc->CreateBitmap(size, nullptr, 0, &canvasProps, &t->canvas);
     if (FAILED(hr)) { safeRelease(t->backBuffer); t->lost = true; return false; }
+    if (t->hdr) {
+        if (t->toLinear) t->toLinear->SetInput(0, t->canvas);
+        else { safeRelease(t->canvas); safeRelease(t->backBuffer); t->lost = true; return false; }
+    }
     t->canvasFresh = true;
     t->hasDirty = false;
     t->dc->SetTarget(t->canvas);
@@ -136,6 +150,46 @@ static void releaseBackBufferBitmap(CD2DTarget *t) {
     // ResizeBuffers needs every reference to the buffers gone, including any the D3D
     // immediate context still holds for in-flight work.
     if (t->d3dContext) { t->d3dContext->ClearState(); t->d3dContext->Flush(); }
+}
+
+/// The white-level scale of an HDR target: scRGB 1.0 is 80 nits, the desktop shows SDR
+/// white at the monitor's SDR white level, so the frame is multiplied by their ratio.
+static void applyWhiteLevel(CD2DTarget *t) {
+    if (!t->whiteScale) return;
+    float s = t->sdrWhiteNits > 0 ? t->sdrWhiteNits / 80.0f : 1.0f;
+    D2D1_MATRIX_5X4_F m = {};
+    m.m[0][0] = s; m.m[1][1] = s; m.m[2][2] = s; m.m[3][3] = 1;   // alpha unscaled, no offset
+    t->whiteScale->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, m);
+}
+
+/// Builds the HDR presentation chain on `t->dc`: canvas (sRGB, 8-bit) → colour management
+/// (sRGB → scRGB, i.e. linear with 1.0 = 80 nits) → colour matrix (× SDR white / 80), both
+/// computing in 16-bit float so values above 1.0 survive. The canvas is wired in by
+/// createBackBufferBitmap.
+static bool createHDREffects(CD2DTarget *t) {
+    ID2D1ColorContext *srgb = nullptr, *scrgb = nullptr;
+    bool ok = false;
+    do {
+        if (FAILED(t->dc->CreateColorContext(D2D1_COLOR_SPACE_SRGB, nullptr, 0, &srgb))) break;
+        if (FAILED(t->dc->CreateColorContext(D2D1_COLOR_SPACE_SCRGB, nullptr, 0, &scrgb))) break;
+        if (FAILED(t->dc->CreateEffect(CLSID_D2D1ColorManagement, &t->toLinear))) break;
+        if (FAILED(t->toLinear->SetValue(D2D1_COLORMANAGEMENT_PROP_SOURCE_COLOR_CONTEXT, srgb))) break;
+        if (FAILED(t->toLinear->SetValue(D2D1_COLORMANAGEMENT_PROP_DESTINATION_COLOR_CONTEXT, scrgb))) break;
+        t->toLinear->SetValue(D2D1_COLORMANAGEMENT_PROP_ALPHA_MODE, D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED);
+        t->toLinear->SetValue(D2D1_COLORMANAGEMENT_PROP_QUALITY, D2D1_COLORMANAGEMENT_QUALITY_NORMAL);
+        t->toLinear->SetValue(D2D1_PROPERTY_PRECISION, D2D1_BUFFER_PRECISION_16BPC_FLOAT);
+        if (FAILED(t->dc->CreateEffect(CLSID_D2D1ColorMatrix, &t->whiteScale))) break;
+        t->whiteScale->SetValue(D2D1_PROPERTY_PRECISION, D2D1_BUFFER_PRECISION_16BPC_FLOAT);
+        t->whiteScale->SetValue(D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, FALSE);
+        t->whiteScale->SetValue(D2D1_COLORMATRIX_PROP_ALPHA_MODE, D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED);
+        t->whiteScale->SetInputEffect(0, t->toLinear);
+        applyWhiteLevel(t);
+        ok = true;
+    } while (false);
+    safeRelease(srgb);
+    safeRelease(scrgb);
+    if (!ok) { safeRelease(t->toLinear); safeRelease(t->whiteScale); }
+    return ok;
 }
 
 static HRESULT createD3DDevice(ID3D11Device **device, ID3D11DeviceContext **context) {
@@ -170,7 +224,7 @@ static HRESULT createD3DDevice(ID3D11Device **device, ID3D11DeviceContext **cont
 /// Shared body of cd2d_target_create_swapchain (HWND swap chain, opaque) and
 /// cd2d_target_create_composition_swapchain (composition swap chain, premultiplied,
 /// presented through a DirectComposition visual).
-static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi, bool composition) {
+static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi, bool composition, bool hdr, float sdrWhiteNits) {
     if (!factory || !factory->factory || !hwnd) return nullptr;
     ID2D1Factory1 *factory1 = nullptr;
     if (FAILED(factory->factory->QueryInterface(__uuidof(ID2D1Factory1), reinterpret_cast<void **>(&factory1)))) return nullptr;
@@ -178,6 +232,9 @@ static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint3
     CD2DTarget *t = new CD2DTarget();
     t->dpi = dpi;
     t->alphaMode = composition ? D2D1_ALPHA_MODE_PREMULTIPLIED : D2D1_ALPHA_MODE_IGNORE;
+    t->hdr = hdr;
+    t->sdrWhiteNits = sdrWhiteNits > 0 ? sdrWhiteNits : 80;
+    t->chainFormat = hdr ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_B8G8R8A8_UNORM;
     IDXGIDevice *dxgiDevice = nullptr;
     IDXGIAdapter *adapter = nullptr;
     IDXGIFactory2 *dxgiFactory = nullptr;
@@ -193,7 +250,7 @@ static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint3
         DXGI_SWAP_CHAIN_DESC1 desc = {};
         desc.Width = w ? w : 1;
         desc.Height = h ? h : 1;
-        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.Format = t->chainFormat;
         desc.Stereo = FALSE;
         desc.SampleDesc.Count = 1;
         desc.SampleDesc.Quality = 0;
@@ -218,6 +275,19 @@ static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint3
         }
         // Alt+Enter full-screen switching is not an AppKit behaviour.
         dxgiFactory->MakeWindowAssociation((HWND)hwnd, DXGI_MWA_NO_ALT_ENTER);
+        if (hdr) {
+            // FP16 buffers are scRGB: say so explicitly (IDXGISwapChain3, Windows 10), and
+            // give up on HDR when the chain cannot carry that colour space.
+            IDXGISwapChain3 *chain3 = nullptr;
+            if (FAILED(t->swapChain->QueryInterface(__uuidof(IDXGISwapChain3), reinterpret_cast<void **>(&chain3))) || !chain3) break;
+            UINT support = 0;
+            HRESULT hr = chain3->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &support);
+            if (SUCCEEDED(hr) && (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)) hr = chain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+            else hr = E_FAIL;
+            chain3->Release();
+            if (FAILED(hr)) break;
+            if (!createHDREffects(t)) break;
+        }
         if (!createBackBufferBitmap(t)) break;
         // The HWND target draws text grayscale-antialiased (premultiplied alpha disables
         // ClearType); keep that on the opaque swap-chain bitmap so frames match, and so the
@@ -237,11 +307,159 @@ static CD2DTarget *createSwapChainTarget(CD2DFactory *factory, void *hwnd, uint3
 }
 
 CD2DTarget *cd2d_target_create_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
-    return createSwapChainTarget(factory, hwnd, w, h, dpi, false);
+    return createSwapChainTarget(factory, hwnd, w, h, dpi, false, false, 80);
 }
 
 CD2DTarget *cd2d_target_create_composition_swapchain(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi) {
-    return createSwapChainTarget(factory, hwnd, w, h, dpi, true);
+    return createSwapChainTarget(factory, hwnd, w, h, dpi, true, false, 80);
+}
+
+CD2DTarget *cd2d_target_create_swapchain_with_options(CD2DFactory *factory, void *hwnd, uint32_t w, uint32_t h, float dpi, const CD2DSwapChainOptions *options) {
+    if (!options) return createSwapChainTarget(factory, hwnd, w, h, dpi, false, false, 80);
+    return createSwapChainTarget(factory, hwnd, w, h, dpi, options->composition, options->hdr, options->sdrWhiteNits);
+}
+
+bool cd2d_target_is_hdr(CD2DTarget *target) {
+    return target && target->swapChain && target->hdr;
+}
+
+void cd2d_target_set_sdr_white_level(CD2DTarget *target, float sdrWhiteNits) {
+    if (!target || !target->hdr) return;
+    target->sdrWhiteNits = sdrWhiteNits > 0 ? sdrWhiteNits : 80;
+    applyWhiteLevel(target);
+}
+
+bool cd2d_presentation_available(void) {
+    static int cached = -1;
+    if (cached >= 0) return cached == 1;
+    ID3D11Device *device = nullptr;
+    ID3D11DeviceContext *context = nullptr;
+    IDXGIDevice *dxgiDevice = nullptr;
+    IDXGIAdapter *adapter = nullptr;
+    IDXGIFactory2 *factory2 = nullptr;
+    bool ok = SUCCEEDED(createD3DDevice(&device, &context))
+        && SUCCEEDED(device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgiDevice)))
+        && SUCCEEDED(dxgiDevice->GetAdapter(&adapter))
+        && SUCCEEDED(adapter->GetParent(__uuidof(IDXGIFactory2), reinterpret_cast<void **>(&factory2)));
+    safeRelease(factory2);
+    safeRelease(adapter);
+    safeRelease(dxgiDevice);
+    safeRelease(context);
+    safeRelease(device);
+    cached = ok ? 1 : 0;
+    return ok;
+}
+
+// ---------------------------------------------------------------- monitor HDR state
+
+struct CachedDisplayHDR { CD2DDisplayHDR info; bool found; ULONGLONG when; };
+static std::unordered_map<HMONITOR, CachedDisplayHDR> g_displayHDRCache;
+
+/// The SDR white level and advanced-colour state of the display path whose GDI device
+/// name is `deviceName` (QueryDisplayConfig; the names match MONITORINFOEX.szDevice).
+static void queryDisplayConfig(const wchar_t *deviceName, CD2DDisplayHDR *out) {
+    UINT32 pathCount = 0, modeCount = 0;
+    for (int attempt = 0; attempt < 4; attempt++) {
+        if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) return;
+        std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+        std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+        LONG status = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr);
+        if (status == ERROR_INSUFFICIENT_BUFFER) continue;   // a display arrived between the two calls
+        if (status != ERROR_SUCCESS) return;
+        for (UINT32 i = 0; i < pathCount; i++) {
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
+            source.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+            source.header.size = sizeof source;
+            source.header.adapterId = paths[i].sourceInfo.adapterId;
+            source.header.id = paths[i].sourceInfo.id;
+            if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS) continue;
+            if (wcscmp(source.viewGdiDeviceName, deviceName) != 0) continue;
+            DISPLAYCONFIG_SDR_WHITE_LEVEL white = {};
+            white.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
+            white.header.size = sizeof white;
+            white.header.adapterId = paths[i].targetInfo.adapterId;
+            white.header.id = paths[i].targetInfo.id;
+            // SDRWhiteLevel is in thousandths of 80 nits (1000 = 80 nits).
+            if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS && white.SDRWhiteLevel > 0) out->sdrWhiteNits = white.SDRWhiteLevel * 80.0f / 1000.0f;
+            DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO color = {};
+            color.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+            color.header.size = sizeof color;
+            color.header.adapterId = paths[i].targetInfo.adapterId;
+            color.header.id = paths[i].targetInfo.id;
+            if (DisplayConfigGetDeviceInfo(&color.header) == ERROR_SUCCESS) {
+                out->advancedColorSupported = color.advancedColorSupported != 0;
+                out->advancedColorEnabled = color.advancedColorEnabled != 0;
+                if (color.bitsPerColorChannel) out->bitsPerColor = color.bitsPerColorChannel;
+            }
+            return;
+        }
+        return;
+    }
+}
+
+bool cd2d_display_hdr_info(void *hmonitor, CD2DDisplayHDR *out) {
+    if (!out) return false;
+    CD2DDisplayHDR info = {};
+    info.colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    info.bitsPerColor = 8;
+    info.minLuminance = 0;
+    info.maxLuminance = 80;
+    info.maxFullFrameLuminance = 80;
+    info.sdrWhiteNits = 80;
+    *out = info;
+    HMONITOR monitor = (HMONITOR)hmonitor;
+    if (!monitor) return false;
+    ULONGLONG now = GetTickCount64();
+    auto cached = g_displayHDRCache.find(monitor);
+    if (cached != g_displayHDRCache.end() && now - cached->second.when < 1000) { *out = cached->second.info; return cached->second.found; }
+
+    bool found = false;
+    IDXGIFactory1 *factory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void **>(&factory))) && factory) {
+        IDXGIAdapter1 *adapter = nullptr;
+        for (UINT a = 0; !found && factory->EnumAdapters1(a, &adapter) != DXGI_ERROR_NOT_FOUND; a++) {
+            IDXGIOutput *output = nullptr;
+            for (UINT o = 0; !found && adapter->EnumOutputs(o, &output) != DXGI_ERROR_NOT_FOUND; o++) {
+                IDXGIOutput6 *output6 = nullptr;
+                if (SUCCEEDED(output->QueryInterface(__uuidof(IDXGIOutput6), reinterpret_cast<void **>(&output6))) && output6) {
+                    DXGI_OUTPUT_DESC1 desc = {};
+                    if (SUCCEEDED(output6->GetDesc1(&desc)) && desc.Monitor == monitor) {
+                        found = true;
+                        info.colorSpace = desc.ColorSpace;
+                        info.bitsPerColor = desc.BitsPerColor;
+                        info.minLuminance = desc.MinLuminance;
+                        info.maxLuminance = desc.MaxLuminance;
+                        info.maxFullFrameLuminance = desc.MaxFullFrameLuminance;
+                    }
+                    output6->Release();
+                } else {
+                    // Pre-1703 DXGI: the plain description only tells whether this is the monitor.
+                    DXGI_OUTPUT_DESC desc = {};
+                    if (SUCCEEDED(output->GetDesc(&desc)) && desc.Monitor == monitor) found = true;
+                }
+                output->Release();
+            }
+            adapter->Release();
+        }
+        factory->Release();
+    }
+    if (found) {
+        MONITORINFOEXW mi = {};
+        mi.cbSize = sizeof mi;
+        if (GetMonitorInfoW(monitor, &mi)) queryDisplayConfig(mi.szDevice, &info);
+    }
+    info.hdr = info.colorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 || (info.advancedColorEnabled && info.maxLuminance > 80);
+    char force[8] = {};
+    DWORD n = GetEnvironmentVariableA("APPKITWIN_HDR", force, sizeof force);
+    if (n == 1 && force[0] == '0') info.hdr = false;
+    if (n == 1 && force[0] == '1') info.hdr = true;
+    g_displayHDRCache[monitor] = { info, found, now };
+    *out = info;
+    return found;
+}
+
+void cd2d_display_hdr_invalidate(void) {
+    g_displayHDRCache.clear();
 }
 
 bool cd2d_target_is_swapchain(CD2DTarget *target) {
@@ -255,6 +473,8 @@ bool cd2d_target_is_composition(CD2DTarget *target) {
 void cd2d_target_release(CD2DTarget *target) {
     if (!target) return;
     releaseBackBufferBitmap(target);   // no-op for HWND and offscreen targets
+    safeRelease(target->whiteScale);
+    safeRelease(target->toLinear);
     safeRelease(target->target);
     safeRelease(target->dc);
     safeRelease(target->d2dDevice);
@@ -318,8 +538,20 @@ bool cd2d_target_end_draw(CD2DTarget *target) {
     // was repainted this frame is what DWM is told changed.
     D2D1_SIZE_U size = target->backBuffer->GetPixelSize();
     D2D1_RECT_U whole = D2D1::RectU(0, 0, size.width, size.height);
-    D2D1_POINT_2U dest = D2D1::Point2U(0, 0);
-    HRESULT copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &whole);
+    HRESULT copied;
+    if (target->hdr && target->whiteScale) {
+        // FP16 back buffer: the 8-bit sRGB canvas goes through the linearising and
+        // white-level effects (the formats differ, so a copy is not possible anyway).
+        target->dc->SetTarget(target->backBuffer);
+        target->dc->BeginDraw();
+        target->dc->SetTransform(D2D1::Matrix3x2F::Identity());
+        target->dc->DrawImage(target->whiteScale, nullptr, nullptr, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_COPY);
+        copied = target->dc->EndDraw();
+        target->dc->SetTarget(target->canvas);
+    } else {
+        D2D1_POINT_2U dest = D2D1::Point2U(0, 0);
+        copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &whole);
+    }
     if (FAILED(copied)) { target->lost = true; return false; }
     bool partial = target->hasDirty && !target->canvasFresh;
     D2D1_RECT_U changed = partial ? target->dirty : whole;
