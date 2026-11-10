@@ -8,9 +8,9 @@ import Foundation
 import CoreGraphics
 #endif
 
-enum _CAPixels {
+public enum _CAPixels {
     /// A premultiplied BGRA bitmap context, bottom-left origin, in pixel units.
-    static func makeContext(width: Int, height: Int) -> CGContext? {
+    public static func makeContext(width: Int, height: Int) -> CGContext? {
         guard width > 0, height > 0 else { return nil }
         return CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -52,7 +52,7 @@ enum _CAPixels {
     /// at `scale` pixels per point. With `yDown` the extent's minimum y is the top row, as
     /// in a flipped layer; otherwise its maximum y is.
     @MainActor
-    static func render(extent: CGRect, scale: (x: CGFloat, y: CGFloat), yDown: Bool, draw: (CGContext) -> Void) -> CGImage? {
+    public static func render(extent: CGRect, scale: (x: CGFloat, y: CGFloat), yDown: Bool, draw: (CGContext) -> Void) -> CGImage? {
         let pw = Int((extent.width * scale.x).rounded(.up)), ph = Int((extent.height * scale.y).rounded(.up))
         guard pw > 0, ph > 0, pw <= 8192, ph <= 8192, let off = makeContext(width: pw, height: ph) else { return nil }
         if yDown {
@@ -67,7 +67,7 @@ enum _CAPixels {
     }
 
     /// Draws an image rendered by `render` back over `rect` in a context of the same orientation.
-    static func blit(_ image: CGImage, into ctx: CGContext, rect: CGRect, yDown: Bool, alpha: CGFloat) {
+    public static func blit(_ image: CGImage, into ctx: CGContext, rect: CGRect, yDown: Bool, alpha: CGFloat) {
         ctx.saveGState()
         ctx.setAlpha(alpha)
         if yDown {

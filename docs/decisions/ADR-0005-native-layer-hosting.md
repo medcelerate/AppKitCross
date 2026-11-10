@@ -63,3 +63,39 @@ for pixel (within one anti-aliased edge).
   transparency group.
 - Linux keeps the software compositor; a Wayland/Vulkan backend could implement the same
   seam.
+
+## 3D transforms (2026-11-10)
+
+A node under a 3D rotation or a perspective `sublayerTransform` carries the full 4x4
+(`transform3D`, PR 16) and DirectComposition applies it to the visual. The software
+compositor (Cairo on Linux, the Direct2D canvas on Windows windows without composition,
+and the host backend's reference compositor) only has an affine CTM, so it used to draw
+the affine part and the perspective was lost there.
+
+Core Animation flattens a layer's sublayers into the layer's plane, so the map from a
+sublayer's plane into its superlayer's is a 2D homography (the 4x4 restricted to z = 0,
+with the perspective divide). `CALayer._planeTransform` builds that map for a layer: the
+geometry flip, anchor, `transform`, `position` and the superlayer's `sublayerTransform`
+combined in 3D, which `_nodeTransform` (the scene) and `_compose` (the software
+compositor) share. When the map is affine the layer is placed through the CTM as before;
+when it is projective the layer's subtree is rasterised to an offscreen surface (at the
+context's scale, more where the projection magnifies) and drawn through the homography
+by `_CAProjective.draw`: the extent is split into a mesh of up to 8x8 cells, each drawn
+with the affine transform fitted to its projected corners (centre on the projected
+centre, axes the mean projected edge vectors) and clipped to them. The mesh is only as
+fine as the curvature needs: the corner one affine fit misplaces must land within half a
+device pixel, so a nearly affine layer is one draw. Neighbouring cells overlap by a third
+of a pixel so anti-aliased clip edges leave no seams. This is the portable choice:
+neither Cairo nor Direct2D's bitmap canvas draws images through a projective matrix,
+and a per-pixel inverse mapping would cost a CPU pass per frame.
+
+Consequences: `convert(_:from:)` and `hitTest` go through the homography and its inverse
+(a point behind the eye misses), so a mouse event over a rotated card lands on the card
+where it is drawn; a layer with `isDoubleSided == false` whose projection mirrors its
+plane is culled with its subtree, at scene build time and in the software compositor;
+`CATransformLayer` orders its sublayers by projected depth, other layers by `zPosition`
+then sublayer order as Core Animation does; the host backend's reference compositor
+flattens a projective node's subtree the same way, so `LayerPerspectiveTests` can compare
+the hosted and software composites against the analytically projected quad. Not done:
+a `CATransformLayer` still flattens its sublayers at its own plane rather than keeping
+their 3D transforms for the ancestor's projection.

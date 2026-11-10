@@ -54,3 +54,13 @@ Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.s
 | Server-side (sway) | Client-side (the package) |
 |---|---|
 | ![sway frame](images/hellowindow-linux-wayland.png) | ![client-side decorations](images/hellowindow-linux-wayland-csd.png) |
+
+3D transforms with perspective in the software compositor (ADR-0005, "3D transforms"):
+the Animation example's card mid-flip under a perspective `sublayerTransform`, drawn by
+Cairo under Xvfb. The near edge is taller and the far edge shorter, as DirectComposition
+draws it on Windows; before 2026-11-10 the software path drew the affine part only, a
+plain horizontal squash.
+
+| Animation example, flip card mid-flip (Linux, X11, Cairo) |
+|---|
+| ![flip card](images/animation-linux-flip.png) |
