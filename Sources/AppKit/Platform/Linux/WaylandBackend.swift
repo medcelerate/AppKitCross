@@ -404,8 +404,18 @@ final class WaylandBackend: PlatformBackend {
     let image: any PlatformImageBackend
     var systemPasteboard: any PlatformPasteboard { dataDevice }
 
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {
-        LinuxBackend.runZenity(options)
+    /// The xdg-desktop-portal FileChooser when a portal is on the session bus (ADR-0017).
+    /// Parent identifiers need xdg-foreign exports, which the backend does not do yet, so
+    /// the portal dialog is not parented.
+    private var portalLookedUp = false
+    private var portal: LinuxFileChooserPortal?
+    var fileDialog: (any PlatformFileDialog)? {
+        guard PlatformFileDialogPolicy.allowsNative else { return nil }
+        if !portalLookedUp {
+            portalLookedUp = true
+            portal = LinuxFileChooserPortal.connect(pump: { [weak self] in self?.pump(blocking: false) }, parentIdentifier: { _ in "" })
+        }
+        return portal
     }
 
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {

@@ -17,6 +17,8 @@ final class _NSWindowButton: NSButton {
     var showsGlyph = false { didSet { if showsGlyph != oldValue { needsDisplay = true } } }
     /// Grey when the window is not key.
     var isActive = true { didSet { if isActive != oldValue { needsDisplay = true } } }
+    /// The close button carries a dot while the window's document has unsaved changes.
+    var isDocumentEdited = false { didSet { if isDocumentEdited != oldValue { needsDisplay = true } } }
     private var pressed = false
 
     init(kind: NSWindow.ButtonType) {
@@ -51,6 +53,10 @@ final class _NSWindowButton: NSButton {
         NSColor(white: 0, alpha: 0.15).setStroke()
         circle.lineWidth = 0.5
         circle.stroke()
+        if kind == .closeButton, isDocumentEdited, !showsGlyph, isEnabled {
+            NSColor(white: 0, alpha: 0.55).setFill()
+            NSBezierPath(ovalIn: NSRect(x: bounds.midX - 2, y: bounds.midY - 2, width: 4, height: 4)).fill()
+        }
         guard showsGlyph, isEnabled else { return }
         let glyph = NSBezierPath()
         glyph.lineWidth = 1.5
