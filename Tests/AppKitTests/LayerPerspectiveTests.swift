@@ -210,17 +210,19 @@ final class LayerPerspectiveTests: XCTestCase, @unchecked Sendable {
             _CAProjective.draw(src, extent: CGRect(x: 0, y: 0, width: 80, height: 80), yDown: true, through: h, into: ctx, alpha: 1)
             let image = ctx.makeImage()!
             let data = _pixels(image)
-            func blue(_ x: CGFloat, _ y: CGFloat) -> Bool {      // points, y-down
+            func blue(_ x: CGFloat, _ y: CGFloat, fully: Bool = false) -> Bool {      // points, y-down
                 let i = Int(y * 2) * image.bytesPerRow + Int(x * 2) * 4
-                return data[i] > 200 && data[i + 2] < 60
+                return data[i] > (fully ? 250 : 200) && data[i + 2] < (fully ? 5 : 60)
             }
             XCTAssertTrue(blue(21, 21)); XCTAssertTrue(blue(98, 21))                 // top corners at (20, 20)-(100, 20)
             XCTAssertTrue(blue(21, 59)); XCTAssertTrue(blue(58, 59))                 // bottom edge at y = 60, x in 20...60
             XCTAssertFalse(blue(62, 59)); XCTAssertFalse(blue(70, 59)); XCTAssertFalse(blue(18, 40))
             XCTAssertFalse(blue(60, 62)); XCTAssertFalse(blue(60, 18))
             // The midline (y = 40 → w = 1.5 → y' = 20 + 26.67, x' from 20 + 0 to 20 + 53.3): no seams.
-            for x in stride(from: CGFloat(21), through: 72, by: 1) { XCTAssertTrue(blue(x, 46.5), "seam at x=\(x)") }
-            for y in stride(from: CGFloat(21), through: 59, by: 1) { XCTAssertTrue(blue(50, y), "seam at y=\(y)") }
+            // Every interior pixel is fully covered: no seam between cells, in any direction.
+            for x in stride(from: CGFloat(21), through: 72, by: 0.5) { XCTAssertTrue(blue(x, 46.5, fully: true), "seam at x=\(x)") }
+            for y in stride(from: CGFloat(21), through: 59, by: 0.5) { XCTAssertTrue(blue(50, y, fully: true), "seam at y=\(y)") }
+            for y in stride(from: CGFloat(22), through: 58, by: 0.5) { XCTAssertTrue(blue(30, y, fully: true), "seam at y=\(y)") }
         }
     }
 }

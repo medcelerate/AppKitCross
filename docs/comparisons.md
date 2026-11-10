@@ -57,10 +57,12 @@ Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.s
 
 3D transforms with perspective in the software compositor (ADR-0005, "3D transforms"):
 the Animation example's card mid-flip under a perspective `sublayerTransform`, drawn by
-Cairo under Xvfb. The near edge is taller and the far edge shorter, as DirectComposition
-draws it on Windows; before 2026-11-10 the software path drew the affine part only, a
-plain horizontal squash.
+Cairo under Xvfb (`APPKITWIN_LINUX_BACKEND=x11 .build/debug/Animation`, captured with
+`xwd` a few seconds in). The near edge is taller and the far edge shorter, as
+DirectComposition draws it on Windows; before 2026-11-10 the software path drew the
+affine part only, a plain horizontal squash (left, the earlier capture from the same
+loop).
 
-| Animation example, flip card mid-flip (Linux, X11, Cairo) |
-|---|
-| ![flip card](images/animation-linux-flip.png) |
+| Before: the affine part only (Linux, X11, Cairo) | After: the projection (Linux, X11, Cairo) |
+|---|---|
+| ![flip card, affine](images/animation-linux-flip-affine.png) | ![flip card, perspective](images/animation-linux-flip.png) |

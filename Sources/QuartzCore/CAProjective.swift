@@ -112,6 +112,29 @@ public enum _CAProjective {
     /// with the affine transform fitted to its projected corners and clipped to them. The
     /// mesh is as fine as the projection's curvature needs: cells are added until the
     /// corner a cell's affine fit misplaces lands within half a device pixel.
+    /// The convex polygon with every edge moved outward by `d` (vertices along the miter).
+    static func offset(_ poly: [CGPoint], by d: CGFloat) -> [CGPoint] {
+        let n = poly.count
+        guard n >= 3 else { return poly }
+        var area: CGFloat = 0
+        for k in 0..<n { let p = poly[k], q = poly[(k + 1) % n]; area += p.x * q.y - q.x * p.y }
+        let sign: CGFloat = area >= 0 ? 1 : -1      // which side of an edge is outside
+        func normal(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            let len = max(1e-9, hypot(b.x - a.x, b.y - a.y))
+            return CGPoint(x: (b.y - a.y) / len * sign, y: -(b.x - a.x) / len * sign)
+        }
+        return (0..<n).map { k in
+            let v = poly[k]
+            let n1 = normal(poly[(k + n - 1) % n], v), n2 = normal(v, poly[(k + 1) % n])
+            var m = CGPoint(x: n1.x + n2.x, y: n1.y + n2.y)
+            let len = hypot(m.x, m.y)
+            guard len > 1e-9 else { return CGPoint(x: v.x + n1.x * d, y: v.y + n1.y * d) }
+            m = CGPoint(x: m.x / len, y: m.y / len)
+            let cosHalf = max(0.2, m.x * n1.x + m.y * n1.y)   // a very sharp corner is not mitered further
+            return CGPoint(x: v.x + m.x * d / cosHalf, y: v.y + m.y * d / cosHalf)
+        }
+    }
+
     @MainActor
     public static func draw(_ image: CGImage, extent: CGRect, yDown: Bool, through h: _CAHomography, into ctx: CGContext, alpha: CGFloat) {
         if h.isAffine {
@@ -131,7 +154,10 @@ public enum _CAProjective {
         // Subdividing n times per side divides that error by about n².
         let n = min(8, max(1, Int((deviation / 0.5).squareRoot().rounded(.up))))
         let scale = max(0.01, (abs(ctm.a * ctm.d - ctm.b * ctm.c)).squareRoot())
-        let eps = 0.35 / scale           // clip overlap between neighbouring cells, so seams stay closed
+        // Each cell's clip is offset outward by half a device pixel, so neighbouring cells
+        // overlap by one: the anti-aliased clip edges, and the slightly different affine
+        // fits of two cells at their shared edge, would otherwise leave hairline seams.
+        let eps = 0.5 / scale
         let cw = extent.width / CGFloat(n), ch = extent.height / CGFloat(n)
         for row in 0..<n {
             for col in 0..<n {
@@ -144,12 +170,9 @@ public enum _CAProjective {
                 let fit = CGAffineTransform(a: ux.x, b: ux.y, c: uy.x, d: uy.y,
                                             tx: centre.x - cell.midX * ux.x - cell.midY * uy.x,
                                             ty: centre.y - cell.midX * ux.y - cell.midY * uy.y)
-                let cx = (q[0].x + q[1].x + q[2].x + q[3].x) / 4, cy = (q[0].y + q[1].y + q[2].y + q[3].y) / 4
                 ctx.saveGState()
-                for (k, p) in q.enumerated() {
-                    let len = max(1e-6, hypot(p.x - cx, p.y - cy))
-                    let out = CGPoint(x: p.x + (p.x - cx) / len * eps, y: p.y + (p.y - cy) / len * eps)
-                    if k == 0 { ctx.move(to: out) } else { ctx.addLine(to: out) }
+                for (k, p) in offset(q, by: eps).enumerated() {
+                    if k == 0 { ctx.move(to: p) } else { ctx.addLine(to: p) }
                 }
                 ctx.closePath()
                 ctx.clip()
