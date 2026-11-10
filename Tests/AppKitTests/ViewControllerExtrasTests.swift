@@ -238,8 +238,9 @@ final class TrackingAreaTests: XCTestCase, @unchecked Sendable {
             defer { w.close() }
             let v = Rebuilding(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
             w.contentView!.addSubview(v)
-            var posted = 0
-            let o = NotificationCenter.default.addObserver(forName: NSView.didUpdateTrackingAreasNotification, object: v, queue: nil) { _ in posted += 1 }
+            final class Counter: @unchecked Sendable { var posted = 0 }
+            let counter = Counter()
+            let o = NotificationCenter.default.addObserver(forName: NSView.didUpdateTrackingAreasNotification, object: v, queue: nil) { _ in counter.posted += 1 }
             defer { NotificationCenter.default.removeObserver(o) }
             moveMouse(w, to: NSPoint(x: 10, y: 10))
             XCTAssertEqual(v.updates, 1, "the window asks the view before its first evaluation")
@@ -250,7 +251,7 @@ final class TrackingAreaTests: XCTestCase, @unchecked Sendable {
             moveMouse(w, to: NSPoint(x: 30, y: 10))
             XCTAssertEqual(v.updates, 2, "a resize does")
             XCTAssertEqual(v.trackingAreas[0].rect.width, 200)
-            XCTAssertEqual(posted, 2)
+            XCTAssertEqual(counter.posted, 2)
         }
     }
 
