@@ -31,6 +31,39 @@ final class Win32Window: PlatformWindow {
     private var pressedButtons = 0
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
+    /// The Text Services Framework for this window's text input (ADR-0016), made on first focus
+    /// when a text view has the focus. While it owns the input, the WM_IME_* path stays off.
+    private var textServices: Win32TextServices?
+    private var tsfOwnsInput: Bool { textServices != nil && isKey }
+
+    /// Makes the text services for the window (once) and gives them the focus when a text view
+    /// accepts input. `APPKITWIN_IME_OPEN=0|1` sets the input method's open state and
+    /// `APPKITWIN_TSF_RECONVERT=1` runs reconversion once, both for scripted checks.
+    private func beginTextServices() {
+        guard let hwnd, owner?.platformWindowTextInput() != nil else { return }
+        if textServices == nil {
+            textServices = Win32TextServices(
+                hwnd: hwnd,
+                input: { [weak self] in self?.owner?.platformWindowTextInput() },
+                geometry: { [weak self] in (self?.scale ?? 1, self?.contentSize.height ?? 0) })
+            if NSView._traceInvalidation {
+                NSView._trace("win32 tsf document '\(_title)' \(textServices == nil ? "unavailable" : "created")")
+            }
+            if let textServices {
+                let env = ProcessInfo.processInfo.environment
+                if let open = env["APPKITWIN_IME_OPEN"] { textServices.setIMEOpen(open == "1") }
+                if env["APPKITWIN_TSF_RECONVERT"] == "1" {
+                    let hr = textServices.reconvert()
+                    if NSView._traceInvalidation { NSView._trace("win32 tsf reconvert hr 0x\(String(UInt32(bitPattern: hr), radix: 16))") }
+                }
+            }
+        }
+        guard let textServices else { return }
+        textServices.setFocus(true)
+        if NSView._traceInvalidation {
+            NSView._trace("win32 tsf focus '\(_title)' ime open \(textServices.isIMEOpen)")
+        }
+    }
     private var dpi: UINT = 96
     /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
     var uiaRoot: OpaquePointer? = nil
@@ -1163,6 +1196,8 @@ final class Win32Window: PlatformWindow {
         case WM_DESTROY:
             if NSView._traceInvalidation { NSView._trace("win32 WM_DESTROY '\(title)' destroying \(destroying)") }
             accessibilityWindowDestroyed()
+            textServices?.invalidate()
+            textServices = nil
             if let hwnd { backend.win32DragDrop.revoke(hwnd); backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
             tearDownLayerHosting()
@@ -1177,9 +1212,11 @@ final class Win32Window: PlatformWindow {
             isKey = true
             owner?.platformWindowDidBecomeKey()
             activateTestInputMethodIfRequested()
+            beginTextServices()
             return nil      // DefWindowProc activates the input method context for the window
         case WM_KILLFOCUS:
             isKey = false
+            textServices?.setFocus(false)
             owner?.platformWindowDidResignKey()
             return nil      // ... and deactivates it
         case WM_MOUSEACTIVATE:
@@ -1191,6 +1228,8 @@ final class Win32Window: PlatformWindow {
             pressedButtons |= 1
             NSEvent._pressedMouseButtons = pressedButtons
             mouse(.leftMouseDown, lParam, button: 0, clickCount: Int32(msg) == WM_LBUTTONDBLCLK ? 2 : 1)
+            // A click can make a text view the first responder: its text services start now.
+            if isKey { beginTextServices() }
             return 0
         case WM_LBUTTONUP:
             pressedButtons &= ~1
@@ -1266,6 +1305,13 @@ final class Win32Window: PlatformWindow {
         case WM_TIMER where wParam == Win32Window.wheelGestureTimer:
             if let hwnd { _ = KillTimer(hwnd, Win32Window.wheelGestureTimer) }
             endWheelGesture()
+            return 0
+        case WM_IME_STARTCOMPOSITION where tsfOwnsInput:
+            // The text services (TSF, ADR-0016) run the composition: the IME messages are consumed.
+            return 0
+        case WM_IME_COMPOSITION where tsfOwnsInput:
+            return 0
+        case WM_IME_ENDCOMPOSITION where tsfOwnsInput:
             return 0
         case WM_IME_STARTCOMPOSITION:
             // The text view draws the composition (marked text) itself, so the input
