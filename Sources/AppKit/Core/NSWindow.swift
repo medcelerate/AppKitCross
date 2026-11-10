@@ -676,6 +676,11 @@ import CoreText
         if let previous = app.keyWindow, previous !== self { previous.resignKey() }
         _isKey = true
         app._keyWindow = self
+        // The first time the window is key, `initialFirstResponder` takes focus (macOS
+        // does this when the window is first shown), so typing reaches the document's view.
+        if firstResponder == nil || firstResponder === self, let initial = _initialFirstResponder, initial.window === self {
+            makeFirstResponder(initial)
+        }
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
     }

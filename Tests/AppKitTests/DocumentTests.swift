@@ -42,6 +42,27 @@ final class TestDocument: NSDocument {
     }
 }
 
+/// A document edited through an NSTextView, as Examples/TextEdit does.
+final class TextViewDocument: NSDocument {
+    var textView: NSTextView?
+    private var observer: NSObjectProtocol?
+    override func makeWindowControllers() {
+        let w = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 320, height: 200), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        let tv = NSTextView(frame: w.contentView!.bounds)
+        w.contentView?.addSubview(tv)
+        w.initialFirstResponder = tv
+        textView = tv
+        observer = NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: tv, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateChangeCount(.changeDone) }
+        }
+        addWindowController(NSWindowController(window: w))
+    }
+    override func close() {
+        if let o = observer { NotificationCenter.default.removeObserver(o); observer = nil }
+        super.close()
+    }
+}
+
 @MainActor
 final class SuffixWindowController: NSWindowController {
     var suffix = ""
@@ -465,6 +486,49 @@ final class DocumentTests: XCTestCase, @unchecked Sendable {
             XCTAssertNil(answer)                          // then the second's
             visibleAlertButton("Don\u{2019}t Save")!.performClick(nil)
             XCTAssertEqual(answer, true)
+            for d in dc.documents { d.updateChangeCount(.changeCleared); d.close() }
+        }
+    }
+
+    /// The PC scenario: two documents made as File > New does, each edited by typing into
+    /// its own window's text view (the second window must have become key with its text
+    /// view as first responder), then Quit: the two-document review alert, not one
+    /// document's Save / Cancel / Don't Save.
+    func testQuitWithTwoDocumentsEditedThroughTheirTextViews() {
+        MainActor.assumeIsolated {
+            _ = freshController()
+            var plist = testInfoPlist
+            plist["CFBundleDocumentTypes"] = [["CFBundleTypeName": "Plain Text", "CFBundleTypeRole": "Editor", "LSItemContentTypes": ["public.plain-text"],
+                                              "CFBundleTypeExtensions": ["txt"], "NSDocumentClass": "AppKitTests.TextViewDocument"]]
+            NSDocumentController._shared = nil
+            NSDocumentController._infoDictionaryOverride = plist
+            let dc = NSDocumentController()
+            let app = NSApplication.shared
+            var docs: [TextViewDocument] = []
+            for _ in 0..<2 {
+                XCTAssertTrue(app.sendAction(Selector(("newDocument:")), to: nil, from: nil))
+                guard let d = dc.documents.last as? TextViewDocument else { XCTFail("no TextViewDocument"); return }
+                docs.append(d)
+                let window = d.windowControllers[0].window!
+                XCTAssertTrue(app.keyWindow === window, "the new document's window is key")
+                XCTAssertTrue(window.firstResponder === d.textView, "its text view is first responder")
+                sendKey("a", code: 0, to: window)
+                XCTAssertEqual(d.textView?.string, "a")
+                XCTAssertTrue(d.isDocumentEdited)
+                XCTAssertTrue(window.isDocumentEdited)
+            }
+            XCTAssertEqual(docs[0].displayName, "Untitled")
+            XCTAssertEqual(docs[1].displayName, "Untitled 2")
+            XCTAssertEqual(dc.documents.filter { $0.isDocumentEdited }.count, 2)
+            // Quit through the menu's action: the review alert is up; Cancel keeps running.
+            var sawReview = false
+            Platform.backend.post {
+                sawReview = visibleAlertButton("Discard Changes") != nil && visibleAlertButton("Review Changes\u{2026}") != nil
+                visibleAlertButton("Cancel")!.performClick(nil)
+            }
+            XCTAssertTrue(app.sendAction(Selector(("terminate:")), to: nil, from: nil))
+            XCTAssertTrue(sawReview, "the two-document alert, not a single document's prompt")
+            XCTAssertEqual(dc.documents.count, 2)
             for d in dc.documents { d.updateChangeCount(.changeCleared); d.close() }
         }
     }
