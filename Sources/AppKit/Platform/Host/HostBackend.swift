@@ -152,6 +152,10 @@ final class HostWindow: PlatformWindow {
     var chrome = PlatformWindowChrome()
     private var surface: CGContext?     // retained between paints, like the Direct2D target
     #endif
+    /// Test hook: the host window leaves its title bar to the package, as a Wayland
+    /// compositor without server-side decorations does (ClientSideDecoration.swift).
+    var clientSideTitleBar = false
+    var hasClientSideTitleBar: Bool { clientSideTitleBar }
     private(set) var paintCount = 0
     /// Accessibility changes the core reported (ADR-0013), oldest first.
     private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []

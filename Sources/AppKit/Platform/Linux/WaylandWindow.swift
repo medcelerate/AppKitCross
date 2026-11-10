@@ -4,6 +4,14 @@
 // does (through `CGContext(cairo:)`), then copied into one of two shared-memory buffers
 // that the compositor releases when it is done reading. Wayland has no window positions:
 // the frame origin is whatever the core last set, only the size follows the compositor.
+//
+// Decorations (ADR-0015): the window asks xdg-decoration for a server-side frame and
+// takes what the compositor answers; without the protocol, or when the answer is "client
+// side", it decorates itself (`ClientSideDecorationLayout`): the surface grows a
+// transparent shadow margin around the frame, the frame gets a title band above the
+// content that the owner paints with its standard buttons, the edges and the margin become
+// resize handles, and `xdg_surface.set_window_geometry` tells the compositor where the
+// frame is so it sizes and places the window by its visible rectangle.
 
 #if os(Linux)
 import Foundation
@@ -32,6 +40,18 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     private var destroying = false
     private var configured = false
     private var pendingSize: NSSize? = nil
+    // Decorations
+    /// The compositor's xdg-decoration answer (ZXDG_TOPLEVEL_DECORATION_V1_MODE_*), nil until it arrives.
+    private var serverMode: UInt32? = nil
+    private var maximized = false
+    private var fullScreen = false
+    private var tiled = false
+    private var activated = false
+    /// The layout the surface, buffers and hints were last made for.
+    private var appliedLayout: ClientSideDecorationLayout
+    private var sentGeometry: NSRect? = nil
+    private var decorationsDirty = true
+    private var hoverRegion: ClientSideDecorationRegion = .outside
     private var enteredOutputs: [WaylandOutput] = []
     private(set) var scale = 1
     private var pressedButtons = 0
@@ -72,6 +92,11 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         self.owner = owner
         _styleMask = styleMask
         _frame = contentRect
+        appliedLayout = ClientSideDecorationLayout(frameSize: contentRect.size)
+        // The frame is the content plus the band the package will draw, when the compositor
+        // is not expected to decorate (its answer, if it has the protocol, may still change that).
+        _frame = NSRect(origin: contentRect.origin, size: ClientSideDecorationLayout.frameSize(forContentSize: contentRect.size, titleBarHeight: layout.titleBarHeight))
+        appliedLayout = layout
         surface = wl_compositor_create_surface(backend.compositor)
         wl_surface_add_listener(surface, WaylandWindow.surfaceListener, opaque)
         xdgSurface = xdg_wm_base_get_xdg_surface(backend.wmBase, surface)
@@ -110,9 +135,14 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         }))
 
     private static let toplevelListener = WaylandBackend.listener(xdg_toplevel_listener(
-        configure: { data, _, width, height, _ in
+        configure: { data, _, width, height, states in
             guard let w = WaylandWindow.from(data) else { return }
-            MainActor.assumeIsolated { w.toplevelConfigure(width: Int(width), height: Int(height)) }
+            var list: [UInt32] = []
+            if let states, let base = states.pointee.data {
+                let count = states.pointee.size / MemoryLayout<UInt32>.size
+                list = Array(UnsafeBufferPointer(start: base.assumingMemoryBound(to: UInt32.self), count: count))
+            }
+            MainActor.assumeIsolated { w.toplevelConfigure(width: Int(width), height: Int(height), states: list) }
         },
         close: { data, _ in
             guard let w = WaylandWindow.from(data) else { return }
@@ -121,7 +151,11 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         configure_bounds: { _, _, _, _ in },
         wm_capabilities: { _, _, _ in }))
 
-    private static let decorationListener = WaylandBackend.listener(zxdg_toplevel_decoration_v1_listener(configure: { _, _, _ in }))
+    private static let decorationListener = WaylandBackend.listener(zxdg_toplevel_decoration_v1_listener(
+        configure: { data, _, mode in
+            guard let w = WaylandWindow.from(data) else { return }
+            MainActor.assumeIsolated { w.decorationConfigured(mode: mode) }
+        }))
 
     private static let frameListener = WaylandBackend.listener(wl_callback_listener(
         done: { data, callback, _ in
@@ -138,8 +172,22 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
 
     // MARK: Configure
 
-    private func toplevelConfigure(width: Int, height: Int) {
+    /// The size is the window geometry (frame: band plus content) in points; 0 leaves the
+    /// size to the client. The states say whether the compositor has the window maximised,
+    /// tiled or full screen (no shadow margin then) and whether it is the active one.
+    private func toplevelConfigure(width: Int, height: Int, states: [UInt32]) {
+        if NSView._traceInvalidation { NSView._trace("wayland configure '\(_title)' \(width)x\(height) states \(states)") }
         if width > 0 && height > 0 { pendingSize = NSSize(width: width, height: height) }
+        maximized = states.contains(UInt32(XDG_TOPLEVEL_STATE_MAXIMIZED.rawValue))
+        fullScreen = states.contains(UInt32(XDG_TOPLEVEL_STATE_FULLSCREEN.rawValue))
+        tiled = states.contains { (UInt32(XDG_TOPLEVEL_STATE_TILED_LEFT.rawValue)...UInt32(XDG_TOPLEVEL_STATE_TILED_BOTTOM.rawValue)).contains($0) }
+        activated = states.contains(UInt32(XDG_TOPLEVEL_STATE_ACTIVATED.rawValue))
+    }
+
+    private func decorationConfigured(mode: UInt32) {
+        if NSView._traceInvalidation { NSView._trace("wayland decoration mode '\(_title)' \(mode == 2 ? "server" : "client") side") }
+        serverMode = mode
+        decorationsDidChange()
     }
 
     private func configured(serial: UInt32) {
@@ -148,12 +196,80 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
             pendingSize = nil
             if size != _frame.size {
                 _frame.size = size
+                appliedLayout = layout
                 releaseBacking()
                 owner?.platformWindowDidChangeFrame(_frame)
             }
         }
+        decorationsDidChange()
+        // The compositor's "activated" is the key window on a seat without a keyboard too.
+        setKey(activated || backend.keyboardFocus === self)
         dirty = NSRect(origin: .zero, size: _frame.size)
+        decorationsDirty = true
         if isVisible { paintIfNeeded() }
+    }
+
+    // MARK: Decorations (ADR-0015)
+
+    /// What the compositor was asked for: a server-side frame for titled windows whose
+    /// content does not cover the title bar, unless APPKITWIN_WAYLAND_DECORATIONS says otherwise.
+    private var requestsServerSide: Bool {
+        if let preference = backend.decorationPreference { return preference == .server }
+        return _styleMask.contains(.titled) && !contentCoversTitleBar
+    }
+
+    /// `fullSizeContentView` (from the mask, so the answer is right before the chrome arrives) or
+    /// a borderless window: the content reaches the top of the frame, no band.
+    private var contentCoversTitleBar: Bool { _chrome.extendsContentIntoTitleBar || _styleMask.contains(.fullSizeContentView) || !_styleMask.contains(.titled) }
+
+    private var decorationMode: ClientSideDecorationMode {
+        let granted: Bool?
+        if backend.decorationManager == nil { granted = nil }
+        else if let serverMode { granted = serverMode == UInt32(ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue) }
+        else { granted = requestsServerSide }
+        return ClientSideDecorationMode.mode(for: _styleMask, serverSideGranted: granted)
+    }
+
+    /// The decoration geometry for the current mode, states and frame.
+    var layout: ClientSideDecorationLayout {
+        ClientSideDecorationLayout(mode: decorationMode, styleMask: _styleMask, contentCoversTitleBar: contentCoversTitleBar,
+                                   tiledOrMaximized: maximized || tiled, fullScreen: fullScreen, frameSize: _frame.size)
+    }
+
+    var hasClientSideTitleBar: Bool { layout.titleBarHeight > 0 }
+
+    /// The mode, a state or the style changed. Before the first configure the content
+    /// keeps the size the application asked for and the frame gains or loses the band; once
+    /// the compositor has sized the window, its size is the frame's (window geometry) and
+    /// the content gives way to the band, as a compositor that answers the decoration
+    /// request only after mapping (sway for windows it floats) would otherwise keep
+    /// re-imposing the old frame. The surface gains or loses its margins; the owner hears
+    /// of the new frame.
+    private func decorationsDidChange() {
+        let old = appliedLayout
+        let band = layout.titleBarHeight
+        if band != old.titleBarHeight, !configured {
+            _frame.size.height += band - old.titleBarHeight
+        }
+        let new = layout
+        guard new != old else { return }
+        appliedLayout = new
+        releaseBacking()
+        for b in buffers where !b.busy { b.release() }
+        buffers.removeAll { !$0.busy }
+        decorationsDirty = true
+        dirty = NSRect(origin: .zero, size: _frame.size)
+        applySizeHints()
+        if new.frameSize != old.frameSize || new.titleBarHeight != old.titleBarHeight {
+            owner?.platformWindowDidChangeFrame(_frame)
+        }
+    }
+
+    /// Resize-edge cursors come from the decoration, the rest from the core's `setCursor`.
+    private func updateHover(_ region: ClientSideDecorationRegion) {
+        guard region != hoverRegion else { return }
+        hoverRegion = region
+        if case .resize(let edge) = region { backend.setDecorationCursor(edge.cursorNames) } else { backend.setDecorationCursor(nil) }
     }
 
     private func closeRequested() {
@@ -203,6 +319,7 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func setKey(_ key: Bool) {
         guard isKey != key else { return }
         isKey = key
+        if layout.hasDecorations { decorationsDirty = true; dirty = NSRect(origin: .zero, size: _frame.size) }
         if key { owner?.platformWindowDidBecomeKey() } else { owner?.platformWindowDidResignKey() }
     }
 
@@ -222,16 +339,18 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
             let resized = newValue.size != _frame.size
             _frame = newValue
             if resized {
+                appliedLayout = layout
                 releaseBacking()
                 applySizeHints()
                 dirty = NSRect(origin: .zero, size: _frame.size)
+                decorationsDirty = true
             }
         }
     }
 
     var styleMask: NSWindow.StyleMask {
         get { _styleMask }
-        set { _styleMask = newValue; applyDecorationMode(); applySizeHints() }
+        set { _styleMask = newValue; applyDecorationMode(); decorationsDidChange(); applySizeHints() }
     }
 
     var minSize: NSSize {
@@ -246,20 +365,27 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
 
     var chrome: PlatformWindowChrome {
         get { _chrome }
-        set { _chrome = newValue; applyDecorationMode() }
+        set {
+            let changed = newValue != _chrome
+            _chrome = newValue
+            applyDecorationMode()
+            decorationsDidChange()
+            if changed, layout.hasDecorations { decorationsDirty = true; dirty = NSRect(origin: .zero, size: _frame.size) }
+        }
     }
 
     private func applyDecorationMode() {
         guard let decoration else { return }
-        let serverSide = _styleMask.contains(.titled) && !_chrome.extendsContentIntoTitleBar
-        zxdg_toplevel_decoration_v1_set_mode(decoration, serverSide ? UInt32(ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue)
-                                                                   : UInt32(ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue))
+        zxdg_toplevel_decoration_v1_set_mode(decoration, requestsServerSide ? UInt32(ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE.rawValue)
+                                                                           : UInt32(ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE.rawValue))
     }
 
+    /// Size hints are window geometry: the content limits plus the band.
     private func applySizeHints() {
         guard let t = toplevel else { return }
-        var minW = _minSize.width, minH = _minSize.height
-        var maxW = min(_maxSize.width, 100_000), maxH = min(_maxSize.height, 100_000)
+        let band = layout.titleBarHeight
+        var minW = _minSize.width, minH = _minSize.height + band
+        var maxW = min(_maxSize.width, 100_000), maxH = min(_maxSize.height + band, 100_000)
         if !_styleMask.contains(.resizable) {
             minW = _frame.width; maxW = minW
             minH = _frame.height; maxH = minH
@@ -268,14 +394,19 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         xdg_toplevel_set_max_size(t, maxW >= 100_000 ? 0 : Int32(maxW), maxH >= 100_000 ? 0 : Int32(maxH))
     }
 
-    func frameRect(forContentRect contentRect: NSRect) -> NSRect { contentRect }
-    func contentRect(forFrameRect frameRect: NSRect) -> NSRect { frameRect }
+    func frameRect(forContentRect contentRect: NSRect) -> NSRect {
+        NSRect(origin: contentRect.origin, size: ClientSideDecorationLayout.frameSize(forContentSize: contentRect.size, titleBarHeight: layout.titleBarHeight))
+    }
+    func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
+        NSRect(origin: frameRect.origin, size: ClientSideDecorationLayout.contentSize(forFrameSize: frameRect.size, titleBarHeight: layout.titleBarHeight))
+    }
 
     func show() {
         guard !isVisible, let surface else { return }
         isVisible = true
         configured = false
         dirty = NSRect(origin: .zero, size: _frame.size)
+        decorationsDirty = true
         // Map: commit without a buffer and wait for the configure before painting.
         wl_surface_commit(surface)
         wl_display_flush(backend.display)
@@ -297,7 +428,6 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func orderBack() {}
 
     private var minimized = false
-    private var maximized = false
     func miniaturize() {
         guard let toplevel else { return }
         xdg_toplevel_set_minimized(toplevel)
@@ -309,11 +439,11 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         // own UI. Activation requests (xdg-activation) are the closest substitute and out of scope.
         minimized = false
     }
+    /// Maximised or not follows the compositor's configure states.
     func zoom() {
         guard let toplevel else { return }
         if maximized { xdg_toplevel_unset_maximized(toplevel) } else { xdg_toplevel_set_maximized(toplevel) }
         wl_display_flush(backend.display)
-        maximized.toggle()
     }
     var isMiniaturized: Bool { minimized }
     var isZoomed: Bool { maximized }
@@ -354,8 +484,8 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
 
     // MARK: Painting
 
-    private var pixelWidth: Int { max(1, Int((_frame.width * CGFloat(scale)).rounded())) }
-    private var pixelHeight: Int { max(1, Int((_frame.height * CGFloat(scale)).rounded())) }
+    private var pixelWidth: Int { max(1, Int((appliedLayout.surfaceSize.width * CGFloat(scale)).rounded())) }
+    private var pixelHeight: Int { max(1, Int((appliedLayout.surfaceSize.height * CGFloat(scale)).rounded())) }
 
     private func releaseBacking() {
         if let c = backingCairo { cairo_destroy(c) }
@@ -420,16 +550,58 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     }
 
     func paintIfNeeded() {
-        guard needsPaint, let surface, let rect = dirty, ensureBacking(), let cr = backingCairo, let buffer = freeBuffer() else { return }
+        guard needsPaint, let surface, let rect0 = dirty, ensureBacking(), let cr = backingCairo, let buffer = freeBuffer() else { return }
+        let layout = appliedLayout
+        let frameBounds = NSRect(origin: .zero, size: layout.frameSize)
+        let rect = decorationsDirty ? frameBounds : rect0
+        let redrawDecorations = decorationsDirty
         dirty = nil
-        let size = _frame.size
+        decorationsDirty = false
         let s = CGFloat(scale)
-        let flip = CGAffineTransform(a: s, b: 0, c: 0, d: -s, tx: 0, ty: size.height * s)
+        let m = layout.shadowMargin
+        // Window coordinates (the frame's bottom-left, y up) to surface pixels.
+        let flip = CGAffineTransform(a: s, b: 0, c: 0, d: -s, tx: m * s, ty: (m + layout.frameSize.height) * s)
+        let dark = (owner as? NSWindow)?.effectiveAppearance.isDark ?? backend.systemAppearanceIsDark
         cairo_save(cr)
+        if redrawDecorations {
+            // Everything goes: the shadow is translucent and the rounded corners transparent.
+            cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR)
+            cairo_paint(cr)
+            cairo_set_operator(cr, CAIRO_OPERATOR_OVER)
+            if layout.shadowMargin > 0 { drawShadow(cr, layout: layout) }
+        }
         do {
             let ctx = CGContext(cairo: cr, baseTransform: flip, width: pixelWidth, height: pixelHeight)
-            ctx.clip(to: rect)
-            owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
+            let clip = layout.cornerRadius > 0 ? CGPath(roundedRect: frameBounds, cornerWidth: layout.cornerRadius, cornerHeight: layout.cornerRadius, transform: nil) : CGPath(rect: frameBounds, transform: nil)
+            ctx.addPath(clip)
+            ctx.clip()
+            let content = NSRect(origin: .zero, size: layout.contentSize)
+            let contentDirty = rect.intersection(content)
+            if !contentDirty.isEmpty {
+                ctx.saveGState()
+                ctx.clip(to: contentDirty)
+                owner?.platformWindowDraw(into: ctx, dirtyRect: contentDirty)
+                ctx.restoreGState()
+            }
+            let bandDirty = rect.intersection(layout.titleBarRect)
+            if !bandDirty.isEmpty {
+                ctx.saveGState()
+                ctx.clip(to: bandDirty)
+                owner?.platformWindowDrawTitleBar(into: ctx, dirtyRect: bandDirty)
+                ctx.restoreGState()
+            }
+            if layout.borderWidth > 0 {
+                // A hairline just inside the frame, over whatever the content drew there.
+                ctx.saveGState()
+                ctx.clip(to: rect)
+                let inset = frameBounds.insetBy(dx: layout.borderWidth / 2, dy: layout.borderWidth / 2)
+                let r = max(0, layout.cornerRadius - layout.borderWidth / 2)
+                ctx.addPath(r > 0 ? CGPath(roundedRect: inset, cornerWidth: r, cornerHeight: r, transform: nil) : CGPath(rect: inset, transform: nil))
+                ctx.setLineWidth(layout.borderWidth)
+                ctx.setStrokeColor(dark ? CGColor(red: 1, green: 1, blue: 1, alpha: 0.18) : CGColor(red: 0, green: 0, blue: 0, alpha: 0.28))
+                ctx.strokePath()
+                ctx.restoreGState()
+            }
         }
         cairo_restore(cr)
         cairo_surface_flush(backing)
@@ -444,17 +616,79 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         buffer.busy = true
         if backend.compositorVersion >= 3 { wl_surface_set_buffer_scale(surface, Int32(scale)) }
         wl_surface_attach(surface, buffer.buffer, 0, 0)
-        let px = NSRect(x: rect.minX * s, y: (size.height - rect.maxY) * s, width: rect.width * s, height: rect.height * s)
-        let dx = Int32(px.minX.rounded(.down)), dy = Int32(px.minY.rounded(.down))
-        let dw = Int32(px.width.rounded(.up) + 1), dh = Int32(px.height.rounded(.up) + 1)
-        if backend.compositorVersion >= 4 { wl_surface_damage_buffer(surface, dx, dy, dw, dh) }
-        else { wl_surface_damage(surface, dx / Int32(scale), dy / Int32(scale), dw / Int32(scale) + 1, dh / Int32(scale) + 1) }
+        applyRegions(layout)
+        if redrawDecorations {
+            if backend.compositorVersion >= 4 { wl_surface_damage_buffer(surface, 0, 0, Int32(pixelWidth), Int32(pixelHeight)) }
+            else { wl_surface_damage(surface, 0, 0, Int32(layout.surfaceSize.width), Int32(layout.surfaceSize.height)) }
+        } else {
+            let px = NSRect(x: (m + rect.minX) * s, y: (m + layout.frameSize.height - rect.maxY) * s, width: rect.width * s, height: rect.height * s)
+            let dx = Int32(px.minX.rounded(.down)), dy = Int32(px.minY.rounded(.down))
+            let dw = Int32(px.width.rounded(.up) + 1), dh = Int32(px.height.rounded(.up) + 1)
+            if backend.compositorVersion >= 4 { wl_surface_damage_buffer(surface, dx, dy, dw, dh) }
+            else { wl_surface_damage(surface, dx / Int32(scale), dy / Int32(scale), dw / Int32(scale) + 1, dh / Int32(scale) + 1) }
+        }
         if frameCallback == nil {
             frameCallback = wl_surface_frame(surface)
             wl_callback_add_listener(frameCallback, WaylandWindow.frameListener, opaque)
         }
         wl_surface_commit(surface)
         wl_display_flush(backend.display)
+    }
+
+    /// The window geometry (the frame within the surface), the opaque part of the frame
+    /// and where pointer input is the window's, for the commit that follows.
+    private func applyRegions(_ layout: ClientSideDecorationLayout) {
+        guard let surface, let xdgSurface else { return }
+        let g = layout.windowGeometry
+        if sentGeometry != g {
+            sentGeometry = g
+            if NSView._traceInvalidation { NSView._trace("wayland geometry '\(_title)' \(g) surface \(layout.surfaceSize)") }
+            xdg_surface_set_window_geometry(xdgSurface, Int32(g.minX), Int32(g.minY), Int32(g.width), Int32(g.height))
+        }
+        if let region = wl_compositor_create_region(backend.compositor) {
+            if !_chrome.isTransparent {
+                // The rounded corners stay out: two rects that cover the frame but its corners.
+                let r = layout.cornerRadius
+                wl_region_add(region, Int32(g.minX + r), Int32(g.minY), Int32(max(0, g.width - 2 * r)), Int32(g.height))
+                wl_region_add(region, Int32(g.minX), Int32(g.minY + r), Int32(g.width), Int32(max(0, g.height - 2 * r)))
+            }
+            wl_surface_set_opaque_region(surface, region)
+            wl_region_destroy(region)
+        }
+        if let region = wl_compositor_create_region(backend.compositor) {
+            let i = layout.inputRegion
+            wl_region_add(region, Int32(i.minX), Int32(i.minY), Int32(i.width), Int32(i.height))
+            wl_surface_set_input_region(surface, region)
+            wl_region_destroy(region)
+        }
+    }
+
+    /// A soft shadow around the frame: nested rounded rectangles from the surface edge in,
+    /// each a little more opaque, stronger for the key window.
+    private func drawShadow(_ cr: OpaquePointer, layout: ClientSideDecorationLayout) {
+        let s = Double(scale)
+        let m = Double(layout.shadowMargin)
+        let w = Double(layout.surfaceSize.width), h = Double(layout.surfaceSize.height)
+        let steps = Int(m)
+        let peak = isKey ? 0.028 : 0.014
+        for i in 0..<steps {
+            let t = Double(i) / m                       // 0 at the surface edge, 1 at the frame
+            let inset = Double(i) + 1.5                 // the frame edge is the last ring, shifted down
+            let radius = Double(layout.cornerRadius) + (m - Double(i)) * 0.5
+            roundedRect(cr, x: inset * s, y: (inset + 1.5) * s, width: (w - 2 * inset) * s, height: (h - 2 * inset) * s, radius: radius * s)
+            cairo_set_source_rgba(cr, 0, 0, 0, peak * t * t)
+            cairo_fill(cr)
+        }
+    }
+
+    private func roundedRect(_ cr: OpaquePointer, x: Double, y: Double, width: Double, height: Double, radius: Double) {
+        let r = min(radius, width / 2, height / 2)
+        cairo_new_path(cr)
+        cairo_arc(cr, x + width - r, y + r, r, -Double.pi / 2, 0)
+        cairo_arc(cr, x + width - r, y + height - r, r, 0, Double.pi / 2)
+        cairo_arc(cr, x + r, y + height - r, r, Double.pi / 2, Double.pi)
+        cairo_arc(cr, x + r, y + r, r, Double.pi, 3 * Double.pi / 2)
+        cairo_close_path(cr)
     }
 
     // MARK: Events
@@ -466,7 +700,10 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func ownerDrop(_ drag: PlatformDragInfo) -> NSDragOperation { owner?.platformDrop(drag) ?? [] }
 
     private func windowNumber() -> Int { (owner as? NSWindow)?.windowNumber ?? 0 }
-    private func contentPoint(_ p: NSPoint) -> NSPoint { NSPoint(x: p.x, y: _frame.height - p.y) }
+    /// Surface-local pointer position (points, y down) to window coordinates (the content
+    /// at the origin, the band above it, y up), which is what `locationInWindow` carries.
+    private func contentPoint(_ p: NSPoint) -> NSPoint { appliedLayout.windowPoint(fromSurface: p) }
+    func windowPoint(fromSurface p: NSPoint) -> NSPoint { appliedLayout.windowPoint(fromSurface: p) }
     private func seconds(_ t: UInt32) -> TimeInterval { TimeInterval(t) / 1000 }
 
     private func mouse(_ type: NSEvent.EventType, position: NSPoint, time: UInt32, button: Int, clickCount: Int = 1) {
@@ -476,10 +713,48 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     }
 
     func pointerMoved(time: UInt32, position: NSPoint) {
+        updateHover(appliedLayout.hitTest(position))
         if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, position: position, time: time, button: 0) }
         else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, position: position, time: time, button: 1) }
         else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, position: position, time: time, button: 2) }
         else { mouse(.mouseMoved, position: position, time: time, button: 0, clickCount: 0) }
+    }
+
+    /// The pointer left the surface (also when the compositor grabs it for a move or
+    /// resize): no edge cursor, no hovered buttons.
+    func pointerLeft() {
+        updateHover(.outside)
+        let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: backend.modifierFlags,
+                                    timestamp: 0, windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// A left press on the decoration: resize handles and the title band go to the
+    /// compositor (`xdg_toplevel.resize`/`.move`), a double click on the band zooms, and
+    /// the band's buttons (and content, as usual) get the event. True when consumed here.
+    private func decorationPress(position: NSPoint, clickCount: Int) -> Bool {
+        guard let toplevel, appliedLayout.hasDecorations || _chrome.extendsContentIntoTitleBar || _chrome.movableByBackground else { return false }
+        let region = appliedLayout.hitTest(position)
+        switch region {
+        case .outside:
+            return true
+        case .resize(let edge):
+            guard let seat = backend.seat else { return true }
+            xdg_toplevel_resize(toplevel, seat, backend.lastButtonSerial, edge.rawValue)
+            wl_display_flush(backend.display)
+            return true
+        case .titleBar, .content:
+            let p = contentPoint(position)
+            guard owner?.platformWindowHitTest(p) == .caption else { return false }
+            let inBand = region == .titleBar || (_chrome.extendsContentIntoTitleBar && p.y >= appliedLayout.contentSize.height - NSWindow._titleBarBandHeight)
+            if clickCount >= 2, inBand {
+                owner?.platformWindowTitleBarDoubleClicked()
+            } else if let seat = backend.seat {
+                xdg_toplevel_move(toplevel, seat, backend.lastButtonSerial)
+                wl_display_flush(backend.display)
+            }
+            return true
+        }
     }
 
     func pointerButton(time: UInt32, button: UInt32, pressed: Bool, position: NSPoint) {
@@ -488,6 +763,11 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         if pressed {
             if time &- lastClickTime < 400 { clickCount += 1 } else { clickCount = 1 }
             lastClickTime = time
+            if number == 0, decorationPress(position: position, clickCount: clickCount) { return }
+            // Other buttons on the shadow or a resize handle are nobody's.
+            if number != 0 {
+                switch appliedLayout.hitTest(position) { case .outside, .resize: return; default: break }
+            }
             pressedButtons |= bit
             NSEvent._pressedMouseButtons = pressedButtons
             let type: NSEvent.EventType = number == 0 ? .leftMouseDown : number == 1 ? .rightMouseDown : .otherMouseDown

@@ -45,3 +45,12 @@ by the package in their own windows on every platform:
 | Pop-up button open (selected item over the button) | SwiftUI Menu with a submenu |
 |---|---|
 | ![Pop-up menu](images/compare/popup-menu-windows.png) | ![SwiftUI menu](images/compare/swiftui-menu-windows.png) |
+
+Window frames on Wayland (ADR-0015): sway's server-side frame, and the package's own
+client-side decorations (title band with the standard buttons, shadow, rounded corners,
+resize edges) that every window gets on a compositor without xdg-decoration, such as
+Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.sh`):
+
+| Server-side (sway) | Client-side (the package) |
+|---|---|
+| ![sway frame](images/hellowindow-linux-wayland.png) | ![client-side decorations](images/hellowindow-linux-wayland-csd.png) |
