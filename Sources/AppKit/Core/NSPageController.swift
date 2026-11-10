@@ -210,6 +210,15 @@ import CoreText
 
     private func _startDisplayLink() {
         guard _displayLink == nil else { return }
+        // The frame clock comes from the platform backend once the host is installed; a
+        // window without layer-backed views has not installed it yet (the Win32 Layout
+        // Demo), and without it the link would never tick.
+        _CoreAnimationHost.installIfNeeded()
+        guard CARuntime.frameRequester != nil else {
+            // No frame source at all: land at once rather than leave the pages mid-slide.
+            if let t = _transition, t.animationTo >= 1 { _finishTransition() } else { _abandonTransition() }
+            return
+        }
         let link = CADisplayLink { [weak self] _ in self?._tick() }
         link.add(to: .main, forMode: .common)
         _displayLink = link
@@ -272,11 +281,14 @@ import CoreText
     }
 
     /// Drops whatever transition is running, landing on the selected page.
+    /// Drops whatever transition is running: a programmatic slide lands where it was
+    /// going (so repeated Next clicks keep paging even if frames are slow), a live one
+    /// lands past the middle and springs back before it.
     private func _cancelTransition() {
         guard _transition != nil else { return }
         _stopDisplayLink()
         if let t = _transition {
-            if t.progress >= 0.5, t.to != nil { _finishTransition() } else { _abandonTransition() }
+            if t.to != nil, !t.live || t.progress >= 0.5 { _finishTransition() } else { _abandonTransition() }
         }
         _transition = nil
     }

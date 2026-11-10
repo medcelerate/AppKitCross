@@ -594,7 +594,11 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
         let clock = Clock()
         let saved = CARuntime.now
         CARuntime.now = { clock.time }
-        defer { CARuntime.now = saved }
+        // Frames are requested of a stand-in (an earlier test may have left none installed);
+        // the test ticks the runtime itself.
+        let savedRequester = CARuntime.frameRequester
+        CARuntime.frameRequester = { }
+        defer { CARuntime.now = saved; CARuntime.frameRequester = savedRequester }
         body(clock)
     }
 
@@ -665,6 +669,30 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
                 clock.time += 1
                 CARuntime.tick()
                 XCTAssertNil(pc._transitionProgress)
+            }
+        }
+    }
+
+    func testNavigationWithoutFramesStillPagesAndInstallsTheFrameClock() {
+        MainActor.assumeIsolated {
+            run { _ in
+                let (w, pc, d) = makePages()
+                defer { w.close(); withExtendedLifetime(d) {} }
+                // Next, Next, with no frame in between: the first slide lands where it was
+                // going before the second starts, so the pages keep advancing.
+                pc.navigateForward(nil)
+                pc.navigateForward(nil)
+                XCTAssertEqual(pc.selectedIndex, 2)
+                XCTAssertEqual(d.log.filter { $0.hasPrefix("did:") }, ["did:two"], "the first slide completed on its own")
+                // Without any frame source the slide lands at once.
+                let saved = CARuntime.frameRequester
+                CARuntime.frameRequester = nil
+                defer { CARuntime.frameRequester = saved }
+                pc.navigateBack(nil)
+                XCTAssertNil(pc._transitionProgress)
+                XCTAssertEqual(pc.selectedIndex, 1)
+                XCTAssertEqual(pc.selectedViewController?.representedObject as? String, "two")
+                XCTAssertEqual(d.log.last, "did:two")
             }
         }
     }
