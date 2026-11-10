@@ -84,8 +84,9 @@ by `_CAProjective.draw`: the extent is split into a mesh of up to 8x8 cells, eac
 with the affine transform fitted to its projected corners (centre on the projected
 centre, axes the mean projected edge vectors) and clipped to them. The mesh is only as
 fine as the curvature needs: the corner one affine fit misplaces must land within half a
-device pixel, so a nearly affine layer is one draw. Neighbouring cells overlap by a third
-of a pixel so anti-aliased clip edges leave no seams. This is the portable choice:
+device pixel, so a nearly affine layer is one draw. Each cell's clip is offset outward by
+half a device pixel, so neighbouring cells overlap by one and the anti-aliased clip edges
+leave no seams. This is the portable choice:
 neither Cairo nor Direct2D's bitmap canvas draws images through a projective matrix,
 and a per-pixel inverse mapping would cost a CPU pass per frame.
 
