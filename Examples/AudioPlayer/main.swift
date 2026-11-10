@@ -1,7 +1,9 @@
-// AudioPlayer: an AVAudioEngine with a player node for a WAV file and a second one for a
-// generated sine, a level meter fed by a tap on the main mixer, play/pause/loop, and an
-// offline render switch for machines without a sound device. Same source on every
-// platform: on macOS it runs on Apple's AVFoundation.
+// AudioPlayer: an AVAudioEngine with a player node for a WAV file (through a time-pitch
+// unit, for the rate and pitch sliders) and a second one for a generated sine, a level
+// meter fed by a tap on the main mixer, play/pause/loop, an output device pop-up, a record
+// button (AVAudioRecorder; the recording then loads into the file player), recovery from
+// device changes, and an offline render switch for machines without a sound device. Same
+// source on every platform: on macOS it runs on Apple's AVFoundation.
 
 import AppKit
 import AVFoundation
@@ -44,6 +46,12 @@ final class AudioModel {
     let engine = AVAudioEngine()
     let filePlayer = AVAudioPlayerNode()
     let sinePlayer = AVAudioPlayerNode()
+    let timePitch = AVAudioUnitTimePitch()
+    private var recorder: AVAudioRecorder?
+    let recordingURL = FileManager.default.temporaryDirectory.appendingPathComponent("AudioPlayer-recording.caf")
+    var isRecording: Bool { recorder?.isRecording ?? false }
+    /// Called (on the main queue) after a device change restarted the engine.
+    var onConfigurationChange: ((String) -> Void)?
     private(set) var fileBuffer: AVAudioPCMBuffer?
     private(set) var fileName = "demo melody (generated)"
     var loops = false
@@ -59,10 +67,99 @@ final class AudioModel {
     init() {
         engine.attach(filePlayer)
         engine.attach(sinePlayer)
-        engine.connect(filePlayer, to: engine.mainMixerNode, format: format)
+        engine.attach(timePitch)
+        engine.connect(filePlayer, to: timePitch, format: format)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: format)
         engine.connect(sinePlayer, to: engine.mainMixerNode, format: format)
         fileBuffer = makeDemo(format: format)
         installTap()
+        // A device change (the default output switched, the device unplugged) stops the
+        // engine; restart it on the device now current and carry on playing.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recoverFromConfigurationChange() }
+        }
+    }
+
+    private func recoverFromConfigurationChange() {
+        let wasPlayingFile = isPlayingFile, wasSine = sineOn
+        if wasPlayingFile { pausedAt = AVAudioFramePosition(position * format.sampleRate) }
+        isPlayingFile = false
+        sineOn = false
+        let status = startEngine()
+        if wasPlayingFile { playFile() }
+        if wasSine { toggleSine() }
+        print("audio: configuration change, \(status)")
+        fflush(nil)
+        onConfigurationChange?(status)
+    }
+
+    // MARK: Rate and pitch
+
+    /// Playback rate of the file player (time-pitch unit: the pitch stays).
+    var rate: Float {
+        get { timePitch.rate }
+        set { timePitch.rate = newValue }
+    }
+
+    /// Pitch shift of the file player in cents.
+    var pitch: Float {
+        get { timePitch.pitch }
+        set { timePitch.pitch = newValue }
+    }
+
+    // MARK: Output devices
+
+    /// (id, name) of the output devices, the first being "System Default" (nil id). On
+    /// macOS the engine always follows the system default here (Apple selects devices
+    /// through the output unit's CoreAudio properties).
+    var outputDevices: [(id: String?, name: String)] {
+        var list: [(id: String?, name: String)] = [(nil, "System Default")]
+        #if !canImport(Darwin)
+        for d in (try? PlatformAudio.backend.outputDevices()) ?? [] { list.append((d.id, d.name)) }
+        #endif
+        return list
+    }
+
+    func selectOutputDevice(_ id: String?) {
+        #if !canImport(Darwin)
+        engine._outputDeviceUID = id
+        #endif
+    }
+
+    // MARK: Recording
+
+    /// Starts recording the default input to a CAF file; false when there is no input.
+    func startRecording() -> Bool {
+        let settings: [String: Any] = [AVFormatIDKey: Int(kAudioFormatLinearPCM), AVSampleRateKey: format.sampleRate, AVNumberOfChannelsKey: 1,
+                                       AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false]
+        do {
+            let r = try AVAudioRecorder(url: recordingURL, settings: settings)
+            r.isMeteringEnabled = true
+            guard r.record() else { return false }
+            recorder = r
+            return true
+        } catch {
+            print("cannot record: \(error)")
+            return false
+        }
+    }
+
+    /// Stops recording and loads the recording into the file player.
+    func stopRecording() throws -> Double {
+        guard let r = recorder else { return 0 }
+        let seconds = r.currentTime
+        r.stop()
+        recorder = nil
+        try open(url: recordingURL)
+        fileName = "recording (\(String(format: "%.1f", seconds)) s)"
+        return seconds
+    }
+
+    /// The input level in dB while recording.
+    var recordingLevel: Float {
+        guard let r = recorder else { return -160 }
+        r.updateMeters()
+        return r.averagePower(forChannel: 0)
     }
 
     private func installTap() {
@@ -201,6 +298,7 @@ final class AudioModel {
 
     /// Renders `seconds` of the file player (from the start) plus the sine into a WAV.
     func render(to url: URL, seconds: Double) throws -> Int {
+        // The file player goes through the time-pitch unit at the sliders' rate and pitch.
         engine.stop()
         try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
         try engine.start()
@@ -256,7 +354,8 @@ final class LevelMeterView: NSView {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     var window: NSWindow!
     let model = AudioModel()
-    var playButton: NSButton!, sineButton: NSButton!, loopCheckbox: NSButton!
+    var playButton: NSButton!, sineButton: NSButton!, loopCheckbox: NSButton!, recordButton: NSButton!
+    var rateLabel: NSTextField!, pitchLabel: NSTextField!, devicePopUp: NSPopUpButton!
     var meter: LevelMeterView!
     var status: NSTextField!, fileLabel: NSTextField!, positionLabel: NSTextField!
     var timer: Timer?
@@ -282,6 +381,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         case Selector(("volumeChanged:")):
             model.engine.mainMixerNode.outputVolume = Float((sender as? NSSlider)?.doubleValue ?? 1)
             return true
+        case Selector(("rateChanged:")):
+            model.rate = Float((sender as? NSSlider)?.doubleValue ?? 1)
+            update()
+            return true
+        case Selector(("pitchChanged:")):
+            model.pitch = Float(((sender as? NSSlider)?.doubleValue ?? 0).rounded())
+            update()
+            return true
+        case Selector(("deviceChanged:")):
+            let index = devicePopUp.indexOfSelectedItem
+            let devices = model.outputDevices
+            if index >= 0 && index < devices.count { model.selectOutputDevice(devices[index].id) }
+            update()
+            return true
+        case Selector(("toggleRecord:")):
+            if model.isRecording {
+                do {
+                    let seconds = try model.stopRecording()
+                    fileLabel.stringValue = "\(model.fileName): press Play to hear it (\(String(format: "%.1f", seconds)) s)"
+                } catch {
+                    fileLabel.stringValue = "cannot open the recording: \(error.localizedDescription)"
+                }
+            } else if !model.startRecording() {
+                fileLabel.stringValue = "no audio input to record from"
+            }
+            update()
+            return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
         default: return false
         }
@@ -299,6 +425,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
 
     func update() {
         playButton.title = model.isPlayingFile ? "Pause" : "Play"
+        recordButton.title = model.isRecording ? String(format: "Stop (%.0f dB)", model.recordingLevel) : "Record"
+        rateLabel.stringValue = String(format: "rate %.2fx", model.rate)
+        pitchLabel.stringValue = String(format: "pitch %+.0f cents", model.pitch)
         sineButton.title = model.sineOn ? "Stop Sine" : "Sine 440 Hz"
         status.stringValue = model.engine.isRunning ? model.statusLine : "engine stopped"
         positionLabel.stringValue = String(format: "%.1f / %.1f s", model.position, model.duration)
@@ -322,24 +451,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         main.addItem(playItem)
         NSApp.mainMenu = main
 
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 220),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 300),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "AudioPlayer"
         let content = window.contentView!
 
         fileLabel = NSTextField(labelWithString: "\(model.fileName) (\(String(format: "%.1f", model.duration)) s)")
-        fileLabel.frame = NSRect(x: 16, y: 184, width: 488, height: 20)
+        fileLabel.frame = NSRect(x: 16, y: 264, width: 488, height: 20)
         content.addSubview(fileLabel)
 
-        meter = LevelMeterView(frame: NSRect(x: 16, y: 120, width: 488, height: 48))
+        meter = LevelMeterView(frame: NSRect(x: 16, y: 200, width: 488, height: 48))
         content.addSubview(meter)
         model.onLevels = { [weak self] levels in self?.meter.levels = levels }
         model.onFinished = { [weak self] in self?.update() }
 
         positionLabel = NSTextField(labelWithString: "0.0 / 0.0 s")
         positionLabel.textColor = .secondaryLabelColor
-        positionLabel.frame = NSRect(x: 16, y: 96, width: 200, height: 18)
+        positionLabel.frame = NSRect(x: 16, y: 176, width: 200, height: 18)
         content.addSubview(positionLabel)
+        model.onConfigurationChange = { [weak self] status in self?.status.stringValue = status; self?.update() }
 
         let openButton = NSButton(title: "Open WAV\u{2026}", target: self, action: Selector(("openFile:")))
         playButton = NSButton(title: "Play", target: self, action: Selector(("playPause:")))
@@ -351,8 +481,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         let bar = NSStackView(views: [openButton, playButton, stop, loopCheckbox, sineButton, volume])
         bar.orientation = .horizontal
         bar.spacing = 8
-        bar.frame = NSRect(x: 16, y: 52, width: 488, height: 30)
+        bar.frame = NSRect(x: 16, y: 132, width: 488, height: 30)
         content.addSubview(bar)
+
+        // Rate (0.5x to 2x) and pitch (an octave down to an octave up) of the file player.
+        let rateSlider = NSSlider(value: 1, minValue: 0.5, maxValue: 2, target: self, action: Selector(("rateChanged:")))
+        rateSlider.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        rateLabel = NSTextField(labelWithString: "rate 1.00x")
+        rateLabel.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        let pitchSlider = NSSlider(value: 0, minValue: -1200, maxValue: 1200, target: self, action: Selector(("pitchChanged:")))
+        pitchSlider.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        pitchLabel = NSTextField(labelWithString: "pitch +0 cents")
+        let timeBar = NSStackView(views: [rateSlider, rateLabel, pitchSlider, pitchLabel])
+        timeBar.orientation = .horizontal
+        timeBar.spacing = 8
+        timeBar.frame = NSRect(x: 16, y: 92, width: 488, height: 30)
+        content.addSubview(timeBar)
+
+        // The output device and the recorder.
+        devicePopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        for d in model.outputDevices { devicePopUp.addItem(withTitle: d.name) }
+        devicePopUp.target = self
+        devicePopUp.action = Selector(("deviceChanged:"))
+        devicePopUp.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        recordButton = NSButton(title: "Record", target: self, action: Selector(("toggleRecord:")))
+        let deviceBar = NSStackView(views: [NSTextField(labelWithString: "Output:"), devicePopUp, recordButton])
+        deviceBar.orientation = .horizontal
+        deviceBar.spacing = 8
+        deviceBar.frame = NSRect(x: 16, y: 52, width: 488, height: 30)
+        content.addSubview(deviceBar)
 
         status = NSTextField(labelWithString: "")
         status.textColor = .secondaryLabelColor
@@ -364,12 +521,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         window.makeKeyAndOrderFront(nil)
 
         let args = CommandLine.arguments
+        // `--rate 1.5` and `--pitch 300` set the time-pitch unit (for --render too).
+        if let i = args.firstIndex(of: "--rate"), i + 1 < args.count, let v = Float(args[i + 1]) { model.rate = v; rateSlider.doubleValue = Double(v) }
+        if let i = args.firstIndex(of: "--pitch"), i + 1 < args.count, let v = Float(args[i + 1]) { model.pitch = v; pitchSlider.doubleValue = Double(v) }
         // `AudioPlayer --render out.wav [file.wav]` renders two seconds offline and exits.
         if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
-            if i + 2 < args.count { open(URL(fileURLWithPath: args[i + 2])) }
+            if i + 2 < args.count, !args[i + 2].hasPrefix("-") { open(URL(fileURLWithPath: args[i + 2])) }
             do {
                 let frames = try model.render(to: URL(fileURLWithPath: args[i + 1]), seconds: 2)
-                print("rendered \(args[i + 1]) (\(frames) frames, \(model.fileName) + 440 Hz sine)")
+                print("rendered \(args[i + 1]) (\(frames) frames, \(model.fileName) at rate \(model.rate), pitch \(model.pitch) cents + 440 Hz sine)")
             } catch {
                 print("render failed: \(error)")
             }

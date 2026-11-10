@@ -23,6 +23,11 @@ public typealias AudioFileTypeID = UInt32
     return v
 }
 
+#if !canImport(Darwin)
+/// MacTypes' success status, which render blocks return (Darwin provides it on macOS).
+public let noErr: OSStatus = 0
+#endif
+
 public let kAudioFormatLinearPCM: AudioFormatID = 0x6C70636D   // 'lpcm'
 
 public let kAudioFormatFlagIsFloat: AudioFormatFlags = 1 << 0

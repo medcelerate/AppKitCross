@@ -1,4 +1,4 @@
-// WAV (RIFF) and AIFF / AIFF-C containers for AVAudioFile: header parsing, raw PCM frame
+// WAV (RIFF), AIFF / AIFF-C and CAF containers for AVAudioFile: header parsing, raw PCM frame
 // access and header writing. Sample decoding to Float32 lives in `_PCMCodec`.
 
 import Foundation
@@ -61,7 +61,7 @@ struct _PCMEncoding: Equatable {
     }
 }
 
-enum _ContainerKind { case wave, aiff, aifc }
+enum _ContainerKind { case wave, aiff, aifc, caf }
 
 /// A parsed container: where the frames are and how they are encoded.
 struct _ContainerInfo {
@@ -95,6 +95,7 @@ private extension Data {
     func u16BE(_ o: Int) -> UInt16 { UInt16(self[startIndex + o]) << 8 | UInt16(self[startIndex + o + 1]) }
     func u32BE(_ o: Int) -> UInt32 { UInt32(u16BE(o)) << 16 | UInt32(u16BE(o + 2)) }
     func fourCC(_ o: Int) -> String { String(decoding: self[(startIndex + o)..<(startIndex + o + 4)], as: UTF8.self) }
+    func u64BE(_ o: Int) -> UInt64 { UInt64(u32BE(o)) << 32 | UInt64(u32BE(o + 4)) }
 }
 
 enum _Containers {
@@ -104,6 +105,7 @@ enum _Containers {
         guard head.count == 12 else { throw _ContainerError.unsupportedType }
         if head.fourCC(0) == "RIFF" && head.fourCC(8) == "WAVE" { return try parseWave(source) }
         if head.fourCC(0) == "FORM" && (head.fourCC(8) == "AIFF" || head.fourCC(8) == "AIFC") { return try parseAIFF(source, aifc: head.fourCC(8) == "AIFC") }
+        if head.fourCC(0) == "caff" { return try parseCAF(source) }
         throw _ContainerError.unsupportedType
     }
 
@@ -191,6 +193,42 @@ enum _Containers {
         return _ContainerInfo(kind: aifc ? .aifc : .aiff, encoding: enc, dataOffset: dataOffset, frameCount: min(frames, available))
     }
 
+    /// Core Audio Format: big-endian chunks with 64-bit sizes; `desc` describes linear PCM
+    /// (kCAFLinearPCMFormatFlagIsFloat = 1, IsLittleEndian = 2), `data` starts with a
+    /// 4-byte edit count and may have size -1 (to the end of the file).
+    private static func parseCAF(_ source: _ByteSource) throws -> _ContainerInfo {
+        var offset = 8
+        var encoding: _PCMEncoding?
+        var dataOffset = -1, dataSize = 0
+        while offset + 12 <= source.length {
+            let h = source.read(at: offset, count: 12)
+            guard h.count == 12 else { break }
+            let id = h.fourCC(0)
+            let rawSize = Int64(bitPattern: h.u64BE(4))
+            let body = offset + 12
+            var size = rawSize < 0 ? source.length - body : Int(min(rawSize, Int64(source.length - body)))
+            if id == "desc" {
+                let d = source.read(at: body, count: 32)
+                guard d.count == 32 else { throw _ContainerError.invalid("short desc chunk") }
+                let rate = Double(bitPattern: d.u64BE(0))
+                guard d.fourCC(8) == "lpcm" else { throw _ContainerError.unsupportedFormat }
+                let flags = d.u32BE(12)
+                let channels = Int(d.u32BE(24)), bits = Int(d.u32BE(28))
+                let isFloat = flags & 1 != 0
+                guard channels > 0, rate > 0, bits >= 8, bits <= 64, bits % 8 == 0, !isFloat || bits == 32 || bits == 64 else { throw _ContainerError.unsupportedFormat }
+                encoding = _PCMEncoding(bitsPerSample: bits, isFloat: isFloat, isBigEndian: flags & 2 == 0, isSigned: true, channels: channels, sampleRate: rate)
+            } else if id == "data" {
+                dataOffset = body + 4
+                dataSize = max(0, size - 4)
+                if rawSize < 0 { size = source.length - body }
+            }
+            offset = body + size
+        }
+        guard let enc = encoding else { throw _ContainerError.invalid("no desc chunk") }
+        guard dataOffset >= 0 else { throw _ContainerError.invalid("no data chunk") }
+        return _ContainerInfo(kind: .caf, encoding: enc, dataOffset: dataOffset, frameCount: dataSize / enc.bytesPerFrame)
+    }
+
     /// The 80-bit IEEE 754 extended used by AIFF for the sample rate.
     static func _extendedToDouble(_ d: Data, at o: Int) -> Double {
         let exponent = Int(d.u16BE(o) & 0x7FFF)
@@ -256,6 +294,15 @@ enum _Containers {
             }
             if commSize & 1 == 1 { d.append(0) }
             cc("SSND"); be32(8 + dataBytes); be32(0); be32(0)
+        case .caf:
+            func be64(_ v: Int64) { be32(Int(UInt64(bitPattern: v) >> 32 & 0xFFFF_FFFF)); be32(Int(UInt64(bitPattern: v) & 0xFFFF_FFFF)) }
+            cc("caff"); be16(1); be16(0)
+            cc("desc"); be64(32)
+            be64(Int64(bitPattern: e.sampleRate.bitPattern))
+            cc("lpcm")
+            be32((e.isFloat ? 1 : 0) | (e.isBigEndian ? 0 : 2))
+            be32(e.bytesPerFrame); be32(1); be32(e.channels); be32(e.bitsPerSample)
+            cc("data"); be64(Int64(4 + dataBytes)); be32(0)
         }
         return d
     }
@@ -269,6 +316,9 @@ enum _Containers {
         case .aiff, .aifc:
             let commBody = kind == .aifc ? 12 + 12 + 8 : 12 + 8
             return [(4, true, false, header.count - 8), (commBody + 2, true, true, 0), (header.count - 12, true, false, 8)]
+        case .caf:
+            // The low word of the data chunk's 64-bit size (the high word is zero below 4 GB).
+            return [(header.count - 8, true, false, 4)]
         }
     }
 }
