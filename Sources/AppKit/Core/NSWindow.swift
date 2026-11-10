@@ -46,6 +46,14 @@ import CoreText
         }
     }
 
+    /// A native surface within the content area for a GPU swap chain, where the platform
+    /// has one (Linux: a child X window or a Wayland subsurface; ADR-0012). Not part of
+    /// Apple's API: MetalKit presents through it when the window does not host its layers.
+    public func _makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { _platform?.makePresentationSurface(frame: frame) }
+
+    /// The content as the window system shows it, presentation surfaces included (tests).
+    internal func _captureContent() -> CGImage? { _platform?.captureContent() }
+
     private func _makeLayerScene() -> PlatformLayerScene? {
         guard let cv = _contentView, let root = cv.layer else { return nil }
         cv.layoutSubtreeIfNeeded()

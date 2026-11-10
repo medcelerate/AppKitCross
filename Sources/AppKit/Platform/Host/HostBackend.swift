@@ -249,6 +249,8 @@ final class HostWindow: PlatformWindow {
         #endif
     }
 
+    func captureContent() -> CGImage? { lastImage }
+
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
         guard layerHostingEnabled else { return false }
         hostedScene = scene

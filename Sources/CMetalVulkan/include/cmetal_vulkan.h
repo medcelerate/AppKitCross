@@ -25,6 +25,7 @@ typedef struct CMVTexture CMVTexture;
 typedef struct CMVShader CMVShader;         // VkShaderModule plus one entry point
 typedef struct CMVPipeline CMVPipeline;     // graphics or compute VkPipeline
 typedef struct CMVSampler CMVSampler;
+typedef struct CMVSwapChain CMVSwapChain;   // VkSurfaceKHR + VkSwapchainKHR on a window-system surface
 
 typedef struct CMVDeviceInfo {
     char name[256];
@@ -34,6 +35,8 @@ typedef struct CMVDeviceInfo {
     bool isSoftware;                  // VK_PHYSICAL_DEVICE_TYPE_CPU (lavapipe, SwiftShader)
     bool isIntegrated;
     bool presentable;                 // VK_KHR_swapchain is available on the device
+    bool xlibSurfaces;                // the instance has VK_KHR_xlib_surface (X11 presentation)
+    bool waylandSurfaces;             // the instance has VK_KHR_wayland_surface
     bool validation;                  // the validation layer was enabled
     uint32_t maxComputeWorkGroupInvocations;
     uint32_t maxComputeWorkGroupSize[3];
@@ -171,6 +174,40 @@ void cmv_commandlist_copy_texture_to_buffer(CMVCommandList *list, CMVTexture *sr
 void cmv_commandlist_generate_mipmaps(CMVCommandList *list, CMVTexture *texture);
 /// Ends recording and submits on `queue`; returns the fence value that completes it.
 uint64_t cmv_commandlist_execute(CMVCommandList *list, CMVQueue *queue);
+
+/// Swap chains for CAMetalLayer (ADR-0012, presentation): a VkSurfaceKHR over an X11
+/// window (`CMV_SURFACE_XLIB`: `display` is the Display*, `window` the Window id) or a
+/// Wayland surface (`CMV_SURFACE_WAYLAND`: `display` is the wl_display*, `window` the
+/// wl_surface*), and a VkSwapchainKHR of `imageCount` images (clamped to the surface's
+/// limits) in `vkFormat` (B8G8R8A8_UNORM, B8G8R8A8_SRGB or R16G16B16A16_SFLOAT, which
+/// the surface must list). `vsync` picks FIFO; otherwise MAILBOX, then IMMEDIATE, when the
+/// surface offers them, else FIFO. Images are acquired into VK_IMAGE_LAYOUT_GENERAL, so
+/// they render and copy like any texture, and presented from VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+/// every transition and the present go through the device's one queue (the queue every
+/// command list executes on), so no ownership transfer is ever needed. NULL (with
+/// `cmv_last_error`) when the device cannot present, the extension is missing or the
+/// surface rejects the format.
+enum { CMV_SURFACE_XLIB = 1, CMV_SURFACE_WAYLAND = 2 };
+CMVSwapChain *cmv_swapchain_create(CMVDevice *device, uint32_t surfaceKind, void *display, uintptr_t window, uint32_t width, uint32_t height, uint32_t vkFormat, uint32_t imageCount, bool vsync);
+void cmv_swapchain_release(CMVSwapChain *swapChain);
+/// Re-creates the chain at a new size (the window's native surface must already be that
+/// size); any acquired image is forgotten.
+bool cmv_swapchain_resize(CMVSwapChain *swapChain, uint32_t width, uint32_t height);
+/// Changes the present mode for the chain's next re-creation (`cmv_swapchain_resize`
+/// with the same size applies it at once).
+void cmv_swapchain_set_vsync(CMVSwapChain *swapChain, bool vsync);
+/// Acquires the next image (the chain owns the returned texture; it is valid until the
+/// next acquire). NULL on timeout or when the surface is gone.
+CMVTexture *cmv_swapchain_acquire(CMVSwapChain *swapChain);
+/// Presents the acquired image; false when nothing was acquired or the present failed
+/// (an out-of-date chain is re-created on the next acquire).
+bool cmv_swapchain_present(CMVSwapChain *swapChain);
+/// The VkPresentModeKHR in use (0 immediate, 1 mailbox, 2 fifo, 3 fifo relaxed) and the
+/// image count the implementation gave.
+uint32_t cmv_swapchain_present_mode(CMVSwapChain *swapChain);
+uint32_t cmv_swapchain_image_count(CMVSwapChain *swapChain);
+/// The last create/resize/acquire/present failure ("" when none).
+void cmv_swapchain_last_error(CMVSwapChain *swapChain, char *errorOut, uint32_t errorCapacity);
 
 #ifdef __cplusplus
 }

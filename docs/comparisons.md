@@ -55,6 +55,17 @@ Mutter. Both from the headless sway in the container (`tools/linux/run-wayland.s
 |---|---|
 | ![sway frame](images/hellowindow-linux-wayland.png) | ![client-side decorations](images/hellowindow-linux-wayland-csd.png) |
 
+Metal on Linux (ADR-0012): the Layout Demo's Metal tab, an `MTKView` whose frames the Vulkan
+device presents through a `VkSwapchainKHR` on a native surface the window places under the
+view (a child window on X11, a subsurface on Wayland), from lavapipe in the container with
+`HelloWindow --metal --metal-static` (`tools/linux/run.sh` and `run-wayland.sh`, which also
+count the clear colour's pixels on screen). The device label the view carries as a subview
+is under the surface on Linux, where Windows composites it above the swap chain.
+
+| X11 (Xvfb) | Wayland (headless sway) |
+|---|---|
+| ![Metal tab on X11](images/hellowindow-linux-metal.png) | ![Metal tab on Wayland](images/hellowindow-linux-wayland-metal.png) |
+
 3D transforms with perspective in the software compositor (ADR-0005, "3D transforms"):
 the Animation example's card mid-flip under a perspective `sublayerTransform`, drawn by
 Cairo under Xvfb (`APPKITWIN_LINUX_BACKEND=x11 .build/debug/Animation`, captured with

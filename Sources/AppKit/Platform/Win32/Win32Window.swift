@@ -52,14 +52,23 @@ final class Win32Window: PlatformWindow {
         // Windows presented through a flip-model swap chain or a DirectComposition visual
         // need no redirection surface: DWM would allocate one per window and copy into
         // it every frame. Windows honours the bit only at CreateWindowExW (verified on
-        // build 26200), so it is decided here, from whether swap chains work at all, not
-        // from the chrome (which arrives after creation). Windows painted through the
-        // legacy ID2D1HwndRenderTarget (APPKITWIN_LEGACY_D2D=1, or no D3D11 device)
-        // keep the surface: that target blits into it.
-        let noRedirectionBitmap = !Win32Window.useLegacyHwndTarget && cd2d_presentation_available()
-        if noRedirectionBitmap { ex |= Win32Window.wsExNoRedirectionBitmap }
+        // build 26200), so it is decided here (Win32WindowPolicy), from whether swap
+        // chains work at all, not from the chrome (which arrives after creation). Kept
+        // for the legacy ID2D1HwndRenderTarget (APPKITWIN_LEGACY_D2D=1, or no D3D11
+        // device), which blits into it, and for windows that carry the Win32 menu bar:
+        // user32 draws the bar through GDI into the surface, a black strip without one.
+        let redirection = Win32WindowPolicy.redirectionBitmap(styleMask: styleMask, applicationHasMenuBar: ownerWantsMenuBar,
+                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available())
+        if !redirection.keeps { ex |= Win32Window.wsExNoRedirectionBitmap }
         if NSView._traceInvalidation {
-            NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(noRedirectionBitmap ? "none" : "kept") (\(Win32Window.useLegacyHwndTarget ? "legacy HWND target" : noRedirectionBitmap ? "swap-chain presentation" : "no D3D11/DXGI 1.2 device: HWND target"))")
+            let why: String
+            switch redirection {
+            case .none: why = "swap-chain presentation"
+            case .keptForLegacyTarget: why = "legacy HWND target"
+            case .keptForMissingDevice: why = "no D3D11/DXGI 1.2 device: HWND target"
+            case .keptForMenuBar: why = "window carries the Win32 menu bar"
+            }
+            NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(redirection.keeps ? "kept" : "none") (\(why))")
         }
         let frame = backend.frameRect(forContentRect: contentRect, styleMask: styleMask)
         let scale = CGFloat(GetDpiForSystem()) / 96
@@ -94,7 +103,7 @@ final class Win32Window: PlatformWindow {
 
     /// Titled windows carry the application menu bar (AppKit's main menu is global).
     /// Windows whose content covers the frame have no non-client area to show it in.
-    var wantsMenuBar: Bool { _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) && ownerWantsMenuBar && !usesCustomFrame }
+    var wantsMenuBar: Bool { Win32WindowPolicy.carriesMenuBar(_styleMask, applicationHasMenuBar: ownerWantsMenuBar) && !usesCustomFrame }
     private let ownerWantsMenuBar: Bool
     private var _chrome = PlatformWindowChrome()
     var chrome: PlatformWindowChrome {

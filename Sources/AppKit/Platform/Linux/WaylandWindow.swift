@@ -79,6 +79,8 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     private var backing: OpaquePointer?          // cairo image surface, window size in pixels
     private var backingCairo: OpaquePointer?     // cairo_t on the backing surface
     private var dirty: NSRect? = nil             // content points
+    /// Subsurfaces that GPU swap chains present into (ADR-0012).
+    private var presentationSurfaces: [WaylandPresentationSurface] = []
     var needsPaint: Bool { dirty != nil && isVisible && configured && !destroying }
 
     var backingScaleFactor: CGFloat { CGFloat(scale) }
@@ -458,6 +460,7 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         guard !destroying else { return }
         destroying = true
         backend.unregister(self)
+        for s in presentationSurfaces { s.close() }
         if let c = frameCallback { wl_callback_destroy(c); frameCallback = nil }
         releaseBacking()
         for b in buffers { b.release() }
@@ -480,6 +483,32 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func display() {
         dirty = NSRect(origin: .zero, size: _frame.size)
         paintIfNeeded()
+    }
+
+    // MARK: Presentation surfaces (ADR-0012)
+
+    func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? {
+        guard let surface, let subcompositor = backend.subcompositor, !destroying else { return nil }
+        guard let s = WaylandPresentationSurface(window: self, backend: backend, parent: surface, subcompositor: subcompositor, frame: frame) else { return nil }
+        presentationSurfaces.append(s)
+        return s
+    }
+
+    func presentationSurfaceClosed(_ s: WaylandPresentationSurface) {
+        presentationSurfaces.removeAll { $0 === s }
+        presentationSurfacesDidChange()
+    }
+
+    /// A subsurface's position is applied by the parent's next commit: repaint the window.
+    func presentationSurfaceDidChange() { presentationSurfacesDidChange() }
+    private func presentationSurfacesDidChange() { dirty = NSRect(origin: .zero, size: _frame.size) }
+
+    /// Where a content rect's top-left lies in the surface (logical coordinates, y down
+    /// from the surface's top: the shadow margin and the title band are above the content).
+    func subsurfacePosition(for frame: NSRect) -> (x: Int32, y: Int32) {
+        let layout = appliedLayout
+        let m = layout.shadowMargin
+        return (Int32((m + frame.minX).rounded()), Int32((m + layout.frameSize.height - frame.maxY).rounded()))
     }
 
     // MARK: Painting
@@ -838,6 +867,55 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
                                  windowNumber: windowNumber(), context: nil, characters: chars,
                                  charactersIgnoringModifiers: plain, isARepeat: false, keyCode: keyCode)!
         owner?.platformWindowDispatch(e)
+    }
+}
+/// A `wl_subsurface` of a `WaylandWindow` at a content rect, for a Vulkan swap chain
+/// (`VK_KHR_wayland_surface`). Desynchronised, so the chain's commits show as they come;
+/// placed in the parent's coordinates and given the window's buffer scale, so a chain of
+/// `drawableSize` pixels covers the view's points.
+@MainActor
+final class WaylandPresentationSurface: PlatformPresentationSurface {
+    private unowned let window: WaylandWindow
+    private unowned let backend: WaylandBackend
+    private(set) var surface: OpaquePointer?      // wl_surface*
+    private var subsurface: OpaquePointer?        // wl_subsurface*
+
+    init?(window: WaylandWindow, backend: WaylandBackend, parent: OpaquePointer, subcompositor: OpaquePointer, frame: NSRect) {
+        self.window = window
+        self.backend = backend
+        guard let s = wl_compositor_create_surface(backend.compositor) else { return nil }
+        guard let sub = wl_subcompositor_get_subsurface(subcompositor, s, parent) else { wl_surface_destroy(s); return nil }
+        surface = s
+        subsurface = sub
+        wl_subsurface_set_desync(sub)
+        apply(frame)
+        window.presentationSurfaceDidChange()
+    }
+
+    var handle: PlatformPresentationSurfaceHandle {
+        PlatformPresentationSurfaceHandle(kind: .wayland, display: UnsafeMutableRawPointer(backend.display), window: UInt(bitPattern: surface))
+    }
+
+    private func apply(_ frame: NSRect) {
+        guard let surface, let subsurface else { return }
+        let p = window.subsurfacePosition(for: frame)
+        wl_subsurface_set_position(subsurface, p.x, p.y)
+        if backend.compositorVersion >= 3 { wl_surface_set_buffer_scale(surface, Int32(window.scale)) }
+    }
+
+    func setFrame(_ frame: NSRect) {
+        apply(frame)
+        window.presentationSurfaceDidChange()
+    }
+
+    func close() {
+        guard surface != nil else { return }
+        if let sub = subsurface { wl_subsurface_destroy(sub) }
+        if let s = surface { wl_surface_destroy(s) }
+        subsurface = nil
+        surface = nil
+        wl_display_flush(backend.display)
+        window.presentationSurfaceClosed(self)
     }
 }
 #endif
