@@ -268,6 +268,7 @@ targets += [
     .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
+    .executableTarget(name: "Sheets", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Sheets", exclude: ["README.md"]),
     // The document-based example: its Info.plist (CFBundleDocumentTypes) travels as a
     // resource (SwiftPM refuses a resource named Info.plist, hence Resources/TextEdit-Info.plist)
     // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).

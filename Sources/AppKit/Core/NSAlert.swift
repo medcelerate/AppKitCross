@@ -101,26 +101,35 @@ import CoreText
 
     @MainActor private func _finish(with response: NSApplication.ModalResponse) {
         _response = response
-        if let completion = _sheetCompletion {
-            _sheetCompletion = nil
-            _window?.orderOut(nil)
-            let keepAlive = _retainedWhileSheetIsUp
-            _retainedWhileSheetIsUp = nil
-            completion(response)
-            _ = keepAlive
+        if _sheetCompletion != nil {
+            // A sheet: the parent ends it, and its completion (below) reports the code.
+            if let w = _window, let parent = w.sheetParent {
+                parent.endSheet(w, returnCode: response)
+            } else {
+                _sheetDidEnd(response)
+            }
         } else {
             NSApplication.shared.stopModal(withCode: response)
         }
     }
 
+    @MainActor private func _sheetDidEnd(_ response: NSApplication.ModalResponse) {
+        guard let completion = _sheetCompletion else { return }
+        _sheetCompletion = nil
+        let keepAlive = _retainedWhileSheetIsUp
+        _retainedWhileSheetIsUp = nil
+        completion(response)
+        _ = keepAlive
+    }
+
     @MainActor open func beginSheetModal(for sheetWindow: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
-        // Sheets are shown as a centred modal panel for now (no sheet animation/attachment).
+        // The panel is attached to the window as a sheet (ADR-0019); a button ends it with
+        // its response, Escape or closing the parent with `.cancel`.
         let panel = _buildWindow()
+        panel._closesAfterSheetEnds = true      // the panel goes with the session; `window` rebuilds it
         _sheetCompletion = { handler?($0) }
         _retainedWhileSheetIsUp = self
-        let parent = sheetWindow.frame
-        panel.setFrameOrigin(NSPoint(x: parent.midX - panel.frame.width / 2, y: parent.maxY - panel.frame.height - 40))
-        panel.makeKeyAndOrderFront(nil)
+        sheetWindow.beginSheet(panel) { [weak self] response in self?._sheetDidEnd(response) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalert/init(error:)
     @MainActor public init(error: any Error) {
