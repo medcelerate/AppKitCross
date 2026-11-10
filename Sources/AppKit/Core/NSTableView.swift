@@ -285,10 +285,21 @@ import CoreGraphics
 
     internal func _rowCountFromDataSource() -> Int { max(0, _dataSource?.numberOfRows(in: self) ?? 0) }
     internal func _delegateHeightOfRow(_ row: Int) -> CGFloat { _delegate?.tableView(self, heightOfRow: row) ?? _rowHeight }
-    internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? { _delegate?.tableView(self, viewFor: column, row: row) }
+    internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? {
+        if let p = _contentProvider { return p._tableView(self, viewFor: column, row: row) }
+        return _delegate?.tableView(self, viewFor: column, row: row)
+    }
     internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? { _dataSource?.tableView(self, objectValueFor: column, row: row) }
-    internal func _delegateRowView(forRow row: Int) -> NSTableRowView? { _delegate?.tableView(self, rowViewForRow: row) }
-    internal func _delegateIsGroupRow(_ row: Int) -> Bool { _delegate?.tableView(self, isGroupRow: row) ?? false }
+    internal func _delegateRowView(forRow row: Int) -> NSTableRowView? {
+        _contentProvider?._tableView(self, rowViewForRow: row) ?? _delegate?.tableView(self, rowViewForRow: row)
+    }
+    internal func _delegateIsGroupRow(_ row: Int) -> Bool {
+        if let p = _contentProvider, p._tableView(self, isGroupRow: row) { return true }
+        return _delegate?.tableView(self, isGroupRow: row) ?? false
+    }
+    /// A data source that also supplies the views (a diffable data source): it answers for
+    /// the delegate's view methods, as on macOS.
+    internal var _contentProvider: (any _NSTableViewContentProviding)? { _dataSource as? any _NSTableViewContentProviding }
     internal func _delegateDidAdd(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didAdd: rowView, forRow: row) }
     internal func _delegateDidRemove(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didRemove: rowView, forRow: row) }
     internal func _delegateSelectionShouldChange() -> Bool { _delegate?.selectionShouldChange(in: self) ?? true }
@@ -303,7 +314,12 @@ import CoreGraphics
     internal func _delegateWillDisplayCell(_ cell: NSCell, for column: NSTableColumn, row: Int) { _delegate?.tableView(self, willDisplayCell: cell, for: column, row: row) }
     /// The frame of each visible column's cell inside a row view of `height`.
     internal func _cellFrames(forRow row: Int, height: CGFloat) -> [(column: Int, frame: NSRect)] {
-        _tableColumns.indices.filter { !_tableColumns[$0].isHidden }.map { i in
+        // A diffable data source's section header spans the row.
+        if let p = _contentProvider, p._tableView(self, isGroupRow: row),
+           let first = _tableColumns.indices.first(where: { !_tableColumns[$0].isHidden }) {
+            return [(first, NSRect(x: 0, y: 0, width: bounds.width, height: height))]
+        }
+        return _tableColumns.indices.filter { !_tableColumns[$0].isHidden }.map { i in
             let cf = rect(ofColumn: i)
             return (i, NSRect(x: cf.minX, y: 0, width: cf.width, height: height))
         }
@@ -377,6 +393,7 @@ import CoreGraphics
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/reloaddata()
     @MainActor open func reloadData() {
+        _rowMap = nil
         _needsReload = true
         _dropAllRowViews()
         _reloadIfNeeded()
@@ -389,6 +406,7 @@ import CoreGraphics
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/notenumberofrowschanged()
     @MainActor open func noteNumberOfRowsChanged() {
+        _rowMap = nil
         let selected = _selectedRows
         _needsReload = true
         _dropAllRowViews()
@@ -408,36 +426,62 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/endupdates()
     @MainActor open func endUpdates() {
         _updateDepth = max(0, _updateDepth - 1)
-        if _updateDepth == 0 { noteNumberOfRowsChanged() }
+        if _updateDepth == 0 { _commitRowChanges() }
+    }
+
+    /// Where each live row view's row has gone during the current updates (original row →
+    /// current row; a removed row has no entry). Nil when no row was inserted, removed or
+    /// moved since the last commit.
+    private var _rowMap: [Int: Int]?
+
+    private func _trackRows(_ newRow: (Int) -> Int?) {
+        var map = _rowMap ?? Dictionary(uniqueKeysWithValues: _rowViews.keys.map { ($0, $0) })
+        for (k, v) in map { map[k] = newRow(v) }
+        _rowMap = map
+    }
+
+    /// Ends a run of row changes: the row views follow their rows (keeping their cells), the
+    /// views of removed rows are recycled and the counts are read again.
+    private func _commitRowChanges() {
+        guard let map = _rowMap else { noteNumberOfRowsChanged(); return }
+        _rowMap = nil
+        _noteRowsChanged(keeping: { map[$0] }, rebindingCells: false)
+    }
+
+    /// `row` after inserting rows at `indexes` (given in the coordinates after the insert).
+    private static func _row(_ row: Int, afterInserting indexes: IndexSet) -> Int {
+        var r = row
+        for i in indexes { if i <= r { r += 1 } else { break } }
+        return r
+    }
+    private static func _row(_ row: Int, afterRemoving indexes: IndexSet) -> Int? {
+        indexes.contains(row) ? nil : row - indexes.count(in: 0..<row)
+    }
+    private static func _row(_ row: Int, afterMoving oldIndex: Int, to newIndex: Int) -> Int {
+        if row == oldIndex { return newIndex }
+        var r = row
+        if r > oldIndex { r -= 1 }
+        if r >= newIndex { r += 1 }
+        return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/insertrows(at:withanimation:)
     @MainActor open func insertRows(at indexes: IndexSet, withAnimation animationOptions: NSTableView.AnimationOptions = []) {
-        // Selection follows the rows below the insertion points.
-        var selected = IndexSet()
-        for row in _selectedRows { selected.insert(row + indexes.count(in: 0...row)) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        // Selection and row views follow the rows below the insertion points.
+        _selectedRows = IndexSet(_selectedRows.map { Self._row($0, afterInserting: indexes) })
+        _trackRows { Self._row($0, afterInserting: indexes) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/removerows(at:withanimation:)
     @MainActor open func removeRows(at indexes: IndexSet, withAnimation animationOptions: NSTableView.AnimationOptions = []) {
-        var selected = IndexSet()
-        for row in _selectedRows where !indexes.contains(row) { selected.insert(row - indexes.count(in: 0..<row)) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        _selectedRows = IndexSet(_selectedRows.compactMap { Self._row($0, afterRemoving: indexes) })
+        _trackRows { Self._row($0, afterRemoving: indexes) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/moverow(at:to:)
     @MainActor open func moveRow(at oldIndex: Int, to newIndex: Int) {
-        let wasSelected = _selectedRows.contains(oldIndex)
-        var selected = IndexSet()
-        for row in _selectedRows where row != oldIndex {
-            var r = row
-            if r > oldIndex { r -= 1 }
-            if r >= newIndex { r += 1 }
-            selected.insert(r)
-        }
-        if wasSelected { selected.insert(newIndex) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        _selectedRows = IndexSet(_selectedRows.map { Self._row($0, afterMoving: oldIndex, to: newIndex) })
+        _trackRows { Self._row($0, afterMoving: oldIndex, to: newIndex) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/hiddenrowindexes
     @MainActor open var hiddenRowIndexes: IndexSet { _hiddenRows }
@@ -660,7 +704,7 @@ import CoreGraphics
     /// row view whose row is now `newRow(oldRow)` stays that row's view, with its cells
     /// re-read, so the view's identity (its accessibility element) follows the content;
     /// views of rows that vanished (`nil`) are recycled.
-    internal func _noteRowsChanged(keeping newRow: (Int) -> Int?) {
+    internal func _noteRowsChanged(keeping newRow: (Int) -> Int?, rebindingCells: Bool = true) {
         let selected = _selectedRows
         let old = _rowViews
         _rowViews.removeAll()
@@ -671,9 +715,24 @@ import CoreGraphics
         for (row, rv) in old.sorted(by: { $0.key < $1.key }) {
             if let n = newRow(row), n >= 0, n < _numberOfRows, taken.insert(n).inserted { kept.append((rv, n)) } else { _recycle(rv, row: row) }
         }
-        for (rv, n) in kept { _bindRowView(rv, row: n) }
+        for (rv, n) in kept {
+            if rebindingCells { _bindRowView(rv, row: n) } else { _moveRowView(rv, to: n) }
+        }
         _selectedRows = IndexSet(selected.filter { $0 < _numberOfRows })
         needsDisplay = true
+    }
+
+    /// Re-files a row view (with its cells) as row `row`'s.
+    private func _moveRowView(_ rv: NSTableRowView, to row: Int) {
+        let r = rect(ofRow: row)
+        rv.frame = r
+        rv._row = row
+        rv.isGroupRowStyle = _delegateIsGroupRow(row)
+        let frames = _cellFrames(forRow: row, height: r.height)
+        for (i, cell) in rv._cellViews.enumerated() where frames.indices.contains(i) { cell.frame = frames[i].frame }
+        _rowViewDidLayout(rv, row: row)
+        _applyRowState(rv, row: row)
+        _rowViews[row] = rv
     }
 
     private func _recycle(_ rv: NSTableRowView, row: Int) {
