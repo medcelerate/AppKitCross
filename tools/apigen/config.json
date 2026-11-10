@@ -14,6 +14,8 @@
     "NSClickGestureRecognizer",
     "NSClipView",
     "NSColor",
+    "NSComboBox",
+    "NSComboBoxCell",
     "NSControl",
     "NSCursor",
     "NSDraggingImageComponent",
@@ -42,6 +44,7 @@
     "NSMenuToolbarItem",
     "NSMutableParagraphStyle",
     "NSOpenPanel",
+    "NSOutlineView",
     "NSPanGestureRecognizer",
     "NSPanel",
     "NSParagraphStyle",
@@ -331,7 +334,23 @@
     "NSTableViewDelegate.tableView(_:userCanChangeVisibilityOf:)": "return true",
     "NSGestureRecognizerDelegate.gestureRecognizer(_:shouldAttemptToRecognizeWith:)": "return true",
     "NSGestureRecognizerDelegate.gestureRecognizer(_:shouldReceive:)": "return true",
-    "NSGestureRecognizerDelegate.gestureRecognizerShouldBegin(_:)": "return true"
+    "NSGestureRecognizerDelegate.gestureRecognizerShouldBegin(_:)": "return true",
+    "NSOutlineViewDelegate.selectionShouldChange(in:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldExpandItem:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldCollapseItem:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldSelectItem:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldSelect:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldEdit:item:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldShowOutlineCellForItem:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldShowCellExpansionFor:item:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldTrackCell:for:item:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldReorderColumn:toColumn:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:shouldTypeSelectFor:withCurrentSearch:)": "return true",
+    "NSOutlineViewDelegate.outlineView(_:heightOfRowByItem:)": "return outlineView.rowHeight",
+    "NSOutlineViewDelegate.outlineView(_:selectionIndexesForProposedSelection:)": "return proposedSelectionIndexes",
+    "NSOutlineViewDataSource.outlineView(_:validateDrop:proposedItem:proposedChildIndex:)": "return []",
+    "NSComboBoxDataSource.comboBox(_:indexOfItemWithStringValue:)": "return NSNotFound",
+    "NSComboBoxCellDataSource.comboBoxCell(_:indexOfItemWithStringValue:)": "return NSNotFound"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",
@@ -370,5 +389,13 @@
     "NSDraggingDestination",
     "NSDraggingSource",
     "NSTextInputClient"
-  ]
+  ],
+  "protocolExtraParents": {
+    "NSOutlineViewDataSource": [
+      "NSTableViewDataSource"
+    ],
+    "NSOutlineViewDelegate": [
+      "NSTableViewDelegate"
+    ]
+  }
 }

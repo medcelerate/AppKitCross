@@ -1484,6 +1484,7 @@ import CoreText
         _isKey = false
         // Losing the keyboard (another window or application activated) dismisses open menus.
         if let t = _NSMenuTracker.current, !t.isMenuWindow(self) { t.cancel() }
+        if let p = _NSComboBoxPopUp.current, p.window !== self { p.dismiss() }
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
         post(NSWindow.didResignKeyNotification)
@@ -1987,6 +1988,10 @@ extension NSWindow: PlatformAccessibilityProvider {
         case .cancel: return v.accessibilityPerformCancel()
         case .pick: return v.accessibilityPerformPick()
         case .raise: return v.accessibilityPerformRaise()
+        case .expand, .collapse:
+            guard v._accessibilityExpandedState() != nil else { return false }
+            v.setAccessibilityExpanded(action == .expand)
+            return true
         }
     }
 

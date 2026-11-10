@@ -605,7 +605,7 @@ public var NSOpenGLProfileVersionLegacy: Int { unimplemented() }
 public var NSOtherTextMovement: Int { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdroponitemindex
-public var NSOutlineViewDropOnItemIndex: Int { unimplemented() }
+public var NSOutlineViewDropOnItemIndex: Int { -1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagedownfunctionkey
 public var NSPageDownFunctionKey: Int { unimplemented() }
