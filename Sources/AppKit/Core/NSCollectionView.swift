@@ -1163,8 +1163,8 @@ import CoreGraphics
         if item._accessibilityLabelIsOurs { v._a11y.label = nil; item._accessibilityLabelIsOurs = false }
     }
     private func _accessibilityStructureChangedHere() { if window != nil { _accessibilityNotify(.structure(_accessibilityElementID)) } }
-    /// An item's view is selectable through assistive technology.
-    override func _accessibilityChildIsSelectable(_ view: NSView) -> Bool { _item(containing: view) != nil }
+    /// An item's view (not what is inside it) is selectable through assistive technology.
+    override func _accessibilityChildIsSelectable(_ view: NSView) -> Bool { _visibleItems.values.contains { $0.viewIfLoaded === view } }
     /// Pressing an item selects it (as a click would).
     override func _accessibilityChildPressed(_ view: NSView) -> Bool {
         guard _isSelectable, let (ip, _) = _item(containing: view) else { return false }
