@@ -38,6 +38,9 @@ import CoreGraphics
         super.init(frame: frameRect)
         _titleCell.font = _titleFont
         _titleCell.alignment = .center
+        _titleCell.isBordered = false
+        _titleCell.isBezeled = false
+        _titleCell.drawsBackground = false
         let content = NSView(frame: .zero)
         _contentView = content
         addSubview(content)
@@ -131,7 +134,7 @@ import CoreGraphics
     private var _titleSize: NSSize {
         guard _titlePosition != .noTitle else { return .zero }
         let s = (_title as NSString).size(withAttributes: [.font: _titleFont])
-        return NSSize(width: s.width.rounded(.up) + 4, height: _titleHeight)
+        return NSSize(width: s.width.rounded(.up) + 8, height: _titleHeight)
     }
     /// The thickness of the border line.
     private var _borderThickness: CGFloat {
@@ -239,6 +242,23 @@ import CoreGraphics
     @MainActor open override func draw(_ dirtyRect: NSRect) {
         guard !_isTransparent else { return }
         let b = borderRect
+        // A title that straddles the border leaves a gap in it: the border is drawn
+        // through a clip that excludes the title's rect, as AppKit does.
+        let straddles = _titlePosition == .atTop || _titlePosition == .atBottom
+        if straddles {
+            NSGraphicsContext.saveGraphicsState()
+            let clip = NSBezierPath(rect: bounds)
+            clip.appendRect(titleRect)
+            clip.windingRule = .evenOdd
+            clip.addClip()
+        }
+        defer {
+            if straddles { NSGraphicsContext.restoreGraphicsState() }
+            if _titlePosition != .noTitle && _boxType != .separator {
+                _titleCell.textColor = .labelColor
+                _titleCell.draw(withFrame: titleRect, in: self)
+            }
+        }
         switch _boxType {
         case .separator:
             NSColor.separatorColor.setFill()
@@ -281,16 +301,6 @@ import CoreGraphics
             NSColor.darkGray.setFill()
             NSBezierPath(rect: NSRect(x: b.minX, y: b.maxY - 1, width: b.width, height: 1)).fill()
             NSBezierPath(rect: NSRect(x: b.maxX - 1, y: b.minY, width: 1, height: b.height)).fill()
-        }
-        // The title: on a patch of the window's background where it straddles the border.
-        if _titlePosition != .noTitle {
-            let t = titleRect
-            if _titlePosition == .atTop || _titlePosition == .atBottom {
-                (window?.backgroundColor ?? NSColor.windowBackgroundColor).setFill()
-                NSBezierPath(rect: t).fill()
-            }
-            _titleCell.textColor = .labelColor
-            _titleCell.draw(withFrame: t, in: self)
         }
     }
 

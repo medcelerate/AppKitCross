@@ -11,6 +11,9 @@ by a capture of the live window.
 | Layout Demo, Form tab: Auto Layout, labels, text fields, buttons | ![macOS](images/compare/layout-demo-macos.png) | ![Linux](images/compare/layout-demo-linux.png) | ![Windows](images/compare/layout-demo-windows.png) |
 | SwiftUI demo, Controls tab: stacks, text, controls, shapes, list | ![macOS](images/compare/swiftui-demo-macos.png) | ![Linux](images/compare/swiftui-demo-linux.png) | ![Windows](images/compare/swiftui-demo-windows.png) |
 | SwiftUI demo, Data tab: a sortable Table with selection | ![macOS](images/compare/swiftui-data-macos.png) | ![Linux](images/compare/swiftui-data-linux.png) | ![Windows](images/compare/swiftui-data-windows.png) |
+| Layout Demo, Collection tab: `NSCollectionView` with a flow layout, section headers and a selection (ADR-0019) | ![macOS](images/compare/layout-collection-macos.png) | ![Linux](images/compare/layout-collection-linux.png) | ![Windows](images/compare/layout-collection-windows.png) |
+| Layout Demo, Grid tab: an `NSGridView` form with a merged title row and trailing labels | ![macOS](images/compare/layout-grid-macos.png) | ![Linux](images/compare/layout-grid-linux.png) | ![Windows](images/compare/layout-grid-windows.png) |
+| Layout Demo, Box tab: `NSBox` types and title positions | ![macOS](images/compare/layout-box-macos.png) | ![Linux](images/compare/layout-box-linux.png) | ![Windows](images/compare/layout-box-windows.png) |
 
 What to look for:
 
