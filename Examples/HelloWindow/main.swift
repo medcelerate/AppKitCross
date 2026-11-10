@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|panels picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -426,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "panels"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -440,11 +440,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let platform = "macos"
         #endif
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // The Layout Demo's Form tab is the interesting one unless APPKITWIN_LAYOUT_TAB picks another.
+        let layoutTab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"] ?? "form"
+        // Select the tab first: a tab may open a panel of its own (APPKITWIN_PANELS_OPEN), captured below.
+        for w in NSApp.windows where w.isVisible {
+            if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: layoutTab) ?? 0 }
+        }
         for w in NSApp.windows where w.isVisible {
             guard let cv = w.contentView else { continue }
-            // The Layout Demo's Form tab is the interesting one unless APPKITWIN_LAYOUT_TAB picks another.
-            let layoutTab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"] ?? "form"
-            if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: layoutTab) ?? 0 }
             w.display()
             let name: String
             switch w.title {
@@ -452,6 +455,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
                 let tab = ProcessInfo.processInfo.environment["APPKITWIN_DEMO_TAB"] ?? "controls"
                 name = tab == "controls" ? "swiftui-demo" : "swiftui-\(tab)"
             case "Layout Demo": name = layoutTab == "form" ? "layout-demo" : "layout-\(layoutTab)"
+            case "Colors": name = "color-panel"
+            case "Fonts": name = "font-panel"
             default: name = "hellowindow"
             }
             guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { continue }
@@ -555,6 +560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(MetalDemoViewController())
         tabs.addChild(ComboDemoViewController())
         tabs.addChild(OutlineDemoViewController())
+        tabs.addChild(PanelsDemoViewController())
         tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
@@ -1608,5 +1614,102 @@ struct ControlsDemo: View {
             Text("Selected: \(selectedItem ?? "none")").foregroundColor(.secondary)
         }
         .padding(4)
+    }
+}
+
+/// The Layout Demo's Panels tab (ADR-0022): colour wells in the three styles, buttons that
+/// open the Fonts and Colors panels, and a rich text view that both panels change through
+/// the responder chain (`changeFont:` and `changeColor:` reach the first responder).
+/// `APPKITWIN_PANELS_OPEN=color|font` opens a panel at launch for the comparison renders.
+final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
+    let well = NSColorWell(frame: .zero)
+    let minimalWell: NSColorWell = {
+        if #available(macOS 13.0, *) { return NSColorWell(style: .minimal) }
+        return NSColorWell(frame: NSRect(x: 0, y: 0, width: 28, height: 20))
+    }()
+    let expandedWell: NSColorWell = {
+        if #available(macOS 13.0, *) { return NSColorWell(style: .expanded) }
+        return NSColorWell(frame: NSRect(x: 0, y: 0, width: 64, height: 24))
+    }()
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 380, height: 120))
+    let status = NSTextField(labelWithString: "Click a well or open a panel; the selection in the text follows both.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Panels"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let wellLabel = NSTextField(labelWithString: "Color wells:")
+        well.color = NSColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+        minimalWell.color = NSColor(red: 0.9, green: 0.4, blue: 0.2, alpha: 1)
+        expandedWell.color = NSColor(red: 0.3, green: 0.7, blue: 0.3, alpha: 1)
+        for w in [well, minimalWell, expandedWell] {
+            w.target = self
+            w.action = Selector(("wellChanged:"))
+        }
+        let fonts = NSButton(title: "Fonts…", target: nil, action: Selector(("orderFrontFontPanel:")))
+        let colors = NSButton(title: "Colors…", target: nil, action: Selector(("orderFrontColorPanel:")))
+        let scroll = NSScrollView(frame: .zero)
+        textView.isRichText = true
+        textView.isEditable = true
+        textView.textStorage?.setAttributedString(NSAttributedString(string: "Select some of this text, then pick a font or a colour.\nThe panels change the selection; typing continues in it.", attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.textColor]))
+        textView.setSelectedRange(NSRange(location: 12, length: 17))
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        status.font = NSFont.systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        for v in [wellLabel, well, minimalWell, expandedWell, fonts, colors, scroll, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            wellLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            wellLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            well.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            well.leadingAnchor.constraint(equalTo: wellLabel.trailingAnchor, constant: 8),
+            well.widthAnchor.constraint(equalToConstant: 44), well.heightAnchor.constraint(equalToConstant: 24),
+            minimalWell.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            minimalWell.leadingAnchor.constraint(equalTo: well.trailingAnchor, constant: 8),
+            minimalWell.widthAnchor.constraint(equalToConstant: 28), minimalWell.heightAnchor.constraint(equalToConstant: 20),
+            expandedWell.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            expandedWell.leadingAnchor.constraint(equalTo: minimalWell.trailingAnchor, constant: 8),
+            expandedWell.widthAnchor.constraint(equalToConstant: 64), expandedWell.heightAnchor.constraint(equalToConstant: 24),
+            colors.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            colors.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            fonts.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            fonts.trailingAnchor.constraint(equalTo: colors.leadingAnchor, constant: -8),
+            scroll.topAnchor.constraint(equalTo: wellLabel.bottomAnchor, constant: 16),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            scroll.heightAnchor.constraint(equalToConstant: 120),
+            status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+        ])
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(textView)
+        let open: () -> Void
+        switch ProcessInfo.processInfo.environment["APPKITWIN_PANELS_OPEN"] {
+        case "color": open = { NSApp.orderFrontColorPanel(nil) }
+        case "font": open = { NSFontManager.shared.orderFrontFontPanel(nil) }
+        default: return
+        }
+        // Screenshots capture at once; a live run waits for the window to be mapped first.
+        if CommandLine.arguments.contains("--screenshot") { open() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: open) }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard NSStringFromSelector(action) == "wellChanged:", let w = sender as? NSColorWell else { return false }
+        let c = w.color
+        status.stringValue = String(format: "Well: #%02X%02X%02X, alpha %.2f", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), Double(c.alphaComponent))
+        return true
     }
 }

@@ -339,7 +339,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcharacterpalette(_:)
     @MainActor open func orderFrontCharacterPalette(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcolorpanel(_:)
-    @MainActor open func orderFrontColorPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontColorPanel(_ sender: Any?) { NSColorPanel.shared.orderFront(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(_:)
     @MainActor open func orderFrontStandardAboutPanel(_ sender: Any?) { orderFrontStandardAboutPanel(options: [:]) }
     /// The standard about panel: the application's name and version (from the bundle, or
@@ -635,4 +635,21 @@ import CoreText
     open func isAccessibilityEnabled() -> Bool { true }
     open func accessibilityWindow() -> Any? { nil }
     open func accessibilityTopLevelUIElement() -> Any? { nil }
+}
+
+extension NSApplication: NSSelectorHandling {
+    /// The application answers the panel actions the standard toolbar items and menus send
+    /// with no target: `orderFrontColorPanel:` is its own, `orderFrontFontPanel:` goes to
+    /// the font manager, as in AppKit.
+    public func respondsToSelectorAction(_ action: Selector) -> Bool {
+        ["orderFrontColorPanel:", "orderFrontFontPanel:"].contains(NSStringFromSelector(action))
+    }
+    public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "orderFrontColorPanel:": orderFrontColorPanel(sender)
+        case "orderFrontFontPanel:": NSFontManager.shared.orderFrontFontPanel(sender)
+        default: return false
+        }
+        return true
+    }
 }

@@ -24,7 +24,9 @@ targets += [
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
-                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
+                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
+                         // ADR-0022: the common colour dialog (ChooseColorW) behind APPKITWIN_COLOR_PANEL=native.
+                         .linkedLibrary("comdlg32")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
     // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).

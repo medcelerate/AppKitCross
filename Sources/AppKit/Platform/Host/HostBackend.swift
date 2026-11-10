@@ -71,6 +71,14 @@ final class HostBackend: PlatformBackend {
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
 
     /// Test hook: what the next file dialog "chooses" (nil = cancel).
+    /// Test hook: what the "native" colour dialog answers; nil cancels.
+    var nextColorDialogResult: (CGFloat, CGFloat, CGFloat)? = nil
+    private(set) var colorDialogRuns = 0
+    var hasNativeColorDialog: Bool { true }
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? {
+        colorDialogRuns += 1
+        return nextColorDialogResult
+    }
     var nextFileDialogResult: [URL]? = nil
     private(set) var lastFileDialogOptions: PlatformFileDialogOptions? = nil
     func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]? {

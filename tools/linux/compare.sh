@@ -9,9 +9,13 @@ sleep 1
 APPKITWIN_LINUX_BACKEND=x11 "${BIN:-./.build/debug/HelloWindow}" --swiftui --layout --screenshot "$OUT"
 # The SwiftUI demo's Data tab (Table) as a second capture.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/HelloWindow}" --swiftui --screenshot "$OUT"
-# The Layout Demo's Combo and Outline tabs, and the Outline tab mirrored right to left.
-for tab in combo outline; do
+# The Layout Demo's Combo, Outline and Panels tabs, and the Outline tab mirrored right to left.
+for tab in combo outline panels; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+done
+# The Colors and Fonts panels (ADR-0024), rendered headless like the other windows.
+for panel in color font; do
+    APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=$panel "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=outline APPKITWIN_LAYOUT_DIRECTION=rtl "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT/rtl"
@@ -22,5 +26,12 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=combo APPKITWIN_COMBO_POPUP=1 "
 APP=$!
 sleep 3
 xwd -root -silent | convert xwd:- -trim "$OUT/layout-combo-open-linux.png"
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+# The Colors panel open beside the Layout Demo: a capture of the X screen.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color "${BIN:-./.build/debug/HelloWindow}" --layout &
+APP=$!
+sleep 3
+xwd -root -silent | convert xwd:- -trim "$OUT/color-panel-open-linux.png"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
