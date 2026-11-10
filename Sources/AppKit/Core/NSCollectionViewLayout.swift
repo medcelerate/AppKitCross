@@ -7,7 +7,7 @@
 // of every element in `prepare()` and answer `layoutAttributesForElements(in:)`. The
 // invalidation cycle: `invalidateLayout()` (or a context naming parts) tells the
 // collection view, which calls `prepare()` again before it next places its views
-// (ADR-0019).
+// (ADR-0020).
 
 import Foundation
 #if canImport(CoreGraphics)

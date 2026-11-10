@@ -1,4 +1,4 @@
-# ADR-0019: NSCollectionView, NSGridView and NSBox
+# ADR-0020: NSCollectionView, NSGridView and NSBox
 
 Date: 2026-11-10. Status: accepted.
 

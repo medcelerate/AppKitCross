@@ -990,7 +990,7 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
     }
 }
 
-// MARK: Collection, grid and box tabs (ADR-0019)
+// MARK: Collection, grid and box tabs (ADR-0020)
 
 /// An `NSCollectionView` of colour swatches in two sections under a flow layout with
 /// section headers: click, Cmd and Shift select; arrows move; the header's button

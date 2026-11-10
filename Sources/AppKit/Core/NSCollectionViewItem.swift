@@ -11,7 +11,7 @@
 //
 // `init(nibName:bundle:)` is `required` here, where AppKit's is not: the port has no
 // Objective-C runtime to instantiate a registered class with, so `register(_:forItemWithIdentifier:)`
-// constructs items through this initializer (ADR-0019).
+// constructs items through this initializer (ADR-0020).
 
 import Foundation
 #if canImport(CoreGraphics)

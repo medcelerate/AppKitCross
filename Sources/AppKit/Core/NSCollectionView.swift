@@ -10,7 +10,7 @@
 // elements in the visible rect and are placed in `viewWillDraw`, as AppKit does;
 // scrolling redraws the view, which recycles them. Selection, highlighting, the
 // keyboard and batch updates are here; the layout invalidation cycle runs through
-// `_layoutDidInvalidate` (ADR-0019).
+// `_layoutDidInvalidate` (ADR-0020).
 
 import Foundation
 #if canImport(CoreGraphics)
