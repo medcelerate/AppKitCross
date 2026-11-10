@@ -154,6 +154,9 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
                 @Environment(\.dismiss) var dismiss
                 var body: some View { VStack { Text("Sheet body"); Button("Close") { dismiss() } } }
             }
+            let savedDuration = NSWindow._sheetAnimationDuration
+            NSWindow._sheetAnimationDuration = 0
+            defer { NSWindow._sheetAnimationDuration = savedDuration }
             let (w, h) = host(Root())
             XCTAssertTrue(w.sheets.isEmpty)
             buttons(h).first { $0.title == "Open" }?.performClick(nil)
@@ -162,11 +165,26 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             let sheet = w.sheets[0]
             XCTAssertTrue(sheet.isSheet)
             XCTAssertTrue(sheet.sheetParent === w)
+            XCTAssertTrue(w.attachedSheet === sheet)
+            XCTAssertTrue(sheet.isKeyWindow, "the sheet takes the keyboard")
+            XCTAssertEqual(sheet.frame.maxY, w.contentRect(forFrameRect: w.frame).maxY, "attached under the title bar")
             XCTAssertTrue(texts(sheet.contentView!).contains("Sheet body"))
             buttons(sheet.contentView!).first { $0.title == "Close" }?.performClick(nil)
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(w.sheets.isEmpty, "dismiss ends the sheet")
             XCTAssertFalse(sheet.isVisible)
+            XCTAssertTrue(w.isKeyWindow)
+            // Escape dismisses a SwiftUI sheet, as on macOS, and the binding follows.
+            buttons(h).first { $0.title == "Open" }?.performClick(nil)
+            h.layoutSubtreeIfNeeded()
+            let again = w.sheets[0]
+            (again._platformWindow as! HostWindow).inject(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: again.windowNumber, context: nil, characters: "\u{1B}", charactersIgnoringModifiers: "\u{1B}", isARepeat: false, keyCode: 0)!)
+            h.layoutSubtreeIfNeeded()
+            XCTAssertTrue(w.sheets.isEmpty, "Escape ends the sheet")
+            XCTAssertFalse(again.isVisible)
+            buttons(h).first { $0.title == "Open" }?.performClick(nil)
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(w.sheets.count, 1, "the binding was reset, so it presents again")
             w.close()
         }
     }

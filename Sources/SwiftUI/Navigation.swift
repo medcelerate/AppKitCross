@@ -566,6 +566,7 @@ final class _SheetPrimitive: _Primitive {
         hosting.frame = w.contentView!.bounds
         hosting.autoresizingMask = [.width, .height]
         w.contentView = hosting
+        w._cancelsSheetOnEscape = true          // Escape dismisses a SwiftUI sheet, as on macOS
         window = w
         host.beginSheet(w) { [weak self] _ in
             guard let self, self.window === w else { return }

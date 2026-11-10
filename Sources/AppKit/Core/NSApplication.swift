@@ -198,9 +198,11 @@ import CoreText
         if !_modalStack.isEmpty { _modalStack.removeLast() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:)
-    @MainActor open func endSheet(_ sheet: NSWindow) { unimplemented() }
+    @MainActor open func endSheet(_ sheet: NSWindow) { endSheet(sheet, returnCode: NSApplication.ModalResponse.stop.rawValue) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endsheet(_:returncode:)
-    @MainActor open func endSheet(_ sheet: NSWindow, returnCode: Int) { unimplemented() }
+    @MainActor open func endSheet(_ sheet: NSWindow, returnCode: Int) {
+        sheet.sheetParent?.endSheet(sheet, returnCode: NSApplication.ModalResponse(rawValue: returnCode))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enumeratewindows(options:using:)
     @available(macOS 10.12, *)
     @MainActor open func enumerateWindows(options: NSApplication.WindowListOptions = [], using block: (NSWindow, UnsafeMutablePointer<ObjCBool>) -> Void) {

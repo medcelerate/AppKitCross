@@ -185,8 +185,12 @@ final class HostWindow: PlatformWindow {
         }
     }
 
-    func frameRect(forContentRect contentRect: NSRect) -> NSRect { backend.frameRect(forContentRect: contentRect, styleMask: styleMask) }
-    func contentRect(forFrameRect frameRect: NSRect) -> NSRect { backend.contentRect(forFrameRect: frameRect, styleMask: styleMask) }
+    /// The window this one is attached to as a sheet (ADR-0019); a sheet has no title bar.
+    private(set) weak var sheetParent: HostWindow?
+    func attachSheet(to parent: PlatformWindow?) { sheetParent = parent as? HostWindow }
+
+    func frameRect(forContentRect contentRect: NSRect) -> NSRect { sheetParent != nil ? contentRect : backend.frameRect(forContentRect: contentRect, styleMask: styleMask) }
+    func contentRect(forFrameRect frameRect: NSRect) -> NSRect { sheetParent != nil ? frameRect : backend.contentRect(forFrameRect: frameRect, styleMask: styleMask) }
 
     func show() {
         isVisible = true

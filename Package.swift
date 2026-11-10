@@ -265,6 +265,7 @@ targets += [
     .executableTarget(name: "Drawing", dependencies: ["AppKit"], path: "Examples/Drawing", exclude: ["README.md"]),
     .executableTarget(name: "Observable", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Observable", exclude: ["README.md"]),
     .executableTarget(name: "AudioPlayer", dependencies: audioPlayerDependencies, path: "Examples/AudioPlayer", exclude: ["README.md"]),
+    .executableTarget(name: "Sheets", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Sheets", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,
