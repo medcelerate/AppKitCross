@@ -138,7 +138,7 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
         try MainActor.assumeIsolated {
             guard ProcessInfo.processInfo.environment["DBUS_SESSION_BUS_ADDRESS"] != nil else { throw XCTSkip("no session bus") }
             guard let host = LinuxStatusNotifierHost.connect(screenPoint: { x, y in NSPoint(x: CGFloat(x), y: CGFloat(y)) }) else { return XCTFail("no connection") }
-            final class Owner: PlatformStatusItemOwner { var clicks: [PlatformStatusItemClick] = []; func platformStatusItemClicked(_ c: PlatformStatusItemClick, at p: NSPoint) { clicks.append(c) } }
+            @MainActor final class Owner: PlatformStatusItemOwner { var clicks: [PlatformStatusItemClick] = []; func platformStatusItemClicked(_ c: PlatformStatusItemClick, at p: NSPoint) { clicks.append(c) } }
             let owner = Owner()
             let item = host.makeStatusItem(owner: owner)
             item.title = "Probe"

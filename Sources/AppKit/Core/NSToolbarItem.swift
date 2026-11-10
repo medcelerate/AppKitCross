@@ -46,7 +46,7 @@ import CoreGraphics
         super.init()
     }
 
-    open override var description: String { "<\(type(of: self)) '\(_itemIdentifier.rawValue)' label='\(_label)'>" }
+    open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) '\(_itemIdentifier.rawValue)' label='\(_label)'>" } }
 
     /// The toolbar re-lays out when an item's appearance changes.
     internal func _changed(layout: Bool = true) { _toolbar?._itemDidChange(self, layout: layout) }

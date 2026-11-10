@@ -47,7 +47,7 @@ import CoreGraphics
         super.init()
     }
 
-    open override var description: String { "<NSToolbar '\(_identifier)' \(_items.count) items\(_isVisible ? "" : " hidden")>" }
+    open override var description: String { MainActor.assumeIsolated { "<NSToolbar '\(_identifier)' \(_items.count) items\(_isVisible ? "" : " hidden")>" } }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstoolbar/allowsdisplaymodecustomization
     @available(macOS 15.0, *)
