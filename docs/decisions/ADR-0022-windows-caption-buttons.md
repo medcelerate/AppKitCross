@@ -68,6 +68,10 @@ messages like any control's, and `_NSWindowButton` fires `performClose:` /
 from the client area does. `WM_NCMOUSEMOVE` over a button becomes a `mouseMoved`
 (hover); over other non-client area (the 8-pixel resize band along the top of the
 buttons) the pointer is reported as gone, so no button stays lit under a resize cursor.
+Either way the message then goes to `DefWindowProc`: the shell's hot-tracking of
+`HTMAXBUTTON` through it is what brings up the snap layouts flyout (a first PC round
+without the pass-through showed the hover fill but no flyout), and with no non-client
+area it has nothing to paint of its own.
 Other backends ignore the new regions (their hit tests compare against `.caption`).
 
 ### `standardWindowButton(_:)` semantics

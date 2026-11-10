@@ -1176,13 +1176,17 @@ final class Win32Window: PlatformWindow {
             // Over a package-drawn caption button the pointer is "non-client": the owner
             // still sees it move (hover fills). Elsewhere in the non-client area (the resize
             // band over the buttons) the pointer is reported gone, so no button stays lit.
+            // DefWindowProc gets the message either way: the Windows 11 snap layouts flyout
+            // comes from the shell's hot-tracking of HTMAXBUTTON through it (Windows
+            // Terminal's custom frame relies on the same), and with no non-client area
+            // (WM_NCCALCSIZE) it has nothing of its own to paint.
             guard usesCustomFrame else { return nil }
             trackMouseLeave(nonClient: true)
             if Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) {
                 nonClientMouse(.mouseMoved, lParam, clickCount: 0)
-                return 0        // the button draws its own hover; no DefWindowProc hot-tracking
+            } else {
+                pointerLeft()
             }
-            pointerLeft()
             return nil
         case WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK:
             // A press on a package-drawn caption button is the button's to track (DefWindowProc
