@@ -176,7 +176,7 @@ extension Win32Window {
                 n.rangeMax = e.maxValue ?? 1
                 n.rangeStep = (n.rangeMax - n.rangeMin) / 100
             }
-            n.toggleState = Int32(e.value?.doubleValue ?? 0)
+            n.toggleState = e.value?.toggleState ?? 0     // never Int32(Double): a value that parses huge trapped here
             if let sel = e.selectedTextRange { n.textSelectionStart = Int32(sel.location); n.textSelectionLength = Int32(sel.length) } else { n.textSelectionStart = -1; n.textSelectionLength = 0 }
             nodes.append(n)
             for c in e.children { visit(c, parent: n.id) }

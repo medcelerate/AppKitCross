@@ -448,6 +448,30 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A colour's hex "3380E6" reads as the number 3380e6 to `Double`, which overflowed
+    /// the Win32 bridge's `Int32` toggle state and trapped the process under UIA. The
+    /// conversion is now total, and the swatch's value is "#RRGGBB".
+    func testAccessibilityValuesThatLookNumericDoNotTrap() {
+        XCTAssertEqual(PlatformAccessibilityValue.string("3380E6").toggleState, 0)
+        XCTAssertEqual(PlatformAccessibilityValue.string("1e300").toggleState, 0)
+        XCTAssertEqual(PlatformAccessibilityValue.string("nan").toggleState, 0)
+        XCTAssertEqual(PlatformAccessibilityValue.string("inf").toggleState, 0)
+        XCTAssertEqual(PlatformAccessibilityValue.number(1).toggleState, 1)
+        XCTAssertEqual(PlatformAccessibilityValue.number(2).toggleState, 2)
+        XCTAssertEqual(PlatformAccessibilityValue.number(50).toggleState, 0)
+        XCTAssertEqual(PlatformAccessibilityValue.boolean(true).toggleState, 1)
+        XCTAssertEqual(PlatformAccessibilityValue.string("rgb 0.2 0.5 0.9 1").toggleState, 0)
+        MainActor.assumeIsolated {
+            let p = NSColorPanel.shared
+            p.color = NSColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+            let swatch = p.accessibilityTree().flattened.first { $0.label == "Current color" }
+            XCTAssertEqual(swatch?.value?.stringValue, "#3380E6")
+            XCTAssertNil(swatch?.value?.doubleValue)
+            // Every value in the panel's and a well's tree converts without trapping.
+            for e in p.accessibilityTree().flattened { _ = e.value?.toggleState }
+        }
+    }
+
     func testColorWellDragAndDrop() {
         MainActor.assumeIsolated {
             let w = makeWindow()

@@ -286,7 +286,7 @@ internal final class _NSColorSwatchView: NSView, NSDraggingSource {
     override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .colorWell }
     override func accessibilityLabel() -> String? { _a11y.label ?? "Current color" }
-    override func accessibilityValue() -> Any? { MainActor.assumeIsolated { _NSColorMath.hex(color) } }
+    override func accessibilityValue() -> Any? { MainActor.assumeIsolated { "#" + _NSColorMath.hex(color) } }     // "#": never a number to a reader
 }
 
 // MARK: - Favourites
