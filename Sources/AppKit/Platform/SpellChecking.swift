@@ -5,7 +5,9 @@
 // missing; NSSpellChecker then uses its built-in English word list.
 
 import Foundation
-#if canImport(CSpellCheck)
+// The shim is a Windows/Linux target; tools/library-compat.sh exposes every C module map on
+// macOS too, where it is not built, so Darwin never takes it.
+#if canImport(CSpellCheck) && !canImport(Darwin)
 import CSpellCheck
 #endif
 
@@ -28,7 +30,7 @@ public enum PlatformSpellChecking {
     /// The operating system's checker, or nil. `APPKITWIN_SPELL_CHECKER=wordlist` turns it off.
     public static func makeSystemChecker() -> (any PlatformSpellChecker)? {
         if ProcessInfo.processInfo.environment["APPKITWIN_SPELL_CHECKER"]?.lowercased() == "wordlist" { return nil }
-        #if canImport(CSpellCheck)
+        #if canImport(CSpellCheck) && !canImport(Darwin)
         return _CSpellChecker.make()
         #else
         return nil
@@ -36,7 +38,7 @@ public enum PlatformSpellChecking {
     }
 }
 
-#if canImport(CSpellCheck)
+#if canImport(CSpellCheck) && !canImport(Darwin)
 /// The shim's checker: Windows Spell Checking API or hunspell.
 final class _CSpellChecker: PlatformSpellChecker {
     private var handle: OpaquePointer?

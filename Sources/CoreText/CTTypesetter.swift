@@ -87,6 +87,7 @@ public final class CTTypesetter: NSObject {
                 for i in run.clusters.indices { run.clusters[i] += range.location }
                 for i in run.glyphs.indices {
                     let unit = text.units[run.clusters[i]]
+                    if unit == 0x09 { tabHasGlyph.insert(run.clusters[i]) }
                     if CTText.isNewline(unit) || unit == 0x09 { run.advances[i] = unit == 0x09 ? CTTypesetter.tabInterval : 0; run.glyphs[i] = run.glyphs[i] }
                     else if kern != 0 || tracking != 0 { run.advances[i] += kern + tracking }
                     charAdvance[run.clusters[i]] += run.advances[i]
@@ -108,6 +109,9 @@ public final class CTTypesetter: NSObject {
         tabsBefore = [Int](repeating: 0, count: count + 1)
         for i in 0..<count { tabsBefore[i + 1] = tabsBefore[i] + (text.units[i] == 0x09 ? 1 : 0) }
     }
+
+    /// Tabs the engine gave a glyph of their own (DirectWrite may give none).
+    private var tabHasGlyph = Set<Int>()
 
     /// tabsBefore[i] = number of tab characters in 0..<i (a fast "no tabs here" test).
     private var tabsBefore: [Int] = [0]
@@ -235,9 +239,26 @@ public final class CTTypesetter: NSObject {
             var glyphs: [CGGlyph] = [], advances: [CGSize] = [], positions: [CGPoint] = [], indices: [Int] = [], spaces: [Bool] = []
             let baseline = _ctNumber(seg.attributes[.ctBaselineOffset]).map { CGFloat($0) } ?? 0
                 + (_ctNumber(seg.attributes[.ctSuperscript]).map { CGFloat(Int($0)) * seg.font.engine.size * 0.33 } ?? 0)
+            // A tab the engine shaped without a glyph still takes its advance: a synthetic,
+            // undrawn (whitespace) glyph at its index.
+            let segLo = max(range.location, seg.run.range.location), segHi = min(end, seg.run.range.location + seg.run.range.length)
+            var nextTab = segLo
+            func emitDroppedTabs(upTo limit: Int) {
+                guard tabsBefore[min(limit, text.count)] - tabsBefore[min(nextTab, text.count)] > 0 else { nextTab = max(nextTab, limit); return }
+                while nextTab < limit {
+                    if text.units[nextTab] == 0x09 && !tabHasGlyph.contains(nextTab) {
+                        let adv = tabAdvance(at: nextTab, pen: pen, offset: offset)
+                        glyphs.append(0); positions.append(CGPoint(x: pen, y: baseline)); advances.append(CGSize(width: adv, height: 0))
+                        indices.append(nextTab); spaces.append(true)
+                        pen += adv
+                    }
+                    nextTab += 1
+                }
+            }
             for i in seg.run.glyphs.indices {
                 let c = seg.run.clusters[i]
                 guard c >= range.location, c < end else { continue }
+                if !seg.run.isRightToLeft { emitDroppedTabs(upTo: c); nextTab = max(nextTab, c + 1) }
                 var adv = seg.run.advances[i]
                 if text.units[c] == 0x09 { adv = tabAdvance(at: c, pen: pen, offset: offset) }
                 glyphs.append(seg.run.glyphs[i])
@@ -247,6 +268,7 @@ public final class CTTypesetter: NSObject {
                 spaces.append(CTText.isWhitespace(text.units[c]))
                 pen += adv
             }
+            if !seg.run.isRightToLeft { emitDroppedTabs(upTo: segHi) }
             guard !glyphs.isEmpty else { continue }
             let lo = max(range.location, seg.run.range.location), hi = min(end, seg.run.range.location + seg.run.range.length)
             runs.append(CTRun(font: seg.font, attributes: seg.attributes, glyphs: glyphs, positions: positions, advances: advances,
