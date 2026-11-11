@@ -16,6 +16,7 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
+#include <commdlg.h>
 #include <shobjidl.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -1063,6 +1064,23 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
 }
 
 void cd2d_file_dialog_free(uint16_t *paths) { free(paths); }
+
+// ---------------------------------------------------------------- Colour dialog
+
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb) {
+    if (!rgb) return false;
+    static COLORREF custom[16] = { 0 };
+    CHOOSECOLORW cc;
+    ZeroMemory(&cc, sizeof(cc));
+    cc.lStructSize = sizeof(cc);
+    cc.hwndOwner = static_cast<HWND>(ownerHwnd);
+    cc.rgbResult = *rgb;
+    cc.lpCustColors = custom;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN | CC_ANYCOLOR;
+    if (!ChooseColorW(&cc)) return false;
+    *rgb = cc.rgbResult;
+    return true;
+}
 
 // ---------------------------------------------------------------- DirectWrite
 

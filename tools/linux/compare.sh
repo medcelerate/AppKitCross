@@ -15,9 +15,13 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=grid "${BIN:-./.build/debug/Hel
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=box "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 # The Layout Demo's Diffable tab after a shuffle, an insert, a delete and a reload (ADR-0029).
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=diffable APPKITWIN_DIFFABLE_STEPS=shuffle,insert,delete,reload "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
-# The Layout Demo's Combo, Outline and Pages tabs, and the Outline tab mirrored right to left.
-for tab in combo outline pages; do
+# The Layout Demo's Combo, Outline, Pages and Panels tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages panels; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+done
+# The Colors and Fonts panels (ADR-0031), rendered headless like the other windows.
+for panel in color font; do
+    APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=$panel "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=outline APPKITWIN_LAYOUT_DIRECTION=rtl "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT/rtl"
@@ -28,5 +32,12 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=combo APPKITWIN_COMBO_POPUP=1 "
 APP=$!
 sleep 3
 xwd -root -silent | convert xwd:- -trim "$OUT/layout-combo-open-linux.png"
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+# The Colors panel open beside the Layout Demo: a capture of the X screen.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color "${BIN:-./.build/debug/HelloWindow}" --layout &
+APP=$!
+sleep 3
+xwd -root -silent | convert xwd:- -trim "$OUT/color-panel-open-linux.png"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true

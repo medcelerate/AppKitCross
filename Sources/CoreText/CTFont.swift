@@ -76,12 +76,48 @@ public func CTFontDescriptorCopyAttributes(_ descriptor: CTFontDescriptor) -> CF
 }
 
 public func CTFontDescriptorCreateMatchingFontDescriptor(_ descriptor: CTFontDescriptor, _ mandatoryAttributes: CFCharacterSet?) -> CTFontDescriptor? {
-    CTFont._resolve(descriptor, size: nil) != nil ? descriptor : nil
+    guard let f = CTFont._resolve(descriptor, size: nil) else { return nil }
+    return CTFontCopyFontDescriptor(CTFont(engine: f))
 }
 
+/// The installed faces a descriptor matches: a descriptor with a PostScript name
+/// resolves to that face; one with a family alone lists every face of the family, which
+/// a style name (`kCTFontStyleNameAttribute`) or symbolic bold/italic traits narrow.
+/// Each result carries the name, family, style, display name, size and traits of a
+/// real face, as Apple's CoreText reports them.
 public func CTFontDescriptorCreateMatchingFontDescriptors(_ descriptor: CTFontDescriptor, _ mandatoryAttributes: CFCharacterSet?) -> CFArray? {
-    CTFontDescriptorCreateMatchingFontDescriptor(descriptor, mandatoryAttributes).map { [$0] as NSArray }
+    let a = descriptor.attributes
+    let size = _ctNumber(a[kCTFontSizeAttribute as String]).map { CGFloat($0) } ?? 12
+    if a[kCTFontNameAttribute as String] != nil {
+        return CTFontDescriptorCreateMatchingFontDescriptor(descriptor, mandatoryAttributes).map { [$0] as NSArray }
+    }
+    guard let family = a[kCTFontFamilyNameAttribute as String] as? String else {
+        return CTFontDescriptorCreateMatchingFontDescriptor(descriptor, mandatoryAttributes).map { [$0] as NSArray }
+    }
+    var faces = CTRuntime.engine.faces(inFamily: family, size: size)
+    if let style = a[kCTFontStyleNameAttribute as String] as? String {
+        faces = faces.filter { $0.styleName.lowercased() == style.lowercased() }
+    }
+    if let traits = a[kCTFontTraitsAttribute as String] as? [String: Any], let sym = _ctNumber(traits[kCTFontSymbolicTrait as String]) {
+        let wanted = CTFontSymbolicTraits(rawValue: UInt32(sym))
+        faces = faces.filter { f in (!wanted.contains(.traitBold) || f.isBold) && (!wanted.contains(.traitItalic) || f.isItalic) }
+    }
+    guard !faces.isEmpty else { return nil }
+    return faces.map { CTFontCopyFontDescriptor(CTFont(engine: $0)) } as NSArray
 }
+
+// MARK: CTFontManager (the installed fonts)
+
+/// - SeeAlso: https://developer.apple.com/documentation/coretext/1499516-ctfontmanagercopyavailablefontfamilynames
+public func CTFontManagerCopyAvailableFontFamilyNames() -> CFArray {
+    CTRuntime.engine.familyNames as NSArray
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/coretext/1499485-ctfontmanagercopyavailablepostscriptnames
+public func CTFontManagerCopyAvailablePostScriptNames() -> CFArray {
+    CTRuntime.engine.familyNames.flatMap { CTRuntime.engine.faces(inFamily: $0, size: 12).map { $0.postScriptName } } as NSArray
+}
+
 
 /// - SeeAlso: https://developer.apple.com/documentation/coretext/ctfont
 public final class CTFont: NSObject {

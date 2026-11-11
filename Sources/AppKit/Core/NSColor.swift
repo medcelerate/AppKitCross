@@ -191,7 +191,10 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(for:)
     public init(for controlTint: NSControlTint) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(from:)
-    public init?(from pasteBoard: NSPasteboard) { unimplemented() }
+    public convenience init?(from pasteBoard: NSPasteboard) {
+        guard let plist = pasteBoard.propertyList(forType: .color) else { return nil }
+        self.init(pasteboardPropertyList: plist, ofType: .color)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(genericgamma22white:alpha:)
     public init(genericGamma22White white: CGFloat, alpha: CGFloat) {
         storage = .gray(white, alpha)
@@ -576,7 +579,9 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/write(to:)
-    open func write(to pasteBoard: NSPasteboard) { unimplemented() }
+    open func write(to pasteBoard: NSPasteboard) {
+        _ = pasteBoard.writeObjects([self])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/yellow
     class public var yellow: NSColor { NSColor(storage: .rgb(1, 1, 0, 1)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/yellowcomponent
@@ -587,6 +592,25 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     class public var supportsSecureCoding: Bool { unimplemented() }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
+    // MARK: Pasteboard (`com.apple.cocoa.pasteboard.color`): the sRGB components as a property list.
+    public static func readableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.color] }
+    public func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.color] }
+    public func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? {
+        guard type == .color else { return nil }
+        let (r, g, b, a) = storage.rgba
+        return ["red": Double(r), "green": Double(g), "blue": Double(b), "alpha": Double(a)] as [String: Any]
+    }
     // Requirement of NSPasteboardReading
-    public required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
+    public required convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) {
+        guard type == .color else { return nil }
+        var dict: [String: Any] = [:]
+        if let d = propertyList as? [String: Any] { dict = d }
+        else if let d = propertyList as? NSDictionary { for (k, v) in d { if let s = (k as? String) ?? (k as? NSString).map({ $0 as String }) { dict[s] = v } } }
+        else if let data = propertyList as? Data, let d = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] { dict = d }
+        func number(_ v: Any?) -> CGFloat? {
+            switch v { case let n as NSNumber: return CGFloat(n.doubleValue); case let d as Double: return CGFloat(d); case let f as CGFloat: return f; case let i as Int: return CGFloat(i); default: return nil }
+        }
+        guard let r = number(dict["red"]), let g = number(dict["green"]), let b = number(dict["blue"]) else { return nil }
+        self.init(red: r, green: g, blue: b, alpha: number(dict["alpha"]) ?? 1)
+    }
 }
