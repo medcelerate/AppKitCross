@@ -814,6 +814,9 @@ final class Win32Window: PlatformWindow {
 
     private func timestamp() -> TimeInterval { TimeInterval(GetTickCount64()) / 1000 }
 
+    /// A WM_MOUSELEAVE is pending from TrackMouseEvent (one per entry of the client area).
+    private var mouseLeaveTracked = false
+
     private func mouse(_ type: NSEvent.EventType, _ lParam: LPARAM, button: Int, clickCount: Int = 1) {
         let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
         let y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
@@ -1224,7 +1227,22 @@ final class Win32Window: PlatformWindow {
             if pressedButtons == 0 { ReleaseCapture() }
             mouse(.otherMouseUp, lParam, button: 2)
             return 0
+        case WM_MOUSELEAVE:
+            // The pointer left the client area (asked for with TrackMouseEvent below): a
+            // far-away move lets the tracking areas and hover states exit.
+            mouseLeaveTracked = false
+            if pressedButtons == 0 {
+                let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
+                                            timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+                owner?.platformWindowDispatch(e)
+            }
+            return 0
         case WM_MOUSEMOVE:
+            if !mouseLeaveTracked, let hwnd {
+                var tme = TRACKMOUSEEVENT(cbSize: DWORD(MemoryLayout<TRACKMOUSEEVENT>.size), dwFlags: DWORD(TME_LEAVE), hwndTrack: hwnd, dwHoverTime: 0)
+                _ = TrackMouseEvent(&tme)
+                mouseLeaveTracked = true
+            }
             if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, lParam, button: 0) }
             else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, lParam, button: 1) }
             else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, lParam, button: 2) }
@@ -1242,8 +1260,10 @@ final class Win32Window: PlatformWindow {
                 magnifyFromWheel(delta: delta, at: contentPoint(x: pt.x, y: pt.y), flags: flags.subtracting(.command))
                 return 0
             }
+            // Shift+wheel on a mouse is a horizontal scroll, as AppKit reports it (up: left).
+            let sideways = horizontal || flags.contains(.shift)
             let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: flags, timestamp: timestamp(),
-                                         windowNumber: windowNumber(), deltaX: horizontal ? -delta : 0, deltaY: horizontal ? 0 : delta, precise: false)
+                                         windowNumber: windowNumber(), deltaX: sideways ? (horizontal ? -delta : delta) : 0, deltaY: sideways ? 0 : delta, precise: false)
             owner?.platformWindowDispatch(e)
             return 0
         case WM_GESTURE:
