@@ -107,12 +107,128 @@ open class AVAudioIONode: AVAudioNode {
     }
 }
 
-/// Input capture is out of scope for this port: `AVAudioEngine.inputNode` is unimplemented.
+/// Hands captured frames from an input stream's thread to the render thread.
+final class _InputCapture {
+    let ring: _FrameRing
+    let channels: Int
+    let period: Int
+    /// The stream's interleaved channel count (set before the stream starts).
+    var streamChannels: Int
+    private let scratch: UnsafeMutablePointer<Float>
+    private let scratchFrames = 2048
+    /// Frames dropped because the render side did not keep up, or invented because the
+    /// capture side was late (diagnostics).
+    let overruns = _AtomicInt64(0)
+    let underruns = _AtomicInt64(0)
+    /// Render thread: whether the backlog has reached the headroom it reads with (after the
+    /// start and after every underrun the input waits for it, so jitter between the capture
+    /// and render threads does not cut holes in the signal).
+    var primed = false
+
+    init(channels: Int, period: Int) {
+        self.channels = max(1, channels)
+        self.period = max(64, period)
+        streamChannels = self.channels
+        ring = _FrameRing(channels: self.channels, capacity: max(16384, self.period * 16))
+        scratch = .allocate(capacity: scratchFrames * self.channels)
+    }
+
+    deinit { scratch.deallocate() }
+
+    /// Capture thread.
+    func captured(_ src: UnsafePointer<Float>, frames: Int) {
+        let sc = streamChannels
+        if sc == channels {
+            if !ring.writeInterleaved(src, frames: frames) { overruns.add(Int64(frames)) }
+            return
+        }
+        var done = 0
+        while done < frames {
+            let n = min(scratchFrames, frames - done)
+            for f in 0..<n {
+                let s = src + (done + f) * sc
+                for c in 0..<channels { scratch[f * channels + c] = s[sc == 1 ? 0 : min(c, sc - 1)] }
+            }
+            if !ring.writeInterleaved(scratch, frames: n) { overruns.add(Int64(n)) }
+            done += n
+        }
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/avfaudio/avaudioinputnode
+///
+/// The engine's input: the default (or selected) capture device while the engine renders
+/// to a device, or the manual rendering input block in manual rendering mode.
 open class AVAudioInputNode: AVAudioIONode, AVAudioMixing {
     let _mixingSource = _MixingSource()
+    var _capture: _InputCapture?
+    var _manualFormat: AVAudioFormat?
+    var _manualBlock: AVAudioIONodeInputBlock?
     override init() { super.init() }
     open override var numberOfInputs: Int { 0 }
-    open func setManualRenderingInputPCMFormat(_ format: AVAudioFormat, inputBlock block: @escaping AVAudioIONodeInputBlock) -> Bool { unimplemented() }
+
+    /// The hardware input format (an empty format when there is no input device).
+    override func _defaultOutputFormat(forBus bus: AVAudioNodeBus) -> AVAudioFormat {
+        if let f = _manualFormat, let s = AVAudioFormat(standardFormatWithSampleRate: f.sampleRate, channels: f.channelCount) { return s }
+        return _engine?._inputHardwareFormat() ?? AVAudioFormat()
+    }
+
+    open override func inputFormat(forBus bus: AVAudioNodeBus) -> AVAudioFormat {
+        _engine?._lock.lock(); defer { _engine?._lock.unlock() }
+        return _defaultOutputFormat(forBus: bus)
+    }
+
+    /// In manual rendering mode, the input node pulls `block` for its frames in `format`
+    /// (converted to the node's output format). False when the format is not linear PCM.
+    open func setManualRenderingInputPCMFormat(_ format: AVAudioFormat, inputBlock block: @escaping AVAudioIONodeInputBlock) -> Bool {
+        guard format.commonFormat != .otherFormat, format.channelCount > 0, format.sampleRate > 0 else { return false }
+        let engine = _engine
+        engine?._lock.lock(); defer { engine?._lock.unlock() }
+        _manualFormat = format
+        _manualBlock = block
+        engine?._graphChanged()
+        return true
+    }
+
+    /// Render thread: the next `frames` captured frames (zeros where capture fell behind).
+    func _renderInput(into out: UnsafePointer<UnsafeMutablePointer<Float>>, channels: Int, frames: Int, capture: _InputCapture?) -> Bool {
+        if capture == nil, let block = _manualBlock, let format = _manualFormat {
+            guard let list = block(AVAudioFrameCount(frames)) else {
+                for c in 0..<channels { out[c].update(repeating: 0, count: frames) }
+                return false
+            }
+            let fc = Int(format.channelCount)
+            for c in 0..<channels { _PCMListIO.read(list, format: format, channel: fc == 1 ? 0 : min(c, fc - 1), frame: 0, count: frames, into: out[c]) }
+            return true
+        }
+        guard let capture, capture.channels == channels else {
+            for c in 0..<channels { out[c].update(repeating: 0, count: frames) }
+            return false
+        }
+        // Keep `frames` plus two capture periods buffered: wait for that much at the start
+        // and after an underrun. Clock drift between the capture and render devices: when
+        // the backlog grows past a few periods more, drop the oldest frames so the latency
+        // stays bounded.
+        let target = frames + capture.period * 2
+        let backlog = capture.ring.count
+        if !capture.primed {
+            guard backlog >= target else {
+                for c in 0..<channels { out[c].update(repeating: 0, count: frames) }
+                return false
+            }
+            capture.primed = true
+        }
+        if backlog > target + capture.period * 6 { capture.ring.discard(backlog - target) }
+        let available = min(frames, capture.ring.count)
+        if available > 0 { _ = capture.ring.read(into: out, frames: available) }
+        if available < frames {
+            for c in 0..<channels { (out[c] + available).update(repeating: 0, count: frames - available) }
+            capture.underruns.add(Int64(frames - available))
+            capture.primed = false
+        }
+        return available > 0
+    }
+
     open var isVoiceProcessingBypassed: Bool {
         get { false }
         set { }
