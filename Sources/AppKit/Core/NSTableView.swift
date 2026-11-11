@@ -682,6 +682,7 @@ import CoreGraphics
     /// Fills `rv` with row `row`'s cells (replacing the ones it had) and records it as the
     /// row's view.
     private func _bindRowView(_ rv: NSTableRowView, row: Int) {
+        _replaceFiledView(at: row, with: rv)
         let r = rect(ofRow: row)
         rv.frame = r
         rv._row = row
@@ -705,6 +706,11 @@ import CoreGraphics
     /// re-read, so the view's identity (its accessibility element) follows the content;
     /// views of rows that vanished (`nil`) are recycled.
     internal func _noteRowsChanged(keeping newRow: (Int) -> Int?, rebindingCells: Bool = true) {
+        // Nothing may make row views while they are being re-filed: a query that re-enters
+        // here (a UIA client or a synchronous paint on Windows, through tile()) would file
+        // fresh views that the kept ones then overwrite, orphaning them on screen.
+        _refilingRows += 1
+        defer { _refilingRows -= 1 }
         let selected = _selectedRows
         let old = _rowViews
         _rowViews.removeAll()
@@ -724,6 +730,7 @@ import CoreGraphics
 
     /// Re-files a row view (with its cells) as row `row`'s.
     private func _moveRowView(_ rv: NSTableRowView, to row: Int) {
+        _replaceFiledView(at: row, with: rv)
         let r = rect(ofRow: row)
         rv.frame = r
         rv._row = row
@@ -733,6 +740,11 @@ import CoreGraphics
         _rowViewDidLayout(rv, row: row)
         _applyRowState(rv, row: row)
         _rowViews[row] = rv
+    }
+
+    /// A row has one view: one already filed for `row` that is not `rv` is recycled.
+    private func _replaceFiledView(at row: Int, with rv: NSTableRowView) {
+        if let other = _rowViews[row], other !== rv { _recycle(other, row: row) }
     }
 
     private func _recycle(_ rv: NSTableRowView, row: Int) {
@@ -786,8 +798,12 @@ import CoreGraphics
 
     /// Makes row views for the visible rows and recycles the rest.
     private var _updatingVisibleRows = false
+    /// Above zero while `_noteRowsChanged` re-files the row views.
+    private var _refilingRows = 0
     private func _updateVisibleRows() {
-        guard !_updatingVisibleRows else { return }
+        // Not while rows are re-filed or inside beginUpdates/endUpdates: the filed views
+        // still carry the old row numbers then; the commit asks for display afterwards.
+        guard !_updatingVisibleRows, _refilingRows == 0, _updateDepth == 0 else { return }
         _updatingVisibleRows = true
         defer { _updatingVisibleRows = false }
         _reloadIfNeeded()

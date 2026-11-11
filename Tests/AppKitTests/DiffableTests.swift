@@ -29,6 +29,21 @@ private final class RecordingTable: NSTableView {
     }
     override func reloadData() { calls.append("reloadData"); super.reloadData() }
     func count(_ prefix: String) -> Int { calls.filter { $0.hasPrefix(prefix) }.count }
+    /// Asks for the rows from inside the table's own row-view bookkeeping, as a UIA client
+    /// or a synchronous paint can on Windows (COM and WM_PAINT re-enter the message loop).
+    var reenterOnRemove = false
+    override func didRemove(_ rowView: NSTableRowView, forRow row: Int) {
+        super.didRemove(rowView, forRow: row)
+        if reenterOnRemove { _ = accessibilityRows(); viewWillDraw() }
+    }
+    override func didAdd(_ rowView: NSTableRowView, forRow row: Int) {
+        super.didAdd(rowView, forRow: row)
+        if reenterOnRemove { _ = accessibilityRows() }
+    }
+    override func tile() {
+        super.tile()
+        if reenterOnRemove { _ = accessibilityRows() }
+    }
 }
 
 @MainActor
@@ -82,11 +97,12 @@ private struct LCG {
 private final class TableFixture {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
     let table = RecordingTable(frame: .zero)
-    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
+    let scroll: NSScrollView
     var cellRequests: [String] = []
     var source: NSTableViewDiffableDataSource<String, String>!
 
-    init() {
+    init(height: CGFloat = 400) {
+        scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: height))
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         column.width = 200
         table.addTableColumn(column)
@@ -409,6 +425,100 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
                 let items = rng.shuffle((0..<rng.next(15)).map { "i\($0)" }.filter { _ in rng.next(3) != 0 })
                 f.source.apply(snapshot([("s", items)]), animatingDifferences: rng.next(2) == 0)
                 XCTAssertEqual(f.shownRows(), items)
+            }
+        }
+    }
+
+    func testTableShufflesWithHeadersAndRowsOutOfViewMatchTheSnapshot() {
+        // The Layout Demo's Shuffle, after the table has drawn: two sections with header
+        // rows, more rows than the view shows, items moving across the header.
+        MainActor.assumeIsolated {
+            let f = TableFixture(height: 150)
+            f.source.sectionHeaderViewProvider = { _, _, section in
+                let cell = NSTableCellView._makeLabelCell(frame: .zero)
+                cell.textField?.stringValue = "[\(section)]"
+                return cell
+            }
+            var rng = LCG(state: 2026)
+            var all = (1...8).map { "\($0)" }
+            for round in 0..<40 {
+                if round > 0 { all = rng.shuffle(all) }
+                let rows = ["[Warm]"] + all[..<4] + ["[Cool]"] + all[4...]
+                f.source.apply(snapshot([("Warm", Array(all[..<4])), ("Cool", Array(all[4...]))]), animatingDifferences: true)
+                let shown = f.shownRows()
+                XCTAssertFalse(shown.isEmpty)
+                XCTAssertEqual(shown, Array(rows.prefix(shown.count)), "round \(round)")
+                // Every row, scrolled into view, shows its own item.
+                f.table.scrollRowToVisible(rows.count - 1)
+                f.window.display()
+                var bottom: [(Int, String)] = []
+                f.table.enumerateAvailableRowViews { rv, row in bottom.append((row, (rv._cellViews.first as? NSTableCellView)?.textField?.stringValue ?? "?")) }
+                for (row, text) in bottom { XCTAssertEqual(text, rows[row], "round \(round) row \(row)") }
+                f.table.scrollRowToVisible(0)
+            }
+        }
+    }
+
+    func testTableLayoutDemoShuffleSequenceWithReusedCells() {
+        // The Layout Demo's two Shuffle clicks (its generator, seed 2026) with cells reused
+        // through makeView(withIdentifier:), drawn between the clicks.
+        MainActor.assumeIsolated {
+            let f = TableFixture(height: 190)
+            f.source = NSTableViewDiffableDataSource<String, String>(tableView: f.table) { tableView, _, _, id in
+                let rid = NSUserInterfaceItemIdentifier("reused")
+                let cell = (tableView.makeView(withIdentifier: rid, owner: nil) as? NSTableCellView) ?? {
+                    let c = NSTableCellView._makeLabelCell(frame: .zero)
+                    c.identifier = rid
+                    return c
+                }()
+                cell.textField?.stringValue = id
+                return cell
+            }
+            f.source.sectionHeaderViewProvider = { tableView, _, section in
+                let hid = NSUserInterfaceItemIdentifier("header")
+                let cell = (tableView.makeView(withIdentifier: hid, owner: nil) as? NSTableCellView) ?? {
+                    let c = NSTableCellView._makeLabelCell(frame: .zero)
+                    c.identifier = hid
+                    return c
+                }()
+                cell.textField?.stringValue = "[\(section)]"
+                return cell
+            }
+            @MainActor func apply(_ model: [[String]], animating: Bool) -> [String] {
+                f.source.apply(snapshot([("Warm", model[0]), ("Cool", model[1])]), animatingDifferences: animating)
+                return ["[Warm]"] + model[0] + ["[Cool]"] + model[1]
+            }
+            var rows = apply([["1", "2", "3", "4"], ["5", "6", "7", "8"]], animating: false)
+            XCTAssertEqual(f.shownRows(), Array(rows.prefix(f.shownRows().count)))
+            rows = apply([["3", "6", "5", "7"], ["4", "2", "1", "8"]], animating: true)
+            XCTAssertEqual(f.shownRows(), Array(rows.prefix(f.shownRows().count)))
+            rows = apply([["2", "7", "5", "4"], ["6", "8", "1", "3"]], animating: true)
+            XCTAssertEqual(f.shownRows(), Array(rows.prefix(f.shownRows().count)))
+        }
+    }
+
+    func testTableRowsStayRightWhenTheTableIsQueriedDuringAnUpdate() {
+        MainActor.assumeIsolated {
+            let f = TableFixture(height: 150)
+            f.source.sectionHeaderViewProvider = { _, _, section in
+                let cell = NSTableCellView._makeLabelCell(frame: .zero)
+                cell.textField?.stringValue = "[\(section)]"
+                return cell
+            }
+            f.table.reenterOnRemove = true
+            var rng = LCG(state: 11)
+            var all = (1...8).map { "\($0)" }
+            for round in 0..<30 {
+                if round > 0 { all = rng.shuffle(all) }
+                let rows = ["[Warm]"] + all[..<4] + ["[Cool]"] + all[4...]
+                f.source.apply(snapshot([("Warm", Array(all[..<4])), ("Cool", Array(all[4...]))]), animatingDifferences: true)
+                let shown = f.shownRows()
+                XCTAssertEqual(shown, Array(rows.prefix(shown.count)), "round \(round)")
+                // No orphaned row views: every row view in the table is a live, filed one.
+                let rowViews = f.table.subviews.filter { $0 is NSTableRowView }
+                var live = 0
+                f.table.enumerateAvailableRowViews { _, _ in live += 1 }
+                XCTAssertEqual(rowViews.count, live, "round \(round)")
             }
         }
     }
