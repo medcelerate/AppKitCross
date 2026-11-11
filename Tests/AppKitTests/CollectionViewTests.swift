@@ -119,6 +119,13 @@ private func click(_ cv: NSCollectionView, _ ip: IndexPath, flags: NSEvent.Modif
 }
 
 @MainActor
+private func mouse(_ type: NSEvent.EventType, _ cv: NSCollectionView, _ point: NSPoint, flags: NSEvent.ModifierFlags = []) {
+    let p = cv.convert(point, to: nil)
+    let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: flags, timestamp: 0, windowNumber: cv.window!.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
+    cv.window!.sendEvent(e)
+}
+
+@MainActor
 private func key(_ view: NSView, _ chars: String, flags: NSEvent.ModifierFlags = []) {
     let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: view.window!.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0)!
     view.window!.sendEvent(e)
@@ -378,6 +385,38 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
             cv.selectionIndexPaths = [ip(0), ip(3)]
             XCTAssertEqual(cv.selectionIndexPaths, [ip(3)])
             XCTAssertEqual(cv.selectionIndexes, IndexSet(integer: 3))
+            w.close()
+        }
+    }
+
+    func testRubberBandFromEmptySpaceSelectsTheItemsItTouches() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            let (cv, _, source) = makeCollection(in: w, height: 300)
+            w.display()
+            cv.selectionIndexPaths = [ip(0)]
+            // Mouse down in the inset (no item there) clears, then two drags: a short one
+            // still over nothing, then across the first line.
+            mouse(.leftMouseDown, cv, NSPoint(x: 2, y: 2))
+            XCTAssertEqual(cv.selectionIndexPaths, [], "a click on empty space clears")
+            mouse(.leftMouseDragged, cv, NSPoint(x: 3, y: 3))
+            XCTAssertEqual(cv.selectionIndexPaths, [])
+            XCTAssertNotNil(cv.subviews.last as? _NSCollectionViewMarqueeView, "the marquee is a view above the items")
+            mouse(.leftMouseDragged, cv, NSPoint(x: 110, y: 30))
+            XCTAssertEqual(cv.selectionIndexPaths, [ip(0), ip(1), ip(2)], "items whose frames the rect touches are selected")
+            XCTAssertEqual(cv._marquee, NSRect(x: 2, y: 2, width: 108, height: 28))
+            XCTAssertEqual(source.selected.last, [ip(0), ip(1), ip(2)])
+            mouse(.leftMouseDragged, cv, NSPoint(x: 60, y: 30))
+            XCTAssertEqual(cv.selectionIndexPaths, [ip(0), ip(1)], "shrinking the rect deselects")
+            mouse(.leftMouseUp, cv, NSPoint(x: 60, y: 30))
+            XCTAssertEqual(cv.selectionIndexPaths, [ip(0), ip(1)])
+            XCTAssertEqual(cv._marquee, .zero)
+            XCTAssertNil(cv.subviews.first { $0 is _NSCollectionViewMarqueeView }, "the marquee is gone")
+            // Cmd keeps the existing selection and adds to it.
+            mouse(.leftMouseDown, cv, NSPoint(x: 2, y: 60), flags: .command)
+            mouse(.leftMouseDragged, cv, NSPoint(x: 30, y: 80), flags: .command)
+            mouse(.leftMouseUp, cv, NSPoint(x: 30, y: 80), flags: .command)
+            XCTAssertEqual(cv.selectionIndexPaths, [ip(0), ip(1), ip(4)])
             w.close()
         }
     }
