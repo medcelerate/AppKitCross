@@ -33,6 +33,10 @@ final class Win32Window: PlatformWindow {
     /// WM_MOUSELEAVE / WM_NCMOUSELEAVE will tell the owner the pointer left (hover ends).
     private var trackingLeave = false
     private var trackingNonClientLeave = false
+    /// Trace bookkeeping (APPKITWIN_TRACE): the last WM_NCHITTEST answer and whether the
+    /// current non-client hover over a caption button was reported.
+    private var lastTracedHitCode: Int32 = -1
+    private var tracedNonClientHover = false
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
     private var dpi: UINT = 96
@@ -1171,7 +1175,16 @@ final class Win32Window: PlatformWindow {
             // HTMINBUTTON, HTMAXBUTTON: Windows 11 shows snap layouts over the latter).
             let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
             if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) { NSView._trace("win32 popup nchittest client \(pt.x),\(pt.y) -> \(region)") }
-            return LRESULT(Win32WindowPolicy.hitCode(for: region))
+            let code = Win32WindowPolicy.hitCode(for: region)
+            if NSView._traceInvalidation, code != lastTracedHitCode {
+                // What the shell sees while the pointer crosses the caption buttons (the
+                // Windows 11 snap layouts flyout needs HTMAXBUTTON = 9 here), with the style
+                // bits it also checks: WS_MAXIMIZEBOX 0x10000, WS_THICKFRAME 0x40000, WS_CAPTION 0xC00000.
+                lastTracedHitCode = code
+                let style = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_STYLE))
+                NSView._trace("win32 nchittest '\(_title)' client \(pt.x),\(pt.y) -> \(code) (\(region)) style 0x\(String(style, radix: 16)) active \(GetForegroundWindow() == hwnd)")
+            }
+            return LRESULT(code)
         case WM_NCMOUSEMOVE:
             // Over a package-drawn caption button the pointer is "non-client": the owner
             // still sees it move (hover fills). Elsewhere in the non-client area (the resize
@@ -1183,8 +1196,13 @@ final class Win32Window: PlatformWindow {
             guard usesCustomFrame else { return nil }
             trackMouseLeave(nonClient: true)
             if Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) {
+                if NSView._traceInvalidation, !tracedNonClientHover {
+                    tracedNonClientHover = true
+                    NSView._trace("win32 ncmousemove '\(_title)' over caption button \(wParam) -> DefWindowProc")
+                }
                 nonClientMouse(.mouseMoved, lParam, clickCount: 0)
             } else {
+                tracedNonClientHover = false
                 pointerLeft()
             }
             return nil
@@ -1207,6 +1225,7 @@ final class Win32Window: PlatformWindow {
             return 0
         case WM_NCMOUSELEAVE:
             trackingNonClientLeave = false
+            tracedNonClientHover = false
             if pressedButtons == 0 { pointerLeft() }
             return nil
         case WM_MOUSELEAVE:
