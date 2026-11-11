@@ -414,10 +414,13 @@ import CoreText
             }
         }
         if !event.momentumPhase.isEmpty { return }
-        if event.phase.isEmpty, abs(dx) > abs(event.scrollingDeltaY), dx != 0 {
-            // A mouse's horizontal wheel: one page per notch, while nothing is in flight.
+        // A mouse's horizontal wheel (or Shift and the vertical wheel, where a backend
+        // does not already turn that into a horizontal scroll): one page per notch.
+        let shifted = dx == 0 && dy != 0 && event.modifierFlags.contains(.shift)
+        let step = shifted ? dy : dx
+        if event.phase.isEmpty, step != 0, shifted || abs(dx) > abs(dy) {
             guard _transition == nil else { return }
-            _wheelAccumulator += dx
+            _wheelAccumulator += step
             if _wheelAccumulator <= -1 { _wheelAccumulator = 0; if _forwardDirection > 0 { navigateForward(nil) } else { navigateBack(nil) } }
             else if _wheelAccumulator >= 1 { _wheelAccumulator = 0; if _forwardDirection > 0 { navigateBack(nil) } else { navigateForward(nil) } }
             return

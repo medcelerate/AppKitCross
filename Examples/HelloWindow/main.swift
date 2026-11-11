@@ -1181,12 +1181,13 @@ final class PagesDemoViewController: NSViewController, NSPageControllerDelegate,
             (hovering ? color.blended(withFraction: 0.15, of: .black) ?? color : color).setFill()
             NSBezierPath(rect: bounds).fill()
             if hovering {
-                NSColor.controlAccentColor.setStroke()
+                // Orange, so it reads apart from the blue keyboard focus ring.
+                NSColor.systemOrange.setStroke()
                 let ring = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
                 ring.lineWidth = 3
                 ring.stroke()
             }
-            (inHotSpot ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
+            (inHotSpot ? NSColor.systemOrange : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
             NSBezierPath(roundedRect: hotSpot, xRadius: 8, yRadius: 8).fill()
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.labelColor]
             name.draw(at: NSPoint(x: 20, y: bounds.maxY - 50), withAttributes: attrs)

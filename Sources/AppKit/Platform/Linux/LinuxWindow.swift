@@ -623,7 +623,8 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
             backend.lastEventTime = b.time
             switch b.button {
             case 4, 5, 6, 7:
-                let vertical = b.button == 4 || b.button == 5
+                // Shift and the wheel scroll sideways, as AppKit reports it (up: left).
+                let vertical = (b.button == 4 || b.button == 5) && b.state & UInt32(ShiftMask) == 0
                 let delta: CGFloat = (b.button == 4 || b.button == 6) ? 3 : -3
                 let e = NSEvent._scrollEvent(location: contentPoint(x: b.x, y: b.y), modifierFlags: modifierFlags(b.state), timestamp: seconds(b.time),
                                              windowNumber: windowNumber(), deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0, precise: false)

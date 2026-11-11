@@ -917,6 +917,17 @@ final class PageControllerTests: XCTestCase, @unchecked Sendable {
                 let wheel = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: -1, deltaY: 0, precise: false)
                 NSApplication.shared.sendEvent(wheel)
                 XCTAssertEqual(pc.selectedIndex, 1)
+                clock.time += 1
+                CARuntime.tick()
+                // Shift and the vertical wheel, where the backend leaves it vertical: down pages forward, up back.
+                let shiftDown = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [.shift], timestamp: 0, windowNumber: w.windowNumber, deltaX: 0, deltaY: -1, precise: false)
+                NSApplication.shared.sendEvent(shiftDown)
+                XCTAssertEqual(pc.selectedIndex, 2)
+                clock.time += 1
+                CARuntime.tick()
+                let plainDown = NSEvent._scrollEvent(location: NSPoint(x: 200, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, deltaX: 0, deltaY: -1, precise: false)
+                NSApplication.shared.sendEvent(plainDown)
+                XCTAssertEqual(pc.selectedIndex, 2, "a plain vertical notch is not paging")
             }
         }
     }
