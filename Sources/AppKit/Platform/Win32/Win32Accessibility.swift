@@ -208,6 +208,7 @@ extension Win32Window {
             case "AXSlider", "AXScrollBar", "AXIncrementor", "AXLevelIndicator", "AXProgressIndicator": flags |= UInt32(CUIA_HAS_RANGE)
             case "AXTable", "AXList", "AXOutline", "AXTabGroup", "AXRadioGroup": flags |= UInt32(CUIA_HAS_SELECTION)
             case "AXRow": flags |= UInt32(CUIA_HAS_SELECTION_ITEM)
+            case "AXGrid": flags |= UInt32(CUIA_HAS_SELECTION)
             case "AXMenuItem", "AXMenuBarItem":
                 // UIA's menu item: Invoke for a command, ExpandCollapse (above) for an item
                 // with a submenu, Toggle for one with a check mark.
@@ -215,6 +216,7 @@ extension Win32Window {
                 if let c = e.checkedState, c != 0 { flags |= UInt32(CUIA_HAS_TOGGLE) }
             default: if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             }
+            if e.isSelectable && role != "AXRow" { flags |= UInt32(CUIA_HAS_SELECTION_ITEM) }
             if role != "AXCell" && role != "AXUnknown" && role != "AXGroup" && role != "AXScrollArea" && role != "AXScrollBar" { flags |= UInt32(CUIA_IS_CONTENT) }
             n.flags = flags
             if flags & UInt32(CUIA_HAS_RANGE) != 0 {
@@ -284,7 +286,7 @@ extension Win32Window {
         case "AXSlider": return 50015
         case "AXPopUpButton", "AXComboBox": return 50003
         case "AXImage": return 50006
-        case "AXTable", "AXList", "AXOutline": return 50008
+        case "AXTable", "AXList", "AXOutline", "AXGrid": return 50008
         case "AXRow": return 50007
         case "AXScrollArea": return 50033
         case "AXScrollBar": return 50014

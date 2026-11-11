@@ -716,7 +716,7 @@ final class AtspiBridge {
         case "AXTable": return (55, "table")
         case "AXRow": return (90, "table row")
         case "AXCell": return (56, "table cell")
-        case "AXList": return (31, "list")
+        case "AXList", "AXGrid": return (31, "list")
         case "AXScrollArea": return (49, "scroll pane")
         case "AXScrollBar": return (48, "scroll bar")
         case "AXGroup", "AXRadioGroup": return (39, "panel")
@@ -782,7 +782,7 @@ final class AtspiBridge {
             if e.isFocused { bits.append(12) }
             if e.isSettable && ["AXTextField", "AXTextArea"].contains(e.role) { bits.append(7) } else if ["AXTextField", "AXTextArea", "AXStaticText"].contains(e.role) { bits.append(43) }
             let isTab = e.subrole == "AXTabButton"
-            if e.role == "AXRow" || e.role == "AXCell" || isTab { bits.append(22); if e.isSelected { bits.append(23) } }
+            if e.role == "AXRow" || e.role == "AXCell" || isTab || e.isSelectable { bits.append(22); if e.isSelected { bits.append(23) } }
             if (e.role == "AXCheckBox" || e.role == "AXRadioButton") && !isTab { bits.append(41); if (e.value?.doubleValue ?? 0) != 0 { bits.append(4) } }
             if e.isMultiline { bits.append(17) } else if e.role == "AXTextField" { bits.append(26) }
             if e.allowsMultipleSelection { bits.append(18) }
