@@ -87,13 +87,24 @@ final class Win32TextServices {
         cts_document_set_ime_open(document, open ? 1 : 0)
     }
 
+    /// The input mode's conversion bits (see cts.h). 0x11 is native romaji (hiragana) input.
+    var conversion: Int32 { document.map { cts_document_conversion($0) } ?? 0 }
+    func setConversion(_ mode: Int32) {
+        guard let document else { return }
+        cts_document_set_conversion(document, mode)
+    }
+
     /// Candidates the input method is listing (0 when its candidate window is closed).
     var candidateCount: Int { document.map { Int(cts_document_candidate_count($0)) } ?? 0 }
 
     /// Forwards a key message to the input method; true when it took the key.
     func key(wParam: WPARAM, lParam: LPARAM, down: Bool) -> Bool {
         guard let document else { return false }
-        return cts_document_key(document, UInt64(wParam), Int64(lParam), down ? 1 : 0) != 0
+        let eaten = cts_document_key(document, UInt64(wParam), Int64(lParam), down ? 1 : 0) != 0
+        if eaten, NSView._traceInvalidation {
+            NSView._trace("win32 tsf key \(down ? "down" : "up") vk 0x\(String(UInt64(wParam), radix: 16)) eaten, composing \(isComposing)")
+        }
+        return eaten
     }
 
     /// Reconversion of the selected text. Returns the HRESULT (0 = S_OK).

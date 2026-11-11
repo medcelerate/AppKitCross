@@ -42,10 +42,6 @@ final class Win32Window: PlatformWindow {
     private func beginTextServices() {
         guard let hwnd, owner?.platformWindowTextInput() != nil else { return }
         if textServices == nil {
-            if ProcessInfo.processInfo.environment["APPKITWIN_IME_LAYOUT"] != nil {
-                let hr = Win32TextServices.activateMicrosoftIME()
-                if NSView._traceInvalidation { NSView._trace("win32 tsf activate microsoft ime jp hr 0x\(String(UInt32(bitPattern: hr), radix: 16))") }
-            }
             textServices = Win32TextServices(
                 hwnd: hwnd,
                 input: { [weak self] in self?.owner?.platformWindowTextInput() },
@@ -55,6 +51,14 @@ final class Win32Window: PlatformWindow {
             }
             if let textServices {
                 let env = ProcessInfo.processInfo.environment
+                if env["APPKITWIN_IME_LAYOUT"] != nil {
+                    // After the document's thread manager exists: activating earlier is reset by it.
+                    let hr = Win32TextServices.activateMicrosoftIME()
+                    if NSView._traceInvalidation { NSView._trace("win32 tsf activate microsoft ime jp hr 0x\(String(UInt32(bitPattern: hr), radix: 16))") }
+                    // Native romaji (hiragana) input, the same mode the IMM test hook sets.
+                    textServices.setConversion(0x11)
+                    if NSView._traceInvalidation { NSView._trace("win32 tsf conversion now 0x\(String(textServices.conversion, radix: 16))") }
+                }
                 if let open = env["APPKITWIN_IME_OPEN"] { textServices.setIMEOpen(open == "1") }
                 if env["APPKITWIN_TSF_RECONVERT"] == "1" {
                     let hr = textServices.reconvert()

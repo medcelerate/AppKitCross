@@ -17,6 +17,7 @@
 #include <tsattrs.h>
 #include <atomic>
 #include <cstring>
+#include <cstdio>
 
 #include "cts.h"
 
@@ -619,6 +620,18 @@ int cts_document_ime_open(CTSDocument *document) {
     return compartmentValue(d, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) != 0;
 }
 
+void cts_document_set_conversion(CTSDocument *document, int32_t mode) {
+    Document *d = reinterpret_cast<Document *>(document);
+    if (!d || !d->threadMgr) return;
+    setCompartment(d, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, mode);
+}
+
+int32_t cts_document_conversion(CTSDocument *document) {
+    Document *d = reinterpret_cast<Document *>(document);
+    if (!d || !d->threadMgr) return 0;
+    return compartmentValue(d, GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION);
+}
+
 int cts_document_candidate_count(CTSDocument *document) {
     Document *d = reinterpret_cast<Document *>(document);
     return d ? d->candidates : 0;
@@ -653,7 +666,23 @@ extern "C" int cts_document_key(CTSDocument *document, uint64_t wParam, int64_t 
     WPARAM w = static_cast<WPARAM>(wParam);
     LPARAM l = static_cast<LPARAM>(lParam);
     if (down) {
-        keys->TestKeyDown(w, l, &eaten);
+        HRESULT hrTest = keys->TestKeyDown(w, l, &eaten);
+        // Diagnostics (temporary): does the thread's focus match this document, and which profile is active?
+        static bool logged = false;
+        ITfDocumentMgr *focus = nullptr;
+        d->threadMgr->GetFocus(&focus);
+        fprintf(stderr, "[trace] cts key down vk 0x%llx testhr 0x%lx eaten %d focusIsDocument %d\n", (unsigned long long)wParam, (unsigned long)hrTest, (int)eaten, focus == d->documentMgr ? 1 : 0);
+        if (!logged) {
+            logged = true;
+            ITfInputProcessorProfileMgr *pm = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER, IID_ITfInputProcessorProfileMgr, reinterpret_cast<void **>(&pm))) && pm) {
+                TF_INPUTPROCESSORPROFILE prof{};
+                HRESULT hrActive = pm->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &prof);
+                fprintf(stderr, "[trace] cts active keyboard profile hr 0x%lx clsid {%08lX-%04X-%04X} langid 0x%04X type %lu\n", (unsigned long)hrActive, prof.clsid.Data1, prof.clsid.Data2, prof.clsid.Data3, prof.langid, (unsigned long)prof.dwProfileType);
+                pm->Release();
+            }
+        }
+        if (focus) focus->Release();
         if (eaten) keys->KeyDown(w, l, &eaten);
     } else {
         keys->TestKeyUp(w, l, &eaten);
@@ -673,8 +702,19 @@ extern "C" int32_t cts_activate_microsoft_ime_jp(void) {
     // The Microsoft IME (Japanese) text service and its profile.
     static const GUID imeClsid = {0x03B5835F, 0xF03C, 0x411B, {0x9C, 0xE2, 0xAA, 0x23, 0xE1, 0x17, 0x1E, 0x36}};
     static const GUID imeProfile = {0xA76C93D9, 0x5523, 0x4E90, {0xAA, 0xFA, 0x4D, 0xB1, 0x12, 0xF9, 0xAC, 0x76}};
+    // A NULL layout returns S_OK here; an explicit 04110411 returns E_INVALIDARG.
     hr = mgr->ActivateProfile(TF_PROFILETYPE_INPUTPROCESSOR, 0x0411, imeClsid, imeProfile, nullptr,
                               TF_IPPMF_FORPROCESS | TF_IPPMF_ENABLEPROFILE);
+    fprintf(stderr, "[trace] cts ActivateProfile hr 0x%lx\n", (unsigned long)hr);
     mgr->Release();
+    // The classic per-thread route: set the input language, then activate the language profile on this thread.
+    ITfInputProcessorProfiles *profiles = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER, IID_ITfInputProcessorProfiles, reinterpret_cast<void **>(&profiles))) && profiles) {
+        HRESULT hrLang = profiles->ChangeCurrentLanguage(0x0411);
+        HRESULT hrProfile = profiles->ActivateLanguageProfile(imeClsid, 0x0411, imeProfile);
+        fprintf(stderr, "[trace] cts ChangeCurrentLanguage hr 0x%lx ActivateLanguageProfile hr 0x%lx\n", (unsigned long)hrLang, (unsigned long)hrProfile);
+        profiles->Release();
+        if (SUCCEEDED(hrProfile)) hr = hrProfile;
+    }
     return hr;
 }

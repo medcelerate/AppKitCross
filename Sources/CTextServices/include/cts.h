@@ -59,6 +59,10 @@ void cts_document_notify_selection(CTSDocument *document);
 /// The input method's open state (Japanese: on = kana input, off = direct input).
 void cts_document_set_ime_open(CTSDocument *document, int open);
 int cts_document_ime_open(CTSDocument *document);
+/// The input mode's conversion bits (TF_CONVERSIONMODE_*): 0x1 native (kana), 0x10 roman (romaji).
+/// Japanese romaji-to-kana input needs both (0x11); 0 is direct (ASCII) input.
+void cts_document_set_conversion(CTSDocument *document, int32_t mode);
+int32_t cts_document_conversion(CTSDocument *document);
 /// Number of candidates the input method currently lists (0 when none).
 int cts_document_candidate_count(CTSDocument *document);
 /// Reconversion: the input method converts the selected text again. Returns an HRESULT.
