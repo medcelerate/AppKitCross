@@ -25,7 +25,7 @@ import CoreText
 @MainActor open class NSTokenField: NSTextField {
     internal var _tokenCell: NSTokenFieldCell? { _cell as? NSTokenFieldCell }
     internal var _tokenDelegate: (any NSTokenFieldDelegate)? { delegate as? NSTokenFieldDelegate }
-    private var _completionTimer: Timer? = nil
+    private var _completionTimer: _NSFrameTimer? = nil
     internal var _completionPopUp: _NSTokenCompletionPopUp? = nil
     internal var _completions: [Any] = []
     internal var _selectedCompletion = -1
@@ -204,11 +204,7 @@ import CoreText
         _completionTimer = nil
         let delay = completionDelay
         if delay <= 0 { _showCompletions(); return }
-        let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?._showCompletions() }
-        }
-        RunLoop.main.add(t, forMode: .default)
-        _completionTimer = t
+        _completionTimer = _NSFrameTimer(delay: delay) { [weak self] in self?._showCompletions() }
     }
 
     /// Asks the delegate for completions of the typed text and shows them (or hides the list).

@@ -145,6 +145,60 @@ final class StepperTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The repeat runs on the frame clock: with time advanced and frames ticked, a held
+    /// press keeps stepping (half a second to the first repeat, then ten a second) until
+    /// the mouse is up; a stepper without autorepeat steps once.
+    func testAutorepeatRunsOnTheFrameClock() {
+        MainActor.assumeIsolated {
+            var clock: CFTimeInterval = 100
+            let savedNow = CARuntime.now
+            CARuntime.now = { clock }
+            defer { CARuntime.now = savedNow }
+            @MainActor func advance(_ seconds: CFTimeInterval, frames: Int) {
+                let step = seconds / CFTimeInterval(frames)
+                for _ in 0..<frames { clock += step; CARuntime.tick() }
+            }
+            let w = window()
+            let s = NSStepper(frame: NSRect(x: 20, y: 20, width: 15, height: 24))
+            s.maxValue = 100
+            let sink = ActionSink()
+            s.target = sink; s.action = Selector(("act:"))
+            w.contentView!.addSubview(s)
+            CARuntime.tick()                                        // the link's first frame sets its clock
+            mouse(w, .leftMouseDown, at(s, 7, 20))
+            XCTAssertEqual(s.doubleValue, 1)
+            advance(0.4, frames: 24)
+            XCTAssertEqual(s.doubleValue, 1, "nothing before the delay")
+            advance(0.2, frames: 12)
+            XCTAssertEqual(s.doubleValue, 2, "the first repeat after half a second")
+            advance(1.0, frames: 60)
+            XCTAssertGreaterThanOrEqual(s.doubleValue, 11, "then ten a second (frame quantised)")
+            XCTAssertLessThanOrEqual(s.doubleValue, 12)
+            XCTAssertEqual(Double(sink.count), s.doubleValue, "one action per step")
+            let held = s.doubleValue
+            mouse(w, .leftMouseUp, at(s, 7, 20))
+            advance(1.0, frames: 60)
+            XCTAssertEqual(s.doubleValue, held, "nothing after the mouse is up")
+            s.autorepeat = false
+            mouse(w, .leftMouseDown, at(s, 7, 20))
+            advance(2.0, frames: 120)
+            XCTAssertEqual(s.doubleValue, held + 1, "no repeat without autorepeat")
+            mouse(w, .leftMouseUp, at(s, 7, 20))
+            // The search field's delay runs on the same clock.
+            let f = NSSearchField(frame: NSRect(x: 20, y: 60, width: 200, height: 22))
+            let searchSink = ActionSink()
+            f.target = searchSink; f.action = Selector(("act:"))
+            w.contentView!.addSubview(f)
+            XCTAssertTrue(w.makeFirstResponder(f))
+            key(w, "q")
+            advance(0.2, frames: 12)
+            XCTAssertEqual(searchSink.count, 0)
+            advance(0.2, frames: 12)
+            XCTAssertEqual(searchSink.count, 1, "the search goes out after the pause")
+            w.close()
+        }
+    }
+
     func testAccessibilityIsAnIncrementor() {
         MainActor.assumeIsolated {
             let w = window()

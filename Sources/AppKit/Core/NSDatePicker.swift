@@ -23,7 +23,7 @@ import CoreText
 @MainActor open class NSDatePicker: NSControl {
     internal var _dateCell: NSDatePickerCell? { _cell as? NSDatePickerCell }
     private var _presentsCalendarOverlay = false
-    private var _stepperRepeat: Timer? = nil
+    private var _stepperRepeat: _NSFrameTimer? = nil
     private var _stepperDirection = 0
 
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSDatePickerCell(textCell: "") }
@@ -101,17 +101,14 @@ import CoreText
         needsDisplay = true
     }
 
+    /// The stepper's repeat on the frame clock, as `NSStepper`'s.
     private func _scheduleStepperRepeat(after delay: TimeInterval) {
         _stepperRepeat?.invalidate()
-        let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self._stepperDirection != 0, let cell = self._dateCell else { return }
-                self._changed(cell._stepSelectedField(self._stepperDirection))
-                self._scheduleStepperRepeat(after: NSStepper.autorepeatInterval)
-            }
-        }
-        RunLoop.main.add(t, forMode: .default)
-        _stepperRepeat = t
+        _stepperRepeat = _NSFrameTimer(delay: delay, interval: NSStepper.autorepeatInterval) { [weak self] in self?._stepperRepeatFired() }
+    }
+    @MainActor internal func _stepperRepeatFired() {
+        guard _stepperDirection != 0, let cell = _dateCell else { return }
+        _changed(cell._stepSelectedField(_stepperDirection))
     }
 
     // MARK: Keyboard

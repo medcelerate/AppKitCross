@@ -70,11 +70,16 @@ AXDateTimeArea, AXGroup of AXButton children or AXPopUpButton for the path contr
   pause on a run-loop timer) unless `sendsWholeSearchString` keeps them to Return;
   Escape and the cancel button clear and send the empty search; Return records the
   string in the recents.
-- **Stepper and progress.** The stepper repeats on a run-loop timer (0.5 s, then every
-  0.1 s) while the mouse stays over the pressed half. The progress indicator's
-  indeterminate animations (the bar's sweep, the spinner's spokes) advance on a
-  `CADisplayLink`, so the platform schedules frames only while something animates;
-  `observedProgress` is read each frame (KVO is not available on every platform).
+- **Stepper, progress and the delays.** The stepper repeats (0.5 s, then every 0.1 s)
+  while the mouse stays over the pressed half; the date picker's stepper repeats the
+  same way; the search field waits 0.3 s after the last keystroke; the token field waits
+  `completionDelay`. All four run on the frame clock (`_NSFrameTimer`, a `CADisplayLink`
+  that counts down), not on a Foundation `Timer`: every backend schedules frames for a
+  running display link, whereas RunLoop timers are serviced only between frames and did
+  not fire on Win32 during a held press. The progress indicator's indeterminate
+  animations (the bar's sweep, the spinner's spokes) advance on a `CADisplayLink` too,
+  so the platform schedules frames only while something animates; `observedProgress`
+  is read each frame (KVO is not available on every platform).
 - **Level indicator.** All four styles are drawn by the cell (relevancy as a hatched
   bar, capacity as one bar or one segment per unit coloured green/yellow/red against the
   warning and critical values, tiered when asked, rating as stars or the control's

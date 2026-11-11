@@ -20,7 +20,7 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstepper
 @MainActor open class NSStepper: NSControl, NSAccessibilityStepper {
     internal var _stepperCell: NSStepperCell? { _cell as? NSStepperCell }
-    private var _repeatTimer: Timer?
+    private var _repeatTimer: _NSFrameTimer?
     private var _mouseInsidePressedHalf = false
 
     /// The delay before the first repeat and the interval between repeats.
@@ -74,21 +74,17 @@ import CoreText
         needsDisplay = true
     }
 
+    /// Starts the repeat on the frame clock: the first step after `delay`, then one every
+    /// `autorepeatInterval` until the mouse is up.
     private func _scheduleRepeat(after delay: TimeInterval) {
         _repeatTimer?.invalidate()
-        let t = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?._autorepeatFired() }
-        }
-        RunLoop.main.add(t, forMode: .default)
-        _repeatTimer = t
+        _repeatTimer = _NSFrameTimer(delay: delay, interval: NSStepper.autorepeatInterval) { [weak self] in self?._autorepeatFired() }
     }
 
-    /// One autorepeat tick: steps again while the mouse is still over the pressed half,
-    /// then schedules the next tick.
+    /// One autorepeat tick: steps again while the mouse is still over the pressed half.
     @MainActor internal func _autorepeatFired() {
         guard let cell = _stepperCell, cell._pressedDirection != 0 else { return }
         if _mouseInsidePressedHalf { _step(cell._pressedDirection) }
-        _scheduleRepeat(after: NSStepper.autorepeatInterval)
     }
 
     @MainActor open override func keyDown(with event: NSEvent) {

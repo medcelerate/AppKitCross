@@ -990,6 +990,26 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
         view = root
     }
 
+    /// `APPKITWIN_STEPPER_PROBE=1` prints the stepper's upper half in X screen pixels once
+    /// the window is up, and each stepped value (tools/linux/stepper-hold.sh).
+    let probing = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_PROBE"] != nil
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard probing else { return }
+        // A second later the window is placed and laid out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.printStepperProbe() }
+    }
+    private func printStepperProbe() {
+        guard let w = view.window, let screen = w.screen ?? NSScreen.main else { return }
+        let r = stepper.convert(stepper.bounds, to: nil)
+        let s = w.convertToScreen(r)
+        // X screen coordinates: origin top-left, points to pixels at the backing scale.
+        let scale = w.backingScaleFactor
+        let x = Int((s.midX * scale).rounded())
+        let y = Int(((screen.frame.maxY - (s.minY + s.height * 0.75)) * scale).rounded())
+        print("stepper at \(x) \(y)"); fflush(nil)
+    }
+
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action {
         case Selector(("searched:")): status.stringValue = search.stringValue.isEmpty ? "Search cleared." : "Searching for \"\(search.stringValue)\""; return true
@@ -1003,6 +1023,7 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
             capacity.integerValue = stepper.integerValue
             bar.doubleValue = Double(stepper.integerValue) * 10
             status.stringValue = "Stepper: \(stepper.integerValue)"
+            if probing { print("stepper value \(stepper.integerValue)"); fflush(nil) }
             return true
         case Selector(("stepperTyped:")):
             stepper.integerValue = stepperValue.integerValue

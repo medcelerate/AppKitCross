@@ -22,7 +22,7 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssearchfield
 @MainActor open class NSSearchField: NSTextField {
     internal var _searchCell: NSSearchFieldCell? { _cell as? NSSearchFieldCell }
-    private var _searchTimer: Timer? = nil
+    private var _searchTimer: _NSFrameTimer? = nil
     private var _isSearching = false
     private var _trackedButton: NSButtonCell? = nil
 
@@ -63,13 +63,10 @@ import CoreText
         if empty && _isSearching { _isSearching = false; _searchDelegate?.searchFieldDidEndSearching(self) }
     }
 
+    /// The search after the typing pause, on the frame clock.
     private func _scheduleSearch() {
         _searchTimer?.invalidate()
-        let t = Timer(timeInterval: NSSearchField.searchDelay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?._fireSearch() }
-        }
-        RunLoop.main.add(t, forMode: .default)
-        _searchTimer = t
+        _searchTimer = _NSFrameTimer(delay: NSSearchField.searchDelay) { [weak self] in self?._fireSearch() }
     }
 
     /// Replaces the text (in the editor while editing) without ending the session.
