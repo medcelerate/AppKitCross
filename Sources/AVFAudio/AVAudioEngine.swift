@@ -24,7 +24,9 @@ public enum AVAudioEngineManualRenderingMode: Int, Sendable {
 public typealias AVAudioEngineManualRenderingBlock = (AVAudioFrameCount, UnsafeMutablePointer<AudioBufferList>, UnsafeMutablePointer<OSStatus>?) -> AVAudioEngineManualRenderingStatus
 
 extension Notification.Name {
-    /// Posted when the output device or its format changes (never posted by this port yet).
+    /// Posted (object: the engine) when the engine's input or output device goes away or
+    /// the default device it follows changes. The engine has stopped itself by then;
+    /// `start()` reopens it on the device now current.
     public static let AVAudioEngineConfigurationChange = Notification.Name("AVAudioEngineConfigurationChangeNotification")
 }
 
@@ -54,6 +56,14 @@ open class AVAudioEngine: NSObject {
     private var _manualSampleTime: AVAudioFramePosition = 0
     private var _autoShutdown = false
     private var _renderingBuffer: AVAudioPCMBuffer?
+    private var _inputStream: (any PlatformAudioInputStream)?
+    private var _inputStreamFormat: AVAudioFormat?
+    private var _outputDeviceSelection: String?
+    private var _inputDeviceSelection: String?
+    /// The devices the open streams are on (ids from `PlatformAudio`), for device-removal
+    /// notifications.
+    private var _openOutputDeviceID: String?
+    private var _openInputDeviceID: String?
 
     public override init() {
         super.init()
@@ -62,9 +72,15 @@ open class AVAudioEngine: NSObject {
     }
 
     deinit {
+        _DeviceWatch.shared.unregister(self)
         _stream?.stop()
         _stream?.close()
+        _inputStream?.stop()
+        _inputStream?.close()
     }
+
+    /// The attached nodes, for the graph builder (the caller holds `_lock`).
+    func _attachedNodesLocked() -> [AVAudioNode] { Array(_attached.values) }
 
     // MARK: Nodes
 
@@ -94,8 +110,16 @@ open class AVAudioEngine: NSObject {
 
     open var outputNode: AVAudioOutputNode { _outputNode }
 
-    /// Input capture is out of scope for this port.
-    open var inputNode: AVAudioInputNode { unimplemented() }
+    /// Created and attached on first access, as Apple's engine does; it captures from the
+    /// default input device (or `_inputDeviceUID`) once connected or tapped.
+    open var inputNode: AVAudioInputNode {
+        _lock.lock(); defer { _lock.unlock() }
+        if let n = _inputNodeStorage { return n }
+        let n = AVAudioInputNode()
+        _inputNodeStorage = n
+        attach(n)
+        return n
+    }
 
     /// Created and connected to the output node on first access, as Apple's engine does.
     open var mainMixerNode: AVAudioMixerNode {
@@ -140,6 +164,7 @@ open class AVAudioEngine: NSObject {
 
     private func _implicitFormat(from node1: AVAudioNode, bus: AVAudioNodeBus, to node2: AVAudioNode) -> AVAudioFormat {
         if let existing = node1._outputConnections[bus]?.first?.format { return existing }
+        if node1 is AVAudioInputNode { return node1._defaultOutputFormat(forBus: bus) }
         if node2 === _outputNode { return _hardwareFormat() }
         if node1 is AVAudioMixerNode { return (node2._inputConnections[0]?.format) ?? (node1 as! AVAudioMixerNode)._defaultMixerOutputFormat() }
         let d = node1._defaultOutputFormat(forBus: bus)
@@ -154,6 +179,8 @@ open class AVAudioEngine: NSObject {
         switch c.source {
         case let p as AVAudioPlayerNode: p._mixingSource.removeDestinations(forMixer: c.destination, bus: c.destinationBus)
         case let m as AVAudioMixerNode: m._mixingSource.removeDestinations(forMixer: c.destination, bus: c.destinationBus)
+        case let s as AVAudioSourceNode: s._mixingSource.removeDestinations(forMixer: c.destination, bus: c.destinationBus)
+        case let i as AVAudioInputNode: i._mixingSource.removeDestinations(forMixer: c.destination, bus: c.destinationBus)
         default: break
         }
     }
@@ -198,7 +225,13 @@ open class AVAudioEngine: NSObject {
     /// once while running.
     func _graphChanged() {
         _graphDirty = true
-        if _isRunning { _rebuildGraph() }
+        if _isRunning {
+            // A tap or connection on the input node while running opens the capture stream.
+            if !_manual, _inputStream == nil, _inputIsUsed {
+                if (try? _openInputStream()) != nil { try? _inputStream?.start() }
+            }
+            _rebuildGraph()
+        }
     }
 
     // MARK: Formats and the stream
@@ -219,14 +252,147 @@ open class AVAudioEngine: NSObject {
         return "\(PlatformAudio.backend.name): \(s.deviceName), \(Int(s.sampleRate)) Hz, \(s.channelCount) ch, period \(s.bufferFrameCount) frames, latency \(String(format: "%.1f", s.latency * 1000)) ms"
     }
 
+    /// The selected output device, or nil for the default (the selection falls back to
+    /// the default when that device is gone).
+    private func _resolveOutputDevice() -> PlatformAudioDevice? {
+        let backend = PlatformAudio.backend
+        if let uid = _outputDeviceSelection, let d = (try? backend.outputDevices())?.first(where: { $0.id == uid }) { return d }
+        return nil
+    }
+
+    private func _resolveInputDevice(_ backend: any PlatformAudioInputBackend) -> PlatformAudioDevice? {
+        if let uid = _inputDeviceSelection, let d = (try? backend.inputDevices())?.first(where: { $0.id == uid }) { return d }
+        return nil
+    }
+
     private func _openStream() throws {
         guard _stream == nil else { return }
-        let stream = try PlatformAudio.backend.openOutputStream(device: nil, sampleRate: nil, channelCount: nil) { [weak self] out, frames in
+        let backend = PlatformAudio.backend
+        let device = _resolveOutputDevice()
+        let stream = try backend.openOutputStream(device: device, sampleRate: nil, channelCount: nil) { [weak self] out, frames in
             self?._renderCallback(out, frames: frames)
         }
         _stream = stream
         _streamFormat = AVAudioFormat(standardFormatWithSampleRate: stream.sampleRate, channels: AVAudioChannelCount(stream.channelCount))
+        _openOutputDeviceID = device?.id ?? (try? backend.defaultOutputDevice())?.id
         _graphDirty = true
+        _DeviceWatch.shared.register(self)
+    }
+
+    /// Whether the input node is connected or tapped (so the engine captures).
+    private var _inputIsUsed: Bool {
+        guard let n = _inputNodeStorage else { return false }
+        return !n._outputConnections.values.allSatisfy { $0.isEmpty } || !n._taps.isEmpty
+    }
+
+    /// The input device's format, or an empty format when there is none.
+    func _inputHardwareFormat() -> AVAudioFormat {
+        _lock.lock(); defer { _lock.unlock() }
+        if _manual, let f = _inputNodeStorage?._manualFormat, let s = AVAudioFormat(standardFormatWithSampleRate: f.sampleRate, channels: f.channelCount) { return s }
+        if let f = _inputStreamFormat { return f }
+        guard let backend = PlatformAudio.backend as? any PlatformAudioInputBackend else { return AVAudioFormat() }
+        let device = _resolveInputDevice(backend) ?? (try? backend.defaultInputDevice()) ?? nil
+        guard let d = device, let f = AVAudioFormat(standardFormatWithSampleRate: d.sampleRate, channels: AVAudioChannelCount(max(1, d.channelCount))) else { return AVAudioFormat() }
+        return f
+    }
+
+    private func _openInputStream() throws {
+        guard _inputStream == nil, let node = _inputNodeStorage else { return }
+        guard let backend = PlatformAudio.backend as? any PlatformAudioInputBackend else {
+            throw PlatformAudioError("\(PlatformAudio.backend.name) has no audio input")
+        }
+        let format = node.outputFormat(forBus: 0)
+        let device = _resolveInputDevice(backend)
+        let capture = _InputCapture(channels: Int(format.channelCount), period: 480)
+        let stream = try backend.openInputStream(device: device, sampleRate: format.sampleRate > 0 ? format.sampleRate : nil, channelCount: nil) { input, frames in
+            capture.captured(input, frames: frames)
+        }
+        capture.streamChannels = stream.channelCount
+        _inputStream = stream
+        _inputStreamFormat = AVAudioFormat(standardFormatWithSampleRate: stream.sampleRate, channels: AVAudioChannelCount(stream.channelCount))
+        _openInputDeviceID = device?.id ?? (try? backend.defaultInputDevice())?.id
+        node._capture = capture
+        _graphDirty = true
+        _DeviceWatch.shared.register(self)
+    }
+
+    private func _closeInputStream() {
+        _inputStream?.stop()
+        _inputStream?.close()
+        _inputStream = nil
+        _inputStreamFormat = nil
+        _openInputDeviceID = nil
+        _inputNodeStorage?._capture = nil
+    }
+
+    // MARK: Devices (port-specific; see ADR-0028)
+
+    /// The output device the engine renders to, as a `PlatformAudioDevice.id` (on Windows
+    /// the endpoint ID, on Linux the PipeWire node name); nil follows the system default.
+    /// Apple selects the device through the output unit's `kAudioOutputUnitProperty_
+    /// CurrentDevice`, which has no counterpart here. Setting it while running moves the
+    /// stream to the device at once.
+    public var _outputDeviceUID: String? {
+        get { _lock.withLock { _outputDeviceSelection } }
+        set {
+            _lock.lock(); defer { _lock.unlock() }
+            guard newValue != _outputDeviceSelection else { return }
+            _outputDeviceSelection = newValue
+            guard !_manual, _stream != nil else { return }
+            let wasRunning = _isRunning
+            _stream?.stop()
+            _liveRendering = false
+            _liveGraphs.removeAll()
+            _stream?.close()
+            _stream = nil
+            _streamFormat = nil
+            _graphDirty = true
+            if wasRunning {
+                _isRunning = false
+                do { try _startLocked() } catch {
+                    FileHandle.standardError.write("AppKitCross audio: cannot move the engine to \(newValue ?? "the default output"): \(error)\n".data(using: .utf8)!)
+                }
+            }
+        }
+    }
+
+    /// The input device the input node captures from (see `_outputDeviceUID`).
+    public var _inputDeviceUID: String? {
+        get { _lock.withLock { _inputDeviceSelection } }
+        set {
+            _lock.lock(); defer { _lock.unlock() }
+            guard newValue != _inputDeviceSelection else { return }
+            _inputDeviceSelection = newValue
+            guard _inputStream != nil else { return }
+            let running = _isRunning
+            _closeInputStream()
+            if running, (try? _openInputStream()) != nil { try? _inputStream?.start() }
+            _rebuildGraph()
+        }
+    }
+
+    /// The id of the device the output stream is open on (the default's id when following
+    /// it); nil while no stream is open.
+    public var _currentOutputDeviceUID: String? { _lock.withLock { _openOutputDeviceID } }
+
+    /// Called by `_DeviceWatch` on its queue: stops the engine when the change concerns a
+    /// device it renders to or captures from, and posts the configuration change.
+    func _deviceChanged(_ change: PlatformAudioDeviceChange) {
+        _lock.lock()
+        guard _isRunning, !_manual else { _lock.unlock(); return }
+        var affected = false
+        switch change {
+        case .defaultDeviceChanged(let isInput, let id):
+            if isInput { affected = _inputStream != nil && _inputDeviceSelection == nil && id != _openInputDeviceID }
+            else { affected = _outputDeviceSelection == nil && id != _openOutputDeviceID }
+        case .deviceRemoved(let id):
+            affected = id == _openOutputDeviceID || (_inputStream != nil && id == _openInputDeviceID)
+        case .deviceAdded:
+            affected = false
+        }
+        if affected { stop() }
+        _lock.unlock()
+        if affected { NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: self) }
     }
 
     private func _rebuildGraph() {
@@ -281,6 +447,10 @@ open class AVAudioEngine: NSObject {
 
     open func start() throws {
         _lock.lock(); defer { _lock.unlock() }
+        try _startLocked()
+    }
+
+    private func _startLocked() throws {
         if _isRunning { return }
         if _manual {
             if _graphDirty || _graph == nil { _rebuildGraph() }
@@ -290,10 +460,19 @@ open class AVAudioEngine: NSObject {
         do { try _openStream() } catch {
             throw _osStatusError(-10875, "AVAudioEngine.start: no output stream: \(error.localizedDescription)")
         }
+        if _inputIsUsed {
+            do { try _openInputStream() } catch {
+                throw _osStatusError(-10875, "AVAudioEngine.start: no input stream: \(error.localizedDescription)")
+            }
+        }
         if _graphDirty || _graph == nil { _rebuildGraph() }
         _liveRendering = true
         if let g = _graph { _liveGraphs.append(g) }
-        do { try _stream!.start() } catch {
+        do {
+            try _inputStream?.start()
+            try _stream!.start()
+        } catch {
+            _inputStream?.stop()
             _liveRendering = false
             _liveGraphs.removeAll()
             throw _osStatusError(-10875, "AVAudioEngine.start: \(error.localizedDescription)")
@@ -306,6 +485,7 @@ open class AVAudioEngine: NSObject {
         _lock.lock(); defer { _lock.unlock() }
         guard _isRunning else { return }
         _stream?.stop()
+        _inputStream?.stop()
         _liveRendering = false
         _liveGraphs.removeAll()
         _isRunning = false
@@ -321,6 +501,7 @@ open class AVAudioEngine: NSObject {
     open func stop() {
         _lock.lock(); defer { _lock.unlock() }
         _stream?.stop()
+        _inputStream?.stop()
         _liveRendering = false
         _liveGraphs.removeAll()
         _isRunning = false
@@ -329,6 +510,8 @@ open class AVAudioEngine: NSObject {
             _stream?.close()
             _stream = nil
             _streamFormat = nil
+            _openOutputDeviceID = nil
+            _closeInputStream()
             _graphDirty = true
         }
     }
@@ -354,6 +537,7 @@ open class AVAudioEngine: NSObject {
             throw _osStatusError(-10868, "AVAudioEngine: unsupported manual rendering format")
         }
         _stream?.close(); _stream = nil; _streamFormat = nil
+        _closeInputStream()
         _manual = true
         _manualMode = mode
         _manualFormat = pcmFormat
@@ -419,5 +603,42 @@ extension NSRecursiveLock {
     @inline(__always) func withLock<T>(_ body: () throws -> T) rethrows -> T {
         lock(); defer { unlock() }
         return try body()
+    }
+}
+
+/// Forwards the backend's device notifications to the engines that have streams open.
+final class _DeviceWatch: @unchecked Sendable {
+    static let shared = _DeviceWatch()
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "AVFAudio device changes")
+    private struct WeakEngine { weak var engine: AVAudioEngine? }
+    private var engines: [ObjectIdentifier: WeakEngine] = [:]
+    private weak var installedOn: AnyObject?
+
+    func register(_ engine: AVAudioEngine) {
+        lock.lock(); defer { lock.unlock() }
+        engines[ObjectIdentifier(engine)] = WeakEngine(engine: engine)
+        let backend = PlatformAudio.backend
+        guard installedOn !== backend, let inputs = backend as? any PlatformAudioInputBackend else { return }
+        (installedOn as? any PlatformAudioInputBackend)?.setDeviceChangeHandler(nil)
+        installedOn = backend
+        inputs.setDeviceChangeHandler { [weak self] change in self?.dispatch(change) }
+    }
+
+    func unregister(_ engine: AVAudioEngine) {
+        lock.lock(); engines[ObjectIdentifier(engine)] = nil; lock.unlock()
+    }
+
+    private func dispatch(_ change: PlatformAudioDeviceChange) {
+        queue.async { [self] in
+            lock.lock()
+            let live = engines.values.compactMap { $0.engine }
+            engines = engines.filter { $0.value.engine != nil }
+            lock.unlock()
+            if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
+                FileHandle.standardError.write("AppKitCross audio: device change \(change)\n".data(using: .utf8)!)
+            }
+            for e in live { e._deviceChanged(change) }
+        }
     }
 }
