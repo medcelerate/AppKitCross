@@ -55,6 +55,9 @@ final class _DecorationPrimitive: _Primitive {
         var tap: (() -> Void)? = nil
         var tapCount = 1
         var hover: ((Bool) -> Void)? = nil
+        /// `.onContinuousHover`: the pointer's position while over the view.
+        var continuousHover: ((HoverPhase) -> Void)? = nil
+        var continuousHoverSpace: CoordinateSpace = .local
         /// `.gesture`/`.highPriorityGesture`: recognizers installed on the decoration view.
         var gestures: [_GestureInstaller] = []
         var gesturesDelayEvents = false
@@ -250,6 +253,9 @@ final class _DecorationPrimitive: _Primitive {
             view.mouseUpHandler = nil
         }
         view.hoverHandler = style.hover
+        view.continuousHoverHandler = style.continuousHover
+        view.continuousHoverSpace = style.continuousHoverSpace
+        view.needsTrackingAreaUpdate = true
         // Recognizers survive re-renders (a drag that moves the view re-renders every
         // event): each installer reuses the recognizer at its index when the kind matches.
         let previous = view.installedRecognizers
@@ -400,6 +406,13 @@ extension View {
     public func onHover(perform action: @escaping (Bool) -> Void) -> some View {
         var d = _Decorated(content: self)
         d.style.hover = action
+        return d
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/oncontinuoushover(coordinatespace:perform:)
+    public func onContinuousHover(coordinateSpace: CoordinateSpace = .local, perform action: @escaping (HoverPhase) -> Void) -> some View {
+        var d = _Decorated(content: self)
+        d.style.continuousHover = action
+        d.style.continuousHoverSpace = coordinateSpace
         return d
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/help(_:)-9swnr

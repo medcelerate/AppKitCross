@@ -57,13 +57,15 @@ import CoreText
     private func _makeLayerScene() -> PlatformLayerScene? {
         guard let cv = _contentView, let root = cv.layer else { return nil }
         cv.layoutSubtreeIfNeeded()
-        let content = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
-        var scene = root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
-        // The toolbar and the window buttons overlays are further roots above the content.
+        // Every root is placed in the platform's content area: the content view sits at
+        // its bottom, under the bands a toolbar or title bar accessories take at the top.
+        let platformContent = NSRect(origin: .zero, size: _platformContentSize)
+        var scene = root._buildScene(parentFlipped: false, parentBounds: platformContent, scale: backingScaleFactor, frame: _layerSceneFrame)
+        // The toolbar, the accessories and the window buttons overlays are further roots above the content.
         var overlays: [NSView] = []
         if let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded(); overlays.append(t) }
+        if let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded(); overlays.append(a) }
         if let buttons = _windowButtons, _showsWindowButtons { overlays.append(buttons) }
-        let platformContent = NSRect(origin: .zero, size: _platformContentSize)
         for overlay in overlays {
             guard let layer = overlay.layer else { continue }
             let extra = layer._buildScene(parentFlipped: false, parentBounds: platformContent, scale: backingScaleFactor, frame: _layerSceneFrame)
@@ -138,17 +140,17 @@ import CoreText
         return _windowButtons
     }
 
-    // MARK: Toolbar (NSToolbar.swift, NSToolbarView.swift; ADR-0018)
+    // MARK: Toolbar and title bar accessories (NSToolbarView.swift, NSTitlebarAccessoryViewController.swift; ADR-0018, ADR-0023)
 
     /// The toolbar's view, an overlay root like the buttons: above the content, below the buttons.
     internal var _toolbarView: _NSToolbarView? { _toolbar?._view }
-    /// The band the toolbar takes out of the frame as reflected in the current frame.
-    private var _toolbarBandApplied: CGFloat = 0
-    /// The content area the platform gives this window (the band above the content view
-    /// that a toolbar takes is part of it).
+    /// The band the toolbar and the accessories take out of the frame as reflected in the current frame.
+    private var _chromeBandApplied: CGFloat = 0
+    /// The content area the platform gives this window (the bands above the content view
+    /// that a toolbar and the title bar accessories take are part of it).
     internal var _platformContentSize: NSSize {
         if let p = _platform { return p.contentRect(forFrameRect: frame).size }
-        return NSSize(width: contentRect(forFrameRect: frame).width, height: contentRect(forFrameRect: frame).height + _toolbarBandHeight)
+        return NSSize(width: contentRect(forFrameRect: frame).width, height: contentRect(forFrameRect: frame).height + _chromeBandHeight)
     }
     /// How the toolbar is placed and sized for this window; nil when none is shown.
     internal var _toolbarMetrics: _NSToolbarMetrics? {
@@ -161,26 +163,156 @@ import CoreText
         guard let m = _toolbarMetrics, m.placement == .belowTitleBar else { return 0 }
         return m.height
     }
+    /// Everything the chrome takes out of the platform's content area: the toolbar band,
+    /// the strip the leading and trailing accessories get under a title bar the package
+    /// does not own, and the bottom accessories.
+    internal var _chromeBandHeight: CGFloat { _toolbarBandHeight + _accessoryBandHeight }
 
-    /// Places the toolbar view across the top of the platform's content area.
-    internal func _layoutToolbarView() {
-        guard let t = _toolbar, let v = t._view else { return }
-        let m = _toolbarMetrics
-        v.isHidden = m == nil
-        guard let m else { return }
-        v.apply(style: _toolbarStyle, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
-        let pc = _platformContentSize
-        let f = NSRect(x: 0, y: pc.height - m.height, width: pc.width, height: m.height)
-        if v.frame != f { v.frame = f; v.needsLayout = true }
-        v.needsDisplay = true
+    /// The title bar accessories (NSTitlebarAccessoryViewController.swift).
+    private var _titlebarAccessories: [NSTitlebarAccessoryViewController] = []
+    /// The overlay root that holds the accessory views: above the toolbar, below the buttons.
+    internal var _accessoryHost: _NSTitlebarAccessoryHostView?
+    /// Whether the package draws the title band the leading and trailing accessories go
+    /// into: the content covers it (AppKit's buttons at its top), or the platform leaves
+    /// the band to the package (Wayland client-side decorations).
+    internal var _ownsTitleBand: Bool { _styleMask.contains(.titled) && (_styleMask.contains(.fullSizeContentView) || _hasClientSideTitleBar) }
+    private var _visibleAccessories: [NSTitlebarAccessoryViewController] { _styleMask.contains(.titled) ? _titlebarAccessories.filter { !$0.isHidden } : [] }
+    /// The strip under a server-side title bar for the leading and trailing accessories.
+    private var _accessoryTopStripHeight: CGFloat {
+        guard !_ownsTitleBand else { return 0 }
+        return _visibleAccessories.filter { $0.layoutAttribute != .bottom }.map { $0._measuredSize.height }.max() ?? 0
+    }
+    /// The bottom accessories, stacked under the toolbar.
+    private var _accessoryBottomHeight: CGFloat { _visibleAccessories.filter { $0.layoutAttribute == .bottom }.reduce(0) { $0 + $1._measuredSize.height } }
+    /// What the accessories take out of the frame; nothing when the content covers the
+    /// title bar (they overlay it, `contentLayoutRect` excludes them).
+    internal var _accessoryBandHeight: CGFloat {
+        guard !_styleMask.contains(.fullSizeContentView) else { return 0 }
+        return _accessoryTopStripHeight + _accessoryBottomHeight
     }
 
-    /// The toolbar appeared, disappeared or changed height: the frame grows or shrinks by
-    /// the difference with the top edge fixed, so the content keeps its size, as on macOS.
+    /// The resolved placement of the toolbar and every accessory, in the coordinates of
+    /// the platform's content area (the client-side title band lies above it).
+    internal struct _TitlebarLayout {
+        /// The row the leading and trailing accessories share with the buttons and the title.
+        var titleRow = NSRect.zero
+        var toolbar: NSRect?
+        var accessories: [(NSTitlebarAccessoryViewController, NSRect)] = []
+        /// The bands the package paints in the title-bar colour (the strip and the bottom
+        /// accessories when they come out of the frame).
+        var paintedBands: [NSRect] = []
+        /// The top of the content area free of chrome (`contentLayoutRect`).
+        var contentTop: CGFloat = 0
+        /// What the side accessories take out of a toolbar row they share (unified styles).
+        var toolbarInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)
+    }
+
+    internal func _resolveTitlebarLayout() -> _TitlebarLayout {
+        var l = _TitlebarLayout()
+        let pc = _platformContentSize
+        let fullSize = _styleMask.contains(.fullSizeContentView)
+        let csd = _hasClientSideTitleBar && !fullSize
+        var top = pc.height
+        if csd {
+            l.titleRow = NSRect(x: 0, y: pc.height, width: pc.width, height: max(0, frame.height - pc.height))
+        } else if fullSize {
+            l.titleRow = NSRect(x: 0, y: pc.height - NSWindow._titleBarBandHeight, width: pc.width, height: NSWindow._titleBarBandHeight)
+        } else {
+            let strip = _accessoryTopStripHeight
+            l.titleRow = NSRect(x: 0, y: pc.height - strip, width: pc.width, height: strip)
+            if strip > 0 { l.paintedBands.append(l.titleRow) }
+            top -= strip
+        }
+        if let m = _toolbarMetrics {
+            l.toolbar = NSRect(x: 0, y: top - m.height, width: pc.width, height: m.height)
+            top -= m.height
+        } else if fullSize {
+            top -= NSWindow._titleBarBandHeight
+        }
+        // Leading and trailing accessories stack outward from their edge of the title row;
+        // the buttons keep the left edge whatever the direction, as on macOS.
+        let rtl = windowTitlebarLayoutDirection == .rightToLeft
+        let buttonsInset: CGFloat = _showsWindowButtons ? _NSWindowButtonsView.width + 4 : 8
+        var leftX = buttonsInset, rightX = pc.width - 8
+        for a in _visibleAccessories where a.layoutAttribute != .bottom {
+            let size = a._measuredSize
+            let height = min(size.height, l.titleRow.height > 0 ? l.titleRow.height : size.height)
+            let y = l.titleRow.midY - height / 2
+            let onLeft: Bool
+            switch a.layoutAttribute {
+            case .left: onLeft = true
+            case .right: onLeft = false
+            case .trailing: onLeft = rtl
+            default: onLeft = !rtl          // .leading and anything else
+            }
+            if onLeft {
+                l.accessories.append((a, NSRect(x: leftX, y: y, width: size.width, height: height)))
+                leftX += size.width + 8
+            } else {
+                l.accessories.append((a, NSRect(x: rightX - size.width, y: y, width: size.width, height: height)))
+                rightX -= size.width + 8
+            }
+        }
+        if fullSize, let t = l.toolbar, t.maxY == pc.height, _toolbarMetrics?.topInset == 0 {
+            // A unified toolbar shares the row: its items start after the left-hand
+            // accessories and stop before the right-hand ones.
+            l.toolbarInsets = (max(0, leftX - buttonsInset), max(0, pc.width - 8 - rightX))
+        }
+        for a in _visibleAccessories where a.layoutAttribute == .bottom {
+            let h = a._measuredSize.height
+            let r = NSRect(x: 0, y: top - h, width: pc.width, height: h)
+            l.accessories.append((a, r))
+            if !fullSize { l.paintedBands.append(r) }
+            top -= h
+        }
+        l.contentTop = top
+        return l
+    }
+
+    /// Places the toolbar view and the accessory host across the top of the platform's content area.
+    internal func _layoutToolbarView() {
+        let l = _resolveTitlebarLayout()
+        if let t = _toolbar, let v = t._view {
+            let m = _toolbarMetrics
+            v.isHidden = m == nil
+            if m != nil, let f = l.toolbar {
+                v.apply(style: _toolbarStyle, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView), accessoryInsets: l.toolbarInsets)
+                if v.frame != f { v.frame = f; v.needsLayout = true }
+                v.needsDisplay = true
+            }
+        }
+        _layoutAccessoryHost(l)
+    }
+
+    private func _layoutAccessoryHost(_ l: _TitlebarLayout) {
+        guard let host = _accessoryHost else { return }
+        _layingOutAccessories = true
+        defer { _layingOutAccessories = false }
+        let pc = _platformContentSize
+        let csd = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView)
+        let f = NSRect(x: 0, y: 0, width: pc.width, height: csd ? max(pc.height, frame.height) : pc.height)
+        if host.frame != f { host.frame = f }
+        host.isHidden = _visibleAccessories.isEmpty
+        host.paintedBands = l.paintedBands
+        for (a, r) in l.accessories {
+            let v = a.view
+            if v.superview !== host { host.addSubview(v) }
+            v.isHidden = false
+            if v.frame != r { v.frame = r }
+        }
+        for a in _titlebarAccessories where a.isHidden || !_styleMask.contains(.titled) { a.viewIfLoaded?.isHidden = true }
+        host.needsDisplay = true
+    }
+    private var _layingOutAccessories = false
+
+    /// The toolbar or the accessories appeared, disappeared or changed height: the frame
+    /// grows or shrinks by the difference with the top edge fixed, so the content keeps
+    /// its size, as on macOS.
     internal func _toolbarGeometryDidChange() {
-        let band = _toolbarBandHeight
-        let delta = band - _toolbarBandApplied
-        _toolbarBandApplied = band
+        guard !_layingOutAccessories else { return }
+        let band = _chromeBandHeight
+        let delta = band - _chromeBandApplied
+        _chromeBandApplied = band
         if delta != 0, _platform != nil {
             var f = frame
             f.origin.y -= delta
@@ -193,6 +325,31 @@ import CoreText
         _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
         _platform?.setNeedsDisplay(nil)
+    }
+
+    /// An accessory's attribute, visibility or view size changed.
+    internal func _accessoryGeometryDidChange() { _toolbarGeometryDidChange() }
+
+    private func _ensureAccessoryHost() -> _NSTitlebarAccessoryHostView {
+        if let h = _accessoryHost { return h }
+        let h = _NSTitlebarAccessoryHostView()
+        h.nextResponder = self
+        h._setWindow(self)
+        _accessoryHost = h
+        return h
+    }
+
+    private func _insertTitlebarAccessory(_ vc: NSTitlebarAccessoryViewController, at index: Int) {
+        if let w = vc._window, w !== self, let i = w._titlebarAccessories.firstIndex(where: { $0 === vc }) { w.removeTitlebarAccessoryViewController(at: i) }
+        if let i = _titlebarAccessories.firstIndex(where: { $0 === vc }) { _titlebarAccessories.remove(at: i) }
+        _titlebarAccessories.insert(vc, at: min(max(0, index), _titlebarAccessories.count))
+        vc._window = self
+        let host = _ensureAccessoryHost()
+        let v = vc.view
+        v.postsFrameChangedNotifications = true
+        vc._observeViewFrame()
+        host.addSubview(v)
+        _toolbarGeometryDidChange()
     }
 
     private func _setToolbar(_ toolbar: NSToolbar?) {
@@ -214,8 +371,10 @@ import CoreText
     }
 
     /// The view under a window point: the buttons overlay first, then the content.
+    internal func _hitTestForTests(_ point: NSPoint) -> NSView? { _hitTest(point) }
     private func _hitTest(_ point: NSPoint) -> NSView? {
         if _showsWindowButtons, let b = _windowButtons, !b.isHidden, let hit = b.hitTest(point) { return hit }
+        if let a = _accessoryHost, !a.isHidden, let hit = a.hitTest(point) { return hit }
         if let t = _toolbarView, !t.isHidden, let hit = t.hitTest(point) { return hit }
         return _contentView?.hitTest(point)
     }
@@ -313,6 +472,126 @@ import CoreText
 
     open override var description: String { MainActor.assumeIsolated { "<NSWindow \(_windowNumber) '\(_title)' \(frame)>" } }
 
+    // MARK: Tracking areas (NSTrackingArea.swift)
+
+    /// The pointer's last known location in window coordinates; nil once it left.
+    private var _lastMouseLocation: NSPoint?
+    /// Set when a view's geometry, visibility or tracking areas changed: the next
+    /// evaluation first runs `updateTrackingAreas()` on the views that need it.
+    private var _trackingAreasDirty = true
+    /// A tracking area with `cursorUpdate` has the pointer: the cursor rects stand back.
+    private var _cursorOwnedByTrackingArea = false
+
+    internal func _trackingAreasDidChange() { _trackingAreasDirty = true }
+
+    /// The key window, the active application or the first responder changed: areas
+    /// scoped to that activity enter or exit without the pointer moving.
+    internal func _trackingActivityDidChange() { _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
+
+    /// The view roots that may carry tracking areas: the content and the overlays.
+    private var _trackingRoots: [NSView] {
+        var roots: [NSView] = []
+        if let cv = _contentView { roots.append(cv) }
+        if let t = _toolbarView, !t.isHidden { roots.append(t) }
+        if let a = _accessoryHost, !a.isHidden { roots.append(a) }
+        return roots
+    }
+
+    private func _updateTrackingAreasIfNeeded() {
+        guard _trackingAreasDirty else { return }
+        _trackingAreasDirty = false
+        func visit(_ v: NSView) {
+            if v._needsUpdateTrackingAreas {
+                v._needsUpdateTrackingAreas = false
+                v.updateTrackingAreas()
+            }
+            for s in v.subviews { visit(s) }
+        }
+        for r in _trackingRoots { visit(r) }
+    }
+
+    private func _collectTrackingAreas() -> [NSTrackingArea] {
+        var areas: [NSTrackingArea] = []
+        func visit(_ v: NSView) {
+            areas.append(contentsOf: v._trackingAreas)    // hidden views included: their areas exit
+            for s in v.subviews { visit(s) }
+        }
+        for r in _trackingRoots { visit(r) }
+        return areas
+    }
+
+    /// Whether the area's activity scope holds now.
+    private func _trackingAreaIsActive(_ area: NSTrackingArea, view: NSView) -> Bool {
+        let scope = area._activity
+        if scope.contains(.activeAlways) { return true }
+        if scope.contains(.activeInActiveApp) { return NSApplication.shared.isActive }
+        if scope.contains(.activeInKeyWindow) { return _isKey }
+        if scope.contains(.activeWhenFirstResponder) {
+            guard let fr = _firstResponder else { return false }
+            if fr === view { return true }
+            if let v = fr as? NSView { return v.isDescendant(of: view) }
+            if let vc = fr as? NSViewController { return vc.viewIfLoaded === view }
+            return false
+        }
+        return false
+    }
+
+    /// Matches every tracking area of the view tree against `location` (nil: the pointer
+    /// is outside the window). Exits are sent before entries, as AppKit does; `cursorUpdate`
+    /// goes to the owner on entry; `mouseMoved` events go to the owners of the areas that
+    /// asked for them and hold the pointer. During a drag only areas with
+    /// `enabledDuringMouseDrag` change state. Returns true when an area with `cursorUpdate`
+    /// holds the pointer, in which case the cursor rects do not set the cursor.
+    @discardableResult
+    private func _evaluateTrackingAreas(at location: NSPoint?, event: NSEvent?, dragging: Bool) -> Bool {
+        _updateTrackingAreasIfNeeded()
+        let areas = _collectTrackingAreas()
+        guard !areas.isEmpty else { _cursorOwnedByTrackingArea = false; return false }
+        let flags = event?.modifierFlags ?? NSEvent._currentModifierFlags
+        let time = event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        let point = location ?? NSPoint(x: -100_000, y: -100_000)
+        var exits: [NSTrackingArea] = [], entries: [NSTrackingArea] = [], moved: [NSTrackingArea] = []
+        var cursorOwned = false
+        for area in areas {
+            guard let view = area._view, view.window === self else { continue }
+            if dragging && !area.options.contains(.enabledDuringMouseDrag) {
+                if area._isInside, area.options.contains(.cursorUpdate) || area._ownerCursor != nil { cursorOwned = true }
+                continue
+            }
+            var inside = false
+            if _trackingAreaIsActive(area, view: view), let r = area._windowRect, let location {
+                inside = r.contains(location)
+            }
+            if inside != area._isInside {
+                area._isInside = inside
+                if inside { entries.append(area) } else { exits.append(area) }
+            } else if inside, let event, event.type == .mouseMoved, area.options.contains(.mouseMoved) {
+                moved.append(area)
+            }
+            if inside, area.options.contains(.cursorUpdate) || area._ownerCursor != nil { cursorOwned = true }
+        }
+        for area in exits {
+            let e = NSEvent._enterExitEvent(type: .mouseExited, location: point, modifierFlags: flags, timestamp: time, windowNumber: _windowNumber, trackingArea: area)
+            if let c = area._ownerCursor { c.mouseExited(with: e); continue }
+            if area.options.contains(.mouseEnteredAndExited) { area._ownerResponder?.mouseExited(with: e) }
+        }
+        for area in entries {
+            let e = NSEvent._enterExitEvent(type: .mouseEntered, location: point, modifierFlags: flags, timestamp: time, windowNumber: _windowNumber, trackingArea: area)
+            if let c = area._ownerCursor { c.mouseEntered(with: e); continue }
+            if area.options.contains(.mouseEnteredAndExited) { area._ownerResponder?.mouseEntered(with: e) }
+            if area.options.contains(.cursorUpdate) {
+                let u = NSEvent._enterExitEvent(type: .cursorUpdate, location: point, modifierFlags: flags, timestamp: time, windowNumber: _windowNumber, trackingArea: area)
+                area._ownerResponder?.cursorUpdate(with: u)
+            }
+        }
+        if let event { for area in moved { area._ownerResponder?.mouseMoved(with: event) } }
+        let wasOwned = _cursorOwnedByTrackingArea
+        _cursorOwnedByTrackingArea = cursorOwned
+        // Leaving every cursor-updating area hands the cursor back to the cursor rects.
+        if wasOwned, !cursorOwned, let location { _updateCursor(at: location) }
+        return cursorOwned
+    }
+
     private func post(_ name: NSNotification.Name) {
         NotificationCenter.default.post(name: name, object: self)
     }
@@ -402,6 +681,7 @@ import CoreText
         let hit = _hitTest(point) ?? content.hitTest(point)
         if let v = hit, !v.mouseDownCanMoveWindow { return .client }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
+        if let a = _accessoryHost, !a.isHidden, let v = hit, v === a || v.isDescendant(of: a) { return .caption }
         if _isMovableByWindowBackground { return .caption }
         let chrome = _chrome
         if chrome.extendsContentIntoTitleBar, point.y >= content.bounds.height - NSWindow._titleBarBandHeight { return .caption }
@@ -458,6 +738,10 @@ import CoreText
                 context.restoreGState()
             }
             NSGraphicsContext.current = previous
+        }
+        if let a = _accessoryHost, !a.isHidden {
+            a.layoutSubtreeIfNeeded()
+            a._displayHierarchy(in: context, dirtyRect: dirtyRect)
         }
         if let buttons = _ensureWindowButtons() {
             buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
@@ -594,6 +878,8 @@ import CoreText
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
         _commitLayerSceneIfNeeded()
+        // Geometry settled for this frame: areas under a pointer that did not move still enter or exit.
+        if _trackingAreasDirty { _contentView?.layoutSubtreeIfNeeded(); _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
         context.saveGState()
         // The background is a dynamic colour: resolve it under the window's appearance, as the
         // views do, so a dark-themed system gets a dark window behind its light text.
@@ -608,6 +894,10 @@ import CoreText
         if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
             t.layoutSubtreeIfNeeded()
             t._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden {
+            a.layoutSubtreeIfNeeded()
+            a._displayHierarchy(in: context, dirtyRect: dirtyRect)
         }
         if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
             buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
@@ -660,6 +950,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/init(windowref:)
     @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { unimplemented() }
+    /// The end of the `cursorUpdate(with:)` chain: nothing above set a cursor, so the arrow shows.
+    @MainActor open override func cursorUpdate(with event: NSEvent) { NSCursor.arrow.set() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/acceptsmousemovedevents
     @MainActor open var acceptsMouseMovedEvents: Bool {
         get { _acceptsMouseMovedEvents }
@@ -676,7 +968,7 @@ import CoreText
     @MainActor open func addTabbedWindow(_ window: NSWindow, ordered: NSWindow.OrderingMode) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/addtitlebaraccessoryviewcontroller(_:)
     @available(macOS 10.10, *)
-    @MainActor open func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) { unimplemented() }
+    @MainActor open func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) { _insertTitlebarAccessory(childViewController, at: _titlebarAccessories.count) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/allowsautomaticwindowtabbing
     @available(macOS 10.12, *)
     @MainActor class public var allowsAutomaticWindowTabbing: Bool {
@@ -895,6 +1187,7 @@ import CoreText
         _toolbar?.validateVisibleItems()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
+        _trackingActivityDidChange()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomemain()
     @MainActor open func becomeMain() {
@@ -1022,11 +1315,14 @@ import CoreText
     @MainActor open var contentLayoutGuide: Any? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentlayoutrect
     @available(macOS 10.10, *)
-    /// The content's bounds less the toolbar band that overlays it on a window whose
-    /// content covers the title bar.
+    /// The content's bounds less the toolbar band and the title bar accessories that
+    /// overlay it on a window whose content covers the title bar.
     @MainActor open var contentLayoutRect: NSRect {
         guard var r = _contentView?.bounds else { return .zero }
-        if let m = _toolbarMetrics, m.placement == .overContent { r.size.height = max(0, r.height - m.height) }
+        guard _styleMask.contains(.fullSizeContentView), _styleMask.contains(.titled) else { return r }
+        if _toolbarMetrics != nil || !_visibleAccessories.isEmpty {
+            r.size.height = max(0, min(r.height, _resolveTitlebarLayout().contentTop))
+        }
         return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentmaxsize
@@ -1044,7 +1340,7 @@ import CoreText
     /// the title bar: the band is part of the frame, as on macOS.
     @MainActor open func contentRect(forFrameRect frameRect: NSRect) -> NSRect {
         var r = _platform?.contentRect(forFrameRect: frameRect) ?? frameRect
-        let band = _toolbarBandHeight
+        let band = _chromeBandHeight
         if band > 0 { r.size.height = max(0, r.height - band) }
         return r
     }
@@ -1287,7 +1583,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framerect(forcontentrect:)
     @MainActor open func frameRect(forContentRect contentRect: NSRect) -> NSRect {
         var c = contentRect
-        let band = _toolbarBandHeight
+        let band = _chromeBandHeight
         if band > 0 { c.size.height += band }
         return _platform?.frameRect(forContentRect: c) ?? c
     }
@@ -1333,7 +1629,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/inserttitlebaraccessoryviewcontroller(_:at:)
     @available(macOS 10.10, *)
-    @MainActor open func insertTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController, at index: Int) { unimplemented() }
+    @MainActor open func insertTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController, at index: Int) { _insertTitlebarAccessory(childViewController, at: index) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/invalidatecursorrects(for:)
     @MainActor open func invalidateCursorRects(for view: NSView) { view._cursorRectsValid = false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/invalidateshadow()
@@ -1442,6 +1738,7 @@ import CoreText
         }
         if NSView._traceInvalidation { NSView._trace("a11y focus '\(_title)' -> \(String(describing: type(of: target))) element \(accessibilityFocusedElementID.map(String.init) ?? "none")") }
         _accessibilityNotify(.focus(accessibilityFocusedElementID))
+        _trackingActivityDidChange()
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/makekey()
@@ -1645,7 +1942,14 @@ import CoreText
     @MainActor public class func removeFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/removetitlebaraccessoryviewcontroller(at:)
     @available(macOS 10.10, *)
-    @MainActor open func removeTitlebarAccessoryViewController(at index: Int) { unimplemented() }
+    @MainActor open func removeTitlebarAccessoryViewController(at index: Int) {
+        guard _titlebarAccessories.indices.contains(index) else { return }
+        let vc = _titlebarAccessories.remove(at: index)
+        vc._stopObservingViewFrame()
+        vc.viewIfLoaded?.removeFromSuperview()
+        vc._window = nil
+        _toolbarGeometryDidChange()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/representedfilename
     @MainActor open var representedFilename: String {
         get { _representedURL?.path ?? "" }
@@ -1678,6 +1982,7 @@ import CoreText
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
         post(NSWindow.didResignKeyNotification)
+        _trackingActivityDidChange()
         delegate?.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: self))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignmain()
@@ -1761,6 +2066,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectprevioustab(_:)
     @available(macOS 10.12, *)
     @MainActor open func selectPreviousTab(_ sender: Any?) { unimplemented() }
+    /// The event's location, or nil for the far-away location the backends send when
+    /// the pointer leaves the window.
+    private func _pointerLocation(of event: NSEvent) -> NSPoint? {
+        let p = event.locationInWindow
+        return p.x <= -50_000 || p.y <= -50_000 ? nil : p
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sendevent(_:)
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
@@ -1778,18 +2090,27 @@ import CoreText
         switch event.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             guard !_ignoresMouseEvents else { return }
+            _lastMouseLocation = event.locationInWindow
             let hit = _hitTest(event.locationInWindow)
+            if NSView._traceInvalidation { NSView._trace("mouse down '\(_title)' at \(event.locationInWindow) -> \(hit.map { String(describing: type(of: $0)) } ?? "window") accessory host \(_accessoryHost.map { "\($0.frame) hidden \($0.isHidden) bands \($0.paintedBands)" } ?? "none")") }
             _mouseDownView = hit
             if let v = hit, v.acceptsFirstResponder, firstResponder !== v { _ = makeFirstResponder(v) }
             _dispatchMouse(event, to: hit ?? self)
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            _lastMouseLocation = _pointerLocation(of: event)
+            _evaluateTrackingAreas(at: _lastMouseLocation, event: event, dragging: true)
             _dispatchMouse(event, to: _mouseDownView ?? _hitTest(event.locationInWindow) ?? self)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let target: NSResponder = _mouseDownView ?? _hitTest(event.locationInWindow) ?? self
             _mouseDownView = nil
             _dispatchMouse(event, to: target)
+            // The drag is over: areas that stood still during it catch up with the pointer.
+            _lastMouseLocation = _pointerLocation(of: event)
+            _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false)
         case .mouseMoved:
-            _updateCursor(at: event.locationInWindow)
+            _lastMouseLocation = _pointerLocation(of: event)
+            let cursorOwned = _evaluateTrackingAreas(at: _lastMouseLocation, event: event, dragging: false)
+            if !cursorOwned { _updateCursor(at: event.locationInWindow) }
             _windowButtons?.updateHover(event.locationInWindow)
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
@@ -1963,8 +2284,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebaraccessoryviewcontrollers
     @available(macOS 10.10, *)
     @MainActor open var titlebarAccessoryViewControllers: [NSTitlebarAccessoryViewController] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _titlebarAccessories }
+        set {
+            while !_titlebarAccessories.isEmpty { removeTitlebarAccessoryViewController(at: _titlebarAccessories.count - 1) }
+            for vc in newValue { addTitlebarAccessoryViewController(vc) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebarappearstransparent
     @available(macOS 10.10, *)
@@ -2076,7 +2400,7 @@ import CoreText
     @MainActor open var windowRef: UnsafeMutableRawPointer { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowtitlebarlayoutdirection
     @available(macOS 10.12, *)
-    @MainActor open var windowTitlebarLayoutDirection: NSUserInterfaceLayoutDirection { unimplemented() }
+    @MainActor open var windowTitlebarLayoutDirection: NSUserInterfaceLayoutDirection { _contentView?.userInterfaceLayoutDirection ?? NSApplication._resolvedLayoutDirection }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/workswhenmodal
     @MainActor open var worksWhenModal: Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/zoom(_:)
@@ -2129,6 +2453,7 @@ import CoreText
         guard let cv = _contentView else { return [] }
         var children: [Any] = (cv.isAccessibilityElement() ? [cv] : cv.accessibilityChildren()) ?? []
         if let t = _toolbarView, !t.isHidden { children.append(t) }
+        if let a = _accessoryHost, !a.isHidden { children.append(contentsOf: a.accessibilityChildren() ?? []) }
         return children
     }
     open func setAccessibilityChildren(_ accessibilityChildren: [Any]?) { _a11yOverrides.children = accessibilityChildren; _accessibilityNotify(.structure(_accessibilityElementID)) }
@@ -2195,7 +2520,7 @@ extension NSWindow: PlatformAccessibilityProvider {
 
     /// The view behind an element id, the window itself for its own id.
     @MainActor internal func _accessibilityView(withID id: Int) -> NSView? {
-        _contentView?._accessibilityView(withID: id) ?? _toolbarView?._accessibilityView(withID: id)
+        _contentView?._accessibilityView(withID: id) ?? _toolbarView?._accessibilityView(withID: id) ?? _accessoryHost?._accessibilityView(withID: id)
     }
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
