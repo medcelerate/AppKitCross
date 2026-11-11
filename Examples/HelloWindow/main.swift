@@ -584,7 +584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
         tabs.addChild(PopoverDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 560, height: 300)   // wide enough for the eleven tabs
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 640, height: 300)   // wide enough for the eleven tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
