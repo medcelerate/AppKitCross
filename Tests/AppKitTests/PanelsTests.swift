@@ -8,6 +8,12 @@ import XCTest
 @testable import AppKit
 @testable import SwiftUI
 
+/// A log notification observers (Sendable closures) can append to.
+private final class Log: @unchecked Sendable {
+    var events: [String] = []
+    func add(_ s: String) { events.append(s) }
+}
+
 /// Counts the actions it receives (`changeColor:` / `changeFont:` / a well's action).
 @MainActor
 private final class Receiver: NSObject, NSSelectorHandling {
@@ -108,14 +114,14 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(p.mode, .crayon)
             p.mode = .RGB
             let red = NSColor(red: 1, green: 0.2, blue: 0.1, alpha: 1)
-            var notified = 0
-            let token = NotificationCenter.default.addObserver(forName: NSColorPanel.colorDidChangeNotification, object: nil, queue: nil) { _ in notified += 1 }
+            let notified = Log()
+            let token = NotificationCenter.default.addObserver(forName: NSColorPanel.colorDidChangeNotification, object: nil, queue: nil) { _ in notified.add("changed") }
             defer { NotificationCenter.default.removeObserver(token) }
             p.color = red
             XCTAssertEqual(p.color.redComponent, 1, accuracy: 0.001)
             XCTAssertEqual(p._view.hexField.stringValue, "FF331A")
             XCTAssertEqual(p._view.sliderFields[0].stringValue, "255")
-            XCTAssertEqual(notified, 1, "setting the colour posts the notification")
+            XCTAssertEqual(notified.events.count, 1, "setting the colour posts the notification")
             // Alpha only counts while shown.
             XCTAssertFalse(p.showsAlpha)
             p.color = red.withAlphaComponent(0.5)
@@ -548,9 +554,9 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
                 var stored = NSFontCollection._stored; stored[name.rawValue] = nil; NSFontCollection._stored = stored
                 NSFontCollection._hidden = NSFontCollection._hidden.filter { $0 != name.rawValue }
             }
-            var actions: [String] = []
+            let actions = Log()
             let token = NotificationCenter.default.addObserver(forName: NSFontCollection.didChangeNotification, object: nil, queue: nil) { n in
-                if let a = n.userInfo?[NSFontCollection.actionUserInfoKey.rawValue] as? NSFontCollection.ActionTypeKey { actions.append(a.rawValue) }
+                if let a = n.userInfo?[NSFontCollection.actionUserInfoKey.rawValue] as? NSFontCollection.ActionTypeKey { actions.add(a.rawValue) }
             }
             defer { NotificationCenter.default.removeObserver(token) }
             XCTAssertNil(NSFontCollection(name: name))
@@ -562,7 +568,7 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(back.matchingDescriptors?.count, members)
             XCTAssertNoThrow(try NSFontCollection.hide(withName: name, visibility: .user))
             XCTAssertFalse(NSFontCollection.allFontCollectionNames.contains(name))
-            XCTAssertEqual(actions, [NSFontCollection.ActionTypeKey.shown.rawValue, NSFontCollection.ActionTypeKey.hidden.rawValue])
+            XCTAssertEqual(actions.events, [NSFontCollection.ActionTypeKey.shown.rawValue, NSFontCollection.ActionTypeKey.hidden.rawValue])
             XCTAssertThrowsError(try NSFontCollection.hide(withName: NSFontCollection.Name("Never Shown"), visibility: .user))
             // The manager's collection API is the same store.
             XCTAssertTrue(NSFontManager.shared.addCollection("AppKitCross Manager \(getpid())", options: []))

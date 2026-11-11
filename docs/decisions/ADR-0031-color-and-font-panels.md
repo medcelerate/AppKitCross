@@ -1,4 +1,4 @@
-# ADR-0024: Colour and font panels
+# ADR-0031: Colour and font panels
 
 Date: 2026-11-10. Status: accepted, awaiting verification on the Windows PC.
 

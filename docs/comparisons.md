@@ -15,7 +15,7 @@ by a capture of the live window.
 | Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
 | Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Panels tab: `NSColorWell`s in the three styles, buttons opening the panels, a rich text view both panels change | ![macOS](images/compare/layout-panels-macos.png) | ![Linux](images/compare/layout-panels-linux.png) | awaiting a capture from the Windows machine |
-| The Colors panel (`NSColorPanel`, ADR-0024), drawn by the package | ![macOS](images/compare/color-panel-macos.png) | ![Linux](images/compare/color-panel-linux.png) | awaiting a capture from the Windows machine |
+| The Colors panel (`NSColorPanel`, ADR-0031), drawn by the package | ![macOS](images/compare/color-panel-macos.png) | ![Linux](images/compare/color-panel-linux.png) | awaiting a capture from the Windows machine |
 | The Fonts panel (`NSFontPanel`), listing the platform's families | ![macOS](images/compare/font-panel-macos.png) | ![Linux](images/compare/font-panel-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:

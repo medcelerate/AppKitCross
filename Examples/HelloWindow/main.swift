@@ -1696,14 +1696,15 @@ final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
     override func viewDidAppear() {
         super.viewDidAppear()
         view.window?.makeFirstResponder(textView)
-        let open: () -> Void
+        let wantsColor: Bool
         switch ProcessInfo.processInfo.environment["APPKITWIN_PANELS_OPEN"] {
-        case "color": open = { NSApp.orderFrontColorPanel(nil) }
-        case "font": open = { NSFontManager.shared.orderFrontFontPanel(nil) }
+        case "color": wantsColor = true
+        case "font": wantsColor = false
         default: return
         }
+        @MainActor func open() { if wantsColor { NSApp.orderFrontColorPanel(nil) } else { NSFontManager.shared.orderFrontFontPanel(nil) } }
         // Screenshots capture at once; a live run waits for the window to be mapped first.
-        if CommandLine.arguments.contains("--screenshot") { open() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: open) }
+        if CommandLine.arguments.contains("--screenshot") { open() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { open() } }
     }
 
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {

@@ -30,7 +30,8 @@ import CoreText
     private var _mouseDownPoint: NSPoint = .zero
     private var _dragStarted = false
     private var _dropHighlight = false
-    nonisolated(unsafe) private static var _activeWells = NSHashTable<NSColorWell>.weakObjects()
+    private final class _WeakWell { weak var well: NSColorWell?; init(_ w: NSColorWell) { well = w } }
+    nonisolated(unsafe) private static var _activeWells: [_WeakWell] = []
     internal static let takeColorAction = Selector(("takeColorFrom:"))
 
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSActionCell(textCell: "") }
@@ -228,10 +229,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorwell/activate(_:)
     @MainActor open func activate(_ exclusive: Bool) {
         if exclusive {
-            for w in NSColorWell._activeWells.allObjects where w !== self { w.deactivate() }
+            for w in NSColorWell._activeWells.compactMap({ $0.well }) where w !== self { w.deactivate() }
         }
         _isActive = true
-        NSColorWell._activeWells.add(self)
+        NSColorWell._activeWells.removeAll { $0.well == nil || $0.well === self }
+        NSColorWell._activeWells.append(_WeakWell(self))
         let panel = NSColorPanel.shared
         panel.showsAlpha = _supportsAlpha
         panel.setTarget(self)
@@ -261,7 +263,7 @@ import CoreText
     @MainActor open func deactivate() {
         guard _isActive else { return }
         _isActive = false
-        NSColorWell._activeWells.remove(self)
+        NSColorWell._activeWells.removeAll { $0.well == nil || $0.well === self }
         if NSColorPanel.sharedColorPanelExists, NSColorPanel.shared._target === self {
             NSColorPanel.shared.setTarget(nil)
             NSColorPanel.shared.setAction(nil)

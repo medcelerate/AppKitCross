@@ -13,7 +13,7 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/Hello
 for tab in combo outline panels; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
-# The Colors and Fonts panels (ADR-0024), rendered headless like the other windows.
+# The Colors and Fonts panels (ADR-0031), rendered headless like the other windows.
 for panel in color font; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=$panel "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done

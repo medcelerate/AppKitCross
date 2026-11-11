@@ -244,7 +244,7 @@ import CoreText
         "cancelOperation:": { $0.cancelOperation($1) }, "selectAll:": { $0.selectAll($1) }, "selectWord:": { $0.selectWord($1) },
         "selectLine:": { $0.selectLine($1) }, "selectParagraph:": { $0.selectParagraph($1) },
         "copy:": { $0.copy($1) }, "cut:": { $0.cut($1) }, "paste:": { $0.paste($1) }, "delete:": { $0.delete($1) },
-        "changeFont:": { $0.changeFont($1) }, "changeColor:": { $0.changeColor($1) },
+        "changeFont:": { $0.changeFont($1) }, "changeColor:": { $0._changeColor(from: $1) },
     ]
 
     // MARK: Font and colour panels (ADR-0022)
@@ -313,7 +313,11 @@ import CoreText
 
     /// `changeColor:` from the colour panel (or a colour well): the sender's colour
     /// becomes the selection's text colour.
-    @MainActor open func changeColor(_ sender: Any?) {
+    @MainActor open func changeColor(_ sender: Any?) { _changeColor(from: sender) }
+
+    /// Shared by both `changeColor` overloads (which must not call each other: the
+    /// compiler picks a different one per platform).
+    @MainActor internal func _changeColor(from sender: Any?) {
         guard isEditable else { return }
         let color: NSColor
         if let p = sender as? NSColorPanel { color = p.color }
@@ -1121,7 +1125,7 @@ import CoreText
     }
     // Requirement of NSColorChanging (signature differs from the inherited member)
     // Requirement of NSColorChanging
-    open func changeColor(_ sender: NSColorPanel?) { MainActor.assumeIsolated { changeColor(sender as Any?) } }
+    open func changeColor(_ sender: NSColorPanel?) { MainActor.assumeIsolated { _changeColor(from: sender) } }
     // Requirement of NSTextInputClient
     open func doCommand(by selector: Selector) {
         MainActor.assumeIsolated {
