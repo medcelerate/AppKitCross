@@ -1,4 +1,4 @@
-// Colour and font panels (ADR-0022) on the host backend: panel mode and colour round
+// Colour and font panels (ADR-0031) on the host backend: panel mode and colour round
 // trips, continuous and final action delivery, `changeColor:` through the responder
 // chain, colour wells (activation, the panel following, drag and drop, accessibility),
 // the colour pasteboard type, the native-dialog hook, font conversion through the
@@ -339,6 +339,61 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             b.deactivate()
             click(b)
             XCTAssertFalse(b.isActive, "a disabled well ignores clicks")
+        }
+    }
+
+    /// The panel's own sliders, wheel and swatch are accessibility elements (a plain
+    /// NSView is ignored unless it opts in), the sliders in percent with a label; a well
+    /// reads as a colour well with a role description, help and a settable colour value.
+    func testPanelAndWellAccessibility() {
+        MainActor.assumeIsolated {
+            let w = makeWindow()
+            defer { w.close() }
+            let well = NSColorWell(frame: NSRect(x: 20, y: 100, width: 44, height: 24))
+            well.color = .blue
+            let r = Receiver()
+            well.target = r; well.action = Selector(("wellChanged:"))
+            w.contentView!.addSubview(well)
+            let e = w.accessibilityTree().flattened.first { $0.role == NSAccessibility.Role.colorWell.rawValue }
+            XCTAssertNotNil(e)
+            XCTAssertEqual(e?.roleDescription, "color well")
+            XCTAssertEqual(e?.value?.stringValue, "rgb 0 0 1 1")
+            XCTAssertFalse(e?.help?.isEmpty ?? true)
+            XCTAssertTrue(e?.isSettable ?? false)
+            XCTAssertTrue(e?.actions.contains(.press) ?? false)
+            XCTAssertTrue(well._accessibilitySetValue(.string("#FF0000")))
+            XCTAssertEqual(well.color.redComponent, 1)
+            XCTAssertEqual(well.color.blueComponent, 0)
+            XCTAssertTrue(well._accessibilitySetValue(.string("rgb 0 1 0 1")))
+            XCTAssertEqual(well.color.greenComponent, 1)
+            XCTAssertEqual(r.received, ["wellChanged:", "wellChanged:"])
+
+            let p = NSColorPanel.shared
+            p.showsAlpha = true
+            p.color = NSColor(red: 0.5, green: 0.25, blue: 0, alpha: 1)
+            p.mode = .wheel
+            p.orderFront(nil)
+            defer { p.orderOut(nil); p.showsAlpha = false }
+            @MainActor func sliders() -> [PlatformAccessibilityElement] {
+                p.accessibilityTree().flattened.filter { $0.role == NSAccessibility.Role.slider.rawValue }
+            }
+            var labels = sliders().map { $0.label ?? "" }
+            XCTAssertTrue(labels.contains("Brightness"), "\(labels)")
+            XCTAssertTrue(labels.contains("Opacity"), "\(labels)")
+            let wheel = p.accessibilityTree().flattened.first { $0.label == "Color wheel" }
+            XCTAssertEqual(wheel?.role, NSAccessibility.Role.colorWell.rawValue)
+            p.mode = .RGB
+            labels = sliders().map { $0.label ?? "" }
+            XCTAssertEqual(labels, ["Red", "Green", "Blue", "Opacity"])
+            let red = sliders()[0]
+            XCTAssertEqual(red.minValue, 0)
+            XCTAssertEqual(red.maxValue, 100)
+            XCTAssertEqual(red.value?.doubleValue, 50)
+            XCTAssertTrue(red.isSettable)
+            // Setting the value through accessibility changes the panel's colour.
+            let view = p._view
+            XCTAssertTrue(view.sliders[0]._accessibilitySetValue(.number(100)))
+            XCTAssertEqual(p.color.redComponent, 1, accuracy: 0.01)
         }
     }
 

@@ -327,6 +327,24 @@ import CoreText
         return MainActor.assumeIsolated { String(format: "rgb %.3g %.3g %.3g %.3g", Double(_color.redComponent), Double(_color.greenComponent), Double(_color.blueComponent), Double(_color.alphaComponent)) }
     }
     open override func accessibilityLabel() -> String? { _a11y.label ?? toolTip }
+    open override func accessibilityRoleDescription() -> String? { _a11y.roleDescription ?? "color well" }
+    open override func accessibilityHelp() -> String? { _a11y.help ?? toolTip ?? "Opens the Colors panel to choose a color" }
+    /// A hex ("#RRGGBB") or "rgb r g b a" string sets the colour, as the panel would.
+    override func _accessibilityValueIsSettable() -> Bool { isEnabled }
+    override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
+        guard isEnabled, case .string(let s) = value, let c = NSColorWell._parseColor(s) else { return false }
+        color = _supportsAlpha ? c : c.withAlphaComponent(1)
+        _fireAction()
+        return true
+    }
+    internal static func _parseColor(_ s: String) -> NSColor? {
+        let parts = s.split(separator: " ").map(String.init)
+        if parts.first?.lowercased() == "rgb", parts.count >= 4, let r = Double(parts[1]), let g = Double(parts[2]), let b = Double(parts[3]) {
+            let a = parts.count > 4 ? Double(parts[4]) ?? 1 : 1
+            return NSColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a))
+        }
+        return _NSColorMath.color(hex: s, alpha: 1)
+    }
     open override func accessibilityPerformPress() -> Bool {
         MainActor.assumeIsolated {
             guard isEnabled else { return false }

@@ -92,7 +92,13 @@ updates its binding. Wells are drag sources (a drag past the click threshold cal
 the colour on the pasteboard and a swatch image) and drag destinations for
 `NSPasteboard.PasteboardType.color`, whose property list is the sRGB components
 (`NSColor` adopts `NSPasteboardReading`/`NSPasteboardWriting`). A well is AXColorWell
-with the colour's components as its value; the press action activates it.
+with the colour's components as its value (settable from a hex or `rgb r g b a` string),
+the role description "color well", a help string and the press action, which activates
+it. UIA has no colour-well control type, so the Win32 bridge exposes a well as a Button
+named by its role description with Invoke and a Value pattern; the panel's own sliders,
+wheel and swatch opt in as accessibility elements (a plain `NSView` is ignored unless it
+does), the sliders as AXSlider in percent with a settable range value, so Narrator reads
+them as sliders.
 
 ### Font descriptors and collections over CoreText
 

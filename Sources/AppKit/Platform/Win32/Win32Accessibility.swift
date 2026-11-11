@@ -161,6 +161,7 @@ extension Win32Window {
             case "AXStaticText": flags |= UInt32(CUIA_HAS_TEXT)
             case "AXPopUpButton", "AXComboBox": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             case "AXSlider", "AXScrollBar", "AXIncrementor", "AXLevelIndicator", "AXProgressIndicator": flags |= UInt32(CUIA_HAS_RANGE)
+            case "AXColorWell": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             case "AXTable", "AXList", "AXOutline", "AXTabGroup", "AXRadioGroup": flags |= UInt32(CUIA_HAS_SELECTION)
             case "AXRow": flags |= UInt32(CUIA_HAS_SELECTION_ITEM)
             case "AXGrid": flags |= UInt32(CUIA_HAS_SELECTION)
@@ -203,6 +204,7 @@ extension Win32Window {
         if let l = e.label, !l.isEmpty { return l }
         if let t = e.title, !t.isEmpty { return t }
         if e.role == "AXStaticText", case .string(let s)? = e.value { return s }
+        if e.role == "AXColorWell" { return e.roleDescription ?? "Color well" }     // Narrator needs a name; the value carries the colour
         return nil
     }
 
@@ -210,7 +212,7 @@ extension Win32Window {
     private static func controlType(for e: PlatformAccessibilityElement) -> Int32 {
         if e.subrole == "AXTabButton" { return 50019 }      // TabItem
         switch e.role {
-        case "AXButton", "AXMenuButton": return 50000
+        case "AXButton", "AXMenuButton", "AXColorWell": return 50000     // a colour well is a button whose Value is the colour
         case "AXCheckBox": return 50002
         case "AXRadioButton": return 50013
         case "AXStaticText": return 50020

@@ -117,11 +117,20 @@ internal final class _NSColorSliderView: NSView {
         }
     }
 
-    // Accessibility: a slider in percent.
+    // Accessibility: a slider in percent. A plain NSView is ignored unless it says it is an
+    // element, so these views opt in (UIA then lists them as Slider with RangeValue).
+    override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .slider }
     override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : MainActor.assumeIsolated { Double((value * 100).rounded()) } }
     override func accessibilityMinValue() -> Any? { 0.0 }
     override func accessibilityMaxValue() -> Any? { 100.0 }
+    override func _accessibilityValueIsSettable() -> Bool { isEnabledForTracking }
+    override func _accessibilitySetValue(_ v: PlatformAccessibilityValue) -> Bool {
+        guard isEnabledForTracking, let d = v.doubleValue else { return false }
+        value = _NSColorMath.clamp(CGFloat(d) / 100)
+        onChange?(value, true)
+        return true
+    }
     override func accessibilityPerformIncrement() -> Bool { MainActor.assumeIsolated { value = _NSColorMath.clamp(value + 0.01); onChange?(value, true); return true } }
     override func accessibilityPerformDecrement() -> Bool { MainActor.assumeIsolated { value = _NSColorMath.clamp(value - 0.01); onChange?(value, true); return true } }
 }
@@ -218,8 +227,13 @@ internal final class _NSColorWheelView: NSView {
         onChange?(hue, saturation, true)
     }
 
+    override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .colorWell }
     override func accessibilityLabel() -> String? { _a11y.label ?? "Color wheel" }
+    override func accessibilityValue() -> Any? {
+        if _a11y.hasValue { return _a11y.value }
+        return MainActor.assumeIsolated { String(format: "hue %d° saturation %d%%", Int((hue * 360).rounded()), Int((saturation * 100).rounded())) }
+    }
 }
 
 // MARK: - The preview swatch
@@ -269,6 +283,7 @@ internal final class _NSColorSwatchView: NSView, NSDraggingSource {
         return true
     }
 
+    override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .colorWell }
     override func accessibilityLabel() -> String? { _a11y.label ?? "Current color" }
     override func accessibilityValue() -> Any? { MainActor.assumeIsolated { _NSColorMath.hex(color) } }
@@ -388,6 +403,7 @@ internal final class _NSColorFavoritesView: NSView, NSDraggingSource {
         return true
     }
 
+    override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .group }
     override func accessibilityLabel() -> String? { _a11y.label ?? "Favorite colors" }
 }
@@ -441,6 +457,7 @@ internal final class _NSColorCrayonView: NSView {
         onPick?(crayons[i].1)
     }
 
+    override func isAccessibilityElement() -> Bool { _a11y.isElement ?? true }
     override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .group }
     override func accessibilityLabel() -> String? { _a11y.label ?? "Crayons" }
 }
@@ -620,6 +637,7 @@ internal final class _NSColorPanelView: NSView {
             guard let self else { return }
             self.userChanged(NSColor(hue: self.wheel.hue, saturation: self.wheel.saturation, brightness: v, alpha: self.color.alphaComponent), final: final)
         }
+        brightnessSlider.setAccessibilityLabel("Brightness")
         addSubview(brightnessSlider)
         brightnessField.alignment = .right
         brightnessField.tag = 100
