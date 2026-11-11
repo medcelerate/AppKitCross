@@ -18,7 +18,10 @@ final class _RenderNode {
     var renderedFrames = 0
     var renderedHasAudio = false
     let kind: Kind
-    enum Kind { case player(_PlayerRenderState), mixer(AVAudioMixerNode), output, effect(_EffectState) }
+    enum Kind {
+        case player(_PlayerRenderState), mixer(AVAudioMixerNode), output, effect(_EffectState)
+        case timeEffect(_TimeEffectState), source(_SourceRenderState), input(AVAudioInputNode, _InputCapture?), sink(_SinkRenderState)
+    }
 
     init(node: AVAudioNode, format: AVAudioFormat, capacity: Int, kind: Kind) {
         self.node = node
@@ -44,8 +47,24 @@ final class _RenderInput {
     /// Scratch for the converter's output (source channel count).
     let converted: UnsafeMutablePointer<UnsafeMutablePointer<Float>>?
     let mixing: _MixingParameters?
-    init(source: _RenderNode, bus: Int, converter: _RateConverter?, capacity: Int, mixing: _MixingParameters?) {
+    /// For a mixer input whose channel count has no direct law (not mono/stereo into
+    /// stereo, not anything into mono): AVAudioConverter's downmix matrix, and its scratch.
+    let matrix: _ChannelMatrix?
+    let mapped: UnsafeMutablePointer<UnsafeMutablePointer<Float>>?
+    let mappedChannels: Int
+    init(source: _RenderNode, bus: Int, converter: _RateConverter?, capacity: Int, mixing: _MixingParameters?, destinationChannels: Int = 0) {
         self.source = source; self.bus = bus; self.converter = converter; self.mixing = mixing
+        let i = source.channels, o = destinationChannels
+        if mixing != nil && o > 0 && i != o && o != 1 && !(o == 2 && i == 1) {
+            let m = i > o ? _ChannelMatrix.downmix(inputs: i, outputs: o) : _ChannelMatrix.standard(inputs: i, outputs: o)
+            matrix = m
+            let p = UnsafeMutablePointer<UnsafeMutablePointer<Float>>.allocate(capacity: o)
+            for c in 0..<o { p[c] = .allocate(capacity: capacity); p[c].initialize(repeating: 0, count: capacity) }
+            mapped = p
+            mappedChannels = o
+        } else {
+            matrix = nil; mapped = nil; mappedChannels = 0
+        }
         if converter != nil {
             let p = UnsafeMutablePointer<UnsafeMutablePointer<Float>>.allocate(capacity: source.channels)
             for c in 0..<source.channels { p[c] = .allocate(capacity: capacity); p[c].initialize(repeating: 0, count: capacity) }
@@ -56,6 +75,7 @@ final class _RenderInput {
     }
     deinit {
         if let converted { for c in 0..<source.channels { converted[c].deallocate() }; converted.deallocate() }
+        if let mapped { for c in 0..<mappedChannels { mapped[c].deallocate() }; mapped.deallocate() }
     }
 }
 
@@ -72,6 +92,11 @@ final class _RenderGraph {
     let latencyFrames: Int64
     private(set) var nodes: [_RenderNode] = []
     let output: _RenderNode
+    /// Nodes pulled every cycle besides the output's chain: sink nodes, and the input node
+    /// when only a tap uses it. Each keeps the fraction of a frame it is owed when its rate
+    /// differs from the graph's.
+    private var extras: [_RenderNode] = []
+    private var extraFractions: [Double] = []
     private var cycle: Int64 = 0
     /// Scratch for the interleaved/planar output conversion.
     private let outputPlanes: UnsafeMutablePointer<UnsafeMutablePointer<Float>>
@@ -97,6 +122,10 @@ final class _RenderGraph {
             case let p as AVAudioPlayerNode: kind = .player(p._state)
             case let m as AVAudioMixerNode: kind = .mixer(m)
             case let e as AVAudioUnitEffect: kind = .effect(e._makeEffectState(channels: Int(format.channelCount), rate: format.sampleRate))
+            case let t as AVAudioUnitTimeEffect: kind = .timeEffect(t._makeTimeEffectState(channels: max(1, Int(format.channelCount)), rate: format.sampleRate, maxFrames: maxFrames))
+            case let s as AVAudioSourceNode: kind = .source(_SourceRenderState(node: s, connectionFormat: format, maxFrames: capacity))
+            case let i as AVAudioInputNode: kind = .input(i, manualRendering ? nil : i._capture)
+            case let k as AVAudioSinkNode: kind = .sink(_SinkRenderState(node: k, channels: max(1, Int(format.channelCount))))
             default: kind = .output
             }
             let r = _RenderNode(node: node, format: format, capacity: capacity, kind: kind)
@@ -118,10 +147,11 @@ final class _RenderGraph {
                     case let p as AVAudioPlayerNode: mixing = p._mixingSource.parameters(forMixer: r.node, bus: bus)
                     case let m as AVAudioMixerNode: mixing = m._mixingSource.parameters(forMixer: r.node, bus: bus)
                     case let i as AVAudioInputNode: mixing = i._mixingSource.parameters(forMixer: r.node, bus: bus)
+                    case let s as AVAudioSourceNode: mixing = s._mixingSource.parameters(forMixer: r.node, bus: bus)
                     default: mixing = nil
                     }
                 }
-                r.inputs.append(_RenderInput(source: src, bus: bus, converter: converter, capacity: maxFrames, mixing: mixing))
+                r.inputs.append(_RenderInput(source: src, bus: bus, converter: converter, capacity: maxFrames, mixing: mixing, destinationChannels: r.channels))
             }
             // Taps deliver only when a device renders; Apple's do not fire in manual
             // rendering mode either.
@@ -130,6 +160,17 @@ final class _RenderGraph {
 
         wire(output)
         order.append(output)
+        // Sinks have no output to be pulled through; the input node feeds taps even when
+        // nothing downstream renders it.
+        for node in engine._attachedNodesLocked() {
+            guard built[ObjectIdentifier(node)] == nil else { continue }
+            if node is AVAudioSinkNode, let c = node._inputConnections[0] {
+                extras.append(build(node, format: c.format))
+            } else if let input = node as? AVAudioInputNode, !input._taps.isEmpty, !manualRendering {
+                extras.append(build(input, format: input.outputFormat(forBus: 0)))
+            }
+        }
+        extraFractions = Array(repeating: 0, count: extras.count)
         nodes = order
         for n in nodes {
             n.node._lastRate.value = n.rate
@@ -162,6 +203,17 @@ final class _RenderGraph {
         cycle += 1
         let hasAudio = pull(output, frames: frames, sampleTime: sampleTime, hostTime: hostTime)
         for c in 0..<channels { outputPlanes[c].update(from: output.out[c], count: frames) }
+        for i in 0..<extras.count {
+            let x = extras[i]
+            var n = frames
+            if x.rate != rate {
+                let exact = Double(frames) * x.rate / rate + extraFractions[i]
+                n = Int(exact.rounded(.down))
+                extraFractions[i] = exact - Double(n)
+            }
+            n = min(n, maxFrames)
+            if n > 0 { _ = pull(x, frames: n, sampleTime: Int64(Double(sampleTime) * x.rate / rate), hostTime: hostTime) }
+        }
         return hasAudio
     }
 
@@ -188,11 +240,62 @@ final class _RenderGraph {
                 guard let planes = pullAdapted(input, frames: n, sampleTime: sampleTime, hostTime: hostTime) else { continue }
                 let volume = input.mixing?.volume.value ?? 1
                 let pan = input.mixing?.pan.value ?? 0
-                mix(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: n, volume: volume, pan: pan)
+                if let matrix = input.matrix, let mapped = input.mapped {
+                    matrix.apply(planes, into: UnsafePointer(mapped), frames: n)
+                    mix(UnsafePointer(mapped), inChannels: r.channels, into: r.out, outChannels: r.channels, frames: n, volume: volume, pan: pan)
+                } else {
+                    mix(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: n, volume: volume, pan: pan)
+                }
                 hasAudio = true
             }
             let gain = mixer._outputVolume.value
             if gain != 1 { for c in 0..<r.channels { let p = r.out[c]; for i in 0..<n { p[i] *= gain } } }
+        case .timeEffect(let state):
+            if state.isBypassed {
+                if let input = r.inputs.first, let planes = pullAdapted(input, frames: n, sampleTime: state.inputSampleTime, hostTime: hostTime) {
+                    copyChannels(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: n)
+                    hasAudio = true
+                } else {
+                    for c in 0..<r.channels { r.out[c].update(repeating: 0, count: n) }
+                }
+                state.inputSampleTime += Int64(n)
+            } else if let input = r.inputs.first {
+                // Pull what the unit asks for, in pieces no larger than the source's
+                // scratch; a further piece is a new pass over the upstream nodes.
+                var pieces = 0
+                while pieces < 4096 {
+                    let want = state.inputFramesWanted(forOutput: n)
+                    if want <= 0 { break }
+                    let take = min(want, input.source.capacity, maxFrames)
+                    if pieces > 0 { cycle += 1 }
+                    if let planes = pullAdapted(input, frames: take, sampleTime: state.inputSampleTime, hostTime: hostTime) {
+                        if input.source.channels == r.channels { state.push(planes, frames: take) }
+                        else { copyChannels(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: take); state.push(UnsafePointer(r.out), frames: take) }
+                    } else {
+                        for c in 0..<r.channels { r.out[c].update(repeating: 0, count: take) }
+                        state.push(UnsafePointer(r.out), frames: take)
+                    }
+                    state.inputSampleTime += Int64(take)
+                    pieces += 1
+                }
+                r.renderedCycle = cycle
+                state.produce(UnsafePointer(r.out), frames: n)
+                hasAudio = true
+            } else {
+                for c in 0..<r.channels { r.out[c].update(repeating: 0, count: n) }
+            }
+        case .source(let state):
+            hasAudio = state.render(into: UnsafePointer(r.out), frames: n, sampleTime: sampleTime, hostTime: hostTime)
+        case .input(let node, let capture):
+            hasAudio = node._renderInput(into: UnsafePointer(r.out), channels: r.channels, frames: n, capture: capture)
+        case .sink(let state):
+            if let input = r.inputs.first, let planes = pullAdapted(input, frames: n, sampleTime: sampleTime, hostTime: hostTime) {
+                copyChannels(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: n)
+                hasAudio = true
+            } else {
+                for c in 0..<r.channels { r.out[c].update(repeating: 0, count: n) }
+            }
+            state.deliver(UnsafePointer(r.out), frames: n, sampleTime: sampleTime, hostTime: hostTime)
         case .output, .effect:
             if let input = r.inputs.first, let planes = pullAdapted(input, frames: n, sampleTime: sampleTime, hostTime: hostTime) {
                 copyChannels(planes, inChannels: input.source.channels, into: r.out, outChannels: r.channels, frames: n)
