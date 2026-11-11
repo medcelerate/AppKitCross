@@ -161,6 +161,7 @@ extension Win32Window {
             case "AXStaticText": flags |= UInt32(CUIA_HAS_TEXT)
             case "AXPopUpButton", "AXComboBox": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             case "AXSlider", "AXScrollBar", "AXIncrementor", "AXLevelIndicator", "AXProgressIndicator": flags |= UInt32(CUIA_HAS_RANGE)
+            case "AXColorWell": flags |= UInt32(CUIA_HAS_VALUE); if e.actions.contains(.press) { flags |= UInt32(CUIA_HAS_INVOKE) }
             case "AXTable", "AXList", "AXOutline", "AXTabGroup", "AXRadioGroup": flags |= UInt32(CUIA_HAS_SELECTION)
             case "AXRow": flags |= UInt32(CUIA_HAS_SELECTION_ITEM)
             case "AXGrid": flags |= UInt32(CUIA_HAS_SELECTION)
@@ -175,7 +176,7 @@ extension Win32Window {
                 n.rangeMax = e.maxValue ?? 1
                 n.rangeStep = (n.rangeMax - n.rangeMin) / 100
             }
-            n.toggleState = Int32(e.value?.doubleValue ?? 0)
+            n.toggleState = e.value?.toggleState ?? 0     // never Int32(Double): a value that parses huge trapped here
             if let sel = e.selectedTextRange { n.textSelectionStart = Int32(sel.location); n.textSelectionLength = Int32(sel.length) } else { n.textSelectionStart = -1; n.textSelectionLength = 0 }
             nodes.append(n)
             for c in e.children { visit(c, parent: n.id) }
@@ -195,7 +196,10 @@ extension Win32Window {
             }
             nodes.withUnsafeBufferPointer { cuia_root_set_nodes(root, $0.baseAddress, Int32($0.count)) }
         }
-        if NSView._traceInvalidation { NSView._trace("uia tree '\(title)': \(nodes.count) nodes") }
+        if NSView._traceInvalidation {
+            let ranges = tree.flattened.filter { $0.role == "AXSlider" }.map { "\($0.label ?? "?")=\($0.value?.stringValue ?? "nil")" }
+            NSView._trace("uia tree '\(title)': \(nodes.count) nodes" + (ranges.isEmpty ? "" : ", sliders " + ranges.joined(separator: " ")))
+        }
     }
 
     /// The UIA name: the label, else the title, else a static text's value.
@@ -203,6 +207,7 @@ extension Win32Window {
         if let l = e.label, !l.isEmpty { return l }
         if let t = e.title, !t.isEmpty { return t }
         if e.role == "AXStaticText", case .string(let s)? = e.value { return s }
+        if e.role == "AXColorWell" { return e.roleDescription ?? "Color well" }     // Narrator needs a name; the value carries the colour
         return nil
     }
 
@@ -211,7 +216,7 @@ extension Win32Window {
         if e.subrole == "AXTabButton" { return 50019 }      // TabItem
         if e.subrole == "AXSwitch" { return 50000 }         // Button with the Toggle pattern (a toggle switch)
         switch e.role {
-        case "AXButton", "AXMenuButton": return 50000
+        case "AXButton", "AXMenuButton", "AXColorWell": return 50000     // a colour well is a button whose Value is the colour
         case "AXCheckBox": return 50002
         case "AXRadioButton": return 50013
         case "AXStaticText": return 50020

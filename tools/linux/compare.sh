@@ -13,9 +13,13 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/Hello
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=collection APPKITWIN_COLLECTION_SELECT=1 "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=grid "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=box "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
-# The Layout Demo's Combo, Outline, Pages and Popover tabs, and the Outline tab mirrored right to left.
-for tab in combo outline pages popover; do
+# The Layout Demo's Combo, Outline, Pages, Panels and Popover tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages panels popover; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+done
+# The Colors and Fonts panels (ADR-0031), rendered headless like the other windows.
+for panel in color font; do
+    APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=$panel "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=outline APPKITWIN_LAYOUT_DIRECTION=rtl "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT/rtl"

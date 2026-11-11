@@ -9,6 +9,52 @@ import Foundation
 import CoreGraphics
 #endif
 
+#if !canImport(ObjectiveC)
+/// swift-corelibs-foundation's CFAttributedString compares the attribute dictionaries
+/// of adjacent runs to coalesce them, and its CF equality traps on two distinct instances
+/// of a Swift class (NSFont, NSColor, NSParagraphStyle are not CF types). A Hashable
+/// struct is boxed as a `__SwiftValue`, which CF does compare, so the storage keeps such
+/// objects in this box and unwraps them for every reader.
+internal struct _NSTextStorageBox: Hashable {
+    let object: AnyObject
+    static func == (a: _NSTextStorageBox, b: _NSTextStorageBox) -> Bool {
+        a.object === b.object || ((a.object as? NSObject)?.isEqual(b.object) ?? false)
+    }
+    func hash(into hasher: inout Hasher) {
+        if let o = object as? NSObject { hasher.combine(o.hash) } else { hasher.combine(ObjectIdentifier(object)) }
+    }
+    /// Values CF compares itself stay as they are: Foundation's bridged types and Swift values.
+    static func needsBox(_ value: Any) -> Bool {
+        switch value {
+        case is NSString, is NSNumber, is NSData, is NSArray, is NSDictionary, is NSDate, is NSURL, is NSValue: return false
+        case let o as AnyObject where type(of: o) is NSObject.Type: return true
+        default: return false
+        }
+    }
+    static func box(_ attrs: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
+        var out = attrs
+        for (k, v) in attrs where needsBox(v) { out[k] = _NSTextStorageBox(object: v as AnyObject) }
+        return out
+    }
+    static func unbox(_ attrs: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] {
+        var out = attrs
+        for (k, v) in attrs { if let b = v as? _NSTextStorageBox { out[k] = b.object } }
+        return out
+    }
+    static func unbox(_ value: Any?) -> Any? { (value as? _NSTextStorageBox)?.object ?? value }
+    static func box(_ value: Any) -> Any { needsBox(value) ? _NSTextStorageBox(object: value as AnyObject) : value }
+    /// `s` with every run's attributes passed through `transform`.
+    static func map(_ s: NSAttributedString, _ transform: ([NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any]) -> NSAttributedString {
+        let text = s.string as NSString
+        let out = NSMutableAttributedString(string: "")
+        s.enumerateAttributes(in: NSRange(location: 0, length: s.length), options: []) { attrs, r, _ in
+            out.append(NSAttributedString(string: text.substring(with: r), attributes: transform(attrs)))
+        }
+        return out
+    }
+}
+#endif
+
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextstorage
 open class NSTextStorage: NSMutableAttributedString {
     private let _backing: NSMutableAttributedString
@@ -44,12 +90,12 @@ open class NSTextStorage: NSMutableAttributedString {
 
     public override convenience init(string str: String, attributes attrs: [NSAttributedString.Key: Any]? = nil) {
         self.init()
-        _backing.replaceCharacters(in: NSRange(location: 0, length: 0), with: NSAttributedString(string: str, attributes: attrs))
+        _backing.replaceCharacters(in: NSRange(location: 0, length: 0), with: _in(NSAttributedString(string: str, attributes: attrs)))
     }
 
     public override convenience init(attributedString attrStr: NSAttributedString) {
         self.init()
-        _backing.replaceCharacters(in: NSRange(location: 0, length: 0), with: attrStr)
+        _backing.replaceCharacters(in: NSRange(location: 0, length: 0), with: _in(attrStr))
     }
 
     public required init?(coder: NSCoder) {
@@ -61,28 +107,44 @@ open class NSTextStorage: NSMutableAttributedString {
 
     open override var string: String { _backing.string }
     open override var length: Int { _backing.length }
+    #if canImport(ObjectiveC)
+    @inline(__always) private func _in(_ s: NSAttributedString) -> NSAttributedString { s }
+    @inline(__always) private func _out(_ s: NSAttributedString) -> NSAttributedString { s }
+    @inline(__always) private func _in(_ a: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] { a }
+    @inline(__always) private func _out(_ a: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] { a }
+    @inline(__always) private func _in(_ v: Any) -> Any { v }
+    @inline(__always) private func _out(_ v: Any?) -> Any? { v }
+    #else
+    private func _in(_ s: NSAttributedString) -> NSAttributedString { _NSTextStorageBox.map(s, _NSTextStorageBox.box) }
+    private func _out(_ s: NSAttributedString) -> NSAttributedString { _NSTextStorageBox.map(s, _NSTextStorageBox.unbox) }
+    private func _in(_ a: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] { _NSTextStorageBox.box(a) }
+    private func _out(_ a: [NSAttributedString.Key: Any]) -> [NSAttributedString.Key: Any] { _NSTextStorageBox.unbox(a) }
+    private func _in(_ v: Any) -> Any { _NSTextStorageBox.box(v) }
+    private func _out(_ v: Any?) -> Any? { _NSTextStorageBox.unbox(v) }
+    #endif
+
     open override func attributes(at location: Int, effectiveRange range: NSRangePointer?) -> [NSAttributedString.Key: Any] {
-        _backing.attributes(at: location, effectiveRange: range)
+        _out(_backing.attributes(at: location, effectiveRange: range))
     }
     open override func attribute(_ attrName: NSAttributedString.Key, at location: Int, effectiveRange range: NSRangePointer?) -> Any? {
-        _backing.attribute(attrName, at: location, effectiveRange: range)
+        _out(_backing.attribute(attrName, at: location, effectiveRange: range))
     }
     open override func attributes(at location: Int, longestEffectiveRange range: NSRangePointer?, in rangeLimit: NSRange) -> [NSAttributedString.Key: Any] {
-        _backing.attributes(at: location, longestEffectiveRange: range, in: rangeLimit)
+        _out(_backing.attributes(at: location, longestEffectiveRange: range, in: rangeLimit))
     }
     open override func attribute(_ attrName: NSAttributedString.Key, at location: Int, longestEffectiveRange range: NSRangePointer?, in rangeLimit: NSRange) -> Any? {
-        _backing.attribute(attrName, at: location, longestEffectiveRange: range, in: rangeLimit)
+        _out(_backing.attribute(attrName, at: location, longestEffectiveRange: range, in: rangeLimit))
     }
-    open override func attributedSubstring(from range: NSRange) -> NSAttributedString { _backing.attributedSubstring(from: range) }
+    open override func attributedSubstring(from range: NSRange) -> NSAttributedString { _out(_backing.attributedSubstring(from: range)) }
     open override func enumerateAttributes(in enumerationRange: NSRange, options opts: NSAttributedString.EnumerationOptions = [], using block: ([NSAttributedString.Key: Any], NSRange, UnsafeMutablePointer<ObjCBool>) -> Void) {
-        _backing.enumerateAttributes(in: enumerationRange, options: opts, using: block)
+        _backing.enumerateAttributes(in: enumerationRange, options: opts) { attrs, r, stop in block(self._out(attrs), r, stop) }
     }
     open override func enumerateAttribute(_ attrName: NSAttributedString.Key, in enumerationRange: NSRange, options opts: NSAttributedString.EnumerationOptions = [], using block: (Any?, NSRange, UnsafeMutablePointer<ObjCBool>) -> Void) {
-        _backing.enumerateAttribute(attrName, in: enumerationRange, options: opts, using: block)
+        _backing.enumerateAttribute(attrName, in: enumerationRange, options: opts) { v, r, stop in block(self._out(v), r, stop) }
     }
-    open override func isEqual(to other: NSAttributedString) -> Bool { _backing.isEqual(to: other) }
-    open override func copy(with zone: NSZone? = nil) -> Any { NSAttributedString(attributedString: _backing) }
-    open override func mutableCopy(with zone: NSZone? = nil) -> Any { NSMutableAttributedString(attributedString: _backing) }
+    open override func isEqual(to other: NSAttributedString) -> Bool { _backing.isEqual(to: _in(other)) }
+    open override func copy(with zone: NSZone? = nil) -> Any { NSAttributedString(attributedString: _out(_backing)) }
+    open override func mutableCopy(with zone: NSZone? = nil) -> Any { NSMutableAttributedString(attributedString: _out(_backing)) }
 
     private func _clamp(_ r: NSRange) -> NSRange {
         let n = _backing.length
@@ -97,22 +159,22 @@ open class NSTextStorage: NSMutableAttributedString {
     }
     open override func replaceCharacters(in range: NSRange, with attrString: NSAttributedString) {
         let r = _clamp(range)
-        _backing.replaceCharacters(in: r, with: attrString)
+        _backing.replaceCharacters(in: r, with: _in(attrString))
         edited([.editedCharacters, .editedAttributes], range: r, changeInLength: attrString.length - r.length)
     }
     open override func setAttributes(_ attrs: [NSAttributedString.Key: Any]?, range: NSRange) {
         let r = _clamp(range)
-        _backing.setAttributes(attrs, range: r)
+        _backing.setAttributes(attrs.map { _in($0) }, range: r)
         edited(.editedAttributes, range: r, changeInLength: 0)
     }
     open override func addAttribute(_ name: NSAttributedString.Key, value: Any, range: NSRange) {
         let r = _clamp(range)
-        _backing.addAttribute(name, value: value, range: r)
+        _backing.addAttribute(name, value: _in(value), range: r)
         edited(.editedAttributes, range: r, changeInLength: 0)
     }
     open override func addAttributes(_ attrs: [NSAttributedString.Key: Any] = [:], range: NSRange) {
         let r = _clamp(range)
-        _backing.addAttributes(attrs, range: r)
+        _backing.addAttributes(_in(attrs), range: r)
         edited(.editedAttributes, range: r, changeInLength: 0)
     }
     open override func removeAttribute(_ name: NSAttributedString.Key, range: NSRange) {
