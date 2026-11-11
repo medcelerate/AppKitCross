@@ -697,6 +697,21 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(pixels[i], 240, "the text view's background prints white, not the dark appearance's")
             XCTAssertGreaterThan(pixels[i + 1], 240)
             XCTAssertGreaterThan(pixels[i + 2], 240)
+            // The text itself prints black: dark pixels in the first line's band, none of the
+            // dark appearance's grey (#1E1E1E) anywhere on the page.
+            var darkText = 0, darkGrey = 0
+            for row in 0..<image.height {
+                for col in 0..<image.width {
+                    let j = row * image.bytesPerRow + col * 4
+                    let b = Int(pixels[j]), g = Int(pixels[j + 1]), r = Int(pixels[j + 2])
+                    if r < 80 && g < 80 && b < 80 { darkText += 1 }
+                    if abs(r - 30) < 6 && abs(g - 30) < 6 && abs(b - 30) < 6 { darkGrey += 1 }
+                }
+            }
+            XCTAssertGreaterThan(darkText, 20, "black glyphs on the page")
+            // A few grey pixels are antialiased glyph edges; a dark background would be the
+            // text view's whole 300 × 200 area.
+            XCTAssertLessThan(darkGrey, 500, "no dark-appearance background on the page")
             XCTAssertFalse(NSGraphicsContext._printing)
             XCTAssertTrue(text.effectiveAppearance.isDark, "the window keeps its appearance")
             window.close()

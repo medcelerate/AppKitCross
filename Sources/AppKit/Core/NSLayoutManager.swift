@@ -733,8 +733,10 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/drawglyphs(forglyphrange:at:)
     open func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         MainActor.assumeIsolated {
-            // Laid out (measured) under one appearance, drawn under another: resolve again.
-            if firstTextView == nil, let dark = _layoutIsDark, dark != NSAppearance.currentIsDark { _layoutValid = false }
+            // Laid out (measured) under one appearance, drawn under another: resolve again
+            // (a text view printing from a dark window lays its colours out light for the
+            // page, and dark again for the screen).
+            if let dark = _layoutIsDark, dark != (firstTextView?.effectiveAppearance.isDark ?? NSAppearance.currentIsDark) { _layoutValid = false }
         }
         _ensureLayout()
         MainActor.assumeIsolated {

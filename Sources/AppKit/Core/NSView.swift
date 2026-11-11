@@ -345,9 +345,7 @@ import CoreText
     /// The appearance dynamic colours resolve under while this view draws: its effective
     /// appearance on screen, aqua while `NSPrintOperation` draws a page or preview (AppKit
     /// prints light whatever the window shows, so a dark text view prints on white; ADR-0022).
-    internal var _drawingAppearance: NSAppearance {
-        NSGraphicsContext._printing ? NSAppearance._printing : effectiveAppearance
-    }
+    internal var _drawingAppearance: NSAppearance { effectiveAppearance }
 
     /// Draws this view and its subviews into `ctx`, which is in the superview's coordinate
     /// system. `dirtyRect` is in superview coordinates too.
@@ -431,8 +429,12 @@ import CoreText
 
     /// Inherited from the superview, then the window, then the application.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/effectiveappearance
+    /// While `NSPrintOperation` draws a page or preview every view answers aqua (AppKit
+    /// prints light whatever the window shows), so the text system lays its colours out
+    /// again for the page and dynamic colours resolve light (ADR-0022).
     @MainActor public var effectiveAppearance: NSAppearance {
-        _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
+        if NSGraphicsContext._printing { return NSAppearance._printing }
+        return _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
     }
 
     internal func _effectiveAppearanceDidChange() {
