@@ -266,6 +266,20 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(p.isVisible, "the native dialog stands in for the panel window")
             XCTAssertEqual(r.received, ["changeColor:"])
             XCTAssertEqual(p.color.blueComponent, 0.75, accuracy: 0.001)
+            // An active well gets the dialog's colour through takeColorFrom: and sends its action.
+            let w = makeWindow()
+            defer { w.close() }
+            let well = NSColorWell(frame: NSRect(x: 20, y: 100, width: 44, height: 24))
+            well.color = .red
+            well.target = r
+            well.action = Selector(("wellChanged:"))
+            w.contentView!.addSubview(well)
+            r.received.removeAll()
+            host.nextColorDialogResult = (0.1, 0.9, 0.2)
+            click(well)
+            XCTAssertEqual(well.color.greenComponent, 0.9, accuracy: 0.001, "the native result landed in the well")
+            XCTAssertEqual(r.received, ["wellChanged:"])
+            XCTAssertFalse(p.isVisible)
             host.nextColorDialogResult = nil
             r.received.removeAll()
             p.orderFront(nil)
@@ -491,6 +505,24 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(view.familyScroll.isHidden)
             view.sizeTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
             XCTAssertEqual(face.fonts.count, 1, "changeFont: reached the responder")
+            // While the panel is the key window with its size field editing (as on Win32,
+            // where a click in the panel activates it), its field editor does not swallow
+            // changeFont: and the send still reaches the document window's text view.
+            _ = w.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: 6, length: 9))
+            fm.orderFrontFontPanel(nil)
+            panel.makeKeyAndOrderFront(nil)
+            _ = panel.makeFirstResponder(view.sizeField)
+            XCTAssertTrue(panel.isKeyWindow)
+            XCTAssertTrue(w.isMainWindow, "a utility panel never takes main")
+            XCTAssertTrue((panel.firstResponder as? NSTextView)?.isFieldEditor ?? false, "the size field is editing")
+            let before = (tv.textStorage!.attribute(.font, at: 8, effectiveRange: nil) as? NSFont)?.pointSize
+            let big = try XCTUnwrap(NSFontPanel.standardSizes.firstIndex(of: 36))
+            view.sizeTable.selectRowIndexes(IndexSet(integer: big), byExtendingSelection: false)
+            XCTAssertNotEqual(before, 36)
+            XCTAssertEqual((tv.textStorage!.attribute(.font, at: 8, effectiveRange: nil) as? NSFont)?.pointSize, 36, "changeFont: crossed from the key panel to the main window")
+            XCTAssertNotEqual((panel.firstResponder as? NSTextView)?.font?.pointSize, 36, "the panel's own field editor kept its font")
+            w.makeKeyAndOrderFront(nil)
             // The toolbar's nil-target orderFrontFontPanel: ends at the application.
             panel.orderOut(nil)
             XCTAssertTrue(NSApplication.shared.sendAction(Selector(("orderFrontFontPanel:")), to: nil, from: nil))

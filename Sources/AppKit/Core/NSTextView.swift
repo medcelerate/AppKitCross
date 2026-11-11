@@ -302,7 +302,7 @@ import CoreText
     /// `changeFont:` from the font manager: every font in the selection goes through
     /// `NSFontManager.convert(_:)`, which applies what the panel or the Font menu asked.
     open override func changeFont(_ sender: Any?) {
-        guard isEditable, usesFontPanel else { return }
+        guard isEditable, usesFontPanel, _handlesPanelActions else { return }
         let fm = (sender as? NSFontManager) ?? NSFontManager.shared
         _changeSelectionAttributes { attrs in
             let current = (attrs[.font] as? NSFont) ?? self._effectiveFont
@@ -318,7 +318,7 @@ import CoreText
     /// Shared by both `changeColor` overloads (which must not call each other: the
     /// compiler picks a different one per platform).
     @MainActor internal func _changeColor(from sender: Any?) {
-        guard isEditable else { return }
+        guard isEditable, _handlesPanelActions else { return }
         let color: NSColor
         if let p = sender as? NSColorPanel { color = p.color }
         else if let w = sender as? NSColorWell { color = w.color }
@@ -354,11 +354,21 @@ import CoreText
     /// The editing selectors double as responder-chain actions, so Edit menu items with a
     /// nil target reach the text view.
     public func respondsToSelectorAction(_ action: Selector) -> Bool {
-        NSTextView._selectorDispatch[NSStringFromSelector(action)] != nil
+        let name = NSStringFromSelector(action)
+        // A field editor inside the Fonts or Colors panel (the size or hex field) must not
+        // take the panel's own `changeFont:`/`changeColor:`: the panel is the key window
+        // while the user works in it, and the send has to go on to the main window's
+        // first responder, the document's text view.
+        if name == "changeFont:" || name == "changeColor:" { return _handlesPanelActions }
+        return NSTextView._selectorDispatch[name] != nil
+    }
+
+    internal var _handlesPanelActions: Bool {
+        !(isFieldEditor && (window is NSFontPanel || window is NSColorPanel))
     }
 
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
-        guard let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
+        guard respondsToSelectorAction(action), let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
         handler(self, sender)
         return true
     }
