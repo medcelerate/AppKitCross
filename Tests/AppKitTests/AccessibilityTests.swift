@@ -72,6 +72,16 @@ private final class Fixture: NSObject, NSSelectorHandling {
 
 final class AccessibilityTests: XCTestCase, @unchecked Sendable {
 
+    /// These tests read what the core told the platform window (`HostWindow`) and drive
+    /// the host backend's displays; on a real window system (the Win32 or X11 backend,
+    /// APPKITWIN_HOST_BACKEND unset) they skip. The platform halves have their own suites
+    /// (UIAutomationTests, AtspiTests).
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        let isHost = MainActor.assumeIsolated { Platform.backend is HostBackend }
+        guard isHost else { throw XCTSkip("needs the host backend (APPKITWIN_HOST_BACKEND=1)") }
+    }
+
     // MARK: The tree
 
     func testWindowTreeHasRolesLabelsAndValues() {

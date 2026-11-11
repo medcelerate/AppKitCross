@@ -116,11 +116,22 @@ public static class UiaEventLog {
         Console.WriteLine("== tree");
         Dump(window, 0, 6);
         Console.WriteLine("== menu bar (the system's MenuBar of the HWND)");
-        var bar = First(window, ControlType.MenuBar);
-        Report(bar != null, "the window has a MenuBar");
+        // The title bar carries a MenuBar of its own ("System Menu Bar" with the System
+        // item); the application's bar is the MenuBar holding the HMENU's items.
+        AutomationElement bar = null;
+        var bars = window.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuBar));
+        foreach (AutomationElement b in bars) {
+            var names = new List<string>();
+            var w = TreeWalker.ControlViewWalker;
+            for (var c = w.GetFirstChild(b); c != null; c = w.GetNextSibling(c)) names.Add(c.Current.Name);
+            Info("MenuBar '" + b.Current.Name + "' items [" + string.Join(", ", names) + "]");
+            if (bar == null && (names.Contains("View") || names.Contains("&View"))) bar = b;
+        }
+        Report(bar != null, "the window has the application's MenuBar (one holding 'View'; " + bars.Count + " MenuBar(s) seen)");
         if (bar != null) {
-            var view = First(bar, ControlType.MenuItem, "View");
+            var view = First(bar, ControlType.MenuItem, "View") ?? First(bar, ControlType.MenuItem, "&View");
             Report(view != null, "MenuBar item 'View'");
+            if (view != null) Info("View: " + Line(view));
             object ep;
             if (view != null && view.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out ep)) {
                 try {
