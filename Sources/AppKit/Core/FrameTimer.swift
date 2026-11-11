@@ -26,26 +26,48 @@ internal final class _NSFrameTimer {
         remaining = delay
         self.interval = interval
         self.action = action
-        let l = CADisplayLink { [weak self] link in self?._advance(by: link.duration) }
+        lastTime = CACurrentMediaTime()
+        // The timer keeps its own clock from the moment it was made (a link's first frame
+        // reports a nominal duration, not the time since the link was added).
+        let l = CADisplayLink { [weak self] link in
+            guard let self else { return }
+            let now = link.timestamp
+            let elapsed = now - self.lastTime
+            self.lastTime = now
+            self._advance(by: elapsed)
+        }
         l.add(to: .main, forMode: .default)
         link = l
     }
+    private var lastTime: CFTimeInterval
 
     var isValid: Bool { link != nil }
 
+    /// At most this many repeats are made up for in one late frame.
+    static let maxCatchUp = 10
+
     /// Advances the timer's clock by `seconds` (one frame's worth from the display link).
+    /// The timing is by elapsed time, not by frames: a frame that arrives late fires every
+    /// interval it covered (up to `maxCatchUp`), so a repeat runs at its rate whatever
+    /// the frame rate.
     func _advance(by seconds: TimeInterval) {
         guard link != nil else { return }
         remaining -= max(0, seconds)
-        guard remaining <= 0 else { return }
-        _fire()
+        var fired = 0
+        while remaining <= 0, link != nil, fired < _NSFrameTimer.maxCatchUp {
+            _fire()
+            fired += 1
+        }
+        if remaining <= 0, let interval { remaining = interval }      // past the cap: resume from the next interval
     }
 
-    /// Fires now: the action runs, and a repeating timer rearms for its interval.
+    /// Fires now: the action runs, and a repeating timer rearms for its interval (from
+    /// the moment it was due, so late frames do not stretch the rate).
     func _fire() {
         guard link != nil else { return }
         if let interval {
-            remaining = interval
+            remaining += interval
+            if remaining < -interval * CGFloat(_NSFrameTimer.maxCatchUp) { remaining = interval }
             action()
         } else {
             invalidate()
