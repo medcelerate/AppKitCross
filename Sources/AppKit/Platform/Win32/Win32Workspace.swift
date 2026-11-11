@@ -10,6 +10,14 @@
 // window for the WM_SETTINGCHANGE, WM_POWERBROADCAST and WM_WTSSESSION_CHANGE
 // broadcasts (message-only windows receive none), and a timer that diffs the window
 // list for launches and terminations. The COM pieces live in cd2d_shell.cpp.
+//
+// Nothing of AppKit runs inside a callback the system owns. An out-of-context WinEvent
+// hook is delivered through a kernel user callback (from inside GetMessage, or from the
+// shell's own message pump while ShellExecuteEx is still running): a Swift trap there is
+// a fatal user-callback exception (0xC000041D), and the activation bookkeeping would run
+// re-entrantly inside the call that opened the document. So the hook only posts the event
+// to the broadcast window, and while a shell call is in progress every event, broadcast
+// and poll is queued and replayed from the next message after the call returns.
 
 #if os(Windows)
 import Foundation
@@ -37,13 +45,38 @@ final class Win32Workspace: PlatformWorkspace {
     private var applicationIcon: HICON?
     private var applicationSmallIcon: HICON?
     private var overlayDescription: [WCHAR] = [0]
-    nonisolated(unsafe) static weak var current: Win32Workspace?
+    /// The broadcast window, for the hook callback (which runs outside the actor).
+    nonisolated(unsafe) private static var broadcastHWND: HWND?
+    /// Posted by the WinEvent hook: wParam the event, lParam the process id.
+    static let eventMessage: UINT = UINT(WM_APP) + 0x57
+    /// Posted after a shell call returns with work queued meanwhile.
+    static let kickMessage: UINT = UINT(WM_APP) + 0x58
+    /// Nesting depth of shell calls (ShellExecuteEx, SHOpenFolderAndSelectItems, ...) that
+    /// may pump messages on this thread; workspace work is deferred while it is non-zero.
+    private var shellCallDepth = 0
+    private var deferred: [@MainActor (Win32Workspace) -> Void] = []
     private var trace: Bool { NSView._traceInvalidation }
 
     init(backend: Win32Backend) {
         self.backend = backend
-        Win32Workspace.current = self
     }
+
+    /// Runs a shell call that may pump messages: events arriving meanwhile wait until the
+    /// next message after it returns, so nothing re-enters the caller.
+    private func shellCall<T>(_ body: () -> T) -> T {
+        shellCallDepth += 1
+        defer {
+            shellCallDepth -= 1
+            if shellCallDepth == 0, !deferred.isEmpty, let hwnd = broadcastWindow { _ = PostMessageW(hwnd, Win32Workspace.kickMessage, 0, 0) }
+        }
+        return body()
+    }
+
+    private func perform(_ work: @escaping @MainActor (Win32Workspace) -> Void) {
+        if shellCallDepth > 0 { deferred.append(work) } else { work(self) }
+    }
+
+    private func notify(_ event: PlatformWorkspaceEvent) { perform { $0.observer?.platformWorkspaceDidObserve(event) } }
 
     // MARK: Monitoring
 
@@ -51,6 +84,7 @@ final class Win32Workspace: PlatformWorkspace {
         guard !monitoring else { return }
         monitoring = true
         broadcastWindow = backend.makeBroadcastWindow()
+        Win32Workspace.broadcastHWND = broadcastWindow
         if let hwnd = broadcastWindow {
             cd2d_shell_register_notifications(UnsafeMutableRawPointer(hwnd))
             _ = SetTimer(hwnd, Win32Workspace.pollTimer, 2000, nil)
@@ -63,18 +97,13 @@ final class Win32Workspace: PlatformWorkspace {
         hiddenPIDs = Set(snapshot.filter { $0.value.allMinimized }.keys)
     }
 
+    /// Runs inside a kernel user callback: nothing but a PostMessage.
     private static let winEventProc: WINEVENTPROC = { _, event, hwnd, _, _, _, _ in
-        MainActor.assumeIsolated {
-            guard let workspace = Win32Workspace.current, let hwnd else { return }
-            var pid: DWORD = 0
-            GetWindowThreadProcessId(hwnd, &pid)
-            guard pid != 0 else { return }
-            switch event {
-            case DWORD(EVENT_SYSTEM_FOREGROUND): workspace.foregroundDidChange(to: pid)
-            case DWORD(EVENT_SYSTEM_MINIMIZESTART), DWORD(EVENT_SYSTEM_MINIMIZEEND): workspace.minimizationDidChange(pid: pid)
-            default: break
-            }
-        }
+        guard let hwnd, let target = Win32Workspace.broadcastHWND else { return }
+        var pid: DWORD = 0
+        GetWindowThreadProcessId(hwnd, &pid)
+        guard pid != 0 else { return }
+        _ = PostMessageW(target, Win32Workspace.eventMessage, WPARAM(event), LPARAM(Int(pid)))
     }
 
     private func foregroundDidChange(to pid: DWORD) {
@@ -97,29 +126,45 @@ final class Win32Workspace: PlatformWorkspace {
         }
     }
 
-    /// Broadcasts and the poll timer, from the backend's message window procedure.
+    /// Broadcasts, the hook's posted events and the poll timer, from the backend's message
+    /// window procedure. Pointers in lParam are read here; the work itself may be deferred.
     func handle(message: UINT, wParam: WPARAM, lParam: LPARAM) -> Bool {
         switch message {
         case UINT(WM_TIMER):
             guard wParam == Win32Workspace.pollTimer else { return false }
-            pollWindowList()
+            perform { $0.pollWindowList() }
+        case Win32Workspace.eventMessage:
+            let event = DWORD(truncatingIfNeeded: wParam)
+            let pid = DWORD(truncatingIfNeeded: lParam)
+            perform { ws in
+                switch event {
+                case DWORD(EVENT_SYSTEM_FOREGROUND): ws.foregroundDidChange(to: pid)
+                case DWORD(EVENT_SYSTEM_MINIMIZESTART), DWORD(EVENT_SYSTEM_MINIMIZEEND): ws.minimizationDidChange(pid: pid)
+                default: break
+                }
+            }
+        case Win32Workspace.kickMessage:
+            guard shellCallDepth == 0 else { return true }
+            let work = deferred
+            deferred = []
+            for w in work { w(self) }
         case UINT(WM_SETTINGCHANGE):
-            observer?.platformWorkspaceDidObserve(.accessibilityDisplayOptionsDidChange)
+            notify(.accessibilityDisplayOptionsDidChange)
         case UINT(WM_POWERBROADCAST):
             switch Int(wParam) {
-            case 0x4: observer?.platformWorkspaceDidObserve(.willSleep)                      // PBT_APMSUSPEND
-            case 0x12, 0x7: observer?.platformWorkspaceDidObserve(.didWake)                 // PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND
-            case 0x8013:                                                                    // PBT_POWERSETTINGCHANGE
+            case 0x4: notify(.willSleep)                      // PBT_APMSUSPEND
+            case 0x12, 0x7: notify(.didWake)                 // PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND
+            case 0x8013:                                     // PBT_POWERSETTINGCHANGE
                 var state: UInt32 = 0
                 if cd2d_shell_display_state(UnsafeRawPointer(bitPattern: Int(lParam)), &state) {
-                    observer?.platformWorkspaceDidObserve(state == 0 ? .screensDidSleep : .screensDidWake)
+                    notify(state == 0 ? .screensDidSleep : .screensDidWake)
                 }
             default: break
             }
-        case 0x02B1:                                                                        // WM_WTSSESSION_CHANGE
+        case 0x02B1:                                         // WM_WTSSESSION_CHANGE
             switch Int(wParam) {
-            case 0x1, 0x8: observer?.platformWorkspaceDidObserve(.sessionDidBecomeActive)   // WTS_CONSOLE_CONNECT, WTS_SESSION_UNLOCK
-            case 0x2, 0x7: observer?.platformWorkspaceDidObserve(.sessionDidResignActive)   // WTS_CONSOLE_DISCONNECT, WTS_SESSION_LOCK
+            case 0x1, 0x8: notify(.sessionDidBecomeActive)   // WTS_CONSOLE_CONNECT, WTS_SESSION_UNLOCK
+            case 0x2, 0x7: notify(.sessionDidResignActive)   // WTS_CONSOLE_DISCONNECT, WTS_SESSION_LOCK
             default: break
             }
         default:
@@ -301,8 +346,10 @@ final class Win32Workspace: PlatformWorkspace {
 
     private func execute(_ file: String, parameters: String, show: Int32) -> DWORD? {
         var pid: UInt32 = 0
-        let ok = file.withCString(encodedAs: UTF16.self) { f in
-            parameters.withCString(encodedAs: UTF16.self) { p in cd2d_shell_execute(nil, f, p, show, &pid) }
+        let ok = shellCall {
+            file.withCString(encodedAs: UTF16.self) { f in
+                parameters.withCString(encodedAs: UTF16.self) { p in cd2d_shell_execute(nil, f, p, show, &pid) }
+            }
         }
         if trace { NSView._trace("win32 workspace: ShellExecute '\(file)' '\(parameters)' -> \(ok ? "pid \(pid)" : "failed \(GetLastError())")") }
         return ok ? pid : nil
@@ -372,7 +419,7 @@ final class Win32Workspace: PlatformWorkspace {
         if !selecting { return execute(paths[0], parameters: "", show: SW_SHOWNORMAL) != nil }
         var joined: [UInt16] = []
         for p in paths { joined += Array(p.utf16) + [0] }
-        return cd2d_shell_reveal(joined, UInt32(paths.count))
+        return shellCall { cd2d_shell_reveal(joined, UInt32(paths.count)) }
     }
 
     // MARK: Associations
@@ -461,7 +508,7 @@ final class Win32Workspace: PlatformWorkspace {
     // MARK: Files
 
     func recycle(_ url: URL) throws -> URL? {
-        let ok = url.path.replacingOccurrences(of: "/", with: "\\").withCString(encodedAs: UTF16.self) { cd2d_shell_recycle($0) }
+        let ok = shellCall { url.path.replacingOccurrences(of: "/", with: "\\").withCString(encodedAs: UTF16.self) { cd2d_shell_recycle($0) } }
         guard ok else { throw PlatformWorkspaceError.fileOperationFailed("Recycle Bin refused \(url.path)") }
         return nil   // the bin's own names are not exposed
     }

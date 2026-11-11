@@ -25,3 +25,6 @@ What it demonstrates:
   lifetime, sleep and wake, screens, the session, accessibility settings.
 
 `swift run Workspace --report` prints the workspace's answers without a window.
+`swift run Workspace --open <url> --stay <seconds>` opens the URL right after launch and
+quits after that long, with the launch, activation and termination notifications on the
+console (the Windows CI runs it against a stub scheme handler).

@@ -226,7 +226,10 @@ bool cd2d_shell_execute(void *ownerHwnd, const uint16_t *file, const uint16_t *p
     ensureCom();
     SHELLEXECUTEINFOW info = {};
     info.cbSize = sizeof(info);
-    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+    // No SEE_MASK_NOASYNC: with it the shell finishes DDE and the like by pumping messages
+    // on this thread, re-entering the window procedure that asked for the open; this
+    // thread has a message loop and outlives the call, so the shell may use its own.
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
     info.hwnd = static_cast<HWND>(ownerHwnd);
     info.lpVerb = L"open";
     info.lpFile = reinterpret_cast<LPCWSTR>(file);

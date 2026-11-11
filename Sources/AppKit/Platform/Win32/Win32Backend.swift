@@ -511,7 +511,7 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
-        if msg == UINT(WM_SETTINGCHANGE) || msg == UINT(WM_POWERBROADCAST) || msg == 0x02B1 /* WM_WTSSESSION_CHANGE */ || (msg == UINT(WM_TIMER) && wParam != Win32Backend.dragTimer) {
+        if msg == UINT(WM_SETTINGCHANGE) || msg == UINT(WM_POWERBROADCAST) || msg == 0x02B1 /* WM_WTSSESSION_CHANGE */ || msg == Win32Workspace.eventMessage || msg == Win32Workspace.kickMessage || (msg == UINT(WM_TIMER) && wParam != Win32Backend.dragTimer) {
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
             if ptr != 0 {
                 let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()

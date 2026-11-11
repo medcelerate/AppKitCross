@@ -122,6 +122,15 @@ answer), launch date, active, hidden, whether it shows windows.
   `WM_WTSSESSION_CHANGE` (lock/unlock, console connect/disconnect, through
   `WTSRegisterSessionNotification`); a two-second timer that diffs the window list for
   launches and terminations.
+  Nothing of AppKit runs inside a callback the system owns: an out-of-context WinEvent
+  hook is delivered through a kernel user callback (from inside `GetMessage`, or from the
+  shell's own pump while `ShellExecuteEx` is still running), where a Swift trap is a fatal
+  user-callback exception (`0xC000041D`), so the hook only posts the event to the
+  broadcast window; while a shell call is in progress every event, broadcast and poll is
+  queued and replayed from the next message after it returns; and `ShellExecuteEx` runs
+  without `SEE_MASK_NOASYNC`, so the shell finishes DDE on its own thread instead of
+  pumping messages on ours. The Windows CI opens a URL through a stub scheme handler and
+  keeps the example alive five seconds (`Workspace --open <url> --stay 5`).
 - Accessibility: `SPI_GETCLIENTAREAANIMATION` (off is reduced motion),
   `SPI_GETHIGHCONTRAST`, `SPI_GETSCREENREADER` (a screen reader is VoiceOver's
   counterpart), the personalization registry's `EnableTransparency` (off is reduced

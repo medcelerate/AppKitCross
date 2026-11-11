@@ -5,6 +5,9 @@
 // activating, hiding and terminating another application by its identifier.
 //
 // `--report` prints what the workspace answers without a window (CI and the PC checklist).
+// `--open <url> --stay <seconds>` opens the URL right after launch and keeps the window
+// (and the workspace's hooks and poll timer) running that long before quitting: the
+// Windows CI opens a stub-handled URL this way and checks the process survives.
 
 import AppKit
 import UniformTypeIdentifiers
@@ -21,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     var observers: [NSObjectProtocol] = []
 
     static let act = Selector(("workspaceAction:"))
+    /// `--open` / `--stay` (see the header).
+    static var openOnLaunch: URL?
+    static var stay: TimeInterval?
 
     #if os(Windows)
     static let defaultApplication = "notepad"
@@ -42,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         observe()
         updateFrontmost()
         report("ready: \(NSWorkspace.shared.runningApplications.count) running applications")
+        if let url = AppDelegate.openOnLaunch { report("open \(url): \(NSWorkspace.shared.open(url))") }
+        if let stay = AppDelegate.stay {
+            Timer.scheduledTimer(withTimeInterval: stay, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    self.report("alive after \(stay) s: \(NSWorkspace.shared.runningApplications.count) running applications, frontmost \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "none")")
+                    NSApp.terminate(nil)
+                }
+            }
+        }
     }
 
     func installMenu() {
@@ -218,7 +233,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     func report(_ text: String) {
         status.stringValue = text
         log.string = (log.string.isEmpty ? "" : log.string + "\n") + text
-        print(text)
+        // Unbuffered, so the line is on the console even if the process dies right after.
+        FileHandle.standardOutput.write(Data((text + "\n").utf8))
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -250,7 +266,10 @@ func printReport() {
 }
 
 let app = NSApplication.shared
-if CommandLine.arguments.contains("--report") {
+let arguments = CommandLine.arguments
+if let i = arguments.firstIndex(of: "--open"), i + 1 < arguments.count { AppDelegate.openOnLaunch = URL(string: arguments[i + 1]) }
+if let i = arguments.firstIndex(of: "--stay"), i + 1 < arguments.count { AppDelegate.stay = TimeInterval(arguments[i + 1]) }
+if arguments.contains("--report") {
     MainActor.assumeIsolated { printReport() }
     exit(0)
 }
