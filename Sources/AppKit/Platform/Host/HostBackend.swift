@@ -14,6 +14,16 @@ final class HostBackend: PlatformBackend {
                         visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1055),
                         backingScaleFactor: 2, localizedName: "Host Display", isMain: true)
     ]
+    /// Test hook: the physical top-left pixel of each display (index into `displays`);
+    /// by default the display's point origin times its scale, flipped against the
+    /// primary display's physical height, as Win32Backend derives `NSScreen` frames.
+    var physicalOrigins: [Int: CGPoint] = [:]
+    func physicalOrigin(of index: Int) -> CGPoint {
+        if let o = physicalOrigins[index] { return o }
+        let d = displays[index], primary = displays[0]
+        let primaryHeight = primary.frame.height * primary.backingScaleFactor
+        return CGPoint(x: d.frame.minX * d.backingScaleFactor, y: primaryHeight - d.frame.maxY * d.backingScaleFactor)
+    }
     private var running = false
     private var pending: [@MainActor () -> Void] = []
     var mouseLocation: NSPoint = .zero
@@ -167,6 +177,26 @@ final class HostWindow: PlatformWindow {
     private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { accessibilityChanges.append(change) }
     func clearAccessibilityChanges() { accessibilityChanges.removeAll() }
+
+    /// How this fake window system places a window on the physical desktop, modelled on
+    /// Windows' per-monitor DPI: every display covers a physical-pixel rectangle starting
+    /// at `HostBackend.physicalOrigin(of:)` and maps its own points onto it at its own
+    /// scale. The window's client area sits on the display holding the client frame's
+    /// centre; its physical origin is that display's origin plus the offset in points
+    /// times the display's scale. Tests compare the snapshot's frames against this.
+    func accessibilityScreenMapping(clientFrame: NSRect) -> PlatformAccessibilityScreenMapping? {
+        let displays = backend.displays
+        guard !displays.isEmpty else { return nil }
+        let centre = NSPoint(x: clientFrame.midX, y: clientFrame.midY)
+        let i = displays.firstIndex { $0.frame.contains(centre) } ?? 0
+        let d = displays[i]
+        let origin = backend.physicalOrigin(of: i)
+        let scale = Double(backingScaleFactor)
+        return PlatformAccessibilityScreenMapping(clientFrame: clientFrame,
+                                                  clientOriginX: Double(origin.x) + Double(clientFrame.minX - d.frame.minX) * scale,
+                                                  clientOriginY: Double(origin.y) + Double(d.frame.maxY - clientFrame.maxY) * scale,
+                                                  scale: scale)
+    }
 
     /// Test hook: when set, the window hosts layer scenes and composites them itself
     /// (a reference for the DirectComposition implementation).

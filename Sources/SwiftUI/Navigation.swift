@@ -284,16 +284,24 @@ final class _PickerPrimitive: _Primitive {
         } else if style == .segmented {
             body = AnyView(HStack(spacing: 8) {
                 if !labelText.isEmpty { Text(labelText) }
-                _Segmented(titles: titles, selected: index) { i in sel.set(tags[i]) }
+                _Segmented(titles: titles, selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         } else {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
                 if !labelText.isEmpty { Text(labelText) }
-                _PopUp(titles: titles, selected: index) { i in sel.set(tags[i]) }
+                _PopUp(titles: titles, selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
+    }
+}
+
+extension View {
+    /// The picker's label names its control for assistive technology (the label text is
+    /// still shown beside it).
+    @ViewBuilder fileprivate func _pickerLabel(_ label: String) -> some View {
+        if label.isEmpty { self } else { accessibilityLabel(label) }
     }
 }
 
