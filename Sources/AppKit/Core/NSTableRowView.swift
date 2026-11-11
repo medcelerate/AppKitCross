@@ -182,8 +182,9 @@ import CoreGraphics
     @MainActor open override func setAccessibilitySelected(_ accessibilitySelected: Bool) { _ = _accessibilitySetSelected(accessibilitySelected, extending: false) }
     @MainActor open override func accessibilityParent() -> Any? { _a11y.parent ?? superview }
     @MainActor override func _accessibilityIsFocusable() -> Bool { false }
+    @MainActor override func _accessibilityIsSelectable() -> Bool { true }
     /// Selects or deselects the row through the table, so the selection machinery runs.
-    @MainActor internal func _accessibilitySetSelected(_ selected: Bool, extending: Bool) -> Bool {
+    @MainActor internal override func _accessibilitySetSelected(_ selected: Bool, extending: Bool) -> Bool {
         guard let table = superview as? NSTableView, _row >= 0 else { return false }
         if selected {
             table.selectRowIndexes(IndexSet(integer: _row), byExtendingSelection: extending && table.allowsMultipleSelection)
