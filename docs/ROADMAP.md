@@ -43,9 +43,12 @@ a remote session on a Windows 11 machine from the checklists in the commit histo
 - [x] Full public API inventory extracted from the macOS SDK (`api-inventory/`).
 - [x] Stub generator with coverage report (`tools/apigen`).
 - [x] Package layout that builds on macOS (host) and Windows.
-- [x] CI: macOS host build + test, Windows build (GitHub Actions `windows-latest` with
+- [x] CI: macOS host build + test, Windows build (GitHub Actions `windows-2022` with
       the swift.org toolchain), Linux build in the `swift:6.2-noble` container
-      (`.github/workflows/ci.yml`).
+      (`.github/workflows/ci.yml`). The Windows builds run one compiler job at a time
+      (`-j 1`): Swift 6.2's driver, starting two jobs together, sometimes loses one
+      (usually AppKit's emit-module job) and exits 1 without a diagnostic, which looked like the
+      runner killing the compiler; see `docs/ci-windows-runner.md`.
 
 ## M1: Open a window and draw
 
