@@ -240,6 +240,7 @@ func printReport() {
         print("icon .\(ext): \(Int(icon.size.width))x\(Int(icon.size.height)) pt")
     }
     print("icon folder: \(ws.icon(forFile: temp.path).size)")
+    print("icon application: \(current.icon.map { "\(Int($0.size.width))x\(Int($0.size.height)) pt" } ?? "none")")
     print("type of \(temp.path): \((try? ws.type(ofFile: temp.path)) ?? "?")")
     print("handler for .txt: \(ws.urlForApplication(toOpen: temp.appendingPathComponent("x.txt"))?.path ?? "none")")
     print("handler for https: \(ws.urlForApplication(toOpen: URL(string: "https://example.com")!)?.path ?? "none")")

@@ -216,6 +216,6 @@ public protocol PlatformWorkspace: AnyObject {
 }
 
 extension PlatformBackend {
-    /// The platform's workspace services; the in-memory stand-in by default.
+    /// The in-memory stand-in for backends without a shell of their own (the host backend).
     public var workspace: any PlatformWorkspace { HostWorkspace.shared }
 }
