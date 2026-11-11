@@ -19,6 +19,10 @@ protocol AtspiWindow: AnyObject {
     var atspiOwner: PlatformWindowOwner? { get }
     var atspiIsVisible: Bool { get }
     var atspiIsKey: Bool { get }
+    /// How the window's frames reach the screen (ADR-0013): its client area's position in
+    /// physical pixels and its own scale (X11), or window-relative logical coordinates
+    /// (Wayland, which has no global ones).
+    func accessibilityScreenMapping(clientFrame: NSRect) -> PlatformAccessibilityScreenMapping?
 }
 
 @MainActor
@@ -33,9 +37,13 @@ final class AtspiBridge {
     private(set) var uniqueName = ""
     private(set) var fileDescriptor: Int32 = -1
     private(set) var desktop: (name: String, path: String)? = nil
-    /// AppKit screen rect → X screen pixels (left, top, width, height). Wayland has no
-    /// global coordinates, so its backend reports window-relative ones.
-    private let screenPixels: (NSRect) -> (Int32, Int32, Int32, Int32)
+    /// The application's menu bar (NSApplication through the backend's main-menu host): no
+    /// window draws it on Linux, so it is a child of the application next to the windows.
+    weak var application: PlatformAccessibilityApplication? {
+        didSet { menuBarChanged() }
+    }
+    private var menuBarTree: PlatformAccessibilityElement?
+    private var menuBarDirty = true
     private final class WindowEntry {
         weak var window: AtspiWindow?
         var tree: PlatformAccessibilityElement?
@@ -78,7 +86,7 @@ final class AtspiBridge {
     }
 
     /// Connects and embeds; nil when there is no accessibility bus.
-    static func connect(rootWindowProperty: () -> String?, screenPixels: @escaping (NSRect) -> (Int32, Int32, Int32, Int32)) -> AtspiBridge? {
+    static func connect(rootWindowProperty: () -> String?) -> AtspiBridge? {
         guard let address = busAddress(rootWindowProperty: rootWindowProperty) else { return nil }
         var err = DBusError()
         dbus_error_init(&err)
@@ -95,15 +103,14 @@ final class AtspiBridge {
             dbus_connection_unref(conn)
             return nil
         }
-        let bridge = AtspiBridge(connection: conn, screenPixels: screenPixels)
+        let bridge = AtspiBridge(connection: conn)
         bridge.address = address
         bridge.start()
         return bridge
     }
 
-    private init(connection: OpaquePointer, screenPixels: @escaping (NSRect) -> (Int32, Int32, Int32, Int32)) {
+    private init(connection: OpaquePointer) {
         self.connection = connection
-        self.screenPixels = screenPixels
     }
 
     private func start() {
@@ -184,6 +191,10 @@ final class AtspiBridge {
             }
         case .value(let id):
             guard let e = tree.element(withID: id) else { return }
+            if let expanded = e.isExpanded {
+                // A pop-up or a menu item opening or closing its menu.
+                emitObjectEvent(path: path(id), member: "StateChanged", detail: "expanded", detail1: expanded ? 1 : 0, detail2: 0, data: .int32(0))
+            }
             switch e.role {
             case "AXCheckBox", "AXRadioButton":
                 emitObjectEvent(path: path(id), member: "StateChanged", detail: "checked", detail1: (e.value?.doubleValue ?? 0) != 0 ? 1 : 0, detail2: 0, data: .int32(0))
@@ -203,7 +214,29 @@ final class AtspiBridge {
             for c in tree.element(withID: id)?.children ?? [] where c.isSelected {
                 emitObjectEvent(path: path(c.id), member: "StateChanged", detail: "selected", detail1: 1, detail2: 0, data: .int32(0))
             }
+        case .childAdded(let parent, let child):
+            // The index the child now has among its parent's children.
+            let index = tree.element(withID: parent)?.children.firstIndex { $0.id == child } ?? -1
+            emitChildrenChanged(parentPath: path(parent), childPath: path(child), added: true, index: Int32(index))
+        case .childRemoved(let parent, let child):
+            emitChildrenChanged(parentPath: path(parent), childPath: path(child), added: false, index: -1)
+        case .menuOpened(let id), .menuClosed(let id):
+            var opened = false
+            if case .menuOpened = change { opened = true }
+            emitObjectEvent(path: path(id), member: "StateChanged", detail: "showing", detail1: opened ? 1 : 0, detail2: 0, data: .int32(0))
+            emitObjectEvent(path: path(id), member: "StateChanged", detail: "visible", detail1: opened ? 1 : 0, detail2: 0, data: .int32(0))
         }
+    }
+
+    /// The main menu changed (or the application connected).
+    func menuBarChanged() {
+        menuBarDirty = true
+        emitChildrenChanged(parentPath: AtspiBridge.rootPath, childPath: AtspiBridge.rootPath, added: true)
+    }
+
+    private func currentMenuBar() -> PlatformAccessibilityElement? {
+        if menuBarDirty { menuBarTree = application?.accessibilityMenuBarTree(); menuBarDirty = false }
+        return menuBarTree
     }
 
     private func tree(for entry: WindowEntry) -> PlatformAccessibilityElement? {
@@ -217,21 +250,34 @@ final class AtspiBridge {
 
     /// Every window's snapshot is taken fresh for each request: AT-SPI clients ask one
     /// attribute at a time, and the tree is small.
-    private func invalidateAll() { for e in windows { e.dirty = true } }
+    private func invalidateAll() { for e in windows { e.dirty = true }; menuBarDirty = true }
 
     private struct Located {
-        let entry: WindowEntry
+        /// The window the element is in; nil for the application's menu bar.
+        let entry: WindowEntry?
         let tree: PlatformAccessibilityElement
         let element: PlatformAccessibilityElement
-        var isWindow: Bool { tree.id == element.id }
+        var isWindow: Bool { entry != nil && tree.id == element.id }
+        var isMenuBar: Bool { entry == nil && tree.id == element.id }
     }
 
+    /// Windows first (an open menu's window shows its items with frames), then the menu bar.
     private func locate(id: Int) -> Located? {
         for entry in windows {
             guard let tree = tree(for: entry), let e = tree.element(withID: id) else { continue }
             return Located(entry: entry, tree: tree, element: e)
         }
+        if let bar = currentMenuBar(), let e = bar.element(withID: id) { return Located(entry: nil, tree: bar, element: e) }
         return nil
+    }
+
+    private func perform(_ action: PlatformAccessibilityAction, on id: Int, in l: Located) -> Bool {
+        if let entry = l.entry { return entry.window?.atspiOwner?.platformAccessibility.accessibilityPerform(action, on: id) ?? false }
+        return application?.accessibilityPerformMenuBarAction(action, on: id) ?? false
+    }
+
+    private func setValue(_ value: PlatformAccessibilityValue, in l: Located) -> Bool {
+        l.entry?.window?.atspiOwner?.platformAccessibility.accessibilitySetValue(value, on: l.element.id) ?? false
     }
 
     private var visibleWindows: [WindowEntry] { windows.filter { $0.window?.atspiIsVisible == true } }
@@ -278,7 +324,7 @@ final class AtspiBridge {
             handleText(message, member: member, target: target, reader: &reader)
         case "org.a11y.atspi.EditableText":
             if case .element(let l) = target, member == "SetTextContents", let text = reader.string() {
-                let ok = l.element.isSettable && (l.entry.window?.atspiOwner?.platformAccessibility.accessibilitySetValue(.string(text), on: l.element.id) ?? false)
+                let ok = l.element.isSettable && setValue(.string(text), in: l)
                 reply(message) { DBus.appendBool(&$0, ok) }
             } else {
                 reply(message, error: "org.freedesktop.DBus.Error.UnknownMethod", member)
@@ -299,8 +345,8 @@ final class AtspiBridge {
         case .application: return ["org.a11y.atspi.Accessible", "org.a11y.atspi.Application"]
         case .element(let l):
             var i = ["org.a11y.atspi.Accessible", "org.a11y.atspi.Component"]
-            if !l.element.actions.isEmpty { i.append("org.a11y.atspi.Action") }
-            if l.element.minValue != nil || l.element.role == "AXSlider" || l.element.role == "AXScrollBar" { i.append("org.a11y.atspi.Value") }
+            if !l.element.actions.isEmpty || !l.element.customActions.isEmpty { i.append("org.a11y.atspi.Action") }
+            if l.element.minValue != nil || l.element.role == "AXSlider" || l.element.role == "AXScrollBar" || l.element.role == "AXProgressIndicator" { i.append("org.a11y.atspi.Value") }
             if ["AXTextField", "AXTextArea", "AXStaticText"].contains(l.element.role) {
                 i.append("org.a11y.atspi.Text")
                 if l.element.isSettable { i.append("org.a11y.atspi.EditableText") }
@@ -315,7 +361,7 @@ final class AtspiBridge {
         xml += "  <interface name=\"org.freedesktop.DBus.Properties\"><method name=\"Get\"><arg direction=\"in\" type=\"s\"/><arg direction=\"in\" type=\"s\"/><arg direction=\"out\" type=\"v\"/></method><method name=\"Set\"><arg direction=\"in\" type=\"s\"/><arg direction=\"in\" type=\"s\"/><arg direction=\"in\" type=\"v\"/></method><method name=\"GetAll\"><arg direction=\"in\" type=\"s\"/><arg direction=\"out\" type=\"a{sv}\"/></method></interface>\n"
         for i in interfaces(for: target) { xml += "  <interface name=\"\(i)\"/>\n" }
         switch target {
-        case .application: for e in visibleWindows { if let t = tree(for: e) { xml += "  <node name=\"\(t.id)\"/>\n" } }
+        case .application: for t in children(of: target) { xml += "  <node name=\"\(t.id)\"/>\n" }
         case .element(let l): for c in l.element.children { xml += "  <node name=\"\(c.id)\"/>\n" }
         }
         xml += "</node>\n"
@@ -326,7 +372,7 @@ final class AtspiBridge {
 
     private func children(of target: Target) -> [PlatformAccessibilityElement] {
         switch target {
-        case .application: return visibleWindows.compactMap { tree(for: $0) }
+        case .application: return visibleWindows.compactMap { tree(for: $0) } + (currentMenuBar().map { [$0] } ?? [])
         case .element(let l): return l.element.children
         }
     }
@@ -335,7 +381,7 @@ final class AtspiBridge {
         switch target {
         case .application: return desktop.map { ($0.name, $0.path) } ?? (uniqueName, AtspiBridge.rootPath)
         case .element(let l):
-            if l.isWindow { return (uniqueName, AtspiBridge.rootPath) }
+            if l.isWindow || l.isMenuBar { return (uniqueName, AtspiBridge.rootPath) }
             if let p = l.tree.parent(of: l.element.id) { return (uniqueName, path(p.id)) }
             return (uniqueName, AtspiBridge.rootPath)
         }
@@ -346,6 +392,7 @@ final class AtspiBridge {
         case .application: return -1
         case .element(let l):
             if l.isWindow { return Int32(visibleWindows.firstIndex { $0 === l.entry } ?? -1) }
+            if l.isMenuBar { return Int32(visibleWindows.count) }
             guard let p = l.tree.parent(of: l.element.id) else { return -1 }
             return Int32(p.children.firstIndex { $0.id == l.element.id } ?? -1)
         }
@@ -389,6 +436,7 @@ final class AtspiBridge {
                         DBus.appendDictEntry(&a, "role", l.element.role)
                         if let s = l.element.subrole { DBus.appendDictEntry(&a, "subrole", s) }
                         if let p = l.element.placeholder { DBus.appendDictEntry(&a, "placeholder-text", p) }
+                        if let k = l.element.keyEquivalent { DBus.appendDictEntry(&a, "keyshortcuts", k) }
                     }
                 }
             }
@@ -424,7 +472,7 @@ final class AtspiBridge {
         case "Set":
             guard let iface = reader.string(), let prop = reader.string(), let value = reader.variant() else { reply(message, error: "org.freedesktop.DBus.Error.InvalidArgs", "Set"); return }
             if iface == "org.a11y.atspi.Value", prop == "CurrentValue", case .element(let l) = target, let d = value.doubleValue {
-                _ = l.entry.window?.atspiOwner?.platformAccessibility.accessibilitySetValue(.number(d), on: l.element.id)
+                _ = setValue(.number(d), in: l)
                 reply(message) { _ in }
             } else if iface == "org.a11y.atspi.Application", prop == "Id" {
                 reply(message) { _ in }
@@ -470,7 +518,7 @@ final class AtspiBridge {
         case ("org.a11y.atspi.Application", "AtspiVersion"): return .string("2.1")
         case ("org.a11y.atspi.Application", "Id"): return .int32(0)
         case ("org.a11y.atspi.Action", "NActions"):
-            if case .element(let l) = target { return .int32(Int32(l.element.actions.count)) }
+            if case .element(let l) = target { return .int32(Int32(l.element.actions.count + l.element.customActions.count)) }
             return .int32(0)
         case ("org.a11y.atspi.Value", "MinimumValue"):
             if case .element(let l) = target { return .double(l.element.minValue ?? 0) }
@@ -478,6 +526,7 @@ final class AtspiBridge {
             if case .element(let l) = target { return .double(l.element.maxValue ?? 1) }
         case ("org.a11y.atspi.Value", "MinimumIncrement"):
             if case .element(let l) = target { return .double(((l.element.maxValue ?? 1) - (l.element.minValue ?? 0)) / 100) }
+            return nil
         case ("org.a11y.atspi.Value", "CurrentValue"):
             if case .element(let l) = target { return .double(l.element.value?.doubleValue ?? 0) }
         case ("org.a11y.atspi.Text", "CharacterCount"):
@@ -491,11 +540,16 @@ final class AtspiBridge {
 
     // MARK: Component
 
-    private func extents(_ e: PlatformAccessibilityElement, coordinateType: UInt32, in tree: PlatformAccessibilityElement) -> (Int32, Int32, Int32, Int32) {
-        let r = screenPixels(e.frame)
+    /// Screen extents through the window's own mapping (its client area's physical origin
+    /// and scale), so a window on a monitor of another scale reports where it really is.
+    /// The menu bar, drawn by no window, has empty extents.
+    private func extents(_ e: PlatformAccessibilityElement, coordinateType: UInt32, in l: Located) -> (Int32, Int32, Int32, Int32) {
+        guard let window = l.entry?.window, let mapping = window.accessibilityScreenMapping(clientFrame: l.tree.mappingClientFrame) else { return (0, 0, 0, 0) }
+        func px(_ f: NSRect) -> (Int32, Int32, Int32, Int32) { let r = mapping.pixelRect(f); return (r.x, r.y, r.width, r.height) }
+        let r = px(e.frame)
         guard coordinateType != 0 else { return r }
         // 1: window-relative; 2: parent-relative.
-        let origin = coordinateType == 1 ? screenPixels(tree.frame) : screenPixels(tree.parent(of: e.id)?.frame ?? tree.frame)
+        let origin = coordinateType == 1 ? px(l.tree.frame) : px(l.tree.parent(of: e.id)?.frame ?? l.tree.frame)
         return (r.0 - origin.0, r.1 - origin.1, r.2, r.3)
     }
 
@@ -504,14 +558,14 @@ final class AtspiBridge {
         switch member {
         case "Contains":
             let x = reader.int32() ?? 0, y = reader.int32() ?? 0, ct = reader.uint32() ?? 0
-            let r = extents(l.element, coordinateType: ct, in: l.tree)
+            let r = extents(l.element, coordinateType: ct, in: l)
             let inside = x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3
             reply(message) { DBus.appendBool(&$0, inside) }
         case "GetAccessibleAtPoint":
             let x = reader.int32() ?? 0, y = reader.int32() ?? 0, ct = reader.uint32() ?? 0
             func hit(_ e: PlatformAccessibilityElement) -> PlatformAccessibilityElement? {
                 for c in e.children.reversed() { if let h = hit(c) { return h } }
-                let r = extents(e, coordinateType: ct, in: l.tree)
+                let r = extents(e, coordinateType: ct, in: l)
                 return x >= r.0 && x < r.0 + r.2 && y >= r.1 && y < r.1 + r.3 ? e : nil
             }
             let h = hit(l.element)
@@ -521,21 +575,21 @@ final class AtspiBridge {
             }
         case "GetExtents":
             let ct = reader.uint32() ?? 0
-            let r = extents(l.element, coordinateType: ct, in: l.tree)
+            let r = extents(l.element, coordinateType: ct, in: l)
             reply(message) { iter in DBus.appendStruct(&iter) { s in DBus.appendInt32(&s, r.0); DBus.appendInt32(&s, r.1); DBus.appendInt32(&s, r.2); DBus.appendInt32(&s, r.3) } }
         case "GetPosition":
             let ct = reader.uint32() ?? 0
-            let r = extents(l.element, coordinateType: ct, in: l.tree)
+            let r = extents(l.element, coordinateType: ct, in: l)
             reply(message) { iter in DBus.appendInt32(&iter, r.0); DBus.appendInt32(&iter, r.1) }
         case "GetSize":
-            let r = extents(l.element, coordinateType: 0, in: l.tree)
+            let r = extents(l.element, coordinateType: 0, in: l)
             reply(message) { iter in DBus.appendInt32(&iter, r.2); DBus.appendInt32(&iter, r.3) }
         case "GetLayer":
             reply(message) { DBus.appendUInt32(&$0, l.isWindow ? 7 : 3) }      // ATSPI_LAYER_WINDOW / ATSPI_LAYER_WIDGET
         case "GetMDIZOrder":
             reply(message) { DBus.appendInt16(&$0, 0) }
         case "GrabFocus":
-            let ok = l.entry.window?.atspiOwner?.platformAccessibility.accessibilityFocus(l.element.id) ?? false
+            let ok = l.entry?.window?.atspiOwner?.platformAccessibility.accessibilityFocus(l.element.id) ?? false
             reply(message) { DBus.appendBool(&$0, ok) }
         case "GetAlpha":
             reply(message) { DBus.appendDouble(&$0, 1) }
@@ -565,25 +619,40 @@ final class AtspiBridge {
 
     private func handleAction(_ message: OpaquePointer, member: String, target: Target, reader: inout DBus.Reader) {
         guard case .element(let l) = target else { reply(message, error: "org.freedesktop.DBus.Error.UnknownMethod", member); return }
+        // The role's actions, then the element's custom actions by name (AT-SPI lists named
+        // actions natively; a custom one is performed by pressing its own id).
         let actions = l.element.actions
+        let custom = l.element.customActions
+        func name(_ i: Int) -> String {
+            if actions.indices.contains(i) { return AtspiBridge.actionName(actions[i]) }
+            let c = i - actions.count
+            return custom.indices.contains(c) ? custom[c].name : ""
+        }
+        // The key binding of the first action: "<mnemonic>;<sequence>;<shortcut>".
+        let keyBinding = l.element.keyEquivalent.map { ";;" + AtspiBridge.keyBinding($0) } ?? ""
         switch member {
         case "GetName", "GetLocalizedName", "GetDescription":
             let i = Int(reader.int32() ?? -1)
-            let name = actions.indices.contains(i) ? AtspiBridge.actionName(actions[i]) : ""
-            reply(message) { DBus.appendString(&$0, name) }
+            let n = name(i)
+            reply(message) { DBus.appendString(&$0, n) }
         case "GetKeyBinding":
-            reply(message) { DBus.appendString(&$0, "") }
+            let i = Int(reader.int32() ?? -1)
+            reply(message) { DBus.appendString(&$0, i == 0 ? keyBinding : "") }
         case "GetActions":
             reply(message) { iter in
                 DBus.appendArray(&iter, signature: "(sss)") { a in
-                    for act in actions { DBus.appendStruct(&a) { s in let n = AtspiBridge.actionName(act); DBus.appendString(&s, n); DBus.appendString(&s, n); DBus.appendString(&s, "") } }
+                    for i in 0..<(actions.count + custom.count) {
+                        DBus.appendStruct(&a) { s in let n = name(i); DBus.appendString(&s, n); DBus.appendString(&s, n); DBus.appendString(&s, i == 0 ? keyBinding : "") }
+                    }
                 }
             }
         case "DoAction":
             let i = Int(reader.int32() ?? -1)
             var ok = false
-            if actions.indices.contains(i), let provider = l.entry.window?.atspiOwner?.platformAccessibility {
-                ok = provider.accessibilityPerform(actions[i], on: l.element.id)
+            if actions.indices.contains(i) {
+                ok = perform(actions[i], on: l.element.id, in: l)
+            } else if custom.indices.contains(i - actions.count) {
+                ok = perform(.press, on: custom[i - actions.count].id, in: l)
             }
             reply(message) { DBus.appendBool(&$0, ok) }
         default:
@@ -619,7 +688,7 @@ final class AtspiBridge {
         case "SetCaretOffset", "SetSelection", "AddSelection", "RemoveSelection":
             reply(message) { DBus.appendBool(&$0, false) }
         case "GetCharacterExtents", "GetRangeExtents":
-            let r = extents(l.element, coordinateType: 0, in: l.tree)
+            let r = extents(l.element, coordinateType: 0, in: l)
             reply(message) { iter in DBus.appendInt32(&iter, r.0); DBus.appendInt32(&iter, r.1); DBus.appendInt32(&iter, r.2); DBus.appendInt32(&iter, r.3) }
         case "GetAttributes", "GetDefaultAttributes", "GetAttributeRun":
             reply(message) { iter in DBus.appendArray(&iter, signature: "{ss}") { _ in }; if member == "GetAttributes" || member == "GetAttributeRun" { DBus.appendInt32(&iter, 0); DBus.appendInt32(&iter, Int32(text.count)) } }
@@ -656,6 +725,7 @@ final class AtspiBridge {
         case "AXTabGroup": return (38, "page tab list")
         case "AXMenu", "AXMenuBar": return role == "AXMenuBar" ? (34, "menu bar") : (33, "menu")
         case "AXMenuItem", "AXMenuBarItem": return (35, "menu item")
+        case "AXCheckMenuItem": return (8, "check menu item")
         case "AXLink": return (88, "link")
         case "AXProgressIndicator": return (42, "progress bar")
         case "AXIncrementor": return (52, "spin button")
@@ -668,8 +738,34 @@ final class AtspiBridge {
     private func role(for target: Target) -> (number: UInt32, name: String) {
         switch target {
         case .application: return AtspiBridge.role(for: "AXApplication", subrole: nil)
-        case .element(let l): return AtspiBridge.role(for: l.element.role, subrole: l.element.subrole)
+        case .element(let l):
+            // A menu item with a check mark is AT-SPI's check menu item.
+            if l.element.role == "AXMenuItem", let c = l.element.checkedState, c != 0 { return AtspiBridge.role(for: "AXCheckMenuItem", subrole: nil) }
+            return AtspiBridge.role(for: l.element.role, subrole: l.element.subrole)
         }
+    }
+
+    /// "Ctrl+Shift+S" → "<Control><Shift>s", GTK's accelerator spelling.
+    static func keyBinding(_ label: String) -> String {
+        var parts = label.split(separator: "+", omittingEmptySubsequences: false).map(String.init)
+        guard let key = parts.popLast() else { return "" }
+        let modifiers = parts.map { m -> String in
+            switch m {
+            case "Ctrl": return "<Control>"
+            case "Alt": return "<Alt>"
+            case "Shift": return "<Shift>"
+            case "Win": return "<Super>"
+            default: return "<\(m)>"
+            }
+        }.joined()
+        let k: String
+        switch key {
+        case "Enter": k = "Return"
+        case "Esc": k = "Escape"
+        case "Space": k = "space"
+        default: k = key.count == 1 ? key.lowercased() : key
+        }
+        return modifiers + k
     }
 
     /// The AtspiStateType bits as the two uint32 words of a state set.
@@ -692,7 +788,14 @@ final class AtspiBridge {
             if e.isMultiline { bits.append(17) } else if e.role == "AXTextField" { bits.append(26) }
             if e.allowsMultipleSelection { bits.append(18) }
             if let expanded = e.isExpanded { bits.append(9); bits.append(expanded ? 10 : 5) }
-            if l.isWindow { bits.append(21); if l.entry.window?.atspiIsKey == true { bits.append(1) } }
+            if e.role == "AXPopUpButton" || e.role == "AXComboBox" || e.role == "AXMenuButton" { bits.append(42) }
+            if e.role == "AXMenuItem" || e.role == "AXMenuBarItem" {
+                bits.append(22)
+                if e.isSelected { bits.append(23) }
+                if let c = e.checkedState, c != 0 { bits.append(41); bits.append(c == 2 ? 32 : 4) }
+                if e.children.contains(where: { $0.role == "AXMenu" }) || e.isExpanded != nil { bits.append(42) }
+            }
+            if l.isWindow { bits.append(21); if l.entry?.window?.atspiIsKey == true { bits.append(1) } }
         }
         var w0: UInt32 = 0, w1: UInt32 = 0
         for b in bits { if b < 32 { w0 |= 1 << UInt32(b) } else { w1 |= 1 << UInt32(b - 32) } }
@@ -732,8 +835,8 @@ final class AtspiBridge {
         emitSignal(path: windowPath(window), interface: "org.a11y.atspi.Event.Window", member: member, detail: "", detail1: 0, detail2: 0, data: .int32(0))
     }
 
-    private func emitChildrenChanged(parentPath: String, childPath: String, added: Bool) {
-        emitSignal(path: parentPath, interface: "org.a11y.atspi.Event.Object", member: "ChildrenChanged", detail: added ? "add" : "remove", detail1: -1, detail2: 0, data: .objectReference(uniqueName, childPath))
+    private func emitChildrenChanged(parentPath: String, childPath: String, added: Bool, index: Int32 = -1) {
+        emitSignal(path: parentPath, interface: "org.a11y.atspi.Event.Object", member: "ChildrenChanged", detail: added ? "add" : "remove", detail1: index, detail2: 0, data: .objectReference(uniqueName, childPath))
     }
 
     /// An AT-SPI event: (s detail, i detail1, i detail2, v any_data, a{sv} properties).

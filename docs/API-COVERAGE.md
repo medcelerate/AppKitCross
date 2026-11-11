@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 119 |
-| Types generated | 419 |
+| Types handwritten | 131 |
+| Types generated | 407 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1214 |
+| Members unimplemented-calls | 1155 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -33,17 +33,17 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
 | NSATSTypesetter | class | generated | 15 | 2 | 0 |  |
-| NSAccessibility | struct | handwritten | 339 | 0 | 13 | 10 |
+| NSAccessibility | struct | handwritten | 339 | 0 | 13 | 8 |
 | NSAccessibilityAnnotationPosition | enum | generated | 3 | 0 | 0 |  |
 | NSAccessibilityButton | protocol | generated | 2 | 0 | 0 |  |
 | NSAccessibilityCheckBox | protocol | generated | 1 | 0 | 0 |  |
 | NSAccessibilityColor | protocol | generated | 1 | 0 | 0 |  |
 | NSAccessibilityContainsTransientUI | protocol | generated | 3 | 0 | 0 |  |
-| NSAccessibilityCustomAction | class | generated | 6 | 0 | 0 |  |
+| NSAccessibilityCustomAction | class | handwritten | 6 | 0 | 0 | 0 |
 | NSAccessibilityCustomRotor | class | generated | 39 | 0 | 4 |  |
 | NSAccessibilityCustomRotorItemSearchDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSAccessibilityDateTimeComponentsFlags | typealias | generated | 1 | 0 | 0 |  |
-| NSAccessibilityElement | class | generated | 4 | 0 | 0 |  |
+| NSAccessibilityElement | class | handwritten | 4 | 0 | 0 | 0 |
 | NSAccessibilityElementLoading | protocol | generated | 2 | 0 | 0 |  |
 | NSAccessibilityElementProtocol | protocol | generated | 4 | 0 | 0 |  |
 | NSAccessibilityGroup | protocol | generated | 0 | 0 | 0 |  |
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 40 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 39 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -138,7 +138,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSCollectionViewDelegate | protocol | generated | 29 | 0 | 0 |  |
 | NSCollectionViewDelegateFlowLayout | protocol | generated | 6 | 0 | 0 |  |
-| NSCollectionViewDiffableDataSource | class | generated | 13 | 0 | 2 |  |
+| NSCollectionViewDiffableDataSource | class | handwritten | 13 | 0 | 2 | 0 |
 | NSCollectionViewDiffableDataSourceReference | class | generated | 6 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |
@@ -154,10 +154,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 40 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 37 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
-| NSColorList | class | generated | 16 | 0 | 1 |  |
-| NSColorPanel | class | generated | 35 | 0 | 2 |  |
+| NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
+| NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |
 | NSColorPicker | class | pending | 10 | 0 | 0 |  |
 | NSColorPickerTouchBarItem | class | generated | 11 | 1 | 0 |  |
 | NSColorPickingCustom | protocol | generated | 4 | 0 | 0 |  |
@@ -166,7 +166,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSColorSampler | class | generated | 1 | 0 | 0 |  |
 | NSColorSpace | class | generated | 30 | 0 | 1 |  |
 | NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |
-| NSColorWell | class | generated | 17 | 0 | 1 |  |
+| NSColorWell | class | handwritten | 17 | 0 | 1 | 0 |
 | NSComboBox | class | handwritten | 31 | 1 | 0 | 2 |
 | NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |
 | NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |
@@ -188,7 +188,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDeviceDescriptionKey | struct | generated | 6 | 0 | 0 |  |
 | NSDictionaryController | class | generated | 7 | 0 | 0 |  |
 | NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |
-| NSDiffableDataSourceSnapshot | struct | generated | 25 | 0 | 0 |  |
+| NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |
 | NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |
 | NSDirectionalEdgeInsets | struct | generated | 6 | 0 | 0 |  |
 | NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
@@ -220,17 +220,17 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFindPanelSubstringMatchType | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingPlacement | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingType | enum | generated | 3 | 0 | 0 |  |
-| NSFont | class | handwritten | 90 | 4 | 4 | 23 |
+| NSFont | class | handwritten | 90 | 4 | 4 | 20 |
 | NSFontAction | enum | generated | 8 | 0 | 0 |  |
 | NSFontAssetRequest | class | generated | 5 | 0 | 1 |  |
 | NSFontChanging | protocol | generated | 2 | 0 | 0 |  |
-| NSFontCollection | class | generated | 30 | 0 | 4 |  |
+| NSFontCollection | class | handwritten | 30 | 0 | 4 | 0 |
 | NSFontCollectionMatchingOptionKey | struct | generated | 3 | 0 | 0 |  |
 | NSFontCollectionOptions | struct | generated | 1 | 0 | 0 |  |
-| NSFontDescriptor | class | generated | 67 | 0 | 6 |  |
+| NSFontDescriptor | class | handwritten | 67 | 0 | 6 | 0 |
 | NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |
-| NSFontManager | class | handwritten | 47 | 0 | 0 | 40 |
-| NSFontPanel | class | generated | 19 | 0 | 1 |  |
+| NSFontManager | class | handwritten | 47 | 0 | 0 | 0 |
+| NSFontPanel | class | handwritten | 19 | 0 | 1 | 0 |
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
@@ -282,15 +282,15 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMatrix | class | generated | 83 | 0 | 1 |  |
 | NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
 | NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
-| NSMenu | class | handwritten | 72 | 1 | 3 | 18 |
+| NSMenu | class | handwritten | 72 | 1 | 3 | 14 |
 | NSMenuDelegate | protocol | generated | 8 | 0 | 0 |  |
-| NSMenuItem | class | handwritten | 42 | 0 | 0 | 11 |
+| NSMenuItem | class | handwritten | 42 | 0 | 0 | 7 |
 | NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |
 | NSMenuItemCell | class | handwritten | 20 | 0 | 0 | 1 |
 | NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |
 | NSMenuToolbarItem | class | handwritten | 2 | 0 | 0 | 0 |
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
-| NSMutableFontCollection | class | generated | 8 | 1 | 0 |  |
+| NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |
 | NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |
 | NSNib | class | generated | 4 | 0 | 1 |  |
 | NSObjectController | class | generated | 21 | 3 | 0 |  |
@@ -444,7 +444,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTableView | class | handwritten | 154 | 0 | 10 | 4 |
 | NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |
 | NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |
-| NSTableViewDiffableDataSource | class | generated | 14 | 0 | 3 |  |
+| NSTableViewDiffableDataSource | class | handwritten | 14 | 0 | 3 | 0 |
 | NSTableViewDiffableDataSourceReference | class | generated | 11 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceCellProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | generated | 8 | 0 | 1 |  |
 | NSTextTable | class | generated | 9 | 0 | 1 |  |
 | NSTextTableBlock | class | generated | 6 | 0 | 0 |  |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 162 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 160 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |

@@ -308,12 +308,29 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
+    // MARK: Accessibility (ADR-0013, NSMenuAccessibility.swift)
+    // AXMenuBarItem in the main menu, AXMenuItem elsewhere: the title, enabled state, check
+    // mark and key equivalent; the submenu is the child. Pressing performs the item or
+    // opens its submenu.
+    internal var _accessibilityID = 0
+    open func accessibilityRole() -> NSAccessibility.Role? { MainActor.assumeIsolated { _a11yRole } }
+    open func accessibilityTitle() -> String? { _title }
+    open func accessibilityLabel() -> String? { nil }
+    open func accessibilityHelp() -> String? { _toolTip }
+    open func isAccessibilityElement() -> Bool { !_isSeparator }
+    open func isAccessibilityEnabled() -> Bool { _isEnabled }
+    open func isAccessibilitySelected() -> Bool { MainActor.assumeIsolated { _a11yIsHighlighted } }
+    open func accessibilityChildren() -> [Any]? { _submenu.map { [$0] } ?? [] }
+    open func accessibilityPerformPress() -> Bool { MainActor.assumeIsolated { _a11yPress() } }
+    open func accessibilityPerformPick() -> Bool { accessibilityPerformPress() }
+    open func accessibilityPerformCancel() -> Bool { MainActor.assumeIsolated { _menu?._a11yCancel() ?? false } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _a11yFrame } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
+    open func accessibilityParent() -> Any? { _menu }
     // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
+    /// The highlighted item of an open menu is the one keyboard navigation is on.
+    open func isAccessibilityFocused() -> Bool { MainActor.assumeIsolated { _a11yIsHighlighted } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { _identifier?.rawValue ?? "" }
 }
