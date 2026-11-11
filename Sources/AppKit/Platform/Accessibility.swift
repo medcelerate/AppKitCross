@@ -29,6 +29,18 @@ public enum PlatformAccessibilityValue: Equatable, Sendable {
         case .boolean(let b): return b ? 1 : 0
         }
     }
+
+    /// The value as a check box state: 0 off, 1 on, 2 mixed; anything else (a text, a
+    /// colour swatch's "3380E6", which `Double` reads as 3380e6, a slider's position) is
+    /// off. Never traps, unlike `Int32(doubleValue)`.
+    public var toggleState: Int32 {
+        guard let d = doubleValue, d.isFinite else { return 0 }
+        switch d {
+        case 1: return 1
+        case 2: return 2
+        default: return 0
+        }
+    }
 }
 
 /// An action an element performs for assistive technology (`accessibilityPerformPress`

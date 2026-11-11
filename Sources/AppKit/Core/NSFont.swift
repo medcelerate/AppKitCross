@@ -64,10 +64,37 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
         return o.fontName == fontName && o.pointSize == pointSize && o._weight == _weight && o._italic == _italic
     }
     open override var hash: Int { var h = Hasher(); h.combine(fontName); h.combine(pointSize); return h.finalize() }
+    /// The face a descriptor describes: by PostScript name, or by family with the bold and
+    /// italic symbolic traits (and the weight trait) applied. A size of 0 takes the descriptor's.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/init(descriptor:size:)
-    public init?(descriptor fontDescriptor: NSFontDescriptor, size fontSize: CGFloat) { unimplemented() }
+    public convenience init?(descriptor fontDescriptor: NSFontDescriptor, size fontSize: CGFloat) {
+        let size = fontSize > 0 ? fontSize : (fontDescriptor.pointSize > 0 ? fontDescriptor.pointSize : NSFont.systemFontSize)
+        let a = fontDescriptor.fontAttributes
+        let traits = fontDescriptor.symbolicTraits
+        var weight: CGFloat = traits.contains(.bold) ? NSFont.Weight.bold.rawValue : 0
+        if let w = NSFontDescriptor._number(fontDescriptor._traits[.weight]) { weight = CGFloat(w) }
+        let italic = traits.contains(.italic) || (NSFontDescriptor._number(fontDescriptor._traits[.slant]).map { $0 != 0 } ?? false)
+        if let name = a[.name] as? String {
+            guard let f = NSFont.make(family: name, size: size) else { return nil }
+            // A named face already carries its own weight and slant; traits only add to it.
+            let base = NSFont(handle: f.handle, fontName: name, weight: 0, isSystem: false, italic: false, monospaced: f._monospaced)
+            let adjusted = (weight != 0 || italic) ? base._converted(italic: italic ? true : nil, weight: weight != 0 ? weight : nil, monospaced: nil) : base
+            self.init(handle: adjusted.handle, fontName: adjusted._fontName, weight: adjusted._weight, isSystem: false, italic: adjusted._italic, monospaced: adjusted._monospaced)
+            return
+        }
+        if let family = a[.family] as? String {
+            guard let f = NSFont.make(family: family, size: size, weight: weight, italic: italic, monospaced: traits.contains(.monoSpace)) else { return nil }
+            self.init(handle: f.handle, fontName: family, weight: weight, isSystem: false, italic: italic, monospaced: f._monospaced)
+            return
+        }
+        // Neither: the system font with the traits.
+        let f = NSFont.system(size, weight: weight, monospaced: traits.contains(.monoSpace))._converted(italic: italic ? true : nil, weight: nil, monospaced: nil)
+        self.init(handle: f.handle, fontName: f._fontName, weight: f._weight, isSystem: true, italic: f._italic, monospaced: f._monospaced)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/init(descriptor:texttransform:)
-    public init?(descriptor fontDescriptor: NSFontDescriptor, textTransform: AffineTransform?) { unimplemented() }
+    public convenience init?(descriptor fontDescriptor: NSFontDescriptor, textTransform: AffineTransform?) {
+        self.init(descriptor: fontDescriptor, size: 0)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/init(name:matrix:)
     public init?(name fontName: String, matrix fontMatrix: UnsafePointer<CGFloat>) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/init(name:size:)
@@ -109,7 +136,29 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/familyname
     open var familyName: String? { handle.familyName }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/fontdescriptor
-    open var fontDescriptor: NSFontDescriptor { unimplemented() }
+    open var fontDescriptor: NSFontDescriptor {
+        var symbolic: NSFontDescriptor.SymbolicTraits = []
+        if _italic { symbolic.insert(.italic) }
+        if _weight >= NSFont.Weight.semibold.rawValue { symbolic.insert(.bold) }
+        if isFixedPitch { symbolic.insert(.monoSpace) }
+        if _isSystem { symbolic.insert(.UIOptimized) }
+        let traits: [NSFontDescriptor.TraitKey: Any] = [.symbolic: NSNumber(value: symbolic.rawValue), .weight: NSNumber(value: Double(_weight)), .slant: NSNumber(value: _italic ? 0.2 : 0)]
+        var a: [NSFontDescriptor.AttributeName: Any] = [.name: handle.postScriptName, .size: pointSize, .traits: traits]
+        if let fam = familyName { a[.family] = fam }
+        if let name = displayName { a[.visibleName] = name }
+        a[.face] = _styleName
+        return NSFontDescriptor(fontAttributes: a)
+    }
+    /// The face's style name ("Bold Italic"), from the platform when it knows it.
+    internal var _styleName: String {
+        if let s = handle.styleName, !s.isEmpty { return s }
+        switch (_weight >= NSFont.Weight.semibold.rawValue, _italic) {
+        case (true, true): return "Bold Italic"
+        case (true, false): return "Bold"
+        case (false, true): return "Italic"
+        case (false, false): return "Regular"
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/fontname
     open var fontName: String { _fontName }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont/fontsetchangednotification
