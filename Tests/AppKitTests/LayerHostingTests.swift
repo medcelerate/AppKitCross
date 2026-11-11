@@ -17,6 +17,13 @@ private final class BoxView: NSView {
     }
 }
 
+/// A view that fills itself with a settable colour, the stand-in for a reused cell.
+@MainActor
+private final class SwatchView: NSView {
+    var color = NSColor.red { didSet { needsDisplay = true } }
+    override func draw(_ dirtyRect: NSRect) { color.setFill(); NSBezierPath(rect: bounds).fill() }
+}
+
 final class LayerHostingTests: XCTestCase, @unchecked Sendable {
     /// Rasterising a node into its own surface and compositing it anti-aliases edges once
     /// more than drawing straight into the window, so edge pixels may differ slightly.
@@ -286,6 +293,35 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
 
     /// A shadow reaches outside the layer's bounds: the flattened node a host gets must
     /// cover it, placed so the layer itself stays where it was.
+    /// A view taken out of a hosted window, changed while off-window (as a reused table cell
+    /// or collection item is) and put back must not show the raster it had before.
+    func testViewChangedOffWindowRedrawsWhenReadded() {
+        MainActor.assumeIsolated {
+            let (w, _, _) = makeWindow()
+            let swatch = SwatchView(frame: NSRect(x: 20, y: 20, width: 50, height: 50))
+            w.contentView!.addSubview(swatch)
+            let host = hostWindow(w)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            XCTAssertTrue(w._hostsLayersNatively)
+            w.display()
+            let before = _pixels(host.lastImage!)
+
+            swatch.removeFromSuperview()
+            swatch.color = .blue
+            w.contentView!.addSubview(swatch)
+            w.displayIfNeeded()
+            let hosted = _pixels(host.lastImage!)
+            XCTAssertNotEqual(hosted, before, "the re-added view's new colour reaches the screen")
+
+            host.layerHostingEnabled = false
+            w._updateLayerHosting()
+            w.display()
+            _assertSimilar(hosted, _pixels(host.lastImage!), "hosted matches software after the re-add")
+            w.close()
+        }
+    }
+
     func testShadowsSurviveFlattening() {
         MainActor.assumeIsolated {
             let (w, panel, _) = makeWindow()

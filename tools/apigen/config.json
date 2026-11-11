@@ -1,6 +1,8 @@
 {
   "handwritten": [
     "NSAccessibility",
+    "NSAccessibilityCustomAction",
+    "NSAccessibilityElement",
     "NSActionCell",
     "NSAlert",
     "NSAnimationContext",
@@ -15,6 +17,7 @@
     "NSClickGestureRecognizer",
     "NSClipView",
     "NSCollectionView",
+    "NSCollectionViewDiffableDataSource",
     "NSCollectionViewFlowLayout",
     "NSCollectionViewFlowLayoutInvalidationContext",
     "NSCollectionViewGridLayout",
@@ -31,6 +34,7 @@
     "NSComboBoxCell",
     "NSControl",
     "NSCursor",
+    "NSDiffableDataSourceSnapshot",
     "NSDockTile",
     "NSDocument",
     "NSDocumentController",
@@ -108,6 +112,7 @@
     "NSTableHeaderView",
     "NSTableRowView",
     "NSTableView",
+    "NSTableViewDiffableDataSource",
     "NSText",
     "NSTextContainer",
     "NSTextField",
