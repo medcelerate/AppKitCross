@@ -34,6 +34,8 @@ jobs:
         run: .build/debug/TextEdit --roundtrip textedit-macos.rtf
       - name: TextEdit example RTFD round trip (a list, a table and an attachment)
         run: .build/debug/TextEdit --roundtrip-rtfd textedit-macos.rtfd
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: APPKITWIN_TRACE_PASTEBOARD=1 .build/debug/TextEdit --paste-selftest
       - name: AudioPlayer example offline render (Apple's AVFoundation)
         run: .build/debug/AudioPlayer --render audio-macos.wav && ls -la audio-macos.wav
       - run: swift test
@@ -76,6 +78,11 @@ jobs:
         run: .build/debug/TextEdit.exe --roundtrip-rtfd textedit-windows.rtfd
         env:
           APPKITWIN_HOST_BACKEND: "1"
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: .build/debug/TextEdit.exe --paste-selftest
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
+          APPKITWIN_TRACE_PASTEBOARD: "1"
       - name: Tests on the host backend
         shell: bash
         run: swift test -j 1
@@ -105,6 +112,8 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --roundtrip textedit-linux.rtf
       - name: TextEdit example RTFD round trip (a list, a table and an attachment)
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --roundtrip-rtfd textedit-linux.rtfd
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_TRACE_PASTEBOARD=1 .build/debug/TextEdit --paste-selftest
       - name: AudioPlayer example offline render (no sound device on the runner)
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/AudioPlayer --render audio-linux.wav && ls -la audio-linux.wav
       - name: Tests on the host backend

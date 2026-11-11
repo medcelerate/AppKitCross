@@ -510,6 +510,12 @@ app.run()
     let pb = NSPasteboard.general
     let bmpType = NSPasteboard.PasteboardType("com.microsoft.bmp")
     #if os(Windows)
+    let realClipboard = ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == nil
+    #else
+    let realClipboard = false
+    #endif
+    if realClipboard {
+    #if os(Windows)
     var pixels: [UInt32] = [0x00FF0000, 0x000000FF, 0x0000FF00, 0x00FFFFFF]
     var placed = false
     if let hbm = CreateBitmap(2, 2, 1, 32, &pixels) {
@@ -521,7 +527,8 @@ app.run()
         if !placed { DeleteObject(HGDIOBJ(hbm)) }
     }
     stage("1 put a CF_BITMAP on the Windows clipboard", placed, placed ? "" : "error \(GetLastError())")
-    #else
+    #endif
+    } else {
     var dib = Data()
     func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
     le(0x4D42, 2); le(14 + 40 + 16, 4); le(0, 4); le(54, 4)
@@ -529,7 +536,7 @@ app.run()
     dib.append(contentsOf: [0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255, 255, 255, 0])
     _ = pb.clearContents()
     stage("1 put a BMP on the general pasteboard", pb.setData(dib, forType: bmpType))
-    #endif
+    }
     let types = (pb.types ?? []).map(\.rawValue)
     let imageType = [NSPasteboard.PasteboardType.png, .tiff, bmpType].first { pb.types?.contains($0) == true }
     stage("2 NSPasteboard.general reports an image type", imageType != nil, "types \(types)")
@@ -552,10 +559,32 @@ app.run()
         let enabled = tv.validateMenuItem(paste)
         stage("4 \(kind) text view: Paste \(rich ? "enabled" : "disabled") for an image", enabled == rich,
               "readable \(tv.readablePasteboardTypes.map(\.rawValue)), Paste \(enabled ? "enabled" : "disabled"), Paste and Match Style \(tv.validateMenuItem(matchStyle) ? "enabled" : "disabled")")
+        let drags = tv.registeredDraggedTypes.map(\.rawValue)
+        stage("4 \(kind) text view: drop types \(rich ? "include file URLs and images" : "are text only")", rich == (drags.contains("public.file-url") && drags.contains("com.microsoft.bmp")), "registered \(drags)")
         guard rich else { continue }
         tv.paste(nil)
         let a = tv.textStorage.flatMap { $0.length > 1 ? $0.attribute(.attachment, at: 1, effectiveRange: nil) as? NSTextAttachment : nil }
         stage("5 rich text view: Paste inserts an attachment", a != nil, "text \(tv.string.unicodeScalars.map { $0.value == 0xFFFC ? "<attachment>" : String($0) }.joined()), file \(a?.fileWrapper?.preferredFilename ?? "none")")
+        // Save as RTFD through the document and open it again, as File > Save and Open do.
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("paste-selftest-\(ProcessInfo.processInfo.processIdentifier).rtfd")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let doc = try dc.makeUntitledDocument(ofType: TextDocument.rtfdType) as! TextDocument
+            doc.contents = tv.textStorage!.copy() as! NSAttributedString
+            try doc.write(to: url, ofType: TextDocument.rtfdType)
+            let files = ((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []).sorted()
+            let rtf = (try? String(contentsOf: url.appendingPathComponent("TXT.rtf"), encoding: .utf8)) ?? ""
+            stage("6 saved as RTFD", files.contains("TXT.rtf") && files.contains("Pasted Graphic.bmp"), "files \(files)")
+            print("INFO: TXT.rtf: \(rtf.debugDescription)")
+            let type = (try? dc.typeForContents(of: url)) ?? "unknown"
+            let back = try dc.makeDocument(withContentsOf: url, ofType: type) as! TextDocument
+            let s = back.contents
+            let b = s.length > 1 ? s.attribute(.attachment, at: 1, effectiveRange: nil) as? NSTextAttachment : nil
+            stage("7 reopened RTFD keeps the attachment", b != nil && b?.fileWrapper?.regularFileContents != nil,
+                  "type \(type), text \(s.string.unicodeScalars.map { $0.value == 0xFFFC ? "<attachment>" : String($0) }.joined().debugDescription), file \(b?.fileWrapper?.preferredFilename ?? "none") \(b?.fileWrapper?.regularFileContents?.count ?? -1) bytes")
+        } catch {
+            stage("6 save and reopen as RTFD", false, "\(error)")
+        }
     }
     print(failed ? "paste self-test: FAILED" : "paste self-test: passed")
     return failed ? 1 : 0

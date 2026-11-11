@@ -496,7 +496,12 @@ final class _RTFReader {
             return wrapper.regularFileContents.flatMap { _RTFReader(data: $0).read() }
         }
         let reader = _RTFReader(data: rtf)
-        reader.attachmentFile = { files[$0] }
+        _PasteboardTrace.log("RTFD read: \(rtf.count) bytes of TXT.rtf, files \(files.keys.sorted())")
+        reader.attachmentFile = { name in
+            let f = files[name]
+            _PasteboardTrace.log("RTFD read: \\NeXTGraphic \(name.debugDescription) -> \(f.map { "\($0.regularFileContents?.count ?? -1) bytes" } ?? "no such file")")
+            return f
+        }
         return reader.read()
     }
 

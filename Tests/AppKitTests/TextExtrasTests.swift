@@ -335,6 +335,55 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
     }
     #endif
 
+    /// A pasted clipboard bitmap saved as an RTFD directory on disk and read back from it.
+    func testPastedBitmapSurvivesRTFDOnDisk() throws {
+        try MainActor.assumeIsolated {
+            let (_, _, tv) = window(text: "ab")
+            var dib = Data()
+            func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+            le(40, 4); le(2, 4); le(1, 4); le(1, 2); le(32, 2); le(0, 4); le(8, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+            dib.append(contentsOf: [0, 0, 255, 255, 255, 0, 0, 255])
+            let bmp = try XCTUnwrap(PlatformClipboardImage.bmpFile(fromDIB: dib))
+            let pb = NSPasteboard.general
+            _ = pb.clearContents()
+            _ = pb.setData(bmp, forType: NSTextView._bmpType)
+            tv.setSelectedRange(NSRange(location: 1, length: 0))
+            tv.paste(nil)
+            _ = pb.clearContents()
+            let text = try XCTUnwrap(tv.textStorage?.copy() as? NSAttributedString)
+            var writer = _RTFWriter(attributedString: text, range: NSRange(location: 0, length: text.length))
+            writer.writesAttachments = true
+            let rtf = try XCTUnwrap(writer.write())
+            var children = ["TXT.rtf": FileWrapper(regularFileWithContents: rtf)]
+            for (name, file) in writer.attachmentFiles { children[name] = file }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("bmp-\(UUID().uuidString).rtfd")
+            defer { try? FileManager.default.removeItem(at: url) }
+            try FileWrapper(directoryWithFileWrappers: children).write(to: url, options: .atomic, originalContentsURL: nil)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: url.path).sorted(), ["Pasted Graphic.bmp", "TXT.rtf"])
+            let back = try XCTUnwrap(_RTFReader.readRTFD(try FileWrapper(url: url, options: .immediate)))
+            XCTAssertEqual(back.string, "a\u{FFFC}b")
+            let a = back.attribute(NSAttributedString.Key("NSAttachment"), at: 1, effectiveRange: nil) as? NSTextAttachment
+            XCTAssertEqual(a?.fileWrapper?.regularFileContents, bmp)
+            XCTAssertEqual(a?.fileWrapper?.preferredFilename, "Pasted Graphic.bmp")
+        }
+    }
+
+    /// Making a view rich and graphics-importing after init re-registers its drop types.
+    func testDropTypesFollowRichTextAndGraphics() {
+        MainActor.assumeIsolated {
+            let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+            tv.isRichText = false
+            tv.importsGraphics = false
+            XCTAssertFalse(tv.registeredDraggedTypes.contains(.fileURL))
+            tv.isRichText = true
+            tv.importsGraphics = true
+            XCTAssertTrue(tv.registeredDraggedTypes.contains(.fileURL))
+            XCTAssertTrue(tv.registeredDraggedTypes.contains(.png))
+            tv.isEditable = false
+            XCTAssertTrue(tv.registeredDraggedTypes.isEmpty)
+        }
+    }
+
     func testRTFDRoundTripKeepsAttachments() {
         MainActor.assumeIsolated {
             let png = pngImage(NSSize(width: 20, height: 10))

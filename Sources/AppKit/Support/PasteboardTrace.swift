@@ -1,7 +1,7 @@
 // Pasteboard diagnostics (ADR-0030). `APPKITWIN_TRACE_PASTEBOARD=1` logs to stderr every
 // system clipboard read (raw platform formats, the AppKit types they resolve to), the
 // general pasteboard's sync decisions, menu validation of the paste items (which target was
-// asked and its answer) and NSTextView's paste validation. Any other value is a file path
+// asked and its answer), NSTextView's paste validation and RTFD attachment lookups. Any other value is a file path
 // the lines are appended to (for GUI launches without a console).
 
 import Foundation

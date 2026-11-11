@@ -714,6 +714,21 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(usingtextlayoutmanager:)
     @MainActor public convenience init(usingTextLayoutManager: Bool) { unimplemented() }
+    // The drag types follow what the view accepts, as AppKit's NSTextView re-registers when
+    // these change: a view made editable, rich or graphics-importing after init takes drops.
+    open override var isEditable: Bool {
+        get { super.isEditable }
+        set { super.isEditable = newValue; updateDragTypeRegistration() }
+    }
+    open override var isRichText: Bool {
+        get { super.isRichText }
+        set { super.isRichText = newValue; updateDragTypeRegistration() }
+    }
+    open override var importsGraphics: Bool {
+        get { super.importsGraphics }
+        set { super.importsGraphics = newValue; updateDragTypeRegistration() }
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/acceptabledragtypes
     @MainActor open var acceptableDragTypes: [NSPasteboard.PasteboardType] {
         isRichText && importsGraphics ? [.rtfd, .rtf, .fileURL, .png, .tiff, NSTextView._bmpType, .string] : isRichText ? [.rtf, .string] : [.string]
