@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 108 |
-| Types generated | 430 |
+| Types handwritten | 122 |
+| Types generated | 416 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1161 |
+| Members unimplemented-calls | 1197 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -95,7 +95,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBindingSelectionMarker | class | generated | 5 | 0 | 0 |  |
 | NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 28 |
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
-| NSBox | class | generated | 29 | 0 | 2 |  |
+| NSBox | class | handwritten | 29 | 0 | 2 | 2 |
 | NSBrowser | class | generated | 95 | 1 | 3 |  |
 | NSBrowserCell | class | generated | 12 | 0 | 0 |  |
 | NSBrowserDelegate | protocol | generated | 34 | 0 | 0 |  |
@@ -131,7 +131,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionLayoutSpacing | class | generated | 5 | 0 | 0 |  |
 | NSCollectionLayoutSupplementaryItem | class | generated | 6 | 0 | 0 |  |
 | NSCollectionLayoutVisibleItem | protocol | generated | 10 | 0 | 0 |  |
-| NSCollectionView | class | generated | 84 | 0 | 6 |  |
+| NSCollectionView | class | handwritten | 84 | 0 | 6 | 9 |
 | NSCollectionViewCompositionalLayout | class | generated | 5 | 0 | 0 |  |
 | NSCollectionViewCompositionalLayoutConfiguration | class | generated | 3 | 0 | 0 |  |
 | NSCollectionViewCompositionalLayoutSectionProvider | typealias | generated | 1 | 0 | 0 |  |
@@ -143,17 +143,17 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewElement | protocol | generated | 5 | 0 | 0 |  |
-| NSCollectionViewFlowLayout | class | generated | 13 | 0 | 0 |  |
-| NSCollectionViewFlowLayoutInvalidationContext | class | generated | 2 | 0 | 0 |  |
-| NSCollectionViewGridLayout | class | generated | 8 | 0 | 0 |  |
-| NSCollectionViewItem | class | generated | 10 | 0 | 1 |  |
-| NSCollectionViewLayout | class | generated | 38 | 0 | 0 |  |
-| NSCollectionViewLayoutAttributes | class | generated | 12 | 0 | 0 |  |
-| NSCollectionViewLayoutInvalidationContext | class | generated | 10 | 0 | 0 |  |
+| NSCollectionViewFlowLayout | class | handwritten | 13 | 0 | 0 | 2 |
+| NSCollectionViewFlowLayoutInvalidationContext | class | handwritten | 2 | 0 | 0 | 1 |
+| NSCollectionViewGridLayout | class | handwritten | 8 | 0 | 0 | 2 |
+| NSCollectionViewItem | class | handwritten | 10 | 0 | 1 | 3 |
+| NSCollectionViewLayout | class | handwritten | 38 | 0 | 0 | 3 |
+| NSCollectionViewLayoutAttributes | class | handwritten | 12 | 0 | 0 | 1 |
+| NSCollectionViewLayoutInvalidationContext | class | handwritten | 10 | 0 | 0 | 1 |
 | NSCollectionViewPrefetching | protocol | generated | 2 | 0 | 0 |  |
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
-| NSCollectionViewUpdateItem | class | generated | 3 | 0 | 0 |  |
+| NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
 | NSColor | class | handwritten | 167 | 5 | 4 | 40 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
 | NSColorList | class | generated | 16 | 0 | 1 |  |
@@ -246,10 +246,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSGlyphStorage | protocol | generated | 4 | 0 | 0 |  |
 | NSGradient | class | generated | 17 | 0 | 1 |  |
 | NSGraphicsContext | class | handwritten | 27 | 1 | 2 | 10 |
-| NSGridCell | class | generated | 16 | 0 | 1 |  |
-| NSGridColumn | class | generated | 9 | 0 | 0 |  |
-| NSGridRow | class | generated | 14 | 0 | 1 |  |
-| NSGridView | class | generated | 27 | 0 | 0 |  |
+| NSGridCell | class | handwritten | 16 | 0 | 1 | 3 |
+| NSGridColumn | class | handwritten | 9 | 0 | 0 | 3 |
+| NSGridRow | class | handwritten | 14 | 0 | 1 | 3 |
+| NSGridView | class | handwritten | 27 | 0 | 0 | 2 |
 | NSGroupTouchBarItem | class | generated | 9 | 1 | 0 |  |
 | NSHapticFeedbackManager | class | generated | 7 | 0 | 2 |  |
 | NSHapticFeedbackPerformer | protocol | generated | 1 | 0 | 0 |  |

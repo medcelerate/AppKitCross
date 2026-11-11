@@ -514,6 +514,9 @@ import CoreText
         if NSView._traceInvalidation { NSView._trace("addSubview \(type(of: view)) to \(type(of: self))\(view._superview === self ? " (re-add)" : "")") }
         if view._superview === self {
             _subviews.removeAll { $0 === view }
+            // Re-adding moves the view in the stacking order: its layer must move with it
+            // (the attach below only inserts a layer that is not in the superlayer yet).
+            if let l = view._layer, let sl = _layer, l.superlayer === sl { l.removeFromSuperlayer() }
         } else {
             view.removeFromSuperviewWithoutNeedingDisplay()
         }
@@ -1782,6 +1785,43 @@ import CoreText
     @MainActor internal func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
     @MainActor internal func _accessibilityIsMultiline() -> Bool { false }
     @MainActor internal func _accessibilityAllowsMultipleSelection() -> Bool { false }
+    /// Whether assistive technology may select this element (a table row, a collection
+    /// view item): the nearest container that owns it answers.
+    @MainActor internal func _accessibilityIsSelectable() -> Bool {
+        var v = superview
+        while let cur = v {
+            if cur._accessibilityChildIsSelectable(self) { return true }
+            v = cur.superview
+        }
+        return false
+    }
+    /// Container hooks: a view that owns selectable children (a collection view) says
+    /// so, selects one when assistive technology presses it, and sets its selection.
+    @MainActor internal func _accessibilityChildIsSelectable(_ view: NSView) -> Bool { false }
+    @MainActor internal func _accessibilityChildPressed(_ view: NSView) -> Bool { false }
+    @MainActor internal func _accessibilityChild(_ view: NSView, setSelected selected: Bool, extending: Bool) -> Bool? { nil }
+    /// A press that the view itself does not answer goes to the container that owns it.
+    @MainActor internal func _accessibilityPressThroughContainer() -> Bool {
+        var v = superview
+        while let cur = v {
+            if cur._accessibilityChildPressed(self) { return true }
+            v = cur.superview
+        }
+        return false
+    }
+    /// Assistive technology selects or deselects the element: the owning container
+    /// runs its selection; otherwise the override is stored.
+    @MainActor internal func _accessibilitySetSelected(_ selected: Bool, extending: Bool) -> Bool {
+        var v = superview
+        while let cur = v {
+            if let handled = cur._accessibilityChild(self, setSelected: selected, extending: extending) { return handled }
+            v = cur.superview
+        }
+        setAccessibilitySelected(selected)
+        return true
+    }
+    /// The enclosing scroll view's clip view changed size (NSScrollView.tile).
+    @MainActor internal func _clipViewDidResize() { }
     /// Expanded or collapsed (outline rows, disclosure triangles); nil when the element
     /// cannot expand.
     @MainActor internal func _accessibilityExpandedState() -> Bool? { nil }
