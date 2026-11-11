@@ -48,6 +48,7 @@
     "NSOpenPanel",
     "NSOpenSavePanelDelegate",
     "NSOutlineView",
+    "NSPageController",
     "NSPanGestureRecognizer",
     "NSPanel",
     "NSParagraphStyle",
@@ -100,10 +101,12 @@
     "NSTextTable",
     "NSTextTableBlock",
     "NSTextView",
+    "NSTitlebarAccessoryViewController",
     "NSToolbar",
     "NSToolbarDelegate",
     "NSToolbarItem",
     "NSToolbarItemGroup",
+    "NSTrackingArea",
     "NSTrackingSeparatorToolbarItem",
     "NSView",
     "NSViewController",
@@ -384,7 +387,10 @@
     "NSTextFinderClient.string(at:effectiveRange:endsWithSearchBoundary:)": "outRange.pointee = NSRange(location: 0, length: (string as NSString).length); outFlag.pointee = false; return string",
     "NSTextViewDelegate.textView(_:completions:forPartialWordRange:indexOfSelectedItem:)": "return words",
     "NSTextViewDelegate.textView(_:shouldSetSpellingState:range:)": "return value",
-    "NSTextViewDelegate.textView(_:candidates:forSelectedRange:)": "return candidates"
+    "NSTextViewDelegate.textView(_:candidates:forSelectedRange:)": "return candidates",
+    "NSPageControllerDelegate.pageController(_:frameFor:)": "return pageController.view.bounds",
+    "NSPageControllerDelegate.pageController(_:identifierFor:)": "return \"\"",
+    "NSPageControllerDelegate.pageController(_:viewControllerForIdentifier:)": "return NSViewController()"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",

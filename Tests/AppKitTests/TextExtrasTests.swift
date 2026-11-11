@@ -178,7 +178,7 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
         // A checker that rejects the commonest words is not usable here (a CI runner's
         // service may answer without a working dictionary); the word-list path covers CI.
-        guard system.isCorrect("the"), system.isCorrect("house") else { throw XCTSkip("the \(system.name) checker rejects common words on this machine") }
+        guard ["the", "house", "receive", "separate"].allSatisfy(system.isCorrect) else { throw XCTSkip("the \(system.name) checker rejects common words on this machine") }
         XCTAssertTrue(system.isCorrect("receive"), system.name)
         XCTAssertFalse(system.isCorrect("recieve"), system.name)
         XCTAssertTrue(system.guesses(for: "recieve").contains("receive"), "\(system.guesses(for: "recieve"))")

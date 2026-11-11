@@ -102,9 +102,15 @@ extern "C" int cspell_check(cspell_checker *c, const char *word) {
     std::wstring w = widen(word);
     IEnumSpellingError *errors = nullptr;
     if (FAILED(c->checker->Check(w.c_str(), &errors)) || !errors) return -1;
+    // Only errors that come with a corrective action are misspellings; the checker may also
+    // report spans it merely has no opinion about (CORRECTIVE_ACTION_NONE).
     ISpellingError *error = nullptr;
     int ok = 1;
-    if (errors->Next(&error) == S_OK) { ok = 0; error->Release(); }
+    while (ok && errors->Next(&error) == S_OK) {
+        CORRECTIVE_ACTION action = CORRECTIVE_ACTION_NONE;
+        if (SUCCEEDED(error->get_CorrectiveAction(&action)) && action != CORRECTIVE_ACTION_NONE) ok = 0;
+        error->Release();
+    }
     errors->Release();
     return ok;
 }
