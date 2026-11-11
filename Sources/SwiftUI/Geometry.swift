@@ -11,6 +11,12 @@ public enum CoordinateSpace: Equatable, Hashable {
     public var isLocal: Bool { self == .local }
 }
 
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/hoverphase
+public enum HoverPhase: Equatable {
+    case active(CGPoint)
+    case ended
+}
+
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/geometryproxy
 public struct GeometryProxy {
     public let size: CGSize
