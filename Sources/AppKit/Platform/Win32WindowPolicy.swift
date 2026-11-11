@@ -16,6 +16,9 @@ public enum Win32WindowPolicy {
         /// Kept: the window carries the Win32 menu bar, which user32 draws through GDI into
         /// the redirection surface (without one the bar is a black strip).
         case keptForMenuBar
+        /// Kept: `APPKITWIN_REDIRECTION_BITMAP=1` asked for it (an experiment knob: some
+        /// shell features are said to need the surface).
+        case keptByRequest
 
         public var keeps: Bool { self != .none }
     }
@@ -31,7 +34,8 @@ public enum Win32WindowPolicy {
 
     /// The redirection-bitmap decision at `CreateWindowExW` (the bit is creation-only).
     public static func redirectionBitmap(styleMask: NSWindow.StyleMask, applicationHasMenuBar: Bool,
-                                         legacyTarget: Bool, presentationAvailable: Bool) -> RedirectionBitmap {
+                                         legacyTarget: Bool, presentationAvailable: Bool, requested: Bool = false) -> RedirectionBitmap {
+        if requested { return .keptByRequest }
         if legacyTarget { return .keptForLegacyTarget }
         if !presentationAvailable { return .keptForMissingDevice }
         if carriesMenuBar(styleMask, applicationHasMenuBar: applicationHasMenuBar) { return .keptForMenuBar }

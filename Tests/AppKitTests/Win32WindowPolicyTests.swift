@@ -19,6 +19,11 @@ final class Win32WindowPolicyTests: XCTestCase {
         XCTAssertEqual(Win32WindowPolicy.redirectionBitmap(styleMask: [.borderless, .nonactivatingPanel], applicationHasMenuBar: true, legacyTarget: false, presentationAvailable: true), .none)
     }
 
+    func testRequestedSurfaceWins() {
+        XCTAssertEqual(Win32WindowPolicy.redirectionBitmap(styleMask: app.union(.fullSizeContentView), applicationHasMenuBar: false, legacyTarget: false, presentationAvailable: true, requested: true), .keptByRequest)
+        XCTAssertTrue(Win32WindowPolicy.RedirectionBitmap.keptByRequest.keeps)
+    }
+
     func testLegacyAndDevicelessPathsKeepTheSurface() {
         XCTAssertEqual(Win32WindowPolicy.redirectionBitmap(styleMask: [.borderless], applicationHasMenuBar: false, legacyTarget: true, presentationAvailable: true), .keptForLegacyTarget)
         XCTAssertEqual(Win32WindowPolicy.redirectionBitmap(styleMask: [.borderless], applicationHasMenuBar: false, legacyTarget: false, presentationAvailable: false), .keptForMissingDevice)

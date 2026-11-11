@@ -66,7 +66,8 @@ final class Win32Window: PlatformWindow {
         // device), which blits into it, and for windows that carry the Win32 menu bar:
         // user32 draws the bar through GDI into the surface, a black strip without one.
         let redirection = Win32WindowPolicy.redirectionBitmap(styleMask: styleMask, applicationHasMenuBar: ownerWantsMenuBar,
-                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available())
+                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available(),
+                                                              requested: Win32Window.keepsRedirectionBitmapByRequest)
         if !redirection.keeps { ex |= Win32Window.wsExNoRedirectionBitmap }
         if NSView._traceInvalidation {
             let why: String
@@ -75,6 +76,7 @@ final class Win32Window: PlatformWindow {
             case .keptForLegacyTarget: why = "legacy HWND target"
             case .keptForMissingDevice: why = "no D3D11/DXGI 1.2 device: HWND target"
             case .keptForMenuBar: why = "window carries the Win32 menu bar"
+            case .keptByRequest: why = "APPKITWIN_REDIRECTION_BITMAP=1"
             }
             NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(redirection.keeps ? "kept" : "none") (\(why))")
         }
@@ -229,7 +231,8 @@ final class Win32Window: PlatformWindow {
         // shadow; without a shadow nothing is extended and DWM draws no frame at all.
         updateShadowFrameStyle()
         let shadowFrame = usesCustomFrame && _chrome.hasShadow
-        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: shadowFrame ? 1 : 0, cyBottomHeight: 0)
+        let topMargin: Int32 = shadowFrame ? (Win32Window.frameTopMarginOverride ?? 1) : 0
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: topMargin, cyBottomHeight: 0)
         _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
         if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
@@ -505,6 +508,12 @@ final class Win32Window: PlatformWindow {
     /// `APPKITWIN_LEGACY_D2D=1` selects the Milestone 1 `ID2D1HwndRenderTarget` instead of
     /// the DXGI flip-model swap chain (Milestone 3).
     private static let useLegacyHwndTarget = ProcessInfo.processInfo.environment["APPKITWIN_LEGACY_D2D"] == "1"
+    /// Experiment knobs for the Windows 11 snap layouts investigation (ADR-0022, PC rounds):
+    /// `APPKITWIN_REDIRECTION_BITMAP=1` keeps the redirection surface on every window;
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` is the top margin `DwmExtendFrameIntoClientArea`
+    /// gets for custom frames instead of 1 (0 = nothing extended, 32 = a caption's worth).
+    private static let keepsRedirectionBitmapByRequest = ProcessInfo.processInfo.environment["APPKITWIN_REDIRECTION_BITMAP"] == "1"
+    private static let frameTopMarginOverride: Int32? = ProcessInfo.processInfo.environment["APPKITWIN_FRAME_TOP_MARGIN"].flatMap { Int32($0) }
     /// `APPKITWIN_DXGI_DEBUG=1` prints the DXGI debug layer's live-object report to stderr
     /// whenever a window target is released (and asks for the D3D11 debug layer).
     private static let reportsLiveObjects = ProcessInfo.processInfo.environment["APPKITWIN_DXGI_DEBUG"] == "1"
