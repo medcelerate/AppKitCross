@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 117 |
-| Types generated | 421 |
+| Types handwritten | 120 |
+| Types generated | 418 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -138,7 +138,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewDataSource | protocol | generated | 4 | 0 | 0 |  |
 | NSCollectionViewDelegate | protocol | generated | 29 | 0 | 0 |  |
 | NSCollectionViewDelegateFlowLayout | protocol | generated | 6 | 0 | 0 |  |
-| NSCollectionViewDiffableDataSource | class | generated | 13 | 0 | 2 |  |
+| NSCollectionViewDiffableDataSource | class | handwritten | 13 | 0 | 2 | 0 |
 | NSCollectionViewDiffableDataSourceReference | class | generated | 6 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |
@@ -188,7 +188,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDeviceDescriptionKey | struct | generated | 6 | 0 | 0 |  |
 | NSDictionaryController | class | generated | 7 | 0 | 0 |  |
 | NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |
-| NSDiffableDataSourceSnapshot | struct | generated | 25 | 0 | 0 |  |
+| NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |
 | NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |
 | NSDirectionalEdgeInsets | struct | generated | 6 | 0 | 0 |  |
 | NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
@@ -444,7 +444,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTableView | class | handwritten | 154 | 0 | 10 | 4 |
 | NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |
 | NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |
-| NSTableViewDiffableDataSource | class | generated | 14 | 0 | 3 |  |
+| NSTableViewDiffableDataSource | class | handwritten | 14 | 0 | 3 | 0 |
 | NSTableViewDiffableDataSourceReference | class | generated | 11 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceCellProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |
