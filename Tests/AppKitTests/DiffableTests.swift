@@ -99,6 +99,7 @@ private final class TableFixture {
     let table = RecordingTable(frame: .zero)
     let scroll: NSScrollView
     var cellRequests: [String] = []
+    var suffix = ""            // appended to every label, so a reload has something to show
     var source: NSTableViewDiffableDataSource<String, String>!
 
     init(height: CGFloat = 400) {
@@ -109,8 +110,11 @@ private final class TableFixture {
         table.rowHeight = 20
         source = NSTableViewDiffableDataSource<String, String>(tableView: table) { [unowned self] _, _, row, id in
             self.cellRequests.append(id)
-            let cell = NSTableCellView._makeLabelCell(frame: .zero)
-            cell.textField?.stringValue = id
+            // Reused through makeView, as real data sources do: a reused cell is relabelled
+            // while detached from the window.
+            let cell = (table.makeView(withIdentifier: NSUserInterfaceItemIdentifier("cell"), owner: nil) as? NSTableCellView)
+                ?? NSTableCellView._makeLabelCell(frame: .zero)
+            cell.textField?.stringValue = id + self.suffix
             cell.identifier = NSUserInterfaceItemIdentifier("cell")
             return cell
         }
@@ -138,6 +142,7 @@ private final class CollectionFixture {
     let cv = RecordingCollection(frame: .zero)
     let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 600))
     var itemRequests: [String] = []
+    var suffix = ""
     var source: NSCollectionViewDiffableDataSource<String, String>!
 
     init(headers: Bool = false) {
@@ -153,7 +158,7 @@ private final class CollectionFixture {
         source = NSCollectionViewDiffableDataSource<String, String>(collectionView: cv) { [unowned self] cv, ip, id in
             self.itemRequests.append(id)
             let item = cv.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("color"), for: ip)
-            item.textField?.stringValue = id
+            item.textField?.stringValue = id + self.suffix
             return item
         }
         scroll.documentView = cv
@@ -171,6 +176,32 @@ private final class CollectionFixture {
         }
         return out
     }
+}
+
+
+/// Turns on the host's reference native compositor for `window` (the model of Win32's
+/// DirectComposition hosting), runs `change`, and returns the labels whose text changed while
+/// their layer kept the raster version the compositor had cached: those would show stale text.
+@MainActor
+private func staleLabelsUnderNativeHosting(_ window: NSWindow, labels: () -> [NSTextField], after change: () -> Void) -> [String] {
+    let host = Mirror(reflecting: window).descendant("_platform") as! HostWindow
+    window.contentView!.wantsLayer = true
+    host.layerHostingEnabled = true
+    window._updateLayerHosting()
+    precondition(window._hostsLayersNatively)
+    window.display()
+    var before: [ObjectIdentifier: (String, Int)] = [:]
+    for l in labels() { if let layer = l.layer { before[ObjectIdentifier(l)] = (l.stringValue, layer._rasterVersion) } }
+    change()
+    window.displayIfNeeded()
+    var stale: [String] = []
+    for l in labels() {
+        guard let (text, version) = before[ObjectIdentifier(l)], let layer = l.layer else { continue }
+        if text != l.stringValue && layer._rasterVersion == version { stale.append(l.stringValue) }
+    }
+    host.layerHostingEnabled = false
+    window._updateLayerHosting()
+    return stale
 }
 
 // MARK: - Tests
@@ -603,6 +634,43 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(f.cv.batchDurations[0], 0)
             XCTAssertGreaterThan(f.cv.batchDurations[1], 0)
             XCTAssertEqual(f.cv.count("reloadData"), 0)
+        }
+    }
+
+    /// A reload re-requests every cell; the reused cell views are relabelled while detached,
+    /// and a natively hosted window (Win32's DirectComposition) must re-rasterise them.
+    func testReloadRedrawsReusedViewsUnderNativeHosting() throws {
+        try MainActor.assumeIsolated {
+            guard Platform.backend is HostBackend else { throw XCTSkip("uses the host's reference compositor") }
+            let t = TableFixture()
+            var s = snapshot([("A", ["one", "two", "three", "four"]), ("B", ["five", "six"])])
+            t.source.apply(s, animatingDifferences: false)
+            @MainActor func tableLabels() -> [NSTextField] {
+                var out: [NSTextField] = []
+                t.table.enumerateAvailableRowViews { rv, _ in
+                    if let f = (rv._cellViews.first as? NSTableCellView)?.textField { out.append(f) }
+                }
+                return out
+            }
+            XCTAssertEqual(staleLabelsUnderNativeHosting(t.window, labels: tableLabels) {
+                t.suffix = " r2"
+                s.reloadItems(s.itemIdentifiers)
+                t.source.apply(s, animatingDifferences: true)
+            }, [], "table: reused cells relabelled off-window get a new raster")
+            XCTAssertEqual(t.shownRows(), ["one r2", "two r2", "three r2", "four r2", "five r2", "six r2"])
+            t.window.close()
+
+            let c = CollectionFixture()
+            var cs = snapshot([("A", ["one", "two", "three"]), ("B", ["four", "five"])])
+            c.source.apply(cs, animatingDifferences: false)
+            @MainActor func collectionLabels() -> [NSTextField] { c.cv.visibleItems().compactMap(\.textField) }
+            XCTAssertEqual(staleLabelsUnderNativeHosting(c.window, labels: collectionLabels) {
+                c.suffix = "#"
+                cs.reloadItems(cs.itemIdentifiers)
+                c.source.apply(cs, animatingDifferences: false)
+            }, [], "collection: reused items relabelled off-window get a new raster")
+            XCTAssertEqual(c.shown(), [["one#", "two#", "three#"], ["four#", "five#"]])
+            c.window.close()
         }
     }
 

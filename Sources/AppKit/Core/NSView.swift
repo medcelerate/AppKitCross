@@ -279,6 +279,10 @@ import CoreText
         _needsUpdateTrackingAreas = true
         window?._trackingAreasDidChange()
         if let l = _layer, let w = window { l.contentsScale = w.backingScaleFactor }
+        // Off-window invalidations only mark the layer quietly (no window to repaint), so a
+        // view changed while detached (a reused table cell or collection item) would keep the
+        // raster the native compositor cached for it. Version it now that it is back.
+        if let l = _layer, !_layerIsHosted, window?._hostsLayersNatively == true, l.needsDisplay() { l.setNeedsDisplay() }
         viewDidMoveToWindow()
         if appearing { _viewController?.viewDidAppear() } else if disappearing { _viewController?.viewDidDisappear() }
     }

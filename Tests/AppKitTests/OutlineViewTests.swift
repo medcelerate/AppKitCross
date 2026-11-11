@@ -368,7 +368,11 @@ final class OutlineViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDisclosureTrianglePixels() {
+    func testDisclosureTrianglePixels() throws {
+        // Reads HostWindow's last frame, so it only means something on the host backend.
+        guard MainActor.assumeIsolated({ Platform.backend is HostBackend }) else {
+            throw XCTSkip("pixel reads come from HostWindow (APPKITWIN_HOST_BACKEND=1)")
+        }
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
             let tree = Tree(roots: sampleTree(), log: Log())
