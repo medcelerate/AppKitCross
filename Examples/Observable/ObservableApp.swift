@@ -71,7 +71,7 @@ struct DetailPane: View {
             TextField("Name", text: $vehicle.name)
             HStack {
                 Text("Speed")
-                Slider(value: $vehicle.speed, in: 0...120)
+                Slider(value: $vehicle.speed, in: 0...120).accessibilityLabel("Speed")
                 Text("\(Int(vehicle.speed)) km/h").frame(width: 70, alignment: .trailing)
             }
             Toggle("Moving", isOn: $vehicle.isMoving)

@@ -105,6 +105,7 @@ import CoreText
             (controlView as? NSControl)?._fireAction()
         }
         _tracker = tracker
+        if !tracker.finished { tracker.accessibilityOwner = controlView }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/autoenablesitems
     @MainActor open var autoenablesItems: Bool {

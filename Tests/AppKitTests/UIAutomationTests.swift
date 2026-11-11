@@ -199,6 +199,56 @@ final class UIAutomationTests: XCTestCase, @unchecked Sendable {
         XCTAssertNil(property(root, 2, 30005), "the other range's first id is gone")
         XCTAssertNil(property(root, 106, 30005))
     }
+
+    /// Menus (ADR-0013 follow-ups): a menu with items whose key equivalents are the
+    /// AcceleratorKey, a checked item with Toggle, an item with a submenu with
+    /// ExpandCollapse, and a custom-action button that never answers a hit test.
+    func testMenusAcceleratorsAndCustomActionButtons() {
+        let log = Log()
+        var callbacks = CUIACallbacks()
+        callbacks.context = Unmanaged.passUnretained(log).toOpaque()
+        callbacks.invoke = { ctx, id in Unmanaged<Log>.fromOpaque(ctx!).takeUnretainedValue().invoked.append(id); return true }
+        callbacks.toggle = { ctx, id in Unmanaged<Log>.fromOpaque(ctx!).takeUnretainedValue().toggled.append(id); return true }
+        callbacks.expandCollapse = { ctx, id, expand in Unmanaged<Log>.fromOpaque(ctx!).takeUnretainedValue().invoked.append(expand ? -id : id); return true }
+        let root = cuia_root_create(nil, &callbacks)!
+        defer { cuia_root_destroy(root) }
+        let open = Self.utf16("Open…"), ctrlO = Self.utf16("Ctrl+O"), ruler = Self.utf16("Show Ruler"), recent = Self.utf16("Open Recent"), archive = Self.utf16("Archive")
+        open.withUnsafeBufferPointer { o in ctrlO.withUnsafeBufferPointer { k in ruler.withUnsafeBufferPointer { r in
+        recent.withUnsafeBufferPointer { re in archive.withUnsafeBufferPointer { a in
+            var m = CUIANode(); m.id = 1; m.parent = -1; m.controlType = 50009; m.flags = UInt32(CUIA_ENABLED | CUIA_IS_CONTENT)
+            m.left = 0; m.top = 0; m.right = 200; m.bottom = 100
+            var i1 = CUIANode(); i1.id = 2; i1.parent = 1; i1.controlType = 50011; i1.name = o.baseAddress; i1.acceleratorKey = k.baseAddress
+            i1.flags = UInt32(CUIA_ENABLED | CUIA_HAS_INVOKE | CUIA_IS_CONTENT); i1.left = 0; i1.top = 5; i1.right = 200; i1.bottom = 27
+            var i2 = CUIANode(); i2.id = 3; i2.parent = 1; i2.controlType = 50011; i2.name = r.baseAddress
+            i2.flags = UInt32(CUIA_ENABLED | CUIA_HAS_INVOKE | CUIA_HAS_TOGGLE | CUIA_IS_CONTENT); i2.toggleState = 1
+            i2.left = 0; i2.top = 27; i2.right = 200; i2.bottom = 49
+            var i3 = CUIANode(); i3.id = 4; i3.parent = 1; i3.controlType = 50011; i3.name = re.baseAddress
+            i3.flags = UInt32(CUIA_ENABLED | CUIA_HAS_EXPAND_COLLAPSE | CUIA_IS_CONTENT); i3.left = 0; i3.top = 49; i3.right = 200; i3.bottom = 71
+            var b = CUIANode(); b.id = 5; b.parent = 2; b.controlType = 50000; b.name = a.baseAddress
+            b.flags = UInt32(CUIA_ENABLED | CUIA_HAS_INVOKE | CUIA_IS_CONTENT | CUIA_SKIP_HIT_TEST); b.left = 0; b.top = 5; b.right = 200; b.bottom = 27
+            let nodes = [m, i1, i2, i3, b]
+            nodes.withUnsafeBufferPointer { cuia_root_set_nodes(root, $0.baseAddress, Int32($0.count)) }
+        } } } } }
+        XCTAssertEqual(property(root, 1, 30003), "50009", "Menu")
+        XCTAssertEqual(property(root, 2, 30003), "50011", "MenuItem")
+        XCTAssertEqual(property(root, 2, 30006), "Ctrl+O", "AcceleratorKey")
+        XCTAssertNil(property(root, 3, 30006), "no key equivalent, no accelerator")
+        XCTAssertEqual(property(root, 3, 30086), "1", "the checked item's ToggleState is On")
+        XCTAssertTrue(cuia_root_debug_has_pattern(root, 4, 10005), "ExpandCollapse on the item with a submenu")
+        XCTAssertFalse(cuia_root_debug_has_pattern(root, 4, 10000), "and no Invoke")
+        XCTAssertEqual(cuia_root_debug_child_count(root, 2), 1, "the custom action is a child button")
+        XCTAssertTrue(cuia_debug_invoke(root, 5))
+        XCTAssertTrue(cuia_debug_expand_collapse(root, 4, true))
+        XCTAssertEqual(log.invoked, [5, -4])
+        XCTAssertEqual(cuia_root_debug_hit_test(root, 100, 10), 2, "the item, not the custom-action button over it")
+        XCTAssertEqual(cuia_root_debug_hit_test(root, 100, 60), 4)
+        XCTAssertEqual(cuia_root_debug_hit_test(root, 500, 500), -1)
+        // Without a window the events are no-ops (no host provider to raise them from).
+        cuia_root_raise_structure_child(root, 1, 2, true)
+        cuia_root_raise_structure_child(root, 1, 99, false)
+        cuia_root_raise_menu(root, 1, true)
+        cuia_root_raise_menu(root, 1, false)
+    }
     #else
     func testSkippedWithoutUIAutomation() throws {
         throw XCTSkip("UI Automation exists on Windows only")
