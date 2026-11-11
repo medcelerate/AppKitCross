@@ -18,6 +18,13 @@ public protocol PlatformPasteboard: AnyObject {
     func read() -> [PlatformPasteboardEntry]
     /// Increments whenever the contents change (from this or other applications).
     var changeCount: Int { get }
+    /// True when the last `read()` could not reach the clipboard (another process held it),
+    /// so its empty result says nothing about the contents.
+    var lastReadFailed: Bool { get }
+}
+
+extension PlatformPasteboard {
+    public var lastReadFailed: Bool { false }
 }
 
 /// Clipboard bitmap helpers shared by the platform pasteboards (ADR-0030).

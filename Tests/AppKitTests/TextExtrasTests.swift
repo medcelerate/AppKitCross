@@ -7,6 +7,9 @@
 
 import XCTest
 @testable import AppKit
+#if os(Windows)
+import WinSDK
+#endif
 
 final class TextExtrasTests: XCTestCase, @unchecked Sendable {
     @MainActor private func key(_ w: NSWindow, _ chars: String, flags: NSEvent.ModifierFlags = [], plain: String? = nil) {
@@ -306,6 +309,29 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
             _ = pb.clearContents()
         }
     }
+
+    #if os(Windows)
+    /// What another application leaves on the Windows clipboard: a GDI bitmap only (CF_BITMAP,
+    /// from which Windows synthesises CF_DIB). The host-backend tests never reach this path.
+    func testWin32ClipboardBitmapReadsAsBMP() throws {
+        try MainActor.assumeIsolated {
+            let pb = Win32Pasteboard()
+            var pixels: [UInt32] = [0x00FF0000, 0x000000FF, 0x0000FF00, 0x00FFFFFF]
+            guard let hbm = CreateBitmap(2, 2, 1, 32, &pixels) else { throw XCTSkip("CreateBitmap failed") }
+            guard OpenClipboard(nil) else { DeleteObject(HGDIOBJ(hbm)); throw XCTSkip("no clipboard on this runner") }
+            EmptyClipboard()
+            let placed = SetClipboardData(UINT(CF_BITMAP), HANDLE(hbm)) != nil
+            CloseClipboard()
+            guard placed else { DeleteObject(HGDIOBJ(hbm)); throw XCTSkip("SetClipboardData(CF_BITMAP) failed") }
+            let entries = pb.read()
+            XCTAssertFalse(pb.lastReadFailed)
+            let bmp = try XCTUnwrap(entries.first { $0.type == PlatformClipboardImage.bmpType }?.data, "types: \(entries.map(\.type))")
+            XCTAssertEqual(Array(bmp.prefix(2)), [0x42, 0x4D])
+            XCTAssertEqual(NSImage(data: bmp)?.size, NSSize(width: 2, height: 2))
+            if OpenClipboard(nil) { EmptyClipboard(); CloseClipboard() }
+        }
+    }
+    #endif
 
     func testRTFDRoundTripKeepsAttachments() {
         MainActor.assumeIsolated {

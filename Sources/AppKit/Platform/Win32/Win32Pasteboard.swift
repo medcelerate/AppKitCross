@@ -26,7 +26,7 @@ final class Win32Pasteboard: PlatformPasteboard {
     var changeCount: Int { Int(GetClipboardSequenceNumber()) }
 
     func write(_ entries: [PlatformPasteboardEntry]) {
-        guard OpenClipboard(nil) else { return }
+        guard openClipboard() else { return }
         defer { CloseClipboard() }
         EmptyClipboard()
         for e in entries {
@@ -45,9 +45,34 @@ final class Win32Pasteboard: PlatformPasteboard {
         }
     }
 
+    /// Another process (a clipboard manager, Windows clipboard history, the application
+    /// that just copied) often holds the clipboard open for a moment after a change.
+    private func openClipboard() -> Bool {
+        for attempt in 0..<20 {
+            if OpenClipboard(nil) { return true }
+            Sleep(DWORD(attempt < 5 ? 2 : 10))
+        }
+        return false
+    }
+
+    /// Whether the last read could not open the clipboard; NSPasteboard reads again then.
+    private(set) var lastReadFailed = false
+
     func read() -> [PlatformPasteboardEntry] {
-        guard OpenClipboard(nil) else { return [] }
+        guard openClipboard() else { lastReadFailed = true; return [] }
+        lastReadFailed = false
         defer { CloseClipboard() }
+        if ProcessInfo.processInfo.environment["APPKITWIN_PASTEBOARD_LOG"] != nil {
+            var names: [String] = []
+            var f = EnumClipboardFormats(0)
+            while f != 0 {
+                var buf = [WCHAR](repeating: 0, count: 128)
+                let n = GetClipboardFormatNameW(f, &buf, Int32(buf.count))
+                names.append(n > 0 ? "\(f) \(String(decoding: buf[0..<Int(n)], as: UTF16.self))" : "\(f)")
+                f = EnumClipboardFormats(f)
+            }
+            FileHandle.standardError.write(Data("[pasteboard] formats: \(names.joined(separator: ", "))\n".utf8))
+        }
         var result: [PlatformPasteboardEntry] = []
         if IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), let h = GetClipboardData(UINT(CF_UNICODETEXT)), let p = GlobalLock(h) {
             let text = String(decodingCString: p.assumingMemoryBound(to: UInt16.self), as: UTF16.self)
@@ -63,18 +88,48 @@ final class Win32Pasteboard: PlatformPasteboard {
             if let d = data(f) { result.append(PlatformPasteboardEntry(type: type, data: d)) }
         }
         // What other applications put there: PNG and RTF by their registered names, and a
-        // bitmap (CF_DIBV5 / CF_DIB, which Windows synthesises from CF_BITMAP) as a BMP file.
+        // bitmap (CF_DIB / CF_DIBV5, which Windows synthesises from CF_BITMAP, or CF_BITMAP
+        // itself) as a BMP file.
         for (type, name) in Win32Pasteboard.standardNames where !result.contains(where: { $0.type == type }) {
             if var d = data(Win32Pasteboard.registered(name)) {
                 if type == "public.rtf", let nul = d.firstIndex(of: 0) { d = d.prefix(upTo: nul) }
                 result.append(PlatformPasteboardEntry(type: type, data: d))
             }
         }
-        if !result.contains(where: { $0.type == "public.png" || $0.type == PlatformClipboardImage.bmpType }),
-           let dib = data(UINT(CF_DIBV5)) ?? data(UINT(CF_DIB)), let bmp = PlatformClipboardImage.bmpFile(fromDIB: dib) {
-            result.append(PlatformPasteboardEntry(type: PlatformClipboardImage.bmpType, data: bmp))
+        if !result.contains(where: { $0.type == "public.png" || $0.type == PlatformClipboardImage.bmpType }) {
+            let bmp = data(UINT(CF_DIB)).flatMap(PlatformClipboardImage.bmpFile(fromDIB:))
+                ?? data(UINT(CF_DIBV5)).flatMap(PlatformClipboardImage.bmpFile(fromDIB:))
+                ?? Win32Pasteboard.dibFromBitmap().flatMap(PlatformClipboardImage.bmpFile(fromDIB:))
+            if let bmp { result.append(PlatformPasteboardEntry(type: PlatformClipboardImage.bmpType, data: bmp)) }
         }
         return result
+    }
+
+    /// A 32-bit top-down DIB of the clipboard's CF_BITMAP, for when Windows does not
+    /// synthesise CF_DIB (the clipboard must be open).
+    private static func dibFromBitmap() -> Data? {
+        guard IsClipboardFormatAvailable(UINT(CF_BITMAP)), let h = GetClipboardData(UINT(CF_BITMAP)) else { return nil }
+        let hbm = HBITMAP(OpaquePointer(h))
+        var bm = BITMAP()
+        guard GetObjectW(HGDIOBJ(hbm), Int32(MemoryLayout<BITMAP>.size), &bm) != 0, bm.bmWidth > 0, bm.bmHeight > 0 else { return nil }
+        var info = BITMAPINFO()
+        info.bmiHeader.biSize = DWORD(MemoryLayout<BITMAPINFOHEADER>.size)
+        info.bmiHeader.biWidth = bm.bmWidth
+        info.bmiHeader.biHeight = bm.bmHeight
+        info.bmiHeader.biPlanes = 1
+        info.bmiHeader.biBitCount = 32
+        info.bmiHeader.biCompression = DWORD(BI_RGB)
+        let pixelBytes = Int(bm.bmWidth) * Int(bm.bmHeight) * 4
+        var pixels = [UInt8](repeating: 0, count: pixelBytes)
+        guard let dc = GetDC(nil) else { return nil }
+        defer { ReleaseDC(nil, dc) }
+        let lines = pixels.withUnsafeMutableBytes { GetDIBits(dc, hbm, 0, UINT(bm.bmHeight), $0.baseAddress, &info, UINT(DIB_RGB_COLORS)) }
+        guard lines > 0 else { return nil }
+        var header = info.bmiHeader
+        header.biSizeImage = DWORD(pixelBytes)
+        var out = withUnsafeBytes(of: &header) { Data($0) }
+        out.append(contentsOf: pixels)
+        return out
     }
 }
 #endif
