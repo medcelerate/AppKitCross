@@ -523,6 +523,22 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual((tv.textStorage!.attribute(.font, at: 8, effectiveRange: nil) as? NSFont)?.pointSize, 36, "changeFont: crossed from the key panel to the main window")
             XCTAssertNotEqual((panel.firstResponder as? NSTextView)?.font?.pointSize, 36, "the panel's own field editor kept its font")
             w.makeKeyAndOrderFront(nil)
+            // A click on a button (the demo's "Fonts…") does not move the keyboard focus off
+            // the text view, so the panel's send still starts at it (PC step 5).
+            _ = w.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: 6, length: 9))
+            let button = NSButton(title: "Fonts…", target: nil, action: Selector(("orderFrontFontPanel:")))
+            button.frame = NSRect(x: 10, y: 160, width: 80, height: 24)
+            w.contentView!.addSubview(button)
+            panel.orderOut(nil)
+            click(button)
+            XCTAssertTrue(w.firstResponder === tv, "a button click keeps the text view first responder")
+            XCTAssertTrue(panel.isVisible, "the button's nil-target action opened the panel")
+            panel.makeKeyAndOrderFront(nil)
+            let r48 = try XCTUnwrap(NSFontPanel.standardSizes.firstIndex(of: 48))
+            view.sizeTable.selectRowIndexes(IndexSet(integer: r48), byExtendingSelection: false)
+            XCTAssertEqual((tv.textStorage!.attribute(.font, at: 8, effectiveRange: nil) as? NSFont)?.pointSize, 48)
+            w.makeKeyAndOrderFront(nil)
             // The toolbar's nil-target orderFrontFontPanel: ends at the application.
             panel.orderOut(nil)
             XCTAssertTrue(NSApplication.shared.sendAction(Selector(("orderFrontFontPanel:")), to: nil, from: nil))

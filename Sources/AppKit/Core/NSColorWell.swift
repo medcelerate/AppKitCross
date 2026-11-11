@@ -70,6 +70,8 @@ import CoreText
     private var _styleRaw: Int { _style.rawValue }
 
     @MainActor open override var acceptsFirstResponder: Bool { isEnabled && !refusesFirstResponder }
+    /// A click acts without taking the keyboard focus (the Tab key still reaches it).
+    @MainActor internal override var _takesFirstResponderOnMouseDown: Bool { false }
     @MainActor open override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     // MARK: Drawing

@@ -2148,7 +2148,14 @@ final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
             _ = demo.makeFirstResponder(tv)
             tv.setSelectedRange(NSRange(location: 0, length: 11))
             report("selected \(tv.selectedRange) in \(describe(demo)); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
-            NSFontManager.shared.orderFrontFontPanel(nil)
+            // Click the "Fonts…" button with mouse events, as the user does: the click must
+            // not move the keyboard focus off the text view.
+            guard let fonts = demo.contentView.flatMap({ v in allViews(v).compactMap { $0 as? NSButton }.first { $0.title == "Fonts…" } }) else { report("FAIL no Fonts button"); exit(1) }
+            let p = fonts.convert(NSPoint(x: fonts.bounds.midX, y: fonts.bounds.midY), to: nil)
+            for (type, pressure) in [(NSEvent.EventType.leftMouseDown, 1 as Float), (.leftMouseUp, 0)] {
+                if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: 0, windowNumber: demo.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: pressure) { app.sendEvent(e) }
+            }
+            report("clicked Fonts…; demo first responder \(type(of: demo.firstResponder ?? demo)); panel exists \(NSFontPanel.sharedFontPanelExists)")
             NSFontPanel.shared.makeKeyAndOrderFront(nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { run(step: 1) }
         case 1:
@@ -2164,8 +2171,8 @@ final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
             report("font at 2: \(before) -> \(after); outside the selection \(outside); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
             demo.display()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                let ok = after == 36 && outside != 36
-                report(ok ? "PASS" : "FAIL")
+                let ok = after == 36 && outside != 36 && demo.firstResponder === tv
+                report(ok ? "PASS" : "FAIL (first responder \(type(of: demo.firstResponder ?? demo)))")
                 exit(ok ? 0 : 1)
             }
         default: break
