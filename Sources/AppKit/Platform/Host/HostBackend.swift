@@ -85,6 +85,15 @@ final class HostBackend: PlatformBackend {
     let hostStatusItems = HostStatusItems()
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
 
+    /// Test hook: what the "native" colour dialog answers; nil cancels.
+    var nextColorDialogResult: (CGFloat, CGFloat, CGFloat)? = nil
+    private(set) var colorDialogRuns = 0
+    var hasNativeColorDialog: Bool { true }
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? {
+        colorDialogRuns += 1
+        return nextColorDialogResult
+    }
+
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
         // Tests end modal sessions from inside the loop via posted blocks.
         var guardCount = 0

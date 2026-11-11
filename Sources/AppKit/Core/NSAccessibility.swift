@@ -139,7 +139,7 @@ extension NSAccessibility {
     /// `accessibilityPerform...` when one is used.
     internal static func _actions(for role: NSAccessibility.Role) -> [PlatformAccessibilityAction] {
         switch role {
-        case .button, .checkBox, .radioButton, .link, .disclosureTriangle, .cell, .row: return [.press]
+        case .button, .checkBox, .radioButton, .link, .disclosureTriangle, .cell, .row, .colorWell: return [.press]
         case .menuItem, .menuBarItem: return [.press, .pick]
         case .menu: return [.cancel]
         case .popUpButton, .menuButton, .comboBox: return [.press, .showMenu]

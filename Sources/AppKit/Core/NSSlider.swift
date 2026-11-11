@@ -29,6 +29,8 @@ import CoreText
     }
 
     @MainActor open override var acceptsFirstResponder: Bool { isEnabled && !refusesFirstResponder }
+    /// A click acts without taking the keyboard focus (the Tab key still reaches it).
+    @MainActor internal override var _takesFirstResponderOnMouseDown: Bool { false }
 
     @MainActor private func _set(_ value: Double, send: Bool) {
         let clamped = min(max(value, minValue), maxValue)

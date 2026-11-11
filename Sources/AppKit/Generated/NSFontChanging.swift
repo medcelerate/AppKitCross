@@ -26,6 +26,6 @@ extension NSFontChanging {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontchanging/changefont(_:)
     @MainActor public func changeFont(_ sender: NSFontManager?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontchanging/validmodesforfontpanel(_:)
-    @MainActor public func validModesForFontPanel(_ fontPanel: NSFontPanel) -> NSFontPanel.ModeMask { unimplementedOptionalRequirement() }
+    @MainActor public func validModesForFontPanel(_ fontPanel: NSFontPanel) -> NSFontPanel.ModeMask { return .standardModes }
 }
 

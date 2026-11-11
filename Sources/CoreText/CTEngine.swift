@@ -62,9 +62,25 @@ protocol CTEngine: AnyObject {
     func makeFont(name: String?, size: CGFloat, weight: CGFloat?, italic: Bool?, uiType: CTFontUIFontType) -> CTEngineFont?
     /// All installed family names.
     var familyNames: [String] { get }
+    /// The faces (typefaces) of an installed family at `size`, regular first. Engines that
+    /// cannot enumerate faces probe the standard four (regular, bold, italic, bold italic).
+    func faces(inFamily family: String, size: CGFloat) -> [CTEngineFont]
     /// Shapes `units` (UTF-16) in `font`, substituting fallback fonts for characters the font
     /// lacks. Runs come back in string order.
     func shape(_ units: [UInt16], font: CTEngineFont, language: String?) -> [CTShapedRun]
+}
+
+extension CTEngine {
+    func faces(inFamily family: String, size: CGFloat) -> [CTEngineFont] {
+        var out: [CTEngineFont] = []
+        for (weight, italic) in [(CGFloat(0), false), (0.4, false), (0, true), (0.4, true)] {
+            guard let f = makeFont(name: family, size: size, weight: weight, italic: italic, uiType: .none),
+                  f.familyName.lowercased() == family.lowercased() || f.familyName.replacingOccurrences(of: " ", with: "").lowercased() == family.replacingOccurrences(of: " ", with: "").lowercased(),
+                  !out.contains(where: { $0.postScriptName == f.postScriptName }) else { continue }
+            out.append(f)
+        }
+        return out
+    }
 }
 
 enum CTRuntime {
