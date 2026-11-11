@@ -51,34 +51,19 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       - run: swift --version
-      - name: Runner resources
+      # One job at a time (-j 1) on every Windows build and test: Swift 6.2's driver, when
+      # two of its jobs start together, now and then loses one whose response file or
+      # launch throws. MultiJobExecutor drops the error, the other jobs finish and the
+      # build exits 1 with nothing said, usually at AppKit's emit-module job
+      # (docs/ci-windows-runner.md). -no-emit-module-separately breaks SwiftUI's
+      # merge-modules step (opaque result types), and -driver-force-response-files only
+      # moved the failure to other modules.
+      - name: Build
         shell: bash
-        run: |
-          powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize,FreeVirtualMemory,TotalVirtualMemorySize | Format-List"
-          powershell -NoProfile -Command "Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize,CurrentUsage | Format-List"
-          df -h C: D: || true
-          nproc || true
-      # Two compiler jobs at a time, and one retry: the runner kills a frontend mid-compile
-      # now and then (the log ends in warning notes, no diagnostic, exit code 1), in the
-      # root build as well as in the library-compat step. The retry resumes the
-      # incremental build; the resource dump says what the runner looked like when it died.
-      - name: Build (two compiler jobs, one retry)
-        shell: bash
-        run: |
-          set -o pipefail
-          build() { swift build -c debug -j 2 2>&1 | tr -d '\r' | tee build.log; }
-          if ! build; then
-            echo "== swift build failed: runner resources at that point"
-            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize,FreeVirtualMemory,TotalVirtualMemorySize | Format-List"
-            df -h C: D: || true
-            echo "== lines that are not warnings"
-            grep -aE "error|Assertion|Stack dump|exception|signal|killed" build.log | grep -avE "warning:|^\s*\||^\s*[0-9]+ \||Swift 6 language|SendableClosure" | head -20 || true
-            echo "== retrying once"
-            build
-          fi
+        run: swift build -c debug -j 1
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build -j 2 --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build -j 1 --product $p; done
       - name: AudioPlayer example offline render (WASAPI absent on the runner)
         run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: TextEdit example headless document round trip
@@ -86,7 +71,8 @@ jobs:
         env:
           APPKITWIN_HOST_BACKEND: "1"
       - name: Tests on the host backend
-        run: swift test -j 2
+        shell: bash
+        run: swift test -j 1
         env:
           APPKITWIN_HOST_BACKEND: "1"
           # The Direct3D 12 shim's log (device, shader compiler, swap-chain and readback
