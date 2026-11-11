@@ -43,6 +43,16 @@ private final class FaceOnlyView: NSView, NSFontChanging, NSSelectorHandling {
 }
 
 @MainActor
+private func hostWindow(_ w: NSWindow) -> HostWindow? {
+    var m: Mirror? = Mirror(reflecting: w)
+    while let mirror = m {
+        if let h = mirror.descendant("_platform") as? HostWindow { return h }
+        m = mirror.superclassMirror
+    }
+    return nil
+}
+
+@MainActor
 private func makeWindow(x: CGFloat = 100) -> NSWindow {
     let w = NSWindow(contentRect: NSRect(x: x, y: 300, width: 360, height: 200), styleMask: [.titled, .closable], backing: .buffered, defer: false)
     w.makeKeyAndOrderFront(nil)
@@ -394,6 +404,47 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
             let view = p._view
             XCTAssertTrue(view.sliders[0]._accessibilitySetValue(.number(100)))
             XCTAssertEqual(p.color.redComponent, 1, accuracy: 0.01)
+        }
+    }
+
+    /// The panel opened from a well shows the well's colour in its sliders, in the tree
+    /// too, and every slider, swatch, wheel and well change reaches the platform as a
+    /// value change (a UIA client that waits for RangeValue events sees the new value).
+    func testPanelOpenedFromAWellReportsItsSliderValues() throws {
+        try MainActor.assumeIsolated {
+            let w = makeWindow()
+            defer { w.close() }
+            let well = NSColorWell(frame: NSRect(x: 20, y: 100, width: 44, height: 24))
+            w.contentView!.addSubview(well)
+            let p = NSColorPanel.shared
+            p.mode = .wheel
+            well.color = NSColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+            click(well)
+            XCTAssertTrue(p.isVisible)
+            defer { p.orderOut(nil) }
+            let host = try XCTUnwrap(hostWindow(p))
+            let mainHost = try XCTUnwrap(hostWindow(w))
+            host.clearAccessibilityChanges()
+            mainHost.clearAccessibilityChanges()
+            @MainActor func sliders() -> [PlatformAccessibilityElement] { p.accessibilityTree().flattened.filter { $0.role == NSAccessibility.Role.slider.rawValue } }
+            XCTAssertEqual(sliders().map { $0.label ?? "" }, ["Brightness", "Opacity"])   // a well supports alpha, so the panel shows it
+            XCTAssertEqual(sliders()[0].value?.doubleValue, 90)
+            // The mode control's segment, as a click on the Sliders radio would.
+            let view = p._view
+            view.modeControl.selectedSegment = 1   // "Sliders", second of wheel, sliders, lists, crayons
+            _ = view.modeControl.sendAction(view.modeControl.action, to: view.modeControl.target)
+            XCTAssertEqual(p.mode, .RGB)
+            XCTAssertEqual(sliders().map { "\($0.label ?? "")=\($0.value?.doubleValue ?? -1)" }, ["Red=20.0", "Green=50.0", "Blue=90.0", "Opacity=100.0"])
+            // A later change from the panel reaches the well and its tree value, and the
+            // slider, swatch and well each report a value change to their platform window.
+            p._userSetColor(.black, final: true)
+            var changed: [Int] = []
+            for c in host.accessibilityChanges + mainHost.accessibilityChanges { if case .value(let id) = c { changed.append(id) } }
+            XCTAssertTrue(changed.contains(well._accessibilityElementID), "well")
+            XCTAssertTrue(changed.contains(view.sliders[0]._accessibilityElementID), "red slider")
+            XCTAssertTrue(changed.contains(view.preview._accessibilityElementID), "swatch")
+            XCTAssertEqual(sliders().map { $0.value?.doubleValue ?? -1 }, [0, 0, 0, 100])
+            XCTAssertEqual(w.accessibilityTree().flattened.first { $0.role == NSAccessibility.Role.colorWell.rawValue }?.value?.stringValue, "rgb 0 0 0 1")
         }
     }
 

@@ -248,8 +248,10 @@ import CoreText
     @MainActor open var color: NSColor {
         get { _color }
         set {
+            let changed = !_color.isEqual(newValue)
             _color = newValue
             needsDisplay = true
+            if changed { _accessibilityValueChanged() }
             if _isActive, NSColorPanel.sharedColorPanelExists, NSColorPanel.shared._target === self, !NSColorPanel.shared.color.isEqual(newValue) {
                 NSColorPanel.shared.color = newValue
             }
@@ -317,6 +319,7 @@ import CoreText
         guard let c else { return }
         _color = _supportsAlpha ? c : c.withAlphaComponent(1)
         needsDisplay = true
+        _accessibilityValueChanged()
         _fireAction()
     }
 

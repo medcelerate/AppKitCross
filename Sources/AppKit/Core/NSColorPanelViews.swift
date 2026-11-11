@@ -54,7 +54,7 @@ internal enum _NSColorMath {
 /// A horizontal slider over a gradient of what each position would give, 0...1.
 @MainActor
 internal final class _NSColorSliderView: NSView {
-    var value: CGFloat = 0 { didSet { needsDisplay = true } }
+    var value: CGFloat = 0 { didSet { needsDisplay = true; if value != oldValue { _accessibilityValueChanged() } } }
     var stops: [NSColor] = [.black, .white] { didSet { needsDisplay = true } }
     var showsCheckerboard = false
     var onChange: ((CGFloat, Bool) -> Void)?
@@ -139,8 +139,8 @@ internal final class _NSColorSliderView: NSView {
 
 @MainActor
 internal final class _NSColorWheelView: NSView {
-    var hue: CGFloat = 0
-    var saturation: CGFloat = 0
+    var hue: CGFloat = 0 { didSet { if hue != oldValue { _accessibilityValueChanged() } } }
+    var saturation: CGFloat = 0 { didSet { if saturation != oldValue { _accessibilityValueChanged() } } }
     var brightness: CGFloat = 1 { didSet { if brightness != oldValue { needsDisplay = true } } }
     var onChange: ((CGFloat, CGFloat, Bool) -> Void)?
     private var tracking = false
@@ -241,7 +241,7 @@ internal final class _NSColorWheelView: NSView {
 /// The current colour, draggable out and a drop target for colours.
 @MainActor
 internal final class _NSColorSwatchView: NSView, NSDraggingSource {
-    var color: NSColor = .white { didSet { needsDisplay = true } }
+    var color: NSColor = .white { didSet { needsDisplay = true; if !color.isEqual(oldValue) { _accessibilityValueChanged() } } }
     var onDrop: ((NSColor) -> Void)?
     private var mouseDownPoint: NSPoint? = nil
 

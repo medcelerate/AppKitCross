@@ -196,7 +196,10 @@ extension Win32Window {
             }
             nodes.withUnsafeBufferPointer { cuia_root_set_nodes(root, $0.baseAddress, Int32($0.count)) }
         }
-        if NSView._traceInvalidation { NSView._trace("uia tree '\(title)': \(nodes.count) nodes") }
+        if NSView._traceInvalidation {
+            let ranges = tree.flattened.filter { $0.role == "AXSlider" }.map { "\($0.label ?? "?")=\($0.value?.stringValue ?? "nil")" }
+            NSView._trace("uia tree '\(title)': \(nodes.count) nodes" + (ranges.isEmpty ? "" : ", sliders " + ranges.joined(separator: " ")))
+        }
     }
 
     /// The UIA name: the label, else the title, else a static text's value.
