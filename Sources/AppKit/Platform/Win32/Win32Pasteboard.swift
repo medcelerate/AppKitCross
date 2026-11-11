@@ -59,10 +59,14 @@ final class Win32Pasteboard: PlatformPasteboard {
     private(set) var lastReadFailed = false
 
     func read() -> [PlatformPasteboardEntry] {
-        guard openClipboard() else { lastReadFailed = true; return [] }
+        guard openClipboard() else {
+            lastReadFailed = true
+            _PasteboardTrace.log("Win32 read: OpenClipboard failed after retries (error \(GetLastError()))")
+            return []
+        }
         lastReadFailed = false
         defer { CloseClipboard() }
-        if ProcessInfo.processInfo.environment["APPKITWIN_PASTEBOARD_LOG"] != nil {
+        if _PasteboardTrace.enabled {
             var names: [String] = []
             var f = EnumClipboardFormats(0)
             while f != 0 {
@@ -71,7 +75,7 @@ final class Win32Pasteboard: PlatformPasteboard {
                 names.append(n > 0 ? "\(f) \(String(decoding: buf[0..<Int(n)], as: UTF16.self))" : "\(f)")
                 f = EnumClipboardFormats(f)
             }
-            FileHandle.standardError.write(Data("[pasteboard] formats: \(names.joined(separator: ", "))\n".utf8))
+            _PasteboardTrace.log("Win32 read: sequence \(GetClipboardSequenceNumber()), owner \(String(describing: GetClipboardOwner())), formats: [\(names.joined(separator: ", "))]")
         }
         var result: [PlatformPasteboardEntry] = []
         if IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), let h = GetClipboardData(UINT(CF_UNICODETEXT)), let p = GlobalLock(h) {
@@ -101,7 +105,11 @@ final class Win32Pasteboard: PlatformPasteboard {
                 ?? data(UINT(CF_DIBV5)).flatMap(PlatformClipboardImage.bmpFile(fromDIB:))
                 ?? Win32Pasteboard.dibFromBitmap().flatMap(PlatformClipboardImage.bmpFile(fromDIB:))
             if let bmp { result.append(PlatformPasteboardEntry(type: PlatformClipboardImage.bmpType, data: bmp)) }
+            if _PasteboardTrace.enabled {
+                _PasteboardTrace.log("Win32 read: bitmap: CF_DIB \(data(UINT(CF_DIB))?.count ?? -1) bytes, CF_DIBV5 \(data(UINT(CF_DIBV5))?.count ?? -1) bytes, CF_BITMAP available \(IsClipboardFormatAvailable(UINT(CF_BITMAP))), BMP \(bmp?.count ?? -1) bytes")
+            }
         }
+        _PasteboardTrace.log("Win32 read: resolved \(result.map { "\($0.type) (\($0.data.count) bytes)" })")
         return result
     }
 

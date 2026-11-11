@@ -459,6 +459,10 @@ if let i = arguments.firstIndex(of: "--roundtrip-rtfd"), i + 1 <= arguments.endI
     exit(roundTripRTFD(to: arguments[i + 1]))
 }
 
+if arguments.contains("--paste-selftest") {
+    exit(pasteSelfTest())
+}
+
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
@@ -488,6 +492,74 @@ if arguments.contains("--show-save-panel") {
     }
 }
 app.run()
+
+/// `--paste-selftest`: puts a 2×2 bitmap on the system clipboard the way other Windows
+/// applications do (CF_BITMAP only; elsewhere a BMP through NSPasteboard), then checks each
+/// stage of pasting it: the pasteboard types, the image decoding, the type of a new
+/// document, and Paste's validation and result in a plain-text and a rich-text view.
+/// Prints PASS/FAIL per stage; exit status 1 when a stage that should pass fails. Combine
+/// with APPKITWIN_TRACE_PASTEBOARD=1 for the detailed log.
+@MainActor func pasteSelfTest() -> Int32 {
+    var failed = false
+    func stage(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
+        let d = detail()
+        print("\(ok ? "PASS" : "FAIL"): \(name)\(d.isEmpty ? "" : " (\(d))")")
+        fflush(nil)
+        if !ok { failed = true }
+    }
+    let pb = NSPasteboard.general
+    let bmpType = NSPasteboard.PasteboardType("com.microsoft.bmp")
+    #if os(Windows)
+    var pixels: [UInt32] = [0x00FF0000, 0x000000FF, 0x0000FF00, 0x00FFFFFF]
+    var placed = false
+    if let hbm = CreateBitmap(2, 2, 1, 32, &pixels) {
+        if OpenClipboard(nil) {
+            EmptyClipboard()
+            placed = SetClipboardData(UINT(CF_BITMAP), HANDLE(hbm)) != nil
+            CloseClipboard()
+        }
+        if !placed { DeleteObject(HGDIOBJ(hbm)) }
+    }
+    stage("1 put a CF_BITMAP on the Windows clipboard", placed, placed ? "" : "error \(GetLastError())")
+    #else
+    var dib = Data()
+    func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+    le(0x4D42, 2); le(14 + 40 + 16, 4); le(0, 4); le(54, 4)
+    le(40, 4); le(2, 4); le(2, 4); le(1, 2); le(32, 2); le(0, 4); le(16, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+    dib.append(contentsOf: [0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255, 255, 255, 0])
+    _ = pb.clearContents()
+    stage("1 put a BMP on the general pasteboard", pb.setData(dib, forType: bmpType))
+    #endif
+    let types = (pb.types ?? []).map(\.rawValue)
+    let imageType = [NSPasteboard.PasteboardType.png, .tiff, bmpType].first { pb.types?.contains($0) == true }
+    stage("2 NSPasteboard.general reports an image type", imageType != nil, "types \(types)")
+    let image = imageType.flatMap { pb.data(forType: $0) }.flatMap { NSImage(data: $0) }
+    stage("3 the image data decodes", image != nil, image.map { "size \($0.size)" } ?? "NSImage(data:) nil")
+
+    let dc = NSDocumentController.shared
+    let defaultType = dc.defaultType ?? "none"
+    let defaultIsRich = defaultType == TextDocument.rtfType || defaultType == TextDocument.rtfdType
+    print("INFO: File > New makes \(defaultType) documents (\(defaultIsRich ? "rich text: images paste" : "plain text: Paste stays disabled for an image; use Format > Make Rich Text"))")
+
+    let paste = NSMenuItem(title: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+    let matchStyle = NSMenuItem(title: "Paste and Match Style", action: Selector(("pasteAsPlainText:")), keyEquivalent: "v")
+    for rich in [false, true] {
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        TextDocument.configure(tv, rich: rich)
+        tv.string = "ab"
+        tv.setSelectedRange(NSRange(location: 1, length: 0))
+        let kind = rich ? "rich" : "plain"
+        let enabled = tv.validateMenuItem(paste)
+        stage("4 \(kind) text view: Paste \(rich ? "enabled" : "disabled") for an image", enabled == rich,
+              "readable \(tv.readablePasteboardTypes.map(\.rawValue)), Paste \(enabled ? "enabled" : "disabled"), Paste and Match Style \(tv.validateMenuItem(matchStyle) ? "enabled" : "disabled")")
+        guard rich else { continue }
+        tv.paste(nil)
+        let a = tv.textStorage.flatMap { $0.length > 1 ? $0.attribute(.attachment, at: 1, effectiveRange: nil) as? NSTextAttachment : nil }
+        stage("5 rich text view: Paste inserts an attachment", a != nil, "text \(tv.string.unicodeScalars.map { $0.value == 0xFFFC ? "<attachment>" : String($0) }.joined()), file \(a?.fileWrapper?.preferredFilename ?? "none")")
+    }
+    print(failed ? "paste self-test: FAILED" : "paste self-test: passed")
+    return failed ? 1 : 0
+}
 
 /// Renders a window's content over its background to <dir>/<name>-<platform>.png.
 @MainActor func writeScreenshot(of w: NSWindow, named name: String, to dir: String) {

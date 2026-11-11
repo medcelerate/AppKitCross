@@ -296,6 +296,8 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(NSImage(data: bmp)?.size, NSSize(width: 2, height: 1))
             _ = pb.setData(bmp, forType: NSTextView._bmpType)
             XCTAssertTrue(tv.validateMenuItem(paste), "an image pastes into rich text")
+            let matchStyle = NSMenuItem(title: "Paste and Match Style", action: Selector(("pasteAsPlainText:")), keyEquivalent: "v")
+            XCTAssertFalse(tv.validateMenuItem(matchStyle), "an image has no text to paste and match")
             tv.setSelectedRange(NSRange(location: 1, length: 0))
             tv.paste(nil)
             XCTAssertEqual(tv.string, "a\u{FFFC}b")

@@ -307,9 +307,20 @@ import CoreText
         switch NSStringFromSelector(action) {
         case "copy:": return isSelectable && hasSelection
         case "cut:", "delete:": return isEditable && hasSelection
-        case "paste:": return isEditable && NSPasteboard.general.availableType(from: readablePasteboardTypes) != nil
+        case "paste:":
+            let available = NSPasteboard.general.availableType(from: readablePasteboardTypes)
+            if _PasteboardTrace.enabled {
+                _PasteboardTrace.log("NSTextView.validateMenuItem(paste:) on \(ObjectIdentifier(self)): isEditable \(isEditable), isRichText \(isRichText), importsGraphics \(importsGraphics), readable \(readablePasteboardTypes.map(\.rawValue)), pasteboard \((NSPasteboard.general.types ?? []).map(\.rawValue)), match \(available?.rawValue ?? "none") -> \(isEditable && available != nil)")
+            }
+            return isEditable && available != nil
         case "selectAll:": return isSelectable && !string.isEmpty
-        case "pasteAsPlainText:", "pasteAsRichText:": return isEditable
+        case "pasteAsPlainText:", "pasteAsRichText:":
+            // Paste and Match Style inserts the plain string (pasteAsPlainText reads .string);
+            // an image has none. Paste as rich text takes what Paste takes.
+            let types: [NSPasteboard.PasteboardType] = action == Selector(("pasteAsPlainText:")) ? [.string] : readablePasteboardTypes
+            let available = NSPasteboard.general.availableType(from: types)
+            _PasteboardTrace.log("NSTextView.validateMenuItem(\(NSStringFromSelector(action))) on \(ObjectIdentifier(self)): isEditable \(isEditable), isRichText \(isRichText), accepts \(types.map(\.rawValue)), match \(available?.rawValue ?? "none") -> \(isEditable && available != nil)")
+            return isEditable && available != nil
         case "performFindPanelAction:", "performTextFinderAction:":
             guard usesFindBar || usesFindPanel else { return false }
             let action = NSTextFinder.Action(rawValue: menuItem.tag == 0 ? 1 : menuItem.tag) ?? .showFindInterface
@@ -630,8 +641,9 @@ import CoreText
         _replaceAttributed(r, with: NSAttributedString(string: ""))
     }
     open override func paste(_ sender: Any?) {
-        guard isEditable else { return }
-        _ = readSelection(from: .general)
+        guard isEditable else { _PasteboardTrace.log("NSTextView.paste: not editable"); return }
+        let ok = readSelection(from: .general)
+        _PasteboardTrace.log("NSTextView.paste: readSelection -> \(ok)")
     }
 
     open override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { _dragOperation(sender) }
