@@ -120,13 +120,13 @@ extension NSCollectionViewDelegate {
     @MainActor public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt index: Int) -> (any NSPasteboardWriting)? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:shouldchangeitemsat:to:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldChangeItemsAt indexPaths: Set<IndexPath>, to highlightState: NSCollectionViewItem.HighlightState) -> Set<IndexPath> { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldChangeItemsAt indexPaths: Set<IndexPath>, to highlightState: NSCollectionViewItem.HighlightState) -> Set<IndexPath> { return indexPaths }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:shoulddeselectitemsat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldDeselectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldDeselectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> { return indexPaths }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:shouldselectitemsat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldSelectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, shouldSelectItemsAt indexPaths: Set<IndexPath>) -> Set<IndexPath> { return indexPaths }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:transitionlayoutforoldlayout:newlayout:)
     @available(macOS 10.11, *)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, transitionLayoutForOldLayout fromLayout: NSCollectionViewLayout, newLayout toLayout: NSCollectionViewLayout) -> NSCollectionViewTransitionLayout { unimplementedOptionalRequirement() }
