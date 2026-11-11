@@ -31,13 +31,13 @@ extension NSPageControllerDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontroller(_:didtransitionto:)
     @MainActor public func pageController(_ pageController: NSPageController, didTransitionTo object: Any) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontroller(_:framefor:)
-    @MainActor public func pageController(_ pageController: NSPageController, frameFor object: Any?) -> NSRect { unimplementedOptionalRequirement() }
+    @MainActor public func pageController(_ pageController: NSPageController, frameFor object: Any?) -> NSRect { return pageController.view.bounds }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontroller(_:identifierfor:)
-    @MainActor public func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { unimplementedOptionalRequirement() }
+    @MainActor public func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { return "" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontroller(_:prepare:with:)
     @MainActor public func pageController(_ pageController: NSPageController, prepare viewController: NSViewController, with object: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontroller(_:viewcontrollerforidentifier:)
-    @MainActor public func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController { unimplementedOptionalRequirement() }
+    @MainActor public func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController { return NSViewController() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontrollerdidendlivetransition(_:)
     @MainActor public func pageControllerDidEndLiveTransition(_ pageController: NSPageController) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagecontrollerdelegate/pagecontrollerwillstartlivetransition(_:)

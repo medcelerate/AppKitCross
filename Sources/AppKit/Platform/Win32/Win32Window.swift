@@ -831,6 +831,7 @@ final class Win32Window: PlatformWindow {
 
     private func timestamp() -> TimeInterval { TimeInterval(GetTickCount64()) / 1000 }
 
+
     private func mouse(_ type: NSEvent.EventType, _ lParam: LPARAM, button: Int, clickCount: Int = 1) {
         let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
         let y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
@@ -1344,8 +1345,10 @@ final class Win32Window: PlatformWindow {
                 magnifyFromWheel(delta: delta, at: contentPoint(x: pt.x, y: pt.y), flags: flags.subtracting(.command))
                 return 0
             }
+            // Shift+wheel on a mouse is a horizontal scroll, as AppKit reports it (up: left).
+            let sideways = horizontal || flags.contains(.shift)
             let e = NSEvent._scrollEvent(location: contentPoint(x: pt.x, y: pt.y), modifierFlags: flags, timestamp: timestamp(),
-                                         windowNumber: windowNumber(), deltaX: horizontal ? -delta : 0, deltaY: horizontal ? 0 : delta, precise: false)
+                                         windowNumber: windowNumber(), deltaX: sideways ? (horizontal ? -delta : delta) : 0, deltaY: sideways ? 0 : delta, precise: false)
             owner?.platformWindowDispatch(e)
             return 0
         case WM_GESTURE:
