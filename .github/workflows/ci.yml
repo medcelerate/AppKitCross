@@ -44,8 +44,6 @@ jobs:
     name: Windows build and tests
     # windows-latest ships VS 2026 (MSVC 14.5x), whose STL needs Clang 20; Swift 6.2's clang is older.
     runs-on: windows-2022
-    env:
-      SWIFT_WINDOWS_FLAGS: -Xswiftc -driver-force-response-files
     steps:
       - uses: actions/checkout@v4
       - uses: compnerd/gha-setup-swift@main
@@ -53,19 +51,19 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       - run: swift --version
-      # -driver-force-response-files on every Windows build and test (the same flags each
-      # time, or SwiftPM rebuilds): Swift 6.2's driver now and then never starts AppKit's
-      # separate emit-module job. MultiJobExecutor drops the error thrown before the job
-      # starts, finishes the batches and exits 1 with nothing said (docs/ci-windows-runner.md).
-      # With every job's arguments in a response file it did not happen (0 of 4 vs 15 of 24).
-      # -no-emit-module-separately also avoids it, but its merge-modules step rejects
-      # SwiftUI's opaque result types.
+      # One job at a time (-j 1) on every Windows build and test: Swift 6.2's driver, when
+      # two of its jobs start together, now and then loses one whose response file or
+      # launch throws. MultiJobExecutor drops the error, the other jobs finish and the
+      # build exits 1 with nothing said, usually at AppKit's emit-module job
+      # (docs/ci-windows-runner.md). -no-emit-module-separately breaks SwiftUI's
+      # merge-modules step (opaque result types), and -driver-force-response-files only
+      # moved the failure to other modules.
       - name: Build
         shell: bash
-        run: swift build -c debug -j 2 $SWIFT_WINDOWS_FLAGS
+        run: swift build -c debug -j 1
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build -j 2 $SWIFT_WINDOWS_FLAGS --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build -j 1 --product $p; done
       - name: AudioPlayer example offline render (WASAPI absent on the runner)
         run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: TextEdit example headless document round trip
@@ -74,7 +72,7 @@ jobs:
           APPKITWIN_HOST_BACKEND: "1"
       - name: Tests on the host backend
         shell: bash
-        run: swift test -j 2 $SWIFT_WINDOWS_FLAGS
+        run: swift test -j 1
         env:
           APPKITWIN_HOST_BACKEND: "1"
           # The Direct3D 12 shim's log (device, shader compiler, swap-chain and readback
