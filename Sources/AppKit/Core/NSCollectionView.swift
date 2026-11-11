@@ -34,6 +34,9 @@ import CoreGraphics
     private var _anchor: IndexPath?
     private var _pressed: IndexPath?
     private var _pressDidToggle = false
+    private var _marqueeStart: NSPoint?            // a rubber-band selection from empty space
+    private var _marqueeRect: NSRect = .zero
+    private var _marqueeBase = Set<IndexPath>()    // the selection the drag adds to (Cmd/Shift)
     private var _highlighted = Set<IndexPath>()
     private var _dragMaskLocal: NSDragOperation = .every
     private var _dragMaskRemote: NSDragOperation = []
@@ -554,6 +557,7 @@ import CoreGraphics
         for (key, v) in _visibleDecorations where !wantedDecorations.contains(key) { _recycleDecoration(v, key: key) }
         _restack(placed)
         _placeBackgroundView()
+        if let m = _marqueeView, subviews.last !== m { addSubview(m) }
         _refreshItemAccessibility()
         // Tell the delegate about the items now on screen.
         for ip in wantedItems.sorted() where !_displayed.contains(ip) {
@@ -884,11 +888,19 @@ import CoreGraphics
         let hit = indexPathForItem(at: p)
         _pressDidToggle = false
         _pressed = hit
+        let flags = event.modifierFlags
         guard let ip = hit else {
-            if _allowsEmptySelection { _userSetSelection([]) }
+            // Empty space: a rubber band starts here; without Cmd or Shift it replaces the
+            // selection, so the click alone clears it.
+            let extends = _allowsMultipleSelection && (flags.contains(.command) || flags.contains(.shift))
+            if !extends && _allowsEmptySelection { _userSetSelection([]) }
+            if _allowsMultipleSelection {
+                _marqueeStart = p
+                _marqueeRect = NSRect(origin: p, size: .zero)
+                _marqueeBase = extends ? _selection : []
+            }
             return
         }
-        let flags = event.modifierFlags
         if _allowsMultipleSelection && flags.contains(.command) {
             _pressDidToggle = true
             _anchor = ip
@@ -910,8 +922,20 @@ import CoreGraphics
         }
     }
     @MainActor open override func mouseDragged(with event: NSEvent) {
-        guard _isSelectable, let start = _pressed, _allowsMultipleSelection, !_pressDidToggle else { return }
+        guard _isSelectable else { return }
         let p = convert(event.locationInWindow, from: nil)
+        if let origin = _marqueeStart {
+            // Rubber band: the items whose frames the rect touches join the base selection.
+            let old = _marqueeRect
+            _marqueeRect = NSRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
+            _prepareLayoutIfNeeded()
+            let hits = (_layout?.layoutAttributesForElements(in: _marqueeRect) ?? []).filter { $0.representedElementCategory == .item && !$0.isHidden && _rectsOverlap($0.frame, _marqueeRect) }.compactMap(\.indexPath)
+            _userSetSelection(_marqueeBase.union(hits))
+            _ = old
+            _showMarquee()
+            return
+        }
+        guard let start = _pressed, _allowsMultipleSelection, !_pressDidToggle else { return }
         guard let ip = indexPathForItem(at: p), ip != start || _selection.count > 1 else { return }
         let range = _indexPaths(between: start, and: ip)
         _userSetSelection(range)
@@ -920,8 +944,27 @@ import CoreGraphics
         let pressed = _pressed
         _pressed = nil
         guard _isSelectable else { super.mouseUp(with: event); return }
+        if _marqueeStart != nil {
+            _marqueeStart = nil
+            _marqueeRect = .zero
+            _showMarquee()
+        }
         if !_highlighted.isEmpty { _setHighlight(.none, for: _highlighted) }
         _ = pressed
+    }
+    /// The rubber band's rect while a drag from empty space is in progress (else zero).
+    internal var _marquee: NSRect { _marqueeStart == nil ? .zero : _marqueeRect }
+    /// The rubber band is a view of its own above the elements (a view draws under its
+    /// subviews, so the collection view cannot paint it in `draw`).
+    private var _marqueeView: _NSCollectionViewMarqueeView?
+    private func _showMarquee() {
+        guard _marqueeStart != nil else { _marqueeView?.removeFromSuperview(); _marqueeView = nil; return }
+        let v = _marqueeView ?? _NSCollectionViewMarqueeView(frame: _marqueeRect)
+        _marqueeView = v
+        v.frame = _marqueeRect
+        v.isHidden = _marqueeRect.isEmpty
+        addSubview(v)       // (re)added: always on top
+        v.needsDisplay = true
     }
 
     /// The index paths from one to another in order, both included.
@@ -1197,6 +1240,22 @@ import CoreGraphics
             return _userSetSelection(extending && _allowsMultipleSelection ? _selection.union([ip]) : [ip])
         }
         return _userSetSelection(_selection.subtracting([ip]))
+    }
+}
+
+/// The rubber band drawn over the items while the mouse drags from empty space.
+@MainActor internal final class _NSCollectionViewMarqueeView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.controlAccentColor.withAlphaComponent(0.15).setFill()
+        NSBezierPath(rect: bounds).fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.6).setStroke()
+        let p = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
+        p.lineWidth = 1
+        p.stroke()
     }
 }
 
