@@ -329,10 +329,12 @@ import CoreGraphics
         // Deletes, highest first so the indices stay valid.
         var movedItems: [(token: Token, to: IndexPath)] = []
         for (from, to) in pending.moveItems { check(from, "move"); movedItems.append((sections[from.section].items[from.item], to)) }
-        var movedSections: [(token: Token, items: [Token], to: Int)] = []
-        for (from, to) in pending.moveSections { precondition(sections.indices.contains(from), "NSCollectionView: invalid section move \(from)"); movedSections.append((sections[from].token, sections[from].items, to)) }
         let itemDeletes = (pending.deleteItems.union(pending.moveItems.map { $0.0 })).sorted(by: >)
         for ip in itemDeletes { check(ip, "delete"); sections[ip.section].items.remove(at: ip.item) }
+        // A moved section takes its items as they are after the item deletes (old index
+        // paths address the old sections; inserts address the new ones).
+        var movedSections: [(token: Token, items: [Token], to: Int)] = []
+        for (from, to) in pending.moveSections { precondition(sections.indices.contains(from), "NSCollectionView: invalid section move \(from)"); movedSections.append((sections[from].token, sections[from].items, to)) }
         let sectionDeletes = (pending.deleteSections.union(IndexSet(pending.moveSections.map { $0.0 }))).sorted(by: >)
         for s in sectionDeletes { sections.remove(at: s) }
         // Inserts, lowest first.
@@ -349,7 +351,9 @@ import CoreGraphics
             sections[ip.section].items.insert(token, at: ip.item)
         }
         // The data source must agree. Inserted and reloaded sections take their item
-        // counts from it (every item in them is new).
+        // counts from it (every item in them is new). The selection is mapped from the
+        // old index paths below, so keep it from the new counts' filter.
+        let oldSelection = _selection, oldAnchor = _anchor
         _needsReload = true
         _reloadCountsIfNeeded()
         precondition(_itemCounts.count == sections.count, "NSCollectionView: invalid update: the data source has \(_itemCounts.count) sections after the update, the updates give \(sections.count)")
@@ -409,8 +413,8 @@ import CoreGraphics
         _visibleSupplementary = supplementary
         for (key, v) in _visibleDecorations { _recycleDecoration(v, key: key) }
         _visibleDecorations = [:]
-        _selection = Set(_selection.compactMap { itemMap[$0] })
-        _anchor = _anchor.flatMap { itemMap[$0] }
+        _selection = Set(oldSelection.compactMap { itemMap[$0] })
+        _anchor = oldAnchor.flatMap { itemMap[$0] }
         _highlighted = Set(_highlighted.compactMap { itemMap[$0] })
         for (ip, item) in _visibleItems { item.isSelected = _selection.contains(ip) }
 

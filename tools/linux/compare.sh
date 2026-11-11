@@ -13,6 +13,8 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/Hello
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=collection APPKITWIN_COLLECTION_SELECT=1 "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=grid "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=box "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+# The Layout Demo's Diffable tab after a shuffle, an insert, a delete and a reload (ADR-0029).
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=diffable APPKITWIN_DIFFABLE_STEPS=shuffle,insert,delete,reload "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 # The Layout Demo's Combo, Outline, Pages and Panels tabs, and the Outline tab mirrored right to left.
 for tab in combo outline pages panels; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"

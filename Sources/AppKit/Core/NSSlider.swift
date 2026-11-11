@@ -181,8 +181,10 @@ import CoreText
         _accessibilityApply(d)
         return true
     }
-    /// The step one increment moves: a tick mark's spacing, else a hundredth of the range.
+    /// The step one increment moves: the alternate increment when one is set (SwiftUI's
+    /// `step`), a tick mark's spacing, else a hundredth of the range.
     internal var _accessibilityStep: Double {
+        if altIncrementValue > 0 { return altIncrementValue }
         let range = maxValue - minValue
         if numberOfTickMarks > 1 { return range / Double(numberOfTickMarks - 1) }
         return range > 0 ? range / 100 : 1
