@@ -12,6 +12,10 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstexttab
 open class NSTextTab: NSObject, NSCopying, NSCoding, NSSecureCoding {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     private let _alignment: NSTextAlignment
     private let _location: CGFloat
     private let _options: [NSTextTab.OptionKey: Any]

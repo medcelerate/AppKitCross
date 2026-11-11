@@ -23,6 +23,14 @@ public final class CGColorSpace: Equatable, @unchecked Sendable {
     public static func == (l: CGColorSpace, r: CGColorSpace) -> Bool { l.name == r.name }
 }
 
+// Hashable as Apple's CF types are. It matters beyond API shape: Foundation on Windows and
+// Linux boxes a non-Hashable value with an identity hash, so two equal colours in adjacent
+// attribute runs compare equal with different hashes and CFAttributedString traps
+// (CFBasicHashesAreEqual) when it merges the runs, e.g. two attachments side by side.
+extension CGColorSpace: Hashable {
+    public func hash(into hasher: inout Hasher) { hasher.combine(name) }
+}
+
 /// A color in sRGB, premultiplication deferred to the rasterizer. Other color spaces are
 /// converted on creation; Direct2D composites in sRGB.
 public final class CGColor: Equatable, @unchecked Sendable {
@@ -66,4 +74,11 @@ public final class CGColor: Equatable, @unchecked Sendable {
     public static let clear = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0)
 
     public static func == (l: CGColor, r: CGColor) -> Bool { l.rgba == r.rgba }
+}
+
+extension CGColor: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        let (r, g, b, a) = rgba
+        hasher.combine(r); hasher.combine(g); hasher.combine(b); hasher.combine(a)
+    }
 }

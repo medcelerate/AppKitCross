@@ -8,6 +8,10 @@ import CoreGraphics
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsparagraphstyle
 open class NSParagraphStyle: NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCoding {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     internal var _alignment: NSTextAlignment = .natural
     internal var _allowsDefaultTighteningForTruncation = false
     internal var _baseWritingDirection: NSWritingDirection = .natural

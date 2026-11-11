@@ -16,6 +16,10 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfont
 open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     // MARK: Storage
     internal let handle: any PlatformFontHandle
     private let _fontName: String

@@ -368,6 +368,88 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// What TextEdit does on the PC: an RTFD with a large bitmap opened into a rich view,
+    /// then an image file dropped at the caret (before, after and between attachments) and
+    /// the text laid out again.
+    func testDroppingAnImageNextToAReopenedAttachment() throws {
+        try MainActor.assumeIsolated {
+            // A 600×400 24-bit BMP, as the clipboard paste saved it.
+            let w = 600, h = 400, row = ((w * 24 + 31) / 32) * 4
+            var bmp = Data([0x42, 0x4D])
+            func le(_ v: Int, _ n: Int) { for k in 0..<n { bmp.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+            le(54 + row * h, 4); le(0, 4); le(54, 4)
+            le(40, 4); le(w, 4); le(h, 4); le(1, 2); le(24, 2); le(0, 4); le(row * h, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+            bmp.append(Data(repeating: 0x80, count: row * h))
+            let rtf = "{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822\n{\\fonttbl\\f0\\fnil\\fcharset0 Segoe UI;}\n{\\colortbl;\\red0\\green0\\blue0;}\n\\pard\\ql\\f0\\fs26\\cf1 Before {{\\NeXTGraphic Pasted Graphic.bmp \\width12000 \\height8000 \\appleattachmentpadding0 \\appleembedtype0 \\appleaqc\n}\\'ac} after\n}"
+            let directory = FileWrapper(directoryWithFileWrappers: ["TXT.rtf": FileWrapper(regularFileWithContents: Data(rtf.utf8)), "Pasted Graphic.bmp": FileWrapper(regularFileWithContents: bmp)])
+            let opened = try XCTUnwrap(_RTFReader.readRTFD(directory))
+            XCTAssertEqual(opened.string, "Before \u{FFFC} after")
+            let png = pngImage(NSSize(width: 40, height: 30))
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("drop-\(UUID().uuidString).png")
+            try png.write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            for at in [7, 8, 0, 14] {
+                let (win, _, tv) = window(text: "")
+                TextDocument_configure(tv)
+                tv.font = NSFont.userFont(ofSize: 13)
+                tv.textStorage?.setAttributedString(opened)
+                win.display()
+                // performDragOperation: the caret at the drop point, the file read as an attachment.
+                let pb = NSPasteboard(name: NSPasteboard.Name("drop-test-\(at)"))
+                _ = pb.clearContents()
+                _ = pb.setString(url.absoluteString, forType: .fileURL)
+                let content = try XCTUnwrap(tv._readContent(from: pb), "a file URL to an image reads as content")
+                tv.setSelectedRange(NSRange(location: at, length: 0))
+                tv._insertPasted(content)
+                win.display()
+                let lm = try XCTUnwrap(tv.layoutManager)
+                lm.ensureLayout(for: tv.textContainer!)
+                XCTAssertEqual(tv.string.unicodeScalars.filter { $0.value == 0xFFFC }.count, 2, "dropped at \(at)")
+                XCTAssertEqual(lm._attachments.count, 2, "dropped at \(at)")
+                XCTAssertEqual(lm.attachmentSize(forGlyphAt: at), NSSize(width: 40, height: 30), "dropped at \(at)")
+                pb.releaseGlobally()
+            }
+        }
+    }
+
+    /// Distinct attribute values in adjacent runs: on Windows and Linux Foundation reads a
+    /// Swift object's CF type from its first stored word and halted on these (CFBridgeLayout).
+    func testDistinctAttributeValuesInAdjacentRuns() {
+        MainActor.assumeIsolated {
+            let pairs: [(String, Any, Any)] = [
+                ("black colours", NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1), NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)),
+                ("colours", NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1), NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)),
+                ("fonts", NSFont.systemFont(ofSize: 12), NSFont.systemFont(ofSize: 14)),
+                ("paragraph styles", NSMutableParagraphStyle(), NSMutableParagraphStyle()),
+                ("tabs", NSTextTab(textAlignment: .left, location: 0), NSTextTab(textAlignment: .left, location: 0)),
+                ("lists", NSTextList(markerFormat: .disc, options: 0), NSTextList(markerFormat: .disc, options: 0)),
+                ("blocks", NSTextBlock(), NSTextBlock()),
+                ("attachments", NSTextAttachment(), NSTextAttachment()),
+            ]
+            for (name, a, b) in pairs {
+                let s = NSMutableAttributedString(string: "\u{FFFC}\u{FFFC}")
+                let k = NSAttributedString.Key("probe")
+                s.addAttribute(k, value: a, range: NSRange(location: 0, length: 1))
+                s.addAttribute(k, value: b, range: NSRange(location: 1, length: 1))
+                var runs = 0
+                s.enumerateAttribute(k, in: NSRange(location: 0, length: 2), options: []) { _, _, _ in runs += 1 }
+                XCTAssertTrue(runs == 1 || runs == 2, name)
+            }
+        }
+    }
+
+    /// TextEdit's configure(_:rich:) for a rich document.
+    @MainActor private func TextDocument_configure(_ tv: NSTextView) {
+        tv.isRichText = true
+        tv.importsGraphics = true
+        tv.usesFindBar = true
+        tv.isIncrementalSearchingEnabled = true
+        tv.isContinuousSpellCheckingEnabled = true
+        tv.allowsUndo = true
+        tv.isAutomaticQuoteSubstitutionEnabled = true
+        tv.isAutomaticDashSubstitutionEnabled = true
+    }
+
     /// Making a view rich and graphics-importing after init re-registers its drop types.
     func testDropTypesFollowRichTextAndGraphics() {
         MainActor.assumeIsolated {

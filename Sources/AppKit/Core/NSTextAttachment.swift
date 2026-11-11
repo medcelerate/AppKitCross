@@ -18,6 +18,10 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextattachment
 open class NSTextAttachment: NSObject, NSTextAttachmentLayout, NSSecureCoding, NSCoding, NSTextAttachmentContainer {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     private var _contents: Data?
     private var _fileType: String?
     private var _fileWrapper: FileWrapper?

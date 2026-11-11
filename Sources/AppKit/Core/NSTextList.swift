@@ -9,6 +9,10 @@
 import Foundation
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextlist
 open class NSTextList: NSObject, NSSecureCoding, NSCoding, NSCopying {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     private let _markerFormat: NSTextList.MarkerFormat
     private let _options: NSTextList.Options
     private var _startingItemNumber: Int

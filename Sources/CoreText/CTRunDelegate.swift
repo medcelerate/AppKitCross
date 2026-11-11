@@ -39,6 +39,11 @@ public struct CTRunDelegateCallbacks {
 
 /// - SeeAlso: https://developer.apple.com/documentation/coretext/ctrundelegate
 public final class CTRunDelegate: NSObject {
+    // swift-corelibs-foundation's NSObject has no ivars, so CoreFoundation reads a Swift
+    // object's CF type ID from its first stored word; type 0 makes CFEqual/CFHash halt when
+    // CFAttributedString compares two delegates in adjacent runs (two attachments side by
+    // side). A non-zero type ID that no CF class has keeps CF dispatching to Swift.
+    private let _cfinfo: UInt64 = 0x3FF << 8
     let callbacks: CTRunDelegateCallbacks
     let refCon: UnsafeMutableRawPointer?
     init(callbacks: CTRunDelegateCallbacks, refCon: UnsafeMutableRawPointer?) {

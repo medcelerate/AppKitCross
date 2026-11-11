@@ -14,6 +14,10 @@ import CoreGraphics
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextblock
 open class NSTextBlock: NSObject, NSSecureCoding, NSCoding, NSCopying {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     internal var _values: [Int: (value: CGFloat, type: NSTextBlock.ValueType)] = [:]       // by Dimension
     internal var _widths: [Int: (value: CGFloat, type: NSTextBlock.ValueType)] = [:]       // layer * 8 + edge
     internal var _borderColors: [UInt: NSColor] = [:]
