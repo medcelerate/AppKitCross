@@ -361,6 +361,16 @@ final class Win32Backend: PlatformBackend {
     private lazy var win32FileDialog = Win32FileDialog()
     var fileDialog: (any PlatformFileDialog)? { PlatformFileDialogPolicy.allowsNative ? win32FileDialog : nil }
 
+    /// The common colour dialog (ChooseColor), for `APPKITWIN_COLOR_PANEL=native`.
+    var hasNativeColorDialog: Bool { true }
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? {
+        func byte(_ v: CGFloat) -> UInt32 { UInt32(min(255, max(0, (v * 255).rounded()))) }
+        var rgb: UInt32 = byte(initial.0) | (byte(initial.1) << 8) | (byte(initial.2) << 16)
+        let hwnd = (parent as? Win32Window)?.hwnd
+        guard cd2d_choose_color(hwnd.map { UnsafeMutableRawPointer($0) }, &rgb) else { return nil }
+        return (CGFloat(rgb & 0xFF) / 255, CGFloat((rgb >> 8) & 0xFF) / 255, CGFloat((rgb >> 16) & 0xFF) / 255)
+    }
+
     // MARK: Pasteboard and modal loops
 
     let systemPasteboard: any PlatformPasteboard = Win32Pasteboard()

@@ -26,7 +26,9 @@ targets += [
                          // the DWM frame/backdrop attributes used by Win32Window.
                          .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
                          // ADR-0022: the shell (version resources, session notifications).
-                         .linkedLibrary("version"), .linkedLibrary("wtsapi32"), .linkedLibrary("user32")]
+                         .linkedLibrary("version"), .linkedLibrary("wtsapi32"), .linkedLibrary("user32"),
+                         // ADR-0022: the common colour dialog (ChooseColorW) behind APPKITWIN_COLOR_PANEL=native.
+                         .linkedLibrary("comdlg32")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
     // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).

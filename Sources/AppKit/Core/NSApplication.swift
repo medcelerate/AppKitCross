@@ -16,9 +16,11 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication
 @MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization, NSSelectorHandling {
-    /// The application's own menu actions (`terminate:`, `hide:`, the About panel), at the
-    /// end of the responder chain as on macOS.
-    private static let _actions: Set<String> = ["terminate:", "hide:", "unhide:", "unhideAllApplications:", "orderFrontStandardAboutPanel:", "arrangeInFront:"]
+    /// The application's own menu actions (`terminate:`, `hide:`, the About panel) and the
+    /// panel actions the standard toolbar items send with no target (`orderFrontColorPanel:`
+    /// is its own, `orderFrontFontPanel:` goes to the font manager; ADR-0031), at the end of
+    /// the responder chain as on macOS.
+    private static let _actions: Set<String> = ["terminate:", "hide:", "unhide:", "unhideAllApplications:", "orderFrontStandardAboutPanel:", "arrangeInFront:", "orderFrontColorPanel:", "orderFrontFontPanel:"]
     public func respondsToSelectorAction(_ action: Selector) -> Bool { NSApplication._actions.contains(NSStringFromSelector(action)) }
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch NSStringFromSelector(action) {
@@ -28,6 +30,8 @@ import CoreText
         case "unhideAllApplications:": unhideWithoutActivation()
         case "orderFrontStandardAboutPanel:": orderFrontStandardAboutPanel(sender)
         case "arrangeInFront:": arrangeInFront(sender)
+        case "orderFrontColorPanel:": orderFrontColorPanel(sender)
+        case "orderFrontFontPanel:": NSFontManager.shared.orderFrontFontPanel(sender)
         default: return false
         }
         return true
@@ -390,7 +394,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcharacterpalette(_:)
     @MainActor open func orderFrontCharacterPalette(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcolorpanel(_:)
-    @MainActor open func orderFrontColorPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontColorPanel(_ sender: Any?) { NSColorPanel.shared.orderFront(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(_:)
     @MainActor open func orderFrontStandardAboutPanel(_ sender: Any?) { orderFrontStandardAboutPanel(options: [:]) }
     /// The standard about panel: the application's name and version (from the bundle, or

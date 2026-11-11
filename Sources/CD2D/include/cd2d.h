@@ -312,6 +312,10 @@ bool cd2d_shell_display_state(const void *lParam, uint32_t *state);
 int32_t cd2d_shell_process_architecture(uint32_t pid);
 void cd2d_shell_free(void *buffer);
 
+// The common colour dialog (ChooseColorW). `rgb` is COLORREF (0x00BBGGRR) in and out, with
+// the 16 custom colours kept for the process. Returns false when cancelled.
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb);
+
 // Drag and drop (OLE; ADR-0011 stage B)
 /// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit
 /// pasteboard type; "public.utf8-plain-text" travels as CF_UNICODETEXT, "public.file-url"

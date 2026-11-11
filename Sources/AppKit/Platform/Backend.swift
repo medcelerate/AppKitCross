@@ -65,6 +65,11 @@ public protocol PlatformBackend: AnyObject {
     /// The operating system's open/save dialog (FileDialog.swift, ADR-0017); nil when the
     /// panels should draw themselves.
     var fileDialog: (any PlatformFileDialog)? { get }
+    /// Whether the platform has a system colour dialog (`NSColorPanel` uses it when
+    /// `APPKITWIN_COLOR_PANEL=native`); the package-drawn panel is the default everywhere.
+    var hasNativeColorDialog: Bool { get }
+    /// Shows the system colour dialog modally over `initial` (sRGB); nil when cancelled.
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)?
     /// Runs a nested event loop for a modal window until `stop` reports true.
     /// Other windows of the application do not receive input meanwhile.
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
@@ -86,6 +91,11 @@ public protocol PlatformBackend: AnyObject {
     /// (Workspace.swift). A requirement, not only an extension default, so the backend's
     /// own implementation is reached through the `any PlatformBackend` existential.
     var workspace: any PlatformWorkspace { get }
+}
+
+extension PlatformBackend {
+    public var hasNativeColorDialog: Bool { false }
+    public func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? { nil }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.
