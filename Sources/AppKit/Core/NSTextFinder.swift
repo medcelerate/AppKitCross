@@ -147,7 +147,7 @@ open class NSTextFinder: NSObject, NSCoding {
     /// The client's whole text, read the way AppKit's finder reads it.
     internal func _text(_ c: any NSTextFinderClient) -> NSString {
         let n = c.stringLength()
-        let out = NSMutableString()
+        let out = NSMutableString(string: "")
         var i = 0
         while i < n {
             var r = NSRange(location: 0, length: 0)

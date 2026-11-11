@@ -10,10 +10,13 @@ import Foundation
 import CoreGraphics
 #endif
 
-public typealias CTRunDelegateDeallocateCallback = @convention(c) (UnsafeMutableRawPointer) -> Void
-public typealias CTRunDelegateGetAscentCallback = @convention(c) (UnsafeMutableRawPointer) -> CGFloat
-public typealias CTRunDelegateGetDescentCallback = @convention(c) (UnsafeMutableRawPointer) -> CGFloat
-public typealias CTRunDelegateGetWidthCallback = @convention(c) (UnsafeMutableRawPointer) -> CGFloat
+// Apple's are C function pointers; CGFloat is a Swift struct off Darwin and cannot cross a
+// C convention, so these are Swift function types. Capture-free closures, as written for
+// Apple's, convert to either.
+public typealias CTRunDelegateDeallocateCallback = (UnsafeMutableRawPointer) -> Void
+public typealias CTRunDelegateGetAscentCallback = (UnsafeMutableRawPointer) -> CGFloat
+public typealias CTRunDelegateGetDescentCallback = (UnsafeMutableRawPointer) -> CGFloat
+public typealias CTRunDelegateGetWidthCallback = (UnsafeMutableRawPointer) -> CGFloat
 
 public var kCTRunDelegateVersion1: Int { 1 }
 public var kCTRunDelegateCurrentVersion: Int { kCTRunDelegateVersion1 }
@@ -25,7 +28,7 @@ public struct CTRunDelegateCallbacks {
     public var getAscent: CTRunDelegateGetAscentCallback
     public var getDescent: CTRunDelegateGetDescentCallback
     public var getWidth: CTRunDelegateGetWidthCallback
-    public init(version: CFIndex, dealloc: CTRunDelegateDeallocateCallback, getAscent: CTRunDelegateGetAscentCallback, getDescent: CTRunDelegateGetDescentCallback, getWidth: CTRunDelegateGetWidthCallback) {
+    public init(version: CFIndex, dealloc: @escaping CTRunDelegateDeallocateCallback, getAscent: @escaping CTRunDelegateGetAscentCallback, getDescent: @escaping CTRunDelegateGetDescentCallback, getWidth: @escaping CTRunDelegateGetWidthCallback) {
         self.version = version
         self.dealloc = dealloc
         self.getAscent = getAscent

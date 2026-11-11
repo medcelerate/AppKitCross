@@ -69,12 +69,15 @@ public final class CTRun: NSObject {
             ctx.restoreGState()
         }
         var absolute: [CGPoint] = []
+        var drawn: [CGGlyph] = []
         absolute.reserveCapacity(r.count)
         for i in r {
+            // Whitespace has no ink; tabs and line breaks would show the font's missing-glyph box.
+            if isWhitespace[i] { continue }
             let p = positions[i].applying(m)
             absolute.append(CGPoint(x: origin.x + p.x, y: origin.y + p.y))
+            drawn.append(glyphs[i])
         }
-        let drawn = Array(glyphs[r])
         font.engine.draw(glyphs: drawn, positions: absolute, color: color, in: ctx)
         if let styleValue = _ctNumber(attributes[.ctUnderlineStyle]).map({ Int32($0) }), styleValue != 0 {
             let style = CTUnderlineStyle(rawValue: styleValue & 0xFF)

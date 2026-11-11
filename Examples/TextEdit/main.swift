@@ -75,7 +75,7 @@ final class TextDocument: NSDocument {
 
     override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
         guard typeName == TextDocument.rtfdType else { return try super.fileWrapper(ofType: typeName) }
-        let text = textView?.textStorage.map { NSAttributedString(attributedString: $0) } ?? contents
+        let text = textView?.textStorage.map { $0.copy() as! NSAttributedString } ?? contents
         guard let wrapper = text.rtfdFileWrapper(from: NSRange(location: 0, length: text.length), documentAttributes: [:]) else {
             throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.Code.fileWriteUnknown.rawValue, userInfo: [NSLocalizedDescriptionKey: "The text could not be written as RTFD."])
         }
@@ -114,7 +114,7 @@ final class TextDocument: NSDocument {
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        let text = textView?.textStorage.map { NSAttributedString(attributedString: $0) } ?? contents
+        let text = textView?.textStorage.map { $0.copy() as! NSAttributedString } ?? contents
         if typeName == TextDocument.rtfType {
             guard let data = text.rtf(from: NSRange(location: 0, length: text.length)) else {
                 throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.Code.fileWriteUnknown.rawValue, userInfo: [NSLocalizedDescriptionKey: "The text could not be written as RTF."])
@@ -396,7 +396,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     tv.insertText("An attachment: ")
     tv.insertText(NSAttributedString(attachment: attachment), replacementRange: NSRange(location: NSNotFound, length: 0))
     tv.insertText(" sits on the baseline, and a mispeled word is underlined.")
-    return NSAttributedString(attributedString: tv.textStorage!)
+    // copy(): corelibs' init(attributedString:) does not read an NSTextStorage's backing.
+    return tv.textStorage!.copy() as! NSAttributedString
 }
 
 @MainActor func listItem(_ format: String) -> NSMenuItem {
@@ -433,7 +434,7 @@ extension NSTextView {
         let back = try dc.makeDocument(withContentsOf: url, ofType: TextDocument.rtfdType) as! TextDocument
         let s = back.contents
         guard s.string == text.string else { print("FAIL: text differs:\n\(s.string.debugDescription)\n\(text.string.debugDescription)"); return 1 }
-        guard s.containsAttachments else { print("FAIL: attachment lost"); return 1 }
+        guard s.containsAttachments else { print("FAIL: attachment lost (written \(text.length) characters, attachment \(text.containsAttachments))"); return 1 }
         var lists = 0, cells = 0
         s.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: s.length), options: []) { v, _, _ in
             guard let p = v as? NSParagraphStyle else { return }

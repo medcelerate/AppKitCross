@@ -737,12 +737,19 @@ final class _RTFReader {
             && a.colorIndex == b.colorIndex && a.paragraph == b.paragraph
     }
 
+    /// One colour object per table entry: swift-corelibs-foundation's CFAttributedString
+    /// traps when adjacent runs hold equal but distinct RGB NSColor objects.
+    private var colorObjects: [Int: NSColor] = [:]
+
     private func color(_ index: Int) -> NSColor? {
         // The colour table's first entry (before the first ';') is the automatic colour, so
         // \cfN indexes the table directly.
         guard index > 0, index < colors.count else { return nil }
+        if let made = colorObjects[index] { return made }
         let c = colors[index]
-        return c.0 >= 0 ? NSColor(red: CGFloat(c.0) / 255, green: CGFloat(c.1) / 255, blue: CGFloat(c.2) / 255, alpha: 1) : nil
+        let made = c.0 >= 0 ? NSColor(red: CGFloat(c.0) / 255, green: CGFloat(c.1) / 255, blue: CGFloat(c.2) / 255, alpha: 1) : nil
+        colorObjects[index] = made
+        return made
     }
 
     private func textList(_ ls: Int, level: Int) -> [NSTextList] {

@@ -169,6 +169,20 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The operating system's checker (hunspell with an English dictionary, the Windows
+    /// Spell Checking API), where the machine has one.
+    func testSystemSpellCheckerWhenPresent() throws {
+        guard let system = PlatformSpellChecking.makeSystemChecker() else { throw XCTSkip("no system spell checker on this machine") }
+        guard system.availableLanguages.contains(where: { $0.hasPrefix("en") }), system.language.hasPrefix("en") || system.setLanguage("en_US") else {
+            throw XCTSkip("no English dictionary (\(system.availableLanguages))")
+        }
+        XCTAssertTrue(system.isCorrect("receive"), system.name)
+        XCTAssertFalse(system.isCorrect("recieve"), system.name)
+        XCTAssertTrue(system.guesses(for: "recieve").contains("receive"), "\(system.guesses(for: "recieve"))")
+        system.learn("frobnicate")
+        XCTAssertTrue(system.isCorrect("frobnicate"))
+    }
+
     func testContinuousSpellCheckingMarksAndContextMenu() {
         MainActor.assumeIsolated {
             let checker = NSSpellChecker.shared

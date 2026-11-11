@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1172 |
+| Members unimplemented-calls | 1054 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -347,7 +347,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPrinter | class | generated | 12 | 0 | 3 |  |
 | NSProgressIndicator | class | generated | 17 | 0 | 1 |  |
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
-| NSResponder | class | handwritten | 69 | 2 | 0 | 17 |
+| NSResponder | class | handwritten | 69 | 2 | 0 | 16 |
 | NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
 | NSRuleEditor | class | generated | 44 | 0 | 3 |  |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |
 | NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |
 | NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 162 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 45 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
