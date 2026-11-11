@@ -429,7 +429,7 @@ import CoreText
         }
         if _contentView.frame != content {
             _contentView.frame = content
-            (_contentView.documentView as? NSTableView)?._clipViewDidResize()
+            _contentView.documentView?._clipViewDidResize()
         }
         reflectScrolledClipView(_contentView)
         needsDisplay = true

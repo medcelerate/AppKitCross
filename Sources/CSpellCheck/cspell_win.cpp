@@ -126,9 +126,10 @@ extern "C" char *cspell_suggest(cspell_checker *c, const char *word) {
 extern "C" void cspell_add(cspell_checker *c, const char *word) {
     if (!c || !word) return;
     std::wstring w = widen(word);
-    // Add() writes the user's dictionary; Ignore() only lasts for the session. AppKit's
-    // learnWord is persistent, so Add.
+    // Add() writes the user's dictionary (AppKit's learnWord is persistent), which the
+    // checker may not consult until later; Ignore() accepts the word in this session at once.
     c->checker->Add(w.c_str());
+    c->checker->Ignore(w.c_str());
 }
 
 extern "C" void cspell_free(char *list) { free(list); }
