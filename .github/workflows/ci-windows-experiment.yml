@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         # One variable per variant; each against the control runs of E0/E1.
-        variant: [direct]
+        variant: [forcersp]
         rep: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +63,7 @@ jobs:
             lifecycle) flags+=(-Xswiftc -driver-show-job-lifecycle) ;;
             nosep) flags+=(-Xswiftc -no-emit-module-separately) ;;
             j1) flags=(-c debug -j 1) ;;
+            forcersp) flags+=(-Xswiftc -driver-force-response-files) ;;
           esac
           echo "flags: ${flags[*]}"
           start=$(date +%s)
