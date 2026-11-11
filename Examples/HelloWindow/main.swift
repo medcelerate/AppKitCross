@@ -561,7 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(BoxDemoViewController())
         tabs.addChild(ControlsDemoViewController())
         tabs.addChild(DateDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 560, height: 300)   // wide enough for the twelve tabs
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 660, height: 300)   // wide enough for the twelve tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
