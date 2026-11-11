@@ -283,10 +283,8 @@ final class WaylandBackend: PlatformBackend {
         windows.append(window)
         if atspi == nil && !atspiTried {
             atspiTried = true
-            atspi = AtspiBridge.connect(rootWindowProperty: { nil }) { [weak self] r in
-                let h = self?.displays.first?.frame.height ?? 0
-                return (Int32(r.minX.rounded()), Int32((h - r.maxY).rounded()), Int32(r.width.rounded()), Int32(r.height.rounded()))
-            }
+            atspi = AtspiBridge.connect(rootWindowProperty: { nil })
+            atspi?.application = atspiApplication
         }
         atspi?.register(window)
     }
@@ -429,8 +427,13 @@ final class WaylandBackend: PlatformBackend {
     }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
-        // No native menu bar on Wayland; NSApplication still dispatches key equivalents.
+        // No native menu bar on Wayland; NSApplication still dispatches key equivalents. The
+        // menu reaches assistive technology as the application's AXMenuBar (ADR-0013); the
+        // bridge connects with the first window, so the host is kept until then.
+        atspiApplication = host as? PlatformAccessibilityApplication
+        if let atspi { if atspi.application !== atspiApplication { atspi.application = atspiApplication } else { atspi.menuBarChanged() } }
     }
+    private weak var atspiApplication: PlatformAccessibilityApplication?
 
     /// The band a window of this style would draw itself (ClientSideDecoration.swift):
     /// none when the compositor decorates, which it is expected to when it has xdg-decoration.

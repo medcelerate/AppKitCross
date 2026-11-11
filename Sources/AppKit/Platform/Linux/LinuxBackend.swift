@@ -85,11 +85,7 @@ final class LinuxBackend: PlatformBackend {
         text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
         x11DragDrop = X11DragDrop(backend: self)
-        let scale = self.scale, screenHeightPx = self.screenHeightPx
-        atspi = AtspiBridge.connect(rootWindowProperty: { [self] in atspiBusFromRootWindow() }) { r in
-            (Int32((r.minX * scale).rounded()), Int32((screenHeightPx - r.maxY * scale).rounded()),
-             Int32((r.width * scale).rounded()), Int32((r.height * scale).rounded()))
-        }
+        atspi = AtspiBridge.connect(rootWindowProperty: { [self] in atspiBusFromRootWindow() })
     }
 
     /// The accessibility bus address the bus launcher stores on the root window.
@@ -329,7 +325,10 @@ final class LinuxBackend: PlatformBackend {
     }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
-        // X11 has no native menu bar; NSApplication still dispatches key equivalents.
+        // X11 has no native menu bar; NSApplication still dispatches key equivalents. The
+        // menu reaches assistive technology as the application's AXMenuBar (ADR-0013).
+        if let app = host as? PlatformAccessibilityApplication, atspi?.application !== app { atspi?.application = app }
+        else { atspi?.menuBarChanged() }
     }
 
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect { contentRect }

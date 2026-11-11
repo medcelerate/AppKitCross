@@ -2482,6 +2482,8 @@ import CoreText
     open func accessibilityTopLevelUIElement() -> Any? { self }
     open func accessibilityActivationPoint() -> NSPoint { NSPoint(x: frame.midX, y: frame.midY) }
     open func accessibilityPerformRaise() -> Bool { makeKeyAndOrderFront(nil); return true }
+    /// Nothing to cancel on a plain window; an open menu's window closes the menu.
+    open func accessibilityPerformCancel() -> Bool { false }
     /// The element with keyboard focus: the first responder view, or the text field a
     /// focused field editor edits. Nil when focus is on a view that is not an element.
     open func accessibilityApplicationFocusedUIElement() -> Any? {
@@ -2521,11 +2523,9 @@ extension NSWindow: PlatformAccessibilityProvider {
         e.isEnabled = isAccessibilityEnabled()
         e.isFocusable = canBecomeKey
         e.isFocused = _isKey
-        e.actions = [.raise]
-        e.children = (accessibilityChildren() ?? []).compactMap { c -> PlatformAccessibilityElement? in
-            guard let v = c as? NSView, !v.isHidden, !v.isAccessibilityHidden() else { return nil }
-            return v._accessibilityElement()
-        }
+        e.actions = NSAccessibility._actions(for: accessibilityRole() ?? .window)
+        e.clientFrame = _platform?.contentRect(forFrameRect: e.frame) ?? contentRect(forFrameRect: e.frame)
+        e.children = NSAccessibility._childElements(accessibilityChildren())
         return e
     }
 
@@ -2537,9 +2537,17 @@ extension NSWindow: PlatformAccessibilityProvider {
     }
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
-        if elementID == _accessibilityElementID { return action == .raise ? accessibilityPerformRaise() : false }
+        if elementID == _accessibilityElementID {
+            switch action {
+            case .raise: return accessibilityPerformRaise()
+            case .cancel: return accessibilityPerformCancel()
+            default: return false
+            }
+        }
         guard let v = _accessibilityView(withID: elementID) else {
-            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityPerform(action) ?? false
+            if let e = _contentView?._accessibilityVirtualElement(withID: elementID) { return e._accessibilityPerform(action) }
+            // Custom actions, and virtual elements outside the content view (menu items).
+            return NSAccessibility._performOnRegistered(action, id: elementID) ?? false
         }
         switch action {
         case .press: return v.accessibilityPerformPress() || v._accessibilityPressThroughContainer()
@@ -2558,7 +2566,10 @@ extension NSWindow: PlatformAccessibilityProvider {
     }
 
     public func accessibilitySetValue(_ value: PlatformAccessibilityValue, on elementID: Int) -> Bool {
-        guard let v = _accessibilityView(withID: elementID), v.isAccessibilityEnabled() else { return false }
+        guard let v = _accessibilityView(withID: elementID) else {
+            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilitySetValue(value) ?? false
+        }
+        guard v.isAccessibilityEnabled() else { return false }
         return v._accessibilitySetValue(value)
     }
 

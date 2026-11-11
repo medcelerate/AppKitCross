@@ -566,6 +566,12 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     var atspiIsVisible: Bool { isVisible }
     var atspiIsKey: Bool { isKey }
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { backend.atspi?.windowDidChange(self, change) }
+    /// Wayland has no global coordinates: extents are relative to the window's surface in
+    /// logical pixels (as GTK reports them there), the client area below a drawn title band.
+    func accessibilityScreenMapping(clientFrame: NSRect) -> PlatformAccessibilityScreenMapping? {
+        let f = frame
+        return PlatformAccessibilityScreenMapping(clientFrame: clientFrame, clientOriginX: Double(clientFrame.minX - f.minX), clientOriginY: Double(f.maxY - clientFrame.maxY), scale: 1)
+    }
 
     func close() {
         guard !destroying else { return }

@@ -109,6 +109,15 @@ final class _NSMenuView: NSView {
     override var isOpaque: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
+    // Accessibility (ADR-0013): the view is ignored; the window stands for the menu and the
+    // drawn rows are its AXMenuItem children (an item with a custom view is that view).
+    override func accessibilityChildren() -> [Any]? {
+        layout.rows.compactMap { row -> Any? in
+            if row.item.isSeparatorItem { return nil }
+            return row.item.view ?? row.item
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [.font: layout.font]
         NSColor.windowBackgroundColor.setFill()
@@ -202,6 +211,13 @@ final class _NSMenuWindow: NSPanel {
     required init?(coder: NSCoder) { nil }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // Accessibility (ADR-0013): an open menu is an AXMenu at the top of its window's tree
+    // (UI Automation's Menu, AT-SPI's menu), labelled by the menu's title.
+    override func accessibilityRole() -> NSAccessibility.Role? { .menu }
+    override func accessibilitySubrole() -> NSAccessibility.Subrole? { nil }
+    override func accessibilityLabel() -> String? { menuView.ownerMenu.title.isEmpty ? nil : menuView.ownerMenu.title }
+    override func accessibilityPerformCancel() -> Bool { menuView.ownerMenu._a11yCancel() }
 }
 
 // MARK: Tracker
@@ -240,6 +256,11 @@ final class _NSMenuTracker {
     private var sawFirstMouseUp = false
     private(set) var finished = false
     private(set) var chosenItem: NSMenuItem?
+    /// The control that opened the menu (a pop-up button): its accessibility children
+    /// are the open menu, so it hears when the menu comes and goes.
+    weak var accessibilityOwner: NSView? {
+        didSet { if let o = accessibilityOwner, let m = rootMenu { o._accessibilityMenuDidOpen(m) } }
+    }
 
     var rootMenu: NSMenu? { levels.first?.menu }
     var highlightedItem: NSMenuItem? { levels.last?.window.menuView.highlightedItem }
@@ -315,6 +336,12 @@ final class _NSMenuTracker {
         window.setFrame(NSRect(origin: origin, size: size), display: false)
         levels.append(Level(menu: menu, window: window, parentRow: parentRow))
         window.orderFront(nil)
+        window._accessibilityNotify(.menuOpened(window._accessibilityElementID))
+        if parentRow != nil, levels.count >= 2 {
+            // The parent item now shows its submenu open (UIA ExpandCollapse).
+            let parent = levels[levels.count - 2]
+            parent.window._accessibilityNotify(.value(parent.window.menuView.layout.rows[parentRow!].item._accessibilityElementID))
+        }
     }
 
     private func closeLevels(from index: Int) {
@@ -322,10 +349,12 @@ final class _NSMenuTracker {
         let closing = levels[index...]
         levels.removeSubrange(index...)
         for level in closing.reversed() {
+            level.window._accessibilityNotify(.menuClosed(level.window._accessibilityElementID))
             level.window.menuView.highlightedRow = nil
             level.window.close()
             level.menu.delegate?.menuDidClose(level.menu)
         }
+        if index == 0, let owner = accessibilityOwner, let root = closing.first?.menu { owner._accessibilityMenuDidClose(root) }
     }
 
     private func openSubmenu(ofRow row: Int, in levelIndex: Int) {
@@ -350,6 +379,8 @@ final class _NSMenuTracker {
         if view.highlightedRow != row {
             view.highlightedRow = row
             level.menu.delegate?.menu(level.menu, willHighlight: row.map { view.layout.rows[$0].item })
+            // Keyboard (or mouse) navigation is on this item: screen readers follow focus.
+            if let row { level.window._accessibilityNotify(.focus(view.layout.rows[row].item._accessibilityElementID)) }
         }
         if let row, openSubmenus, view.layout.rows[row].item.hasSubmenu, view.layout.rows[row].item.isEnabled {
             openSubmenu(ofRow: row, in: levelIndex)
@@ -464,6 +495,48 @@ final class _NSMenuTracker {
                 if selectable(i), rows[i].item.title.lowercased().hasPrefix(c) { setHighlight(i, in: last, openSubmenus: false); break }
             }
         }
+    }
+
+    // MARK: Accessibility (ADR-0013)
+
+    /// The level showing `menu`, if it is open.
+    func levelIndex(of menu: NSMenu) -> Int? { levels.firstIndex { $0.menu === menu } }
+
+    /// Where an open item is drawn, in screen coordinates.
+    func screenFrame(of item: NSMenuItem) -> NSRect? {
+        for level in levels {
+            let view = level.window.menuView
+            guard let row = view.layout.rows.first(where: { $0.item === item }) else { continue }
+            return level.window.convertToScreen(view.convert(row.frame, to: nil))
+        }
+        return nil
+    }
+
+    func isHighlighted(_ item: NSMenuItem) -> Bool { levels.contains { $0.window.menuView.highlightedItem === item } }
+
+    /// Assistive technology pressed an open item: open its submenu, or choose it.
+    func accessibilityActivate(_ item: NSMenuItem) -> Bool {
+        for (i, level) in levels.enumerated() {
+            let rows = level.window.menuView.layout.rows
+            guard let r = rows.firstIndex(where: { $0.item === item }) else { continue }
+            guard item.isEnabled, !item.isSeparatorItem else { return false }
+            if item.hasSubmenu {
+                setHighlight(r, in: i, openSubmenus: false)
+                openSubmenu(ofRow: r, in: i)
+            } else {
+                choose(level: i, row: r)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// Closes the level showing `menu` and the ones above it (the whole menu when it is
+    /// the root).
+    func accessibilityClose(_ menu: NSMenu) -> Bool {
+        guard let i = levelIndex(of: menu) else { return false }
+        if i == 0 { cancel() } else { closeLevels(from: i) }
+        return true
     }
 
     // MARK: Finishing
