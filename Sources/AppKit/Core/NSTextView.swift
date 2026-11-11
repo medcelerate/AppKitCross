@@ -284,18 +284,135 @@ import CoreText
         "loosenKerning:": { $0.loosenKerning($1) }, "tightenKerning:": { $0.tightenKerning($1) }, "useStandardKerning:": { $0.useStandardKerning($1) }, "turnOffKerning:": { $0.turnOffKerning($1) },
         "raiseBaseline:": { $0.raiseBaseline($1) }, "lowerBaseline:": { $0.lowerBaseline($1) },
         "useStandardLigatures:": { $0.useStandardLigatures($1) }, "useAllLigatures:": { $0.useAllLigatures($1) }, "turnOffLigatures:": { $0.turnOffLigatures($1) },
+        "changeFont:": { $0.changeFont($1) }, "changeColor:": { $0._changeColor(from: $1) },
     ]
+
+    // MARK: Font and colour panels (ADR-0022)
+
+    /// The selection's attributes with `change` applied: the selected characters of rich
+    /// text, the typing attributes when the selection is empty, the whole text otherwise.
+    private func _changeSelectionAttributes(_ change: (inout [NSAttributedString.Key: Any]) -> Void) {
+        let range = selectedRange
+        if !isRichText || _storage.length == 0 {
+            var attrs = _attributes
+            change(&attrs)
+            if let f = attrs[.font] as? NSFont, !f.isEqual(_effectiveFont) { font = f }
+            if let c = attrs[.foregroundColor] as? NSColor, !c.isEqual(textColor) { textColor = c }
+            if let f = attrs[.font] { _typingAttributes[.font] = f }
+            if let c = attrs[.foregroundColor] { _typingAttributes[.foregroundColor] = c }
+            return
+        }
+        if range.length == 0 {
+            var attrs = typingAttributes
+            change(&attrs)
+            _typingAttributes = attrs
+            NotificationCenter.default.post(name: NSTextView.didChangeTypingAttributesNotification, object: self)
+            return
+        }
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+        var runs: [(NSRange, [NSAttributedString.Key: Any])] = []
+        _storage.enumerateAttributes(in: range, options: []) { attrs, r, _ in runs.append((r, attrs)) }
+        _storage.beginEditing()
+        for (r, attrs) in runs {
+            var a = attrs
+            if a[.font] == nil { a[.font] = _effectiveFont }
+            change(&a)
+            _storage.setAttributes(a, range: r)
+        }
+        _storage.endEditing()
+        var typing = typingAttributes
+        change(&typing)
+        _typingAttributes = typing
+        didChangeText()
+        needsDisplay = true
+    }
+
+    /// Tells the font manager (and so the panel) which font the selection has.
+    internal func _updateFontManagerSelection() {
+        guard usesFontPanel else { return }
+        let range = selectedRange
+        var fonts: [NSFont] = []
+        if isRichText, _storage.length > 0, range.length > 0 {
+            _storage.enumerateAttribute(.font, in: range, options: []) { v, _, _ in if let f = v as? NSFont, !fonts.contains(where: { $0.isEqual(f) }) { fonts.append(f) } }
+        }
+        let font = fonts.first ?? (typingAttributes[.font] as? NSFont) ?? _effectiveFont
+        NSFontManager.shared.setSelectedFont(font, isMultiple: fonts.count > 1)
+    }
+
+    /// `changeFont:` from the font manager: every font in the selection goes through
+    /// `NSFontManager.convert(_:)`, which applies what the panel or the Font menu asked.
+    open override func changeFont(_ sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeFont editable=\(isEditable) usesFontPanel=\(usesFontPanel) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) length=\(_storage.length) window='\(window?.title ?? "nil")'")
+        guard isEditable, usesFontPanel, _handlesPanelActions else { return }
+        let fm = (sender as? NSFontManager) ?? NSFontManager.shared
+        _changeSelectionAttributes { attrs in
+            let current = (attrs[.font] as? NSFont) ?? self._effectiveFont
+            let converted = fm.convert(current)
+            _NSPanelTrace.log("NSTextView.changeFont \(current) -> \(converted)")
+            attrs[.font] = converted
+        }
+        _updateFontManagerSelection()
+    }
+
+    /// `changeColor:` from the colour panel (or a colour well): the sender's colour
+    /// becomes the selection's text colour.
+    @MainActor open func changeColor(_ sender: Any?) { _changeColor(from: sender) }
+
+    /// Shared by both `changeColor` overloads (which must not call each other: the
+    /// compiler picks a different one per platform).
+    @MainActor internal func _changeColor(from sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeColor editable=\(isEditable) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) window='\(window?.title ?? "nil")'")
+        guard isEditable, _handlesPanelActions else { return }
+        let color: NSColor
+        if let p = sender as? NSColorPanel { color = p.color }
+        else if let w = sender as? NSColorWell { color = w.color }
+        else if let c = sender as? NSColor { color = c }
+        else if NSColorPanel.sharedColorPanelExists { color = NSColorPanel.shared.color }
+        else { return }
+        _changeSelectionAttributes { $0[.foregroundColor] = color }
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/setfont(_:range:)
+    open override func setFont(_ font: NSFont, range: NSRange) {
+        guard isRichText, _storage.length > 0 else { self.font = font; return }
+        let r = NSRange(location: max(0, min(range.location, _storage.length)), length: max(0, min(range.length, _storage.length - max(0, min(range.location, _storage.length)))))
+        _storage.addAttribute(.font, value: font, range: r)
+        needsDisplay = true
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/settextcolor(_:range:)
+    open override func setTextColor(_ color: NSColor?, range: NSRange) {
+        guard isRichText, _storage.length > 0 else { textColor = color; return }
+        let r = NSRange(location: max(0, min(range.location, _storage.length)), length: max(0, min(range.length, _storage.length - max(0, min(range.location, _storage.length)))))
+        if let c = color { _storage.addAttribute(.foregroundColor, value: c, range: r) } else { _storage.removeAttribute(.foregroundColor, range: r) }
+        needsDisplay = true
+    }
+
+    open override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { _updateFontManagerSelection() }
+        return ok
+    }
 
     // MARK: Responder-chain actions (menus, nil-target sends)
 
     /// The editing selectors double as responder-chain actions, so Edit menu items with a
     /// nil target reach the text view.
     public func respondsToSelectorAction(_ action: Selector) -> Bool {
-        NSTextView._selectorDispatch[NSStringFromSelector(action)] != nil
+        let name = NSStringFromSelector(action)
+        // A field editor inside the Fonts or Colors panel (the size or hex field) must not
+        // take the panel's own `changeFont:`/`changeColor:`: the panel is the key window
+        // while the user works in it, and the send has to go on to the main window's
+        // first responder, the document's text view.
+        if name == "changeFont:" || name == "changeColor:" { return _handlesPanelActions }
+        return NSTextView._selectorDispatch[name] != nil
+    }
+
+    internal var _handlesPanelActions: Bool {
+        !(isFieldEditor && (window is NSFontPanel || window is NSColorPanel))
     }
 
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
-        guard let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
+        guard respondsToSelectorAction(action), let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
         handler(self, sender)
         return true
     }
@@ -435,6 +552,7 @@ import CoreText
         let n = Notification(name: NSTextView.didChangeSelectionNotification, object: self)
         NotificationCenter.default.post(n)
         _viewDelegate?.textViewDidChangeSelection(n)
+        if window?.firstResponder === self { _updateFontManagerSelection() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(coder:)
     public required init?(coder: NSCoder) {
@@ -778,8 +896,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/candidatelisttouchbaritem
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changeattributes(_:)
     @MainActor open func changeAttributes(_ sender: Any?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changecolor(_:)
-    @MainActor open func changeColor(_ sender: Any?) { unimplemented() }
+    // changeColor(_:) and changeFont(_:): see "Font and colour panels" above.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changedocumentbackgroundcolor(_:)
     @MainActor open func changeDocumentBackgroundColor(_ sender: Any?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changelayoutorientation(_:)
@@ -1432,7 +1549,7 @@ import CoreText
 
     // Requirement of NSColorChanging (signature differs from the inherited member)
     // Requirement of NSColorChanging
-    open func changeColor(_ sender: NSColorPanel?) { unimplemented() }
+    open func changeColor(_ sender: NSColorPanel?) { MainActor.assumeIsolated { _changeColor(from: sender) } }
     // Requirement of NSTextInputClient
     open func doCommand(by selector: Selector) {
         MainActor.assumeIsolated {

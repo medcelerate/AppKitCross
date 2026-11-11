@@ -210,6 +210,8 @@ open class NSPasteboard: NSObject {
                 if cls == NSPasteboardItem.self { result += _items as [Any] } else if let s = string(forType: .string) { result.append(s as NSString) }
             } else if cls == NSImage.self {
                 for t in [NSPasteboard.PasteboardType.png, .tiff] { if let d = data(forType: t), let img = NSImage(data: d) { result.append(img); break } }
+            } else if cls == NSColor.self {
+                if let c = NSColor(from: self) { result.append(c) }
             }
         }
         return result.isEmpty ? nil : result
