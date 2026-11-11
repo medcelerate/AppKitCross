@@ -54,6 +54,7 @@ import CoreText
 
     /// The lists changed under the user: remember what, show it, and tell the manager.
     internal func _selectionDidChange(_ what: NSFontPanel.ModeMask) {
+        _NSPanelTrace.log("NSFontPanel selection changed \(what.rawValue) syncing=\(_syncing) enabled=\(_isEnabled) family=\(_selectedFamily ?? "nil") face=\(_selectedFace ?? "nil") size=\(_selectedSize)")
         guard !_syncing else { return }
         _changed.formUnion(what)
         _view.updatePreview()

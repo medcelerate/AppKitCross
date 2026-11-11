@@ -350,8 +350,17 @@ open class NSFontManager: NSObject, NSMenuItemValidation {
     /// responder chain, with the manager as the sender.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontmanager/sendaction()
     open func sendAction() -> Bool {
-        guard _isEnabled else { return false }
-        return MainActor.assumeIsolated { NSApplication.shared.sendAction(_action, to: _target, from: self) }
+        guard _isEnabled else { _NSPanelTrace.log("NSFontManager.sendAction: disabled"); return false }
+        return MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            if _NSPanelTrace.enabled {
+                @MainActor func describe(_ w: NSWindow?) -> String { w.map { "'\($0.title)' first responder \(type(of: $0.firstResponder ?? $0))" } ?? "nil" }
+                _NSPanelTrace.log("NSFontManager.sendAction \(NSStringFromSelector(_action)) action=\(_currentAction) target=\(_target.map { String(describing: type(of: $0)) } ?? "nil") key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
+            }
+            let sent = app.sendAction(_action, to: _target, from: self)
+            _NSPanelTrace.log("NSFontManager.sendAction -> \(sent)")
+            return sent
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontmanager/setfontmanagerfactory(_:)
     public class func setFontManagerFactory(_ factoryId: AnyClass?) { _factory = factoryId }
@@ -428,4 +437,11 @@ extension NSFontManager: NSSelectorHandling {
     public func respondsToSelectorAction(_ action: Selector) -> Bool {
         ["orderFrontFontPanel:", "orderFrontStylesPanel:", "addFontTrait:", "removeFontTrait:", "modifyFont:", "modifyFontViaPanel:"].contains(NSStringFromSelector(action))
     }
+}
+
+/// `APPKITWIN_TRACE_PANELS=1`: the panels' action path on stderr (which window is key and
+/// main, who receives `changeFont:`/`changeColor:`, what changed), for the Windows PC.
+internal enum _NSPanelTrace {
+    nonisolated(unsafe) static let enabled = ProcessInfo.processInfo.environment["APPKITWIN_TRACE_PANELS"] == "1"
+    static func log(_ message: @autoclosure () -> String) { if enabled { fputs("[panels] \(message())\n", stderr) } }
 }

@@ -302,11 +302,14 @@ import CoreText
     /// `changeFont:` from the font manager: every font in the selection goes through
     /// `NSFontManager.convert(_:)`, which applies what the panel or the Font menu asked.
     open override func changeFont(_ sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeFont editable=\(isEditable) usesFontPanel=\(usesFontPanel) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) length=\(_storage.length) window='\(window?.title ?? "nil")'")
         guard isEditable, usesFontPanel, _handlesPanelActions else { return }
         let fm = (sender as? NSFontManager) ?? NSFontManager.shared
         _changeSelectionAttributes { attrs in
             let current = (attrs[.font] as? NSFont) ?? self._effectiveFont
-            attrs[.font] = fm.convert(current)
+            let converted = fm.convert(current)
+            _NSPanelTrace.log("NSTextView.changeFont \(current) -> \(converted)")
+            attrs[.font] = converted
         }
         _updateFontManagerSelection()
     }
@@ -318,6 +321,7 @@ import CoreText
     /// Shared by both `changeColor` overloads (which must not call each other: the
     /// compiler picks a different one per platform).
     @MainActor internal func _changeColor(from sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeColor editable=\(isEditable) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) window='\(window?.title ?? "nil")'")
         guard isEditable, _handlesPanelActions else { return }
         let color: NSColor
         if let p = sender as? NSColorPanel { color = p.color }

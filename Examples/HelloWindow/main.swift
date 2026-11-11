@@ -420,6 +420,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = index
         }
+        // `HelloWindow --panels-selftest`: the Panels tab, then the Fonts panel made key (a real
+        // activation on this backend) and a size chosen in it; prints whether the text view's
+        // selection took the font and exits 0 or 1 (ADR-0031, the Windows PC check).
+        if CommandLine.arguments.contains("--panels-selftest") {
+            showLayoutDemo()
+            let tabs = layoutWindowController?.window?.contentViewController as? NSTabViewController
+            tabs?.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: "panels") ?? 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { PanelsSelfTest.run(step: 0) }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -2120,4 +2129,47 @@ final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
         status.stringValue = String(format: "Well: #%02X%02X%02X, alpha %.2f", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), Double(c.alphaComponent))
         return true
     }
+}
+
+/// The scripted Fonts panel check (`--panels-selftest`), in steps a second apart so the
+/// window system's activation messages arrive between them, as they would for a user.
+@MainActor enum PanelsSelfTest {
+    static func run(step: Int) {
+        let app = NSApplication.shared
+        func describe(_ w: NSWindow?) -> String { w.map { "'\($0.title)' (first responder \(type(of: $0.firstResponder ?? $0)))" } ?? "nil" }
+        func report(_ s: String) { FileHandle.standardError.write(Data("panels-selftest: \(s)\n".utf8)) }
+        guard let demo = app.windows.first(where: { $0.title == "Layout Demo" }),
+              let tv = demo.contentView.flatMap({ v in allViews(v).compactMap { $0 as? NSTextView }.first }) else {
+            report("FAIL no Layout Demo text view"); exit(1)
+        }
+        switch step {
+        case 0:
+            demo.makeKeyAndOrderFront(nil)
+            _ = demo.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: 0, length: 11))
+            report("selected \(tv.selectedRange) in \(describe(demo)); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
+            NSFontManager.shared.orderFrontFontPanel(nil)
+            NSFontPanel.shared.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { run(step: 1) }
+        case 1:
+            report("panel shown; key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow)) panel.isKey=\(NSFontPanel.shared.isKeyWindow) selection=\(tv.selectedRange)")
+            let before = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            // The same path as a click in the Size list: the panel's font and the manager's send.
+            let family = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.familyName ?? "Segoe UI"
+            let big = NSFont(name: family, size: 36) ?? NSFont.systemFont(ofSize: 36)
+            NSFontPanel.shared.setPanelFont(big, isMultiple: false)
+            NSFontManager.shared.modifyFontViaPanel(nil)
+            let after = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            let outside = (tv.textStorage?.attribute(.font, at: 20, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            report("font at 2: \(before) -> \(after); outside the selection \(outside); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
+            demo.display()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let ok = after == 36 && outside != 36
+                report(ok ? "PASS" : "FAIL")
+                exit(ok ? 0 : 1)
+            }
+        default: break
+        }
+    }
+    static func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allViews) }
 }

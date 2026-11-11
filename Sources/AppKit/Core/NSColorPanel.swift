@@ -78,7 +78,11 @@ import CoreText
     }
 
     internal func _sendAction() {
-        _ = NSApplication.shared.sendAction(_action ?? NSColorPanel.defaultAction, to: _target, from: self)
+        let app = NSApplication.shared
+        let action = _action ?? NSColorPanel.defaultAction
+        _NSPanelTrace.log("NSColorPanel send \(NSStringFromSelector(action)) target=\(_target.map { String(describing: type(of: $0)) } ?? "nil") key='\(app.keyWindow?.title ?? "nil")' main='\(app.mainWindow?.title ?? "nil")' mainFirstResponder=\(app.mainWindow.map { String(describing: type(of: $0.firstResponder ?? $0)) } ?? "nil")")
+        let sent = app.sendAction(action, to: _target, from: self)
+        _NSPanelTrace.log("NSColorPanel send -> \(sent)")
     }
 
     /// The lists the list picker offers: the standard ones plus those attached.
