@@ -9,8 +9,8 @@ sleep 1
 APPKITWIN_LINUX_BACKEND=x11 "${BIN:-./.build/debug/HelloWindow}" --swiftui --layout --screenshot "$OUT"
 # The SwiftUI demo's Data tab (Table) as a second capture.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/HelloWindow}" --swiftui --screenshot "$OUT"
-# The Layout Demo's Combo, Outline and Popover tabs, and the Outline tab mirrored right to left.
-for tab in combo outline popover; do
+# The Layout Demo's Combo, Outline, Pages and Popover tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages popover; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"
