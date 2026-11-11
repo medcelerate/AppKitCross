@@ -70,6 +70,17 @@ import CoreText
     private var _preparedContentRect: NSRect? = nil
     internal var _cursorRects: [(NSRect, NSCursor)] = []
     internal var _cursorRectsValid = false
+    internal var _trackingAreas: [NSTrackingArea] = []
+    /// Set when the geometry changed since `updateTrackingAreas()` last ran; the window
+    /// calls it before the next evaluation of its tracking areas.
+    internal var _needsUpdateTrackingAreas = true
+
+    /// Geometry, visibility or membership changed: the window re-evaluates its tracking
+    /// areas (after giving this view a chance to update them).
+    @MainActor public func _setNeedsUpdateTrackingAreas() {
+        _needsUpdateTrackingAreas = true
+        _window?._trackingAreasDidChange()
+    }
 
     /// Cursor for a point in this view's bounds, consulting (and lazily rebuilding) cursor rects.
     @MainActor internal func _cursor(at point: NSPoint) -> NSCursor? {
@@ -263,7 +274,10 @@ import CoreText
         if appearing { _viewController?.viewWillAppear() } else if disappearing { _viewController?.viewWillDisappear() }
         viewWillMove(toWindow: window)
         for s in _subviews { s._setWindow(window) }
+        old?._trackingAreasDidChange()
         _window = window
+        _needsUpdateTrackingAreas = true
+        window?._trackingAreasDidChange()
         if let l = _layer, let w = window { l.contentsScale = w.backingScaleFactor }
         viewDidMoveToWindow()
         if appearing { _viewController?.viewDidAppear() } else if disappearing { _viewController?.viewDidDisappear() }
@@ -491,6 +505,9 @@ import CoreText
         if NSView._traceInvalidation { NSView._trace("addSubview \(type(of: view)) to \(type(of: self))\(view._superview === self ? " (re-add)" : "")") }
         if view._superview === self {
             _subviews.removeAll { $0 === view }
+            // Re-adding moves the view in the stacking order: its layer must move with it
+            // (the attach below only inserts a layer that is not in the superlayer yet).
+            if let l = view._layer, let sl = _layer, l.superlayer === sl { l.removeFromSuperlayer() }
         } else {
             view.removeFromSuperviewWithoutNeedingDisplay()
         }
@@ -518,7 +535,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtooltip(_:owner:userdata:)
     @MainActor open func addToolTip(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?) -> NSView.ToolTipTag { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtrackingarea(_:)
-    @MainActor open func addTrackingArea(_ trackingArea: NSTrackingArea) { unimplemented() }
+    @MainActor open func addTrackingArea(_ trackingArea: NSTrackingArea) {
+        precondition(trackingArea._view == nil || trackingArea._view === self, "NSTrackingArea: the area is already in another view")
+        guard !_trackingAreas.contains(where: { $0 === trackingArea }) else { return }
+        trackingArea._view = self
+        trackingArea._isInside = trackingArea.options.contains(.assumeInside)
+        _trackingAreas.append(trackingArea)
+        _window?._trackingAreasDidChange()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtrackingrect(_:owner:userdata:assumeinside:)
     @MainActor open func addTrackingRect(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?, assumeInside flag: Bool) -> NSView.TrackingRectTag { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/additionalsafeareainsets
@@ -932,6 +956,7 @@ import CoreText
             guard newValue != _isHidden else { return }
             _isHidden = newValue
             _superview?._subviewDidChangeHidden(self)
+            _window?._trackingAreasDidChange()
             if let l = _layer, !_layerIsHosted {
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.isHidden = newValue
@@ -1250,7 +1275,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetooltip(_:)
     @MainActor open func removeToolTip(_ tag: NSView.ToolTipTag) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetrackingarea(_:)
-    @MainActor open func removeTrackingArea(_ trackingArea: NSTrackingArea) { unimplemented() }
+    @MainActor open func removeTrackingArea(_ trackingArea: NSTrackingArea) {
+        guard let i = _trackingAreas.firstIndex(where: { $0 === trackingArea }) else { return }
+        _trackingAreas.remove(at: i)
+        trackingArea._view = nil
+        trackingArea._isInside = false
+        _window?._trackingAreasDidChange()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetrackingrect(_:)
     @MainActor open func removeTrackingRect(_ tag: NSView.TrackingRectTag) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/renewgstate()
@@ -1361,6 +1392,7 @@ import CoreText
         guard newOrigin != _boundsOrigin else { return }
         _boundsOrigin = newOrigin
         _syncLayerGeometry()
+        _setNeedsUpdateTrackingAreas()
         setNeedsDisplay(bounds)
         if _postsBoundsChangedNotifications {
             NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
@@ -1389,6 +1421,7 @@ import CoreText
         let old = _frame
         _frame.origin = newOrigin
         _syncLayerGeometry()
+        _setNeedsUpdateTrackingAreas()
         if animate { _animateLayer("position", from: old.origin, to: newOrigin) }
         _superview?.setNeedsDisplay(old.union(_frame))
         if _postsFrameChangedNotifications {
@@ -1406,6 +1439,7 @@ import CoreText
         let oldBounds = bounds
         _frame.size = newSize
         _cursorRectsValid = false
+        _setNeedsUpdateTrackingAreas()
         _syncLayerGeometry()
         if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
@@ -1459,7 +1493,7 @@ import CoreText
     @available(macOS 10.11, *)
     @MainActor open var topAnchor: NSLayoutYAxisAnchor { anchorY(.top) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/trackingareas
-    @MainActor open var trackingAreas: [NSTrackingArea] { unimplemented() }
+    @MainActor open var trackingAreas: [NSTrackingArea] { _trackingAreas }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/trailinganchor
     @available(macOS 10.11, *)
     @MainActor open var trailingAnchor: NSLayoutXAxisAnchor { anchorX(.trailing) }
@@ -1490,7 +1524,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updatelayer()
     @MainActor open func updateLayer() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updatetrackingareas()
-    @MainActor open func updateTrackingAreas() { }
+    /// Called by the window when this view's geometry changed before it evaluates the
+    /// tracking areas; subclasses rebuild their areas here and call super, which posts
+    /// `didUpdateTrackingAreasNotification`.
+    @MainActor open func updateTrackingAreas() {
+        NotificationCenter.default.post(name: NSView.didUpdateTrackingAreasNotification, object: self)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/userinterfacelayoutdirection
     @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
         get { _userInterfaceLayoutDirection ?? superview?.userInterfaceLayoutDirection ?? NSApplication._resolvedLayoutDirection }
@@ -1615,6 +1654,43 @@ import CoreText
     @MainActor internal func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool { false }
     @MainActor internal func _accessibilityIsMultiline() -> Bool { false }
     @MainActor internal func _accessibilityAllowsMultipleSelection() -> Bool { false }
+    /// Whether assistive technology may select this element (a table row, a collection
+    /// view item): the nearest container that owns it answers.
+    @MainActor internal func _accessibilityIsSelectable() -> Bool {
+        var v = superview
+        while let cur = v {
+            if cur._accessibilityChildIsSelectable(self) { return true }
+            v = cur.superview
+        }
+        return false
+    }
+    /// Container hooks: a view that owns selectable children (a collection view) says
+    /// so, selects one when assistive technology presses it, and sets its selection.
+    @MainActor internal func _accessibilityChildIsSelectable(_ view: NSView) -> Bool { false }
+    @MainActor internal func _accessibilityChildPressed(_ view: NSView) -> Bool { false }
+    @MainActor internal func _accessibilityChild(_ view: NSView, setSelected selected: Bool, extending: Bool) -> Bool? { nil }
+    /// A press that the view itself does not answer goes to the container that owns it.
+    @MainActor internal func _accessibilityPressThroughContainer() -> Bool {
+        var v = superview
+        while let cur = v {
+            if cur._accessibilityChildPressed(self) { return true }
+            v = cur.superview
+        }
+        return false
+    }
+    /// Assistive technology selects or deselects the element: the owning container
+    /// runs its selection; otherwise the override is stored.
+    @MainActor internal func _accessibilitySetSelected(_ selected: Bool, extending: Bool) -> Bool {
+        var v = superview
+        while let cur = v {
+            if let handled = cur._accessibilityChild(self, setSelected: selected, extending: extending) { return handled }
+            v = cur.superview
+        }
+        setAccessibilitySelected(selected)
+        return true
+    }
+    /// The enclosing scroll view's clip view changed size (NSScrollView.tile).
+    @MainActor internal func _clipViewDidResize() { }
     /// Expanded or collapsed (outline rows, disclosure triangles); nil when the element
     /// cannot expand.
     @MainActor internal func _accessibilityExpandedState() -> Bool? { nil }

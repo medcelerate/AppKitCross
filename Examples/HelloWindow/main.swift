@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -426,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -555,7 +555,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(MetalDemoViewController())
         tabs.addChild(ComboDemoViewController())
         tabs.addChild(OutlineDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 440, height: 300)
+        tabs.addChild(PagesDemoViewController())
+        tabs.addChild(CollectionDemoViewController())
+        tabs.addChild(GridDemoViewController())
+        tabs.addChild(BoxDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 560, height: 300)   // wide enough for the ten tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1147,6 +1151,409 @@ final class OutlineDemoViewController: NSViewController, NSOutlineViewDataSource
     func outlineViewSelectionDidChange(_ notification: Notification) {
         if let n = outline.item(atRow: outline.selectedRow) as? Node { status.stringValue = "Selected: \(n.name) (level \(outline.level(forItem: n)))" }
         else { status.stringValue = "Nothing selected." }
+    }
+}
+
+/// The Layout Demo's Pages tab: an `NSPageController` over three pages with Back and
+/// Next buttons, a segmented control bound through `takeSelectedIndexFrom`, a transition
+/// style pop-up, and a trailing title bar accessory while the tab shows. The pages
+/// highlight under the pointer through `NSTrackingArea` (ADR-0023).
+final class PagesDemoViewController: NSViewController, NSPageControllerDelegate, NSSelectorHandling {
+    /// A page that lights up while the pointer is over it and shows the hand over its hot spot.
+    final class HoverPage: NSView {
+        var color = NSColor.white
+        var name = ""
+        var hovering = false { didSet { needsDisplay = true } }
+        var inHotSpot = false { didSet { needsDisplay = true } }
+        var hotSpot: NSRect { NSRect(x: bounds.maxX - 70, y: bounds.minY + 16, width: 54, height: 54) }
+        override var isOpaque: Bool { true }
+        override func updateTrackingAreas() {
+            trackingAreas.forEach { removeTrackingArea($0) }
+            addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: ["part": "page"]))
+            addTrackingArea(NSTrackingArea(rect: hotSpot, options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow], owner: self, userInfo: ["part": "hot"]))
+            super.updateTrackingAreas()
+        }
+        override func mouseEntered(with event: NSEvent) {
+            if event.trackingArea?.userInfo?["part"] as? String == "hot" { inHotSpot = true } else { hovering = true }
+        }
+        override func mouseExited(with event: NSEvent) {
+            if event.trackingArea?.userInfo?["part"] as? String == "hot" { inHotSpot = false } else { hovering = false }
+        }
+        override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+        override func draw(_ dirtyRect: NSRect) {
+            (hovering ? color.blended(withFraction: 0.15, of: .black) ?? color : color).setFill()
+            NSBezierPath(rect: bounds).fill()
+            if hovering {
+                // Orange, so it reads apart from the blue keyboard focus ring.
+                NSColor.systemOrange.setStroke()
+                let ring = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
+                ring.lineWidth = 3
+                ring.stroke()
+            }
+            (inHotSpot ? NSColor.systemOrange : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
+            NSBezierPath(roundedRect: hotSpot, xRadius: 8, yRadius: 8).fill()
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.labelColor]
+            name.draw(at: NSPoint(x: 20, y: bounds.maxY - 50), withAttributes: attrs)
+            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+            "Hover to highlight; the square shows the hand. Scroll, swipe or arrow to page.".draw(at: NSPoint(x: 20, y: bounds.minY + 16), withAttributes: hint)
+        }
+    }
+
+    let pages = NSPageController()
+    let picker = NSSegmentedControl(labels: ["Red", "Green", "Blue"], trackingMode: .selectOne, target: nil, action: nil)
+    let style = NSPopUpButton(frame: .zero, pullsDown: false)
+    let status = NSTextField(labelWithString: "Page 1 of 3")
+    let accessory = NSTitlebarAccessoryViewController()
+    let objects: [(String, NSColor)] = [("Red", NSColor(red: 1, green: 0.85, blue: 0.85, alpha: 1)), ("Green", NSColor(red: 0.85, green: 1, blue: 0.85, alpha: 1)), ("Blue", NSColor(red: 0.85, green: 0.9, blue: 1, alpha: 1))]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Pages"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let back = NSButton(title: "Back", target: pages, action: Selector(("navigateBack:")))
+        let next = NSButton(title: "Next", target: pages, action: Selector(("navigateForward:")))
+        picker.target = pages
+        picker.action = Selector(("takeSelectedIndexFrom:"))
+        picker.selectedSegment = 0
+        style.addItems(withTitles: ["Stack history", "Stack book", "Horizontal strip"])
+        style.target = self
+        style.action = Selector(("styleChanged:"))
+        pages.delegate = self
+        pages.arrangedObjects = objects.map { $0.0 }
+        let bar = NSStackView(views: [back, next, picker, style])
+        bar.orientation = .horizontal
+        bar.spacing = 8
+        for v in [bar, pages.view, status] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            bar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            pages.view.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 8),
+            pages.view.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            pages.view.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            pages.view.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
+        ])
+        // The title bar accessory: a label at the trailing end of the title bar.
+        let label = NSTextField(labelWithString: "Pages ⌘")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.sizeToFit()
+        accessory.view = label
+        accessory.layoutAttribute = .trailing
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if let w = view.window, !w.titlebarAccessoryViewControllers.contains(where: { $0 === accessory }) { w.addTitlebarAccessoryViewController(accessory) }
+    }
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        accessory.removeFromParent()
+    }
+
+    func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { "page" }
+    func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController {
+        let vc = NSViewController()
+        vc.view = HoverPage(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        return vc
+    }
+    func pageController(_ pageController: NSPageController, prepare viewController: NSViewController, with object: Any?) {
+        guard let page = viewController.view as? HoverPage, let name = object as? String, let entry = objects.first(where: { $0.0 == name }) else { return }
+        page.name = name
+        page.color = entry.1
+        page.needsDisplay = true
+    }
+    func pageController(_ pageController: NSPageController, didTransitionTo object: Any) {
+        status.stringValue = "Page \(pageController.selectedIndex + 1) of 3"
+        picker.selectedSegment = pageController.selectedIndex
+        pageController.completeTransition()
+    }
+    func pageControllerWillStartLiveTransition(_ pageController: NSPageController) { status.stringValue = "Paging…" }
+    func pageControllerDidEndLiveTransition(_ pageController: NSPageController) { status.stringValue = "Page \(pageController.selectedIndex + 1) of 3" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "styleChanged:":
+            pages.transitionStyle = [.stackHistory, .stackBook, .horizontalStrip][max(0, style.indexOfSelectedItem)]
+            return true
+        default: return false
+        }
+    }
+}
+
+// MARK: Collection, grid and box tabs (ADR-0020)
+
+/// An `NSCollectionView` of colour swatches in two sections under a flow layout with
+/// section headers: click, Cmd and Shift select; arrows move; the header's button
+/// collapses its section.
+final class CollectionDemoViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout, NSSelectorHandling {
+    final class SwatchItem: NSCollectionViewItem {
+        final class SwatchView: NSView {
+            weak var item: SwatchItem?
+            var color = NSColor.gray
+            override func draw(_ dirtyRect: NSRect) {
+                let selected = item?.isSelected == true
+                let highlighted = item?.highlightState == .forSelection
+                if selected || highlighted {
+                    (selected ? NSColor.controlAccentColor : NSColor.controlAccentColor.withAlphaComponent(0.5)).setFill()
+                    NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+                }
+                color.setFill()
+                NSBezierPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), xRadius: 4, yRadius: 4).fill()
+            }
+        }
+        override func loadView() {
+            let v = SwatchView(frame: NSRect(x: 0, y: 0, width: 56, height: 56))
+            v.item = self
+            let label = NSTextField(labelWithString: "")
+            label.font = NSFont.systemFont(ofSize: 9)
+            label.alignment = .center
+            label.frame = NSRect(x: 3, y: 40, width: 50, height: 13)
+            label.autoresizingMask = [.width]
+            v.addSubview(label)
+            textField = label
+            view = v
+        }
+    }
+    final class Header: NSView, NSCollectionViewSectionHeaderView {
+        let label = NSTextField(labelWithString: "")
+        var sectionCollapseButton: NSButton?
+        required init?(coder: NSCoder) { super.init(coder: coder); setUp() }
+        override init(frame: NSRect) { super.init(frame: frame); setUp() }
+        private func setUp() {
+            label.font = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+            label.frame = NSRect(x: 6, y: 3, width: 200, height: 16)
+            addSubview(label)
+            let b = NSButton(title: "Hide", target: nil, action: Selector(("toggleSectionCollapse:")))
+            b.controlSize = .small
+            b.bezelStyle = .rounded
+            addSubview(b)
+            sectionCollapseButton = b
+            placeButton()
+        }
+        // The header is made with a zero frame and sized by the collection view afterwards,
+        // so the button is placed from the bounds rather than by an autoresizing mask.
+        private func placeButton() { sectionCollapseButton?.frame = NSRect(x: max(0, bounds.width - 66), y: 0, width: 60, height: 22) }
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            placeButton()
+        }
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.windowBackgroundColor.setFill()
+            NSBezierPath(rect: bounds).fill()
+            NSColor.separatorColor.setFill()
+            NSBezierPath(rect: NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)).fill()
+        }
+    }
+    struct Swatch { let name: String; let color: NSColor }
+    let sections: [(String, [Swatch])] = [
+        ("Warm", [Swatch(name: "Red", color: .systemRed), Swatch(name: "Orange", color: .systemOrange), Swatch(name: "Yellow", color: .systemYellow), Swatch(name: "Pink", color: .systemPink), Swatch(name: "Brown", color: .systemBrown)]),
+        ("Cool", [Swatch(name: "Green", color: .systemGreen), Swatch(name: "Teal", color: .systemTeal), Swatch(name: "Blue", color: .systemBlue), Swatch(name: "Indigo", color: .systemIndigo), Swatch(name: "Purple", color: .systemPurple), Swatch(name: "Mint", color: .systemMint)]),
+    ]
+    let collection = NSCollectionView(frame: .zero)
+    let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Collection"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let flow = NSCollectionViewFlowLayout()
+        flow.itemSize = NSSize(width: 56, height: 56)
+        flow.minimumInteritemSpacing = 8
+        flow.minimumLineSpacing = 8
+        flow.sectionInset = NSEdgeInsets(top: 6, left: 8, bottom: 8, right: 8)
+        flow.headerReferenceSize = NSSize(width: 0, height: 22)
+        flow.sectionHeadersPinToVisibleBounds = true
+        collection.collectionViewLayout = flow
+        collection.register(SwatchItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("swatch"))
+        collection.register(Header.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader, withIdentifier: NSUserInterfaceItemIdentifier("header"))
+        collection.dataSource = self
+        collection.delegate = self
+        collection.isSelectable = true
+        collection.allowsMultipleSelection = true
+        collection.backgroundColors = [.controlBackgroundColor]
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        scroll.documentView = collection
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(scroll)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+        // `APPKITWIN_COLLECTION_SELECT=1` selects two swatches on launch (for the screenshots).
+        if ProcessInfo.processInfo.environment["APPKITWIN_COLLECTION_SELECT"] != nil {
+            collection.selectionIndexPaths = [IndexPath(item: 1, section: 0), IndexPath(item: 2, section: 1)]
+        }
+    }
+
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { sections.count }
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { sections[section].1.count }
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let item = collectionView.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("swatch"), for: indexPath) as! SwatchItem
+        let swatch = sections[indexPath.section].1[indexPath.item]
+        (item.view as? SwatchItem.SwatchView)?.color = swatch.color
+        item.textField?.stringValue = swatch.name
+        item.view.needsDisplay = true
+        return item
+    }
+    func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
+        let header = collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: NSUserInterfaceItemIdentifier("header"), for: indexPath) as! Header
+        header.label.stringValue = sections[indexPath.section].0
+        let flow = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout
+        header.sectionCollapseButton?.title = flow?.section(atIndexIsCollapsed: indexPath.section) == true ? "Show" : "Hide"
+        header.sectionCollapseButton?.target = self
+        header.sectionCollapseButton?.action = Selector(("toggleSection:"))
+        header.sectionCollapseButton?.tag = indexPath.section
+        return header
+    }
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { updateStatus() }
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { updateStatus() }
+    private func updateStatus() {
+        let names = collection.selectionIndexPaths.sorted().map { sections[$0.section].1[$0.item].name }
+        status.stringValue = names.isEmpty ? "Nothing selected." : "Selected: " + names.joined(separator: ", ")
+    }
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action.description == "toggleSection:", let button = sender as? NSButton else { return false }
+        collection.toggleSectionCollapse(button.tag)
+        button.title = (collection.collectionViewLayout as? NSCollectionViewFlowLayout)?.section(atIndexIsCollapsed: button.tag) == true ? "Show" : "Hide"
+        return true
+    }
+}
+
+/// An `NSGridView` form: labels and fields in two columns, a merged title row, a row
+/// that can be hidden, and trailing/centre placements.
+final class GridDemoViewController: NSViewController, NSSelectorHandling {
+    let grid: NSGridView
+    let optionalRow: NSGridRow
+    let status = NSTextField(labelWithString: "The grid sizes its columns to the content.")
+
+    init() {
+        let heading = NSTextField(labelWithString: "Shipping address")
+        heading.font = NSFont.boldSystemFont(ofSize: 13)
+        func field(_ placeholder: String, width: CGFloat = 180) -> NSTextField {
+            let f = NSTextField(string: "")
+            f.placeholderString = placeholder
+            f.widthAnchor.constraint(equalToConstant: width).isActive = true
+            return f
+        }
+        let rows: [[NSView]] = [
+            [heading, NSGridCell.emptyContentView],
+            [NSTextField(labelWithString: "Name:"), field("Full name")],
+            [NSTextField(labelWithString: "Street:"), field("Street and number")],
+            [NSTextField(labelWithString: "Company:"), field("Optional")],
+            [NSTextField(labelWithString: "City:"), field("City", width: 120)],
+        ]
+        grid = NSGridView(views: rows)
+        optionalRow = grid.row(at: 3)
+        super.init(nibName: nil, bundle: nil)
+        title = "Grid"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        grid.rowSpacing = 8
+        grid.columnSpacing = 10
+        grid.column(at: 0).xPlacement = .trailing
+        grid.rowAlignment = .firstBaseline
+        grid.mergeCells(inHorizontalRange: NSRange(location: 0, length: 2), verticalRange: NSRange(location: 0, length: 1))
+        grid.cell(atColumnIndex: 0, rowIndex: 0).xPlacement = .leading
+        grid.row(at: 0).bottomPadding = 4
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(grid)
+        let toggle = NSButton(checkboxWithTitle: "Show the company row", target: self, action: Selector(("toggleRow:")))
+        toggle.state = .on
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(toggle)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
+            grid.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            toggle.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 14),
+            toggle.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+        if ProcessInfo.processInfo.environment["APPKITWIN_GRID_HIDE_ROW"] != nil { optionalRow.isHidden = true; toggle.state = .off }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action.description == "toggleRow:" else { return false }
+        optionalRow.isHidden = (sender as? NSButton)?.state != .on
+        status.stringValue = optionalRow.isHidden ? "The company row is hidden; the rows below moved up." : "The grid sizes its columns to the content."
+        return true
+    }
+}
+
+/// `NSBox` in its types: a titled primary box around controls, a custom box with its
+/// own fill, border and corner radius, a separator, and the title positions.
+final class BoxDemoViewController: NSViewController {
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Box"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let primary = NSBox(frame: NSRect(x: 16, y: 14, width: 190, height: 120))
+        primary.title = "Options"
+        let check1 = NSButton(checkboxWithTitle: "Enable sound", target: nil, action: nil)
+        check1.state = .on
+        check1.frame = NSRect(x: 4, y: 56, width: 160, height: 20)
+        let check2 = NSButton(checkboxWithTitle: "Show badges", target: nil, action: nil)
+        check2.frame = NSRect(x: 4, y: 30, width: 160, height: 20)
+        let check3 = NSButton(checkboxWithTitle: "Open at login", target: nil, action: nil)
+        check3.frame = NSRect(x: 4, y: 4, width: 160, height: 20)
+        for c in [check1, check2, check3] { primary.contentView?.addSubview(c) }
+        root.addSubview(primary)
+
+        let custom = NSBox(frame: NSRect(x: 220, y: 14, width: 184, height: 120))
+        custom.boxType = .custom
+        custom.title = "Custom"
+        custom.titlePosition = .belowTop
+        custom.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12)     // reads in light and dark appearances
+        custom.borderColor = .systemBlue
+        custom.borderWidth = 2
+        custom.cornerRadius = 10
+        let note = NSTextField(labelWithString: "Fill, border and\ncorner radius of its own.")
+        note.frame = NSRect(x: 4, y: 20, width: 160, height: 36)
+        custom.contentView?.addSubview(note)
+        root.addSubview(custom)
+
+        let separator = NSBox(frame: NSRect(x: 16, y: 150, width: 388, height: 1))
+        separator.boxType = .separator
+        root.addSubview(separator)
+
+        let positions: [(String, NSBox.TitlePosition)] = [("Above top", .aboveTop), ("At bottom", .atBottom), ("Below bottom", .belowBottom)]
+        for (i, (name, position)) in positions.enumerated() {
+            let b = NSBox(frame: NSRect(x: 16 + CGFloat(i) * 132, y: 166, width: 124, height: 78))
+            b.title = name
+            b.titlePosition = position
+            root.addSubview(b)
+        }
+        view = root
     }
 }
 
