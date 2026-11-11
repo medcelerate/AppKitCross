@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 132 |
-| Types generated | 406 |
+| Types handwritten | 139 |
+| Types generated | 399 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1226 |
+| Members unimplemented-calls | 1177 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 40 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 39 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -154,10 +154,10 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 40 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 37 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
-| NSColorList | class | generated | 16 | 0 | 1 |  |
-| NSColorPanel | class | generated | 35 | 0 | 2 |  |
+| NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
+| NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |
 | NSColorPicker | class | pending | 10 | 0 | 0 |  |
 | NSColorPickerTouchBarItem | class | generated | 11 | 1 | 0 |  |
 | NSColorPickingCustom | protocol | generated | 4 | 0 | 0 |  |
@@ -166,7 +166,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSColorSampler | class | generated | 1 | 0 | 0 |  |
 | NSColorSpace | class | generated | 30 | 0 | 1 |  |
 | NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |
-| NSColorWell | class | generated | 17 | 0 | 1 |  |
+| NSColorWell | class | handwritten | 17 | 0 | 1 | 0 |
 | NSComboBox | class | handwritten | 31 | 1 | 0 | 2 |
 | NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |
 | NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |
@@ -220,17 +220,17 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFindPanelSubstringMatchType | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingPlacement | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingType | enum | generated | 3 | 0 | 0 |  |
-| NSFont | class | handwritten | 90 | 4 | 4 | 23 |
+| NSFont | class | handwritten | 90 | 4 | 4 | 20 |
 | NSFontAction | enum | generated | 8 | 0 | 0 |  |
 | NSFontAssetRequest | class | generated | 5 | 0 | 1 |  |
 | NSFontChanging | protocol | generated | 2 | 0 | 0 |  |
-| NSFontCollection | class | generated | 30 | 0 | 4 |  |
+| NSFontCollection | class | handwritten | 30 | 0 | 4 | 0 |
 | NSFontCollectionMatchingOptionKey | struct | generated | 3 | 0 | 0 |  |
 | NSFontCollectionOptions | struct | generated | 1 | 0 | 0 |  |
-| NSFontDescriptor | class | generated | 67 | 0 | 6 |  |
+| NSFontDescriptor | class | handwritten | 67 | 0 | 6 | 0 |
 | NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |
-| NSFontManager | class | handwritten | 47 | 0 | 0 | 40 |
-| NSFontPanel | class | generated | 19 | 0 | 1 |  |
+| NSFontManager | class | handwritten | 47 | 0 | 0 | 0 |
+| NSFontPanel | class | handwritten | 19 | 0 | 1 | 0 |
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
@@ -290,7 +290,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |
 | NSMenuToolbarItem | class | handwritten | 2 | 0 | 0 | 0 |
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
-| NSMutableFontCollection | class | generated | 8 | 1 | 0 |  |
+| NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |
 | NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |
 | NSNib | class | generated | 4 | 0 | 1 |  |
 | NSObjectController | class | generated | 21 | 3 | 0 |  |
@@ -510,7 +510,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | generated | 8 | 0 | 1 |  |
 | NSTextTable | class | generated | 9 | 0 | 1 |  |
 | NSTextTableBlock | class | generated | 6 | 0 | 0 |  |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 162 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 160 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
