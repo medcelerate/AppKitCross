@@ -99,6 +99,15 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         // is not expected to decorate (its answer, if it has the protocol, may still change that).
         _frame = NSRect(origin: contentRect.origin, size: ClientSideDecorationLayout.frameSize(forContentSize: contentRect.size, titleBarHeight: layout.titleBarHeight))
         appliedLayout = layout
+        createToplevel()
+        backend.register(self)
+        applyDecorationMode()
+        applySizeHints()
+    }
+
+    /// A fresh surface with the xdg_toplevel role (at creation, and again when a sheet is
+    /// detached: a surface's role is permanent, so the subsurface cannot become a toplevel).
+    private func createToplevel() {
         surface = wl_compositor_create_surface(backend.compositor)
         wl_surface_add_listener(surface, WaylandWindow.surfaceListener, opaque)
         xdgSurface = xdg_wm_base_get_xdg_surface(backend.wmBase, surface)
@@ -106,13 +115,90 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         toplevel = xdg_surface_get_toplevel(xdgSurface)
         xdg_toplevel_add_listener(toplevel, WaylandWindow.toplevelListener, opaque)
         xdg_toplevel_set_app_id(toplevel, "AppKitCross")
+        if !_title.isEmpty { xdg_toplevel_set_title(toplevel, _title) }
         if let manager = backend.decorationManager {
             decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(manager, toplevel)
             zxdg_toplevel_decoration_v1_add_listener(decoration, WaylandWindow.decorationListener, opaque)
         }
-        backend.register(self)
-        applyDecorationMode()
+        configured = false
+        sentGeometry = nil
+        serverMode = nil
+    }
+
+    /// Destroys the surface and whatever role objects it has (toplevel or subsurface), with
+    /// the buffers attached to it; the window is hidden when this runs.
+    private func destroyRole() {
+        if let c = frameCallback { wl_callback_destroy(c); frameCallback = nil }
+        releaseBacking()
+        for b in buffers { b.release() }
+        buffers.removeAll()
+        if let d = decoration { zxdg_toplevel_decoration_v1_destroy(d); decoration = nil }
+        if let t = toplevel { xdg_toplevel_destroy(t); toplevel = nil }
+        if let x = xdgSurface { xdg_surface_destroy(x); xdgSurface = nil }
+        if let sub = subsurface { wl_subsurface_destroy(sub); subsurface = nil }
+        if let s = surface { wl_surface_destroy(s); surface = nil }
+        configured = false
+        sentGeometry = nil
+    }
+
+    // MARK: Sheets (ADR-0019)
+
+    /// The window whose surface this one is a subsurface of while attached as a sheet.
+    private(set) weak var sheetParent: WaylandWindow?
+    private var subsurface: OpaquePointer?        // wl_subsurface* while attached
+    private var styleBeforeSheet: NSWindow.StyleMask?
+
+    /// A sheet is a `wl_subsurface` of its parent's surface rather than an `xdg_popup`
+    /// (a popup is a menu's model: dismissed by a click outside, keyboard only under a
+    /// grab that needs an input serial, placed by the compositor). The subsurface is part
+    /// of the parent's surface tree: placed at the core's frame relative to the parent,
+    /// composited above it, mapped, minimised and closed with it, listed nowhere.
+    /// Desynchronised, so its own commits show as they come. Pointer events arrive on its
+    /// own surface; keyboard focus stays with the parent toplevel and the core forwards
+    /// the keys. The old surface goes (its role is permanent) and a new one takes the
+    /// subsurface role; the window is hidden while this happens.
+    func attachSheet(to parent: PlatformWindow?) {
+        guard !destroying else { return }
+        if let p = parent as? WaylandWindow, let parentSurface = p.surface, let subcompositor = backend.subcompositor {
+            guard sheetParent !== p else { return }
+            if styleBeforeSheet == nil { styleBeforeSheet = _styleMask }
+            _styleMask = _styleMask.subtracting([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            destroyRole()
+            sheetParent = p
+            surface = wl_compositor_create_surface(backend.compositor)
+            wl_surface_add_listener(surface, WaylandWindow.surfaceListener, opaque)
+            subsurface = wl_subcompositor_get_subsurface(subcompositor, surface, parentSurface)
+            wl_subsurface_set_desync(subsurface)
+            configured = true                      // no configure for a subsurface: paint when shown
+            if scale != p.scale { scale = p.scale; owner?.platformWindowDidChangeBackingScaleFactor(CGFloat(scale)) }
+            if NSView._traceInvalidation { NSView._trace("wayland sheet '\(_title)' subsurface of '\(p._title)'") }
+        } else {
+            guard sheetParent != nil else { return }
+            destroyRole()
+            sheetParent = nil
+            if let s = styleBeforeSheet { styleBeforeSheet = nil; _styleMask = s }
+            createToplevel()
+            applyDecorationMode()
+            if NSView._traceInvalidation { NSView._trace("wayland sheet '\(_title)' detached") }
+        }
+        appliedLayout = layout
+        decorationsDirty = true
+        dirty = NSRect(origin: .zero, size: _frame.size)
         applySizeHints()
+        placeSubsurface()
+    }
+
+    /// Positions the subsurface at the frame, relative to the parent's surface: the frame
+    /// origins are in the same (nominal) screen space, so the difference is the offset
+    /// within the parent's window, which the parent maps into its surface. The position
+    /// applies with the parent's next commit, so the parent commits.
+    private func placeSubsurface() {
+        guard let sub = subsurface, let p = sheetParent, let parentSurface = p.surface else { return }
+        let inParent = NSRect(x: _frame.minX - p._frame.minX, y: _frame.minY - p._frame.minY, width: _frame.width, height: _frame.height)
+        let pos = p.subsurfacePosition(for: inParent)
+        wl_subsurface_set_position(sub, pos.x, pos.y)
+        wl_surface_commit(parentSurface)
+        wl_display_flush(backend.display)
     }
 
     // MARK: Listeners
@@ -331,14 +417,27 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         get { _title }
         set {
             _title = newValue
-            if let t = toplevel { xdg_toplevel_set_title(t, newValue) }
+            applyNativeTitle()
         }
+    }
+    /// `NSWindow.isDocumentEdited` on a server-side decorated window: "*" before the
+    /// title (with client-side decorations the window draws the dot itself).
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        guard let t = toplevel else { return }
+        xdg_toplevel_set_title(t, isDocumentEdited && !hasClientSideTitleBar ? "*" + _title : _title)
     }
 
     var frame: NSRect {
         get { _frame }
         set {
             let resized = newValue.size != _frame.size
+            let moved = newValue.origin != _frame.origin
             _frame = newValue
             if resized {
                 appliedLayout = layout
@@ -346,6 +445,12 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
                 applySizeHints()
                 dirty = NSRect(origin: .zero, size: _frame.size)
                 decorationsDirty = true
+            }
+            if subsurface != nil {
+                // A sheet's frame is its place within the parent; a resize needs a buffer
+                // of the new size, which the next paint attaches (the slide, ADR-0019).
+                if moved || resized { placeSubsurface() }
+                if resized { owner?.platformWindowDidChangeFrame(_frame) }
             }
         }
     }
@@ -406,9 +511,15 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func show() {
         guard !isVisible, let surface else { return }
         isVisible = true
-        configured = false
         dirty = NSRect(origin: .zero, size: _frame.size)
         decorationsDirty = true
+        if subsurface != nil {
+            // A subsurface maps with its first buffer: paint now.
+            configured = true
+            paintIfNeeded()
+            return
+        }
+        configured = false
         // Map: commit without a buffer and wait for the configure before painting.
         wl_surface_commit(surface)
         wl_display_flush(backend.display)
@@ -417,7 +528,7 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     func hide() {
         guard isVisible, let surface else { return }
         isVisible = false
-        configured = false
+        if subsurface == nil { configured = false }
         wl_surface_attach(surface, nil, 0, 0)
         wl_surface_commit(surface)
         wl_display_flush(backend.display)
@@ -468,6 +579,7 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         if let d = decoration { zxdg_toplevel_decoration_v1_destroy(d); decoration = nil }
         if let t = toplevel { xdg_toplevel_destroy(t); toplevel = nil }
         if let x = xdgSurface { xdg_surface_destroy(x); xdgSurface = nil }
+        if let sub = subsurface { wl_subsurface_destroy(sub); subsurface = nil }
         if let s = surface { wl_surface_destroy(s); surface = nil }
         wl_display_flush(backend.display)
         isVisible = false
@@ -667,9 +779,9 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     /// The window geometry (the frame within the surface), the opaque part of the frame
     /// and where pointer input is the window's, for the commit that follows.
     private func applyRegions(_ layout: ClientSideDecorationLayout) {
-        guard let surface, let xdgSurface else { return }
+        guard let surface else { return }
         let g = layout.windowGeometry
-        if sentGeometry != g {
+        if let xdgSurface, sentGeometry != g {
             sentGeometry = g
             if NSView._traceInvalidation { NSView._trace("wayland geometry '\(_title)' \(g) surface \(layout.surfaceSize)") }
             xdg_surface_set_window_geometry(xdgSurface, Int32(g.minX), Int32(g.minY), Int32(g.width), Int32(g.height))

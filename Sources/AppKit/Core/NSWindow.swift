@@ -118,6 +118,7 @@ import CoreText
             let v = _NSWindowButtonsView()
             v.nextResponder = self
             v._setWindow(self)
+            v.close.isDocumentEdited = _isDocumentEdited
             for (kind, b) in [(NSWindow.ButtonType.closeButton, v.close), (.miniaturizeButton, v.miniaturize), (.zoomButton, v.zoom)] {
                 b.target = self
                 let selector = kind == .closeButton ? "performClose:" : kind == .miniaturizeButton ? "performMiniaturize:" : "performZoom:"
@@ -526,7 +527,8 @@ import CoreText
         let old = _lastFrame
         _lastFrame = frame
         let cr = contentRect(forFrameRect: frame)
-        if let cv = _contentView, cv.frame.size != cr.size {
+        // A sheet mid-slide keeps its full-size content pinned to the top (ADR-0019).
+        if _sheetSlide == nil, let cv = _contentView, cv.frame.size != cr.size {
             cv.setFrameSize(cr.size)
         }
         _ensureWindowButtons()
@@ -539,6 +541,7 @@ import CoreText
             delegate?.windowDidMove(Notification(name: NSWindow.didMoveNotification, object: self))
         }
         _noteScreen()
+        if !_sheets.isEmpty { _layoutSheets() }
     }
 
     /// Posts `didChangeScreenNotification` when the move or resize put the window on
@@ -556,9 +559,14 @@ import CoreText
     }
 
     public func platformWindowShouldClose() -> Bool {
+        if _isBlockedBySheet { Platform.backend.beep(); return false }    // the close button is disabled under a sheet
         let should = delegate?.windowShouldClose(self) ?? true
         if NSView._traceInvalidation { NSView._trace("shouldClose \'\(_title)\' -> \(should)") }
-        return should
+        guard should, let wc = _windowController, let doc = wc.document as? NSDocument else { return should }
+        // The native close button on a document window: the document decides, and closes
+        // the window itself when it may.
+        doc._shouldCloseWindowController(wc) { [weak self] shouldClose in if shouldClose { self?.close() } }
+        return false
     }
 
     public func platformWindowWillClose() {
@@ -713,24 +721,133 @@ import CoreText
         set { _aspectRatio = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/attachedsheet
-    @MainActor open var attachedSheet: NSWindow? { _sheets.last }
-    // Sheets: shown as windows parked at the top centre of their parent (no slide-down
-    // animation and the parent stays interactive), ended with endSheet(_:returnCode:).
+    @MainActor open var attachedSheet: NSWindow? { _sheets.first { $0._sheetIsPresented } }
+
+    // MARK: Sheets (ADR-0019)
+    //
+    // `_sheets` is the queue: the sheet presented now (attached to the platform window,
+    // ordered in, key) and the ones waiting to be presented when it ends. A critical sheet
+    // is inserted at the front and presented in front of the one already up.
     private var _sheets: [NSWindow] = []
     private var _sheetCompletions: [ObjectIdentifier: (NSApplication.ModalResponse) -> Void] = [:]
     private weak var _sheetParent: NSWindow?
+    /// Presented (attached, ordered in) rather than waiting in the parent's queue.
+    private var _sheetIsPresented = false
+    /// The slide in or out running on this sheet.
+    private var _sheetSlide: _NSSheetSlide? = nil
+    /// Escape ends this sheet with `.cancel` when no key equivalent took it (SwiftUI's
+    /// `.sheet`, as on macOS). Not part of Apple's API: SwiftUI sets it on its sheets.
+    public var _cancelsSheetOnEscape = false
+    /// How long the slide in takes (the slide out takes four fifths); 0 skips the
+    /// animation. Off on the headless host backend (tests and the macOS host build), whose
+    /// run loop nobody spins for frames; the slide test turns it on. Not part of Apple's API.
+    public static var _sheetAnimationDuration: TimeInterval = Platform.backend is HostBackend ? 0 : 0.25
+    /// The window is closed once its sheet session ends (after the slide out): for sheets
+    /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
+    /// linger hidden in the application's window list. Not part of Apple's API.
+    public var _closesAfterSheetEnds = false
+
+    /// A window with an attached sheet does not take input; the sheet does.
+    private var _isBlockedBySheet: Bool { attachedSheet != nil }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/beginsheet(_:completionhandler:)
     @MainActor open func beginSheet(_ sheetWindow: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
-        guard !_sheets.contains(where: { $0 === sheetWindow }) else { return }
-        _sheets.append(sheetWindow)
-        sheetWindow._sheetParent = self
-        if let h = handler { _sheetCompletions[ObjectIdentifier(sheetWindow)] = h }
-        let parent = frame
-        let size = sheetWindow.frame.size
-        sheetWindow.setFrameOrigin(NSPoint(x: parent.midX - size.width / 2, y: parent.maxY - size.height - NSWindow._titleBarBandHeight))
+        _beginSheet(sheetWindow, critical: false, completionHandler: handler)
+    }
+
+    private func _beginSheet(_ sheet: NSWindow, critical: Bool, completionHandler handler: ((NSApplication.ModalResponse) -> Void)?) {
+        guard sheet !== self, sheet._sheetParent == nil, !_sheets.contains(where: { $0 === sheet }) else { return }
+        if NSView._traceInvalidation { NSView._trace("beginSheet '\(_title)' <- '\(sheet._title)'\(critical ? " critical" : "") queued \(_sheets.count)") }
+        if let h = handler { _sheetCompletions[ObjectIdentifier(sheet)] = h }
+        sheet._sheetParent = self
+        sheet._sheetIsPresented = false
+        if critical {
+            _sheets.insert(sheet, at: 0)
+            _presentSheet(sheet)
+        } else {
+            _sheets.append(sheet)
+            if attachedSheet == nil { _presentSheet(sheet) }
+        }
+    }
+
+    /// Attaches the sheet to the platform window, places it under the title band (or the
+    /// toolbar), orders it front, makes it key and slides it in.
+    private func _presentSheet(_ sheet: NSWindow) {
         post(NSWindow.willBeginSheetNotification)
-        sheetWindow.makeKeyAndOrderFront(nil)
+        sheet._sheetIsPresented = true
+        sheet._sheetSlide?.finish()
+        sheet._reopenIfNeeded()
+        sheet._attachAsSheet(to: self)
+        let target = _sheetFrame(for: sheet)
+        sheet._platformWindow?.frame = target
+        let appearing = !sheet.isVisible
+        if appearing { sheet._contentView?._windowVisibilityWillChange(true) }
+        if sheet._sheetAnimates {
+            let slide = _NSSheetSlide(sheet: sheet, target: target, direction: .in, duration: NSWindow._sheetAnimationDuration) { [weak sheet] in
+                sheet?._sheetSlide = nil
+            }
+            sheet._sheetSlide = slide
+            slide.start()
+        }
+        sheet._platformWindow?.show()
+        sheet._platformWindow?.displayIfNeeded()
+        if appearing { sheet._contentView?._windowVisibilityDidChange(true) }
+        sheet.makeKey()
+    }
+
+    /// Whether the slide runs for this sheet: not when the window opts out of animation or
+    /// the duration is zero.
+    private var _sheetAnimates: Bool { _animationBehavior != .none && NSWindow._sheetAnimationDuration > 0 }
+
+    /// Switches the platform window into (or out of) its attached, frameless form, keeping
+    /// the content size: the frame/content conversion changes with the attachment.
+    private func _attachAsSheet(to parent: NSWindow?) {
+        guard let p = _platform else { return }
+        let content = contentRect(forFrameRect: frame)
+        p.attachSheet(to: parent?._platform)
+        let adjusted = frameRect(forContentRect: content)
+        if adjusted != frame { p.frame = adjusted }
+    }
+
+    /// Where the sheet goes: centred on the top of `contentLayoutRect` (under the title bar
+    /// and the toolbar band), unless the delegate moves the attachment rect.
+    private func _sheetFrame(for sheet: NSWindow) -> NSRect {
+        let size = sheet.contentRect(forFrameRect: sheet.frame).size
+        let layout = contentLayoutRect
+        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
+        if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
+        let origin = convertPoint(toScreen: rect.origin)
+        let width = rect.width > 0 ? rect.width : size.width
+        return NSRect(x: origin.x, y: origin.y - size.height, width: width, height: size.height)
+    }
+
+    /// The parent moved or resized: its presented sheets follow (Win32 and X11 do not move
+    /// owned or transient windows with their owner).
+    private func _layoutSheets() {
+        for s in _sheets where s._sheetIsPresented && s._sheetSlide == nil {
+            let f = _sheetFrame(for: s)
+            if f != s.frame { s._platformWindow?.frame = f }
+        }
+    }
+
+    /// A slide step: the frame grows down from the attachment line by `fraction` of the
+    /// target height while the content stays pinned to the top.
+    fileprivate func _applySheetSlide(fraction: CGFloat, target: NSRect) {
+        guard let p = _platform else { return }
+        let h = max(1, (target.height * min(max(fraction, 0), 1)).rounded())
+        let partial = NSRect(x: target.minX, y: target.maxY - h, width: target.width, height: h)
+        if let cv = _contentView {
+            if cv.frame.size != target.size { cv.setFrameSize(target.size) }
+            cv.setFrameOrigin(NSPoint(x: 0, y: h - target.height))
+        }
+        if p.frame != partial { p.frame = partial }
+        p.setNeedsDisplay(nil)
+    }
+
+    /// Ends the sheet session on this sheet's parent with `.cancel` (a sheet closed or
+    /// ordered out by other means than `endSheet`).
+    private func _cancelSheetIfAttached() {
+        if let p = _sheetParent { p.endSheet(self, returnCode: .cancel) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculatescontentborderthickness(for:)
     @MainActor open func autorecalculatesContentBorderThickness(for edge: NSRectEdge) -> Bool { unimplemented() }
@@ -758,12 +875,23 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomekey()
     @MainActor open func becomeKey() {
         defer { _ensureWindowButtons(); _windowButtons?.needsDisplay = true }
+        // A window with a sheet up hands the key status to the sheet (the window system
+        // activated the parent: a click on its title bar, the taskbar).
+        if let sheet = attachedSheet, sheet.isVisible {
+            if !sheet._isKey { sheet._platformWindow?.makeKey(); sheet.becomeKey() }
+            return
+        }
         guard !_isKey else { return }
         if NSView._traceInvalidation { NSView._trace("becomeKey \'\(_title)\'") }
         let app = NSApplication.shared
         if let previous = app.keyWindow, previous !== self { previous.resignKey() }
         _isKey = true
         app._keyWindow = self
+        // The first time the window is key, `initialFirstResponder` takes focus (macOS
+        // does this when the window is first shown), so typing reaches the document's view.
+        if firstResponder == nil || firstResponder === self, let initial = _initialFirstResponder, initial.window === self {
+            makeFirstResponder(initial)
+        }
         _toolbar?.validateVisibleItems()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
@@ -777,8 +905,15 @@ import CoreText
         delegate?.windowDidBecomeMain(Notification(name: NSWindow.didBecomeMainNotification, object: self))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/begincriticalsheet(_:)
-    @MainActor open func beginCriticalSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse { unimplemented() }
+    @MainActor open func beginCriticalSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse {
+        await withCheckedContinuation { c in _beginSheet(sheetWindow, critical: true) { c.resume(returning: $0) } }
+    }
     // DUPLICATE: @MainActor open func beginCriticalSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse
+    /// Begins a critical sheet with a completion handler: presented at once, in front of a
+    /// sheet already up (the async form above wraps it). Not part of Apple's API.
+    @MainActor public func _beginCriticalSheet(_ sheetWindow: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
+        _beginSheet(sheetWindow, critical: true, completionHandler: handler)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/begindraggingsession(items:event:source:)
     @available(macOS 15.0, *)
     @MainActor open func beginDraggingSession(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession { unimplemented() }
@@ -790,7 +925,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/cacheimage(in:)
     @MainActor open func cacheImage(in rect: NSRect) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomekey
-    @MainActor open var canBecomeKey: Bool { _styleMask.contains(.titled) || _styleMask.contains(.resizable) }
+    @MainActor open var canBecomeKey: Bool { _styleMask.contains(.titled) || _styleMask.contains(.resizable) || _sheetParent != nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomemain
     @MainActor open var canBecomeMain: Bool { canBecomeKey && !_styleMask.contains(.utilityWindow) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomevisiblewithoutlogin
@@ -826,9 +961,15 @@ import CoreText
     @MainActor open func close() {
         guard !_isClosing else { return }
         if NSView._traceInvalidation { NSView._trace("close \'\(_title)\'") }
+        // A sheet closed by other means ends its session; a window closing with sheets up
+        // ends theirs (their completion handlers hear `.cancel`).
+        _sheetSlide?.finish()
+        _cancelSheetIfAttached()
+        for s in _sheets { endSheet(s, returnCode: .cancel) }
         _isClosing = true
         post(NSWindow.willCloseNotification)
         delegate?.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: self))
+        _windowController?._windowWillClose()
         let disappearing = isVisible
         let wasKey = _isKey
         if disappearing { _contentView?._windowVisibilityWillChange(false) }
@@ -1083,13 +1224,44 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:returncode:)
     @MainActor open func endSheet(_ sheetWindow: NSWindow, returnCode: NSApplication.ModalResponse) {
         guard let i = _sheets.firstIndex(where: { $0 === sheetWindow }) else { return }
+        if NSView._traceInvalidation { NSView._trace("endSheet '\(_title)' -> '\(sheetWindow._title)' code \(returnCode.rawValue)") }
         _sheets.remove(at: i)
         sheetWindow._sheetParent = nil
-        sheetWindow.orderOut(nil)
         let completion = _sheetCompletions.removeValue(forKey: ObjectIdentifier(sheetWindow))
-        makeKeyAndOrderFront(nil)
+        if sheetWindow._sheetIsPresented {
+            sheetWindow._sheetIsPresented = false
+            sheetWindow._sheetSlide?.finish()
+            if sheetWindow._isKey { sheetWindow.resignKey() }
+            if sheetWindow._sheetAnimates, sheetWindow.isVisible {
+                let target = sheetWindow.frame
+                let slide = _NSSheetSlide(sheet: sheetWindow, target: target, direction: .out, duration: NSWindow._sheetAnimationDuration * 0.8) { [weak sheetWindow] in
+                    guard let s = sheetWindow else { return }
+                    s._sheetSlide = nil
+                    s.orderOut(nil)
+                    s._applySheetSlide(fraction: 1, target: target)     // full size again, hidden
+                    s._attachAsSheet(to: nil)
+                    if s._closesAfterSheetEnds { s.close() }
+                }
+                sheetWindow._sheetSlide = slide
+                slide.start()
+            } else {
+                sheetWindow.orderOut(nil)
+                sheetWindow._attachAsSheet(to: nil)
+                if sheetWindow._closesAfterSheetEnds { sheetWindow.close() }
+            }
+        } else if sheetWindow._closesAfterSheetEnds {
+            sheetWindow.close()                         // ended while still queued
+        }
         completion?(returnCode)
         post(NSWindow.didEndSheetNotification)
+        // The next queued sheet comes up; otherwise the parent takes the keyboard back.
+        if attachedSheet == nil, let next = _sheets.first {
+            _presentSheet(next)
+        } else if attachedSheet == nil, isVisible, !_isClosing {
+            makeKey()
+        } else if let s = attachedSheet, s.isVisible {
+            s.makeKey()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/fieldeditor(_:for:)
     @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
@@ -1172,9 +1344,19 @@ import CoreText
         set { _isAutodisplay = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isdocumentedited
+    /// The edited state shows as a dot in the close button of a package-drawn title bar
+    /// (as macOS marks it) and as the platform's own mark in native title bars (an
+    /// asterisk before the title on Windows and Linux).
     @MainActor open var isDocumentEdited: Bool {
         get { _isDocumentEdited }
-        set { _isDocumentEdited = newValue }
+        set {
+            guard _isDocumentEdited != newValue else { return }
+            _isDocumentEdited = newValue
+            _platform?.setDocumentEdited(newValue)
+            _ensureWindowButtons()
+            _windowButtons?.close.isDocumentEdited = newValue
+            if _hasClientSideTitleBar { _platform?.setNeedsDisplay(nil) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isexcludedfromwindowsmenu
     @MainActor open var isExcludedFromWindowsMenu: Bool {
@@ -1388,6 +1570,7 @@ import CoreText
     @MainActor open func orderFrontRegardless() { orderFront(nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderout(_:)
     @MainActor open func orderOut(_ sender: Any?) {
+        if _sheetParent != nil { _cancelSheetIfAttached(); return }       // endSheet orders the sheet out
         let disappearing = isVisible
         if disappearing { _contentView?._windowVisibilityWillChange(false) }
         if _isKey { resignKey() }
@@ -1406,9 +1589,16 @@ import CoreText
         set { _parent = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performclose(_:)
+    /// The delegate's `windowShouldClose` first; then a window with a document asks the
+    /// document (`shouldCloseWindowController`), whose unsaved-changes alert may cancel.
     @MainActor open func performClose(_ sender: Any?) {
-        guard _styleMask.contains(.closable) else { Platform.backend.beep(); return }
-        if delegate?.windowShouldClose(self) ?? true { close() }
+        guard _styleMask.contains(.closable), !_isBlockedBySheet else { Platform.backend.beep(); return }
+        guard delegate?.windowShouldClose(self) ?? true else { return }
+        if let wc = _windowController, let doc = wc.document as? NSDocument {
+            doc._shouldCloseWindowController(wc) { [weak self] shouldClose in if shouldClose { self?.close() } }
+            return
+        }
+        close()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performdrag(with:)
     @available(macOS 10.11, *)
@@ -1458,8 +1648,8 @@ import CoreText
     @MainActor open func removeTitlebarAccessoryViewController(at index: Int) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/representedfilename
     @MainActor open var representedFilename: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _representedURL?.path ?? "" }
+        set { _representedURL = newValue.isEmpty ? nil : URL(fileURLWithPath: newValue) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/representedurl
     @MainActor open var representedURL: URL? {
@@ -1575,6 +1765,16 @@ import CoreText
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
         defer { _currentEvent = nil }
+        // Blocked by a sheet: the keyboard goes to the sheet (on Wayland the key events
+        // arrive here, focus staying with the toplevel), the content takes no mouse.
+        if let sheet = attachedSheet, sheet.isVisible {
+            switch event.type {
+            case .keyDown, .keyUp, .flagsChanged: sheet.sendEvent(event)
+            case .mouseMoved: _updateCursor(at: event.locationInWindow)
+            default: break
+            }
+            return
+        }
         switch event.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             guard !_ignoresMouseEvents else { return }
@@ -1614,6 +1814,12 @@ import CoreText
                 return
             }
             if !(_contentView?.performKeyEquivalent(with: event) ?? false) {
+                // Escape ends a sheet that opted in (SwiftUI's), when no Cancel button took it.
+                if _sheetParent != nil, _cancelsSheetOnEscape, event.charactersIgnoringModifiers == "\u{1B}",
+                   event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
+                    _cancelSheetIfAttached()
+                    return
+                }
                 firstResponder?.keyDown(with: event)
             }
         case .keyUp:
@@ -1668,7 +1874,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setiszoomed(_:)
     @MainActor open func setIsZoomed(_ flag: Bool) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/settitlewithrepresentedfilename(_:)
-    @MainActor open func setTitleWithRepresentedFilename(_ filename: String) { unimplemented() }
+    @MainActor open func setTitleWithRepresentedFilename(_ filename: String) {
+        representedFilename = filename
+        title = (filename as NSString).lastPathComponent
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sharingtype
     @MainActor open var sharingType: NSWindow.SharingType {
         get { unimplemented() }
@@ -1838,9 +2047,24 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/willstartliveresizenotification
     static public var willStartLiveResizeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSWindowWillStartLiveResizeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowcontroller
+    /// The controller is the window's next responder, so actions and the undo manager
+    /// reach it and its document.
     @MainActor open var windowController: NSWindowController? {
         get { _windowController }
-        set { _windowController = newValue }
+        set {
+            _windowController = newValue
+            nextResponder = newValue
+        }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/undomanager
+    /// The delegate's (`windowWillReturnUndoManager`), else the window controller's (a
+    /// document's), else one of the window's own.
+    private var _ownUndoManager: UndoManager? = nil
+    @MainActor open override var undoManager: UndoManager? {
+        if let d = delegate, let m = d.windowWillReturnUndoManager(self) { return m }
+        if let wc = _windowController, let m = wc.undoManager { return m }
+        if _ownUndoManager == nil { _ownUndoManager = UndoManager() }
+        return _ownUndoManager
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windownumber
     @MainActor open var windowNumber: Int { _windowNumber }
@@ -2016,5 +2240,64 @@ extension NSWindow: PlatformAccessibilityProvider {
         if let row = v as? NSTableRowView { return row._accessibilitySetSelected(selected, extending: extending) }
         v.setAccessibilitySelected(selected)
         return true
+    }
+}
+
+// MARK: - Sheet slide (ADR-0019)
+
+/// Slides a sheet out from under its parent's title band and back: the sheet's frame grows
+/// downwards from the attachment line to its full height (or shrinks back) with the content
+/// pinned to the top, one step per frame of a `CADisplayLink` on Core Animation's clock
+/// (`CARuntime.now`, so tests drive it with a fake clock and `CARuntime.tick()`).
+@MainActor final class _NSSheetSlide {
+    enum Direction { case `in`, out }
+    private let sheet: NSWindow
+    private let target: NSRect
+    private let direction: Direction
+    private let duration: TimeInterval
+    private let completion: () -> Void
+    private var startTime: CFTimeInterval = 0
+    private var link: CADisplayLink?
+    private var finished = false
+
+    init(sheet: NSWindow, target: NSRect, direction: Direction, duration: TimeInterval, completion: @escaping () -> Void) {
+        self.sheet = sheet
+        self.target = target
+        self.direction = direction
+        self.duration = duration
+        self.completion = completion
+    }
+
+    /// Applies the first step and schedules the rest.
+    func start() {
+        guard duration > 0 else { finish(); return }
+        startTime = CARuntime.now()
+        apply(0)
+        let l = CADisplayLink { [weak self] _ in self?.step() }
+        link = l
+        l.add(to: .main, forMode: .default)
+    }
+
+    private func step() {
+        let t = min(1, max(0, (CARuntime.now() - startTime) / duration))
+        // Ease out: fast off the line, settling at the end.
+        let eased = 1 - (1 - t) * (1 - t)
+        apply(eased)
+        if t >= 1 { finish() }
+    }
+
+    private func apply(_ progress: Double) {
+        let visible = direction == .in ? progress : 1 - progress
+        sheet._applySheetSlide(fraction: CGFloat(visible), target: target)
+    }
+
+    /// Jumps to the end state and runs the completion (once).
+    func finish() {
+        guard !finished else { return }
+        finished = true
+        link?.invalidate()
+        link = nil
+        apply(1)
+        completion()
     }
 }

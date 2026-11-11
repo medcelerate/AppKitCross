@@ -62,8 +62,9 @@ public protocol PlatformBackend: AnyObject {
     var image: any PlatformImageBackend { get }
     /// The system clipboard.
     var systemPasteboard: any PlatformPasteboard { get }
-    /// Shows the native open/save dialog modally; nil when cancelled.
-    func runFileDialog(_ options: PlatformFileDialogOptions, parent: PlatformWindow?) -> [URL]?
+    /// The operating system's open/save dialog (FileDialog.swift, ADR-0017); nil when the
+    /// panels should draw themselves.
+    var fileDialog: (any PlatformFileDialog)? { get }
     /// Whether the platform has a system colour dialog (`NSColorPanel` uses it when
     /// `APPKITWIN_COLOR_PANEL=native`); the package-drawn panel is the default everywhere.
     var hasNativeColorDialog: Bool { get }
@@ -124,6 +125,9 @@ public protocol PlatformWindow: AnyObject {
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
     func setNeedsDisplay(_ rect: NSRect?)
+    /// `NSWindow.isDocumentEdited`: platforms with native title bars mark the title (an
+    /// asterisk before it, as their own editors do); the default does nothing.
+    func setDocumentEdited(_ edited: Bool)
     /// Chrome beyond the style mask: title bar treatment, backdrop, shadow (Milestone 3b).
     var chrome: PlatformWindowChrome { get set }
     /// The platform draws no title bar of its own and wants the owner's (Wayland client-side
@@ -151,6 +155,12 @@ public protocol PlatformWindow: AnyObject {
     /// surfaces (X11: `XGetImage`); nil where the platform cannot read it back (Wayland).
     /// For tests and tooling.
     func captureContent() -> CGImage?
+    /// Attaches the (hidden) window to `parent` as a sheet, or detaches it with nil
+    /// (ADR-0019). While attached the window shows no frame of its own, so
+    /// `frameRect(forContentRect:)` is the identity; it is stacked above the parent, hidden
+    /// and minimised with it, and listed nowhere (taskbar, window list). The core sets the
+    /// frame after attaching and moves the sheet when the parent moves.
+    func attachSheet(to parent: PlatformWindow?)
 }
 
 /// A native surface within a window's content area that a swap chain presents into
@@ -193,9 +203,11 @@ extension PlatformBackend {
 }
 
 extension PlatformWindow {
+    public func setDocumentEdited(_ edited: Bool) { }
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
+    public func attachSheet(to parent: PlatformWindow?) { }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }
@@ -249,23 +261,6 @@ public protocol PlatformWindowOwner: AnyObject {
     func platformDrop(_ drag: PlatformDragInfo) -> NSDragOperation
     /// The window's accessibility tree and actions (Accessibility.swift, ADR-0013).
     var platformAccessibility: any PlatformAccessibilityProvider { get }
-}
-
-public struct PlatformFileDialogOptions: Sendable {
-    public var isSave = false
-    public var title: String? = nil
-    public var prompt: String? = nil            // confirm button label
-    public var message: String? = nil
-    public var directory: URL? = nil
-    public var defaultName: String? = nil
-    public var allowedExtensions: [String] = []  // without dots; empty = any
-    public var allowsOtherTypes = true
-    public var canChooseFiles = true
-    public var canChooseDirectories = false
-    public var allowsMultipleSelection = false
-    public var canCreateDirectories = true
-    public var showsHiddenFiles = false
-    public init() {}
 }
 
 /// Window chrome a backend can offer beyond the style mask (Milestone 3b: frameless and

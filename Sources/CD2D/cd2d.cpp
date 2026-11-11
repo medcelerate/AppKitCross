@@ -909,9 +909,21 @@ void cd2d_offscreen_release(CD2DOffscreen *o) {
 
 // ---------------------------------------------------------------- File dialogs
 
+static std::vector<std::wstring> cd2d_split(const std::wstring &s, wchar_t sep) {
+    std::vector<std::wstring> out;
+    size_t start = 0;
+    while (start <= s.size()) {
+        size_t end = s.find(sep, start);
+        if (end == std::wstring::npos) end = s.size();
+        out.push_back(s.substr(start, end - start));
+        start = end + 1;
+    }
+    return out;
+}
+
 bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uint16_t *title, const uint16_t *okLabel,
                       const uint16_t *defaultName, const uint16_t *directory, const uint16_t *extensions,
-                      uint16_t **paths, uint32_t *length) {
+                      const uint16_t *labels, const uint16_t *defaultExtension, uint16_t **paths, uint32_t *length) {
     if (!o || !paths || !length) return false;
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     IFileDialog *dlg = nullptr;
@@ -932,7 +944,6 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
     dlg->SetOptions(flags);
     if (title && title[0]) dlg->SetTitle(reinterpret_cast<LPCWSTR>(title));
     if (okLabel && okLabel[0]) dlg->SetOkButtonLabel(reinterpret_cast<LPCWSTR>(okLabel));
-    if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
     if (directory && directory[0]) {
         IShellItem *folder = nullptr;
         if (SUCCEEDED(SHCreateItemFromParsingName(reinterpret_cast<LPCWSTR>(directory), nullptr, IID_PPV_ARGS(&folder))) && folder) {
@@ -940,43 +951,80 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
             folder->Release();
         }
     }
-    std::vector<std::wstring> specs;
+    // One filter per group ("Plain Text Document (*.txt, *.text)"); names and patterns
+    // are kept in vectors sized up front so the COMDLG_FILTERSPEC pointers stay valid.
+    std::vector<std::wstring> names, patterns;
     std::vector<COMDLG_FILTERSPEC> filters;
+    std::wstring defaultExt = defaultExtension ? std::wstring(reinterpret_cast<const wchar_t *>(defaultExtension)) : L"";
+    size_t selectedIndex = 0;
     if (extensions && extensions[0]) {
-        std::wstring all(reinterpret_cast<const wchar_t *>(extensions));
-        std::wstring pattern;
-        size_t start = 0;
-        while (start <= all.size()) {
-            size_t end = all.find(L';', start);
-            if (end == std::wstring::npos) end = all.size();
-            std::wstring ext = all.substr(start, end - start);
-            if (!ext.empty()) { if (!pattern.empty()) pattern += L";"; pattern += L"*." + ext; }
-            start = end + 1;
-        }
-        std::wstring label = L"Supported files (";
-        for (size_t i = 0; i < pattern.size(); i++) label += pattern[i] == L';' ? L", " : std::wstring(1, pattern[i]);
-        label += L")";
-        specs.push_back(label);
-        specs.push_back(pattern);
-        filters.push_back({ specs[0].c_str(), specs[1].c_str() });
-        if (o->allowsOtherTypes) {
-            specs.push_back(L"All files");
-            specs.push_back(L"*.*");
-            filters.push_back({ specs[2].c_str(), specs[3].c_str() });
-        }
-        dlg->SetFileTypes((UINT)filters.size(), filters.data());
-        if (!o->isSave && !pattern.empty()) {
-            size_t dot = pattern.find(L'.');
-            if (dot != std::wstring::npos) {
-                size_t semi = pattern.find(L';');
-                std::wstring first = pattern.substr(dot + 1, (semi == std::wstring::npos ? pattern.size() : semi) - dot - 1);
-                dlg->SetDefaultExtension(first.c_str());
+        std::vector<std::wstring> groups = cd2d_split(reinterpret_cast<const wchar_t *>(extensions), L'|');
+        std::vector<std::wstring> groupNames = labels ? cd2d_split(reinterpret_cast<const wchar_t *>(labels), L'|') : std::vector<std::wstring>();
+        std::vector<std::wstring> groupFirst;
+        std::wstring all;
+        for (size_t g = 0; g < groups.size(); g++) {
+            std::wstring pattern, first;
+            for (const std::wstring &ext : cd2d_split(groups[g], L';')) {
+                if (ext.empty()) continue;
+                if (first.empty()) first = ext;
+                if (!pattern.empty()) pattern += L";";
+                pattern += L"*." + ext;
             }
-        } else if (o->isSave && !pattern.empty()) {
-            size_t dot = pattern.find(L'.');
-            size_t semi = pattern.find(L';');
-            if (dot != std::wstring::npos) dlg->SetDefaultExtension(pattern.substr(dot + 1, (semi == std::wstring::npos ? pattern.size() : semi) - dot - 1).c_str());
+            if (pattern.empty()) continue;
+            std::wstring shown;
+            for (wchar_t c : pattern) shown += c == L';' ? std::wstring(L", ") : std::wstring(1, c);
+            std::wstring name = g < groupNames.size() && !groupNames[g].empty() ? groupNames[g] : L"Supported files";
+            names.push_back(name + L" (" + shown + L")");
+            patterns.push_back(pattern);
+            groupFirst.push_back(first);
+            if (!all.empty()) all += L";";
+            all += pattern;
         }
+        size_t typeOffset = 0;
+        if (!o->isSave && patterns.size() > 1) {
+            names.insert(names.begin(), L"All supported files");
+            patterns.insert(patterns.begin(), all);
+            typeOffset = 1;
+        }
+        if (o->allowsOtherTypes) { names.push_back(L"All files"); patterns.push_back(L"*.*"); }
+        for (size_t i = 0; i < names.size(); i++) filters.push_back({ names[i].c_str(), patterns[i].c_str() });
+        if (!filters.empty()) dlg->SetFileTypes((UINT)filters.size(), filters.data());
+        // The group holding the default extension is shown first (an open dialog starts on
+        // "All supported files"); the default extension completes a typed name.
+        size_t selected = 0;
+        if (!defaultExt.empty()) {
+            std::wstring needle = L"*." + defaultExt;
+            bool found = false;
+            for (size_t i = 0; i < groupFirst.size() && !found; i++) {
+                const std::wstring &pat = patterns[i + typeOffset];
+                size_t at = pat.find(needle);
+                while (at != std::wstring::npos && !found) {
+                    size_t after = at + needle.size();
+                    if (after == pat.size() || pat[after] == L';') { selected = i + typeOffset; found = true; }
+                    at = pat.find(needle, after);
+                }
+            }
+        } else if (!groupFirst.empty()) {
+            defaultExt = groupFirst[0];
+        }
+        if (!filters.empty()) dlg->SetFileTypeIndex((UINT)selected + 1);
+        selectedIndex = selected + 1;
+        if (!defaultExt.empty()) dlg->SetDefaultExtension(defaultExt.c_str());
+    }
+    // The name goes in after the file types, the selected type and the default extension:
+    // changing the type index afterwards makes the dialog re-derive the name from the new
+    // filter, which drops the extension of a name set earlier.
+    if (defaultName && defaultName[0]) dlg->SetFileName(reinterpret_cast<LPCWSTR>(defaultName));
+    // APPKITWIN_FILE_DIALOG_TRACE=1: what the dialog was given, and whether Explorer hides
+    // known extensions (HideFileExt), which also hides them in the dialog's name box: the
+    // name box then shows "Untitled" for "Untitled.txt" while the saved file keeps ".txt".
+    if (GetEnvironmentVariableW(L"APPKITWIN_FILE_DIALOG_TRACE", nullptr, 0) > 0) {
+        DWORD hide = 0, size = sizeof(hide);
+        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", L"HideFileExt", RRF_RT_REG_DWORD, nullptr, &hide, &size) != ERROR_SUCCESS) hide = 0xFFFFFFFF;
+        fwprintf(stderr, L"[file-dialog] %ls name=\"%ls\" defaultExtension=\"%ls\" filters=%u selected=%u HideFileExt=%ld\n",
+                 o->isSave ? L"save" : L"open", defaultName ? reinterpret_cast<const wchar_t *>(defaultName) : L"",
+                 defaultExt.c_str(), (unsigned)filters.size(), (unsigned)selectedIndex, (long)hide);
+        for (size_t i = 0; i < filters.size(); i++) fwprintf(stderr, L"[file-dialog]   %u: %ls = %ls\n", (unsigned)i + 1, filters[i].pszName, filters[i].pszSpec);
     }
     hr = dlg->Show((HWND)ownerHwnd);
     if (FAILED(hr)) { dlg->Release(); return false; }

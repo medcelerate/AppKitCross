@@ -80,11 +80,11 @@ echo "screenshot: /tmp/hellowindow-linux-rtl.png ($(stat -c %s /tmp/hellowindow-
 # The small examples (Examples/<Name>): each runs under Xvfb for a screenshot, and its log
 # is checked for a trap (an `unimplemented()` stub or a crash); Drawing also exports its
 # canvas headlessly, which checks the PNG path.
-for example in Calculator FramelessWindow Animation Drawing Observable AudioPlayer Toolbar; do
+for example in Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do
     lower=$(echo "$example" | tr '[:upper:]' '[:lower:]')
     echo "== $example under Xvfb (X11 backend)"
     args=""
-    case "$example" in FramelessWindow) args="--panel" ;; esac
+    case "$example" in FramelessWindow) args="--panel" ;; TextEdit) args="--show-save-panel" ;; Sheets) args="--alert" ;; esac
     APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/$example $args >/tmp/$lower-linux.log 2>&1 &
     APP=$!
     sleep 4
@@ -98,9 +98,20 @@ for example in Calculator FramelessWindow Animation Drawing Observable AudioPlay
     fi
     grep -E "Fatal error|not implemented" /tmp/$lower-linux.log | head -3
 done
+echo "== Sheets --swiftui-sheet under Xvfb (a SwiftUI .sheet attached to its window, ADR-0019)"
+APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/Sheets --swiftui-sheet >/tmp/sheets-swiftui-linux.log 2>&1 &
+APP=$!
+sleep 4
+xwd -root -silent | convert xwd:- /tmp/sheets-swiftui-linux.png
+kill $APP 2>/dev/null || true
+wait $APP 2>/dev/null || true
+grep -E "Fatal error|not implemented" /tmp/sheets-swiftui-linux.log | head -3
+echo "screenshot: /tmp/sheets-swiftui-linux.png ($(stat -c %s /tmp/sheets-swiftui-linux.png) bytes)"
 echo "== AudioPlayer --render (offline render, no sound device: ADR-0014)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/AudioPlayer --render /tmp/audioplayer-render-linux.wav 2>&1 | tail -2
 ls -la /tmp/audioplayer-render-linux.wav 2>/dev/null | awk '{print "wav:", $5, "bytes"}'
+echo "== TextEdit --roundtrip (NSDocumentController types from Info.plist, RTF save and reopen)"
+APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/TextEdit --roundtrip /tmp/textedit-roundtrip-linux.rtf 2>&1 | tail -3
 echo "== Drawing --export (headless PNG export)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/Drawing --export /tmp/drawing-export-linux.png 2>&1 | tail -2
 file /tmp/drawing-export-linux.png 2>/dev/null || ls -la /tmp/drawing-export-linux.png

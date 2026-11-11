@@ -74,16 +74,67 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
             attrs.override_redirect = 1
             XChangeWindowAttributes(d, xid, UInt(CWOverrideRedirect), &attrs)
         }
-        if !styleMask.contains(.titled) {
-            // Borderless: ask the window manager for no decorations (Motif hints).
-            let motif = XInternAtom(d, "_MOTIF_WM_HINTS", 0)
+        applyDecorationHints()
+        backend.register(self)
+        applySizeHints()
+    }
+
+    /// Borderless windows (and sheets) ask the window manager for no decorations (Motif
+    /// hints); titled ones drop the hint so the manager frames them.
+    private func applyDecorationHints() {
+        let d = backend.display
+        let motif = backend.atom("_MOTIF_WM_HINTS")
+        if _styleMask.contains(.titled) {
+            XDeleteProperty(d, xid, motif)
+        } else {
             var hints: [UInt] = [2, 0, 0, 0, 0]   // flags = MWM_HINTS_DECORATIONS, decorations = 0
             hints.withUnsafeBufferPointer { buf in
                 _ = XChangeProperty(d, xid, motif, motif, 32, PropModeReplace, UnsafeRawPointer(buf.baseAddress!).assumingMemoryBound(to: UInt8.self), 5)
             }
         }
-        backend.register(self)
+    }
+
+    private func setAtomProperty(_ name: String, _ values: [Atom]) {
+        var atoms = values
+        atoms.withUnsafeMutableBufferPointer { buf in
+            _ = XChangeProperty(backend.display, xid, backend.atom(name), XA_ATOM, 32, PropModeReplace, UnsafeRawPointer(buf.baseAddress!).assumingMemoryBound(to: UInt8.self), Int32(buf.count))
+        }
+    }
+
+    // MARK: Sheets (ADR-0019)
+
+    /// The window this one is attached to as a sheet.
+    private(set) weak var sheetParent: LinuxWindow?
+    private var styleBeforeSheet: NSWindow.StyleMask?
+
+    /// A sheet is a managed transient of its parent: `WM_TRANSIENT_FOR` keeps it above the
+    /// parent and iconified with it, the EWMH dialog type and the skip-taskbar/pager
+    /// states keep it out of the task list, Motif hints remove the frame and the normal
+    /// hints carry a user-specified position and a fixed size so the manager honours the
+    /// core's placement. (An override-redirect window would escape the manager's
+    /// iconification and focus handling.) Nothing moves a transient with its parent: the
+    /// core re-places the sheet when the parent's frame changes.
+    func attachSheet(to parent: PlatformWindow?) {
+        let d = backend.display
+        if let p = parent as? LinuxWindow {
+            sheetParent = p
+            if styleBeforeSheet == nil { styleBeforeSheet = _styleMask }
+            _styleMask = _styleMask.subtracting([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            XSetTransientForHint(d, xid, p.xid)
+            setAtomProperty("_NET_WM_WINDOW_TYPE", [backend.atom("_NET_WM_WINDOW_TYPE_DIALOG")])
+            setAtomProperty("_NET_WM_STATE", [backend.atom("_NET_WM_STATE_SKIP_TASKBAR"), backend.atom("_NET_WM_STATE_SKIP_PAGER")])
+            if NSView._traceInvalidation { NSView._trace("x11 sheet '\(_title)' transient for \(p.xid)") }
+        } else {
+            sheetParent = nil
+            XDeleteProperty(d, xid, Atom(XA_WM_TRANSIENT_FOR))
+            XDeleteProperty(d, xid, backend.atom("_NET_WM_WINDOW_TYPE"))
+            XDeleteProperty(d, xid, backend.atom("_NET_WM_STATE"))
+            if let s = styleBeforeSheet { styleBeforeSheet = nil; _styleMask = s }
+            if NSView._traceInvalidation { NSView._trace("x11 sheet '\(_title)' detached") }
+        }
+        applyDecorationHints()
         applySizeHints()
+        XFlush(d)
     }
 
     struct PixelRect { var x: Int32, y: Int32, w: Int32, h: Int32 }
@@ -109,11 +160,22 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         get { _title }
         set {
             _title = newValue
-            XStoreName(backend.display, xid, newValue)
-            let utf8 = Array(newValue.utf8)
-            utf8.withUnsafeBufferPointer { buf in
-                _ = XChangeProperty(backend.display, xid, backend.netWmName, backend.utf8String, 8, PropModeReplace, buf.baseAddress, Int32(buf.count))
-            }
+            applyNativeTitle()
+        }
+    }
+    /// `NSWindow.isDocumentEdited`: shown as "*" before the title, as GNOME's editors do.
+    private var isDocumentEdited = false
+    func setDocumentEdited(_ edited: Bool) {
+        guard edited != isDocumentEdited else { return }
+        isDocumentEdited = edited
+        applyNativeTitle()
+    }
+    private func applyNativeTitle() {
+        let shown = isDocumentEdited ? "*" + _title : _title
+        XStoreName(backend.display, xid, shown)
+        let utf8 = Array(shown.utf8)
+        utf8.withUnsafeBufferPointer { buf in
+            _ = XChangeProperty(backend.display, xid, backend.netWmName, backend.utf8String, 8, PropModeReplace, buf.baseAddress, Int32(buf.count))
         }
     }
 
@@ -163,6 +225,12 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         if !_styleMask.contains(.resizable) {
             hints.min_width = Int32(_frame.width * scale); hints.max_width = hints.min_width
             hints.min_height = Int32(_frame.height * scale); hints.max_height = hints.min_height
+        }
+        if sheetParent != nil {
+            // The manager places a transient itself unless the position is the user's.
+            hints.flags |= USPosition | PPosition
+            let px = pixelRect(_frame)
+            hints.x = px.x; hints.y = px.y
         }
         XSetWMNormalHints(backend.display, xid, &hints)
     }
