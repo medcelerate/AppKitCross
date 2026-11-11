@@ -307,7 +307,7 @@ import CoreText
         switch NSStringFromSelector(action) {
         case "copy:": return isSelectable && hasSelection
         case "cut:", "delete:": return isEditable && hasSelection
-        case "paste:": return isEditable && NSPasteboard.general.string(forType: .string) != nil
+        case "paste:": return isEditable && NSPasteboard.general.availableType(from: readablePasteboardTypes) != nil
         case "selectAll:": return isSelectable && !string.isEmpty
         case "pasteAsPlainText:", "pasteAsRichText:": return isEditable
         case "performFindPanelAction:", "performTextFinderAction:":
@@ -704,7 +704,7 @@ import CoreText
     @MainActor public convenience init(usingTextLayoutManager: Bool) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/acceptabledragtypes
     @MainActor open var acceptableDragTypes: [NSPasteboard.PasteboardType] {
-        isRichText && importsGraphics ? [.rtfd, .rtf, .fileURL, .png, .tiff, .string] : isRichText ? [.rtf, .string] : [.string]
+        isRichText && importsGraphics ? [.rtfd, .rtf, .fileURL, .png, .tiff, NSTextView._bmpType, .string] : isRichText ? [.rtf, .string] : [.string]
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/acceptsglyphinfo
     @MainActor open var acceptsGlyphInfo: Bool {

@@ -652,7 +652,7 @@ extension NSTextView {
 
     internal func _attachment(fromImageData data: Data, type: NSPasteboard.PasteboardType) -> NSAttributedString {
         let wrapper = FileWrapper(regularFileWithContents: data)
-        wrapper.preferredFilename = type == .tiff ? "Pasted Graphic.tiff" : "Pasted Graphic.png"
+        wrapper.preferredFilename = type == .tiff ? "Pasted Graphic.tiff" : type == NSTextView._bmpType ? "Pasted Graphic.bmp" : "Pasted Graphic.png"
         var attrs = typingAttributes
         attrs[.attachment] = NSTextAttachment(fileWrapper: wrapper)
         return NSAttributedString(string: "\u{FFFC}", attributes: attrs)
@@ -666,8 +666,9 @@ extension NSTextView {
             case .rtfd where isRichText && importsGraphics:
                 if let d = pb.data(forType: .rtfd), let w = _RTFDArchive.unarchive(d), let s = _RTFReader.readRTFD(w) { return s }
             case .rtf where isRichText:
-                if let d = pb.data(forType: .rtf), let s = _RTFReader(data: d).read() { return s }
-            case .png, .tiff:
+                // RTF holding only a picture (\pict, not read) reads as nothing: try the next type.
+                if let d = pb.data(forType: .rtf), let s = _RTFReader(data: d).read(), s.length > 0 { return s }
+            case .png, .tiff, NSTextView._bmpType:
                 guard isRichText && importsGraphics, let d = pb.data(forType: t) else { continue }
                 return _attachment(fromImageData: d, type: t)
             case .fileURL:
@@ -683,6 +684,9 @@ extension NSTextView {
         }
         return nil
     }
+
+    /// A bitmap from the system clipboard (Windows CF_DIB as a BMP file).
+    internal static let _bmpType = NSPasteboard.PasteboardType(PlatformClipboardImage.bmpType)
 
     /// AppKit's marker for text copied as whole words, which pastes with smart spacing.
     internal static let _smartPasteType = NSPasteboard.PasteboardType("NeXT smart paste pasteboard type")

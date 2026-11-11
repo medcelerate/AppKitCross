@@ -10,8 +10,13 @@ final class Win32Pasteboard: PlatformPasteboard {
     private static let textType = "public.utf8-plain-text"
     private var formats: [String: UINT] = [:]
 
+    /// Types other Windows applications exchange under their own registered names.
+    private static let standardNames = ["public.png": "PNG", "public.rtf": "Rich Text Format"]
+    private static func registered(_ name: String) -> UINT { name.withCString(encodedAs: UTF16.self) { RegisterClipboardFormatW($0) } }
+
     private func format(for type: String) -> UINT {
         if type == Win32Pasteboard.textType { return UINT(CF_UNICODETEXT) }
+        if let name = Win32Pasteboard.standardNames[type] { return Win32Pasteboard.registered(name) }
         if let f = formats[type] { return f }
         let f = ("AppKitCross:" + type).withCString(encodedAs: UTF16.self) { RegisterClipboardFormatW($0) }
         formats[type] = f
@@ -49,11 +54,25 @@ final class Win32Pasteboard: PlatformPasteboard {
             GlobalUnlock(h)
             result.append(PlatformPasteboardEntry(type: Win32Pasteboard.textType, data: Data(text.utf8)))
         }
-        for (type, f) in formats where IsClipboardFormatAvailable(f) {
-            guard let h = GetClipboardData(f), let p = GlobalLock(h) else { continue }
-            let size = Int(GlobalSize(h))
-            result.append(PlatformPasteboardEntry(type: type, data: Data(bytes: p, count: size)))
-            GlobalUnlock(h)
+        func data(_ f: UINT) -> Data? {
+            guard IsClipboardFormatAvailable(f), let h = GetClipboardData(f), let p = GlobalLock(h) else { return nil }
+            defer { GlobalUnlock(h) }
+            return Data(bytes: p, count: Int(GlobalSize(h)))
+        }
+        for (type, f) in formats {
+            if let d = data(f) { result.append(PlatformPasteboardEntry(type: type, data: d)) }
+        }
+        // What other applications put there: PNG and RTF by their registered names, and a
+        // bitmap (CF_DIBV5 / CF_DIB, which Windows synthesises from CF_BITMAP) as a BMP file.
+        for (type, name) in Win32Pasteboard.standardNames where !result.contains(where: { $0.type == type }) {
+            if var d = data(Win32Pasteboard.registered(name)) {
+                if type == "public.rtf", let nul = d.firstIndex(of: 0) { d = d.prefix(upTo: nul) }
+                result.append(PlatformPasteboardEntry(type: type, data: d))
+            }
+        }
+        if !result.contains(where: { $0.type == "public.png" || $0.type == PlatformClipboardImage.bmpType }),
+           let dib = data(UINT(CF_DIBV5)) ?? data(UINT(CF_DIB)), let bmp = PlatformClipboardImage.bmpFile(fromDIB: dib) {
+            result.append(PlatformPasteboardEntry(type: PlatformClipboardImage.bmpType, data: bmp))
         }
         return result
     }

@@ -274,6 +274,39 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testPastingAnImageMakesAnAttachment() {
+        MainActor.assumeIsolated {
+            let (_, _, tv) = window(text: "ab")
+            let paste = NSMenuItem(title: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+            let pb = NSPasteboard.general
+            _ = pb.clearContents()
+            XCTAssertFalse(tv.validateMenuItem(paste), "nothing to paste")
+            // A bitmap as Windows puts it on the clipboard (CF_DIB), read as a BMP file.
+            var dib = Data()
+            func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+            le(40, 4); le(2, 4); le(1, 4); le(1, 2); le(32, 2); le(0, 4); le(8, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+            dib.append(contentsOf: [0, 0, 255, 255, 255, 0, 0, 255])        // one red, one blue pixel (BGRA)
+            let bmp = PlatformClipboardImage.bmpFile(fromDIB: dib)!
+            XCTAssertEqual(Array(bmp.prefix(2)), [0x42, 0x4D])
+            XCTAssertEqual(bmp.count, 14 + dib.count)
+            XCTAssertEqual(Int(bmp[10]), 54, "pixels right after the 40-byte header")
+            XCTAssertEqual(NSImage(data: bmp)?.size, NSSize(width: 2, height: 1))
+            _ = pb.setData(bmp, forType: NSTextView._bmpType)
+            XCTAssertTrue(tv.validateMenuItem(paste), "an image pastes into rich text")
+            tv.setSelectedRange(NSRange(location: 1, length: 0))
+            tv.paste(nil)
+            XCTAssertEqual(tv.string, "a\u{FFFC}b")
+            let a = tv.textStorage?.attribute(NSAttributedString.Key("NSAttachment"), at: 1, effectiveRange: nil) as? NSTextAttachment
+            XCTAssertEqual(a?.fileWrapper?.preferredFilename, "Pasted Graphic.bmp")
+            XCTAssertEqual(tv.layoutManager?.attachmentSize(forGlyphAt: 1), NSSize(width: 2, height: 1))
+            // Plain text views take no images.
+            tv.isRichText = false
+            tv.importsGraphics = false
+            XCTAssertFalse(tv.validateMenuItem(paste))
+            _ = pb.clearContents()
+        }
+    }
+
     func testRTFDRoundTripKeepsAttachments() {
         MainActor.assumeIsolated {
             let png = pngImage(NSSize(width: 20, height: 10))
