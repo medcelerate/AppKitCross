@@ -57,14 +57,15 @@ import CoreText
     private func _makeLayerScene() -> PlatformLayerScene? {
         guard let cv = _contentView, let root = cv.layer else { return nil }
         cv.layoutSubtreeIfNeeded()
-        let content = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
-        var scene = root._buildScene(parentFlipped: false, parentBounds: content, scale: backingScaleFactor, frame: _layerSceneFrame)
-        // The toolbar and the window buttons overlays are further roots above the content.
+        // Every root is placed in the platform's content area: the content view sits at
+        // its bottom, under the bands a toolbar or title bar accessories take at the top.
+        let platformContent = NSRect(origin: .zero, size: _platformContentSize)
+        var scene = root._buildScene(parentFlipped: false, parentBounds: platformContent, scale: backingScaleFactor, frame: _layerSceneFrame)
+        // The toolbar, the accessories and the window buttons overlays are further roots above the content.
         var overlays: [NSView] = []
         if let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded(); overlays.append(t) }
         if let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded(); overlays.append(a) }
         if let buttons = _windowButtons, _showsWindowButtons { overlays.append(buttons) }
-        let platformContent = NSRect(origin: .zero, size: _platformContentSize)
         for overlay in overlays {
             guard let layer = overlay.layer else { continue }
             let extra = layer._buildScene(parentFlipped: false, parentBounds: platformContent, scale: backingScaleFactor, frame: _layerSceneFrame)

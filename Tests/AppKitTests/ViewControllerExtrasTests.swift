@@ -499,6 +499,52 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testHostedLayerSceneKeepsTheContentUnderTheStrip() {
+        MainActor.assumeIsolated {
+            // A layer-backed window composited natively (DirectComposition on Windows): the
+            // content root is placed at the bottom of the platform's content area, under the
+            // strip, where the software path draws it and where the clicks land.
+            final class Red: NSView { override func draw(_ r: NSRect) { NSColor.red.setFill(); NSBezierPath.fill(bounds) } }
+            let w = makeWindow()
+            defer { w.close() }
+            let content = Red(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+            content.autoresizingMask = [.width, .height]
+            content.wantsLayer = true
+            w.contentView = content
+            w.appearance = NSAppearance(named: .aqua)
+            let bottom = accessory(.bottom, size: NSSize(width: 10, height: 30))
+            w.addTitlebarAccessoryViewController(bottom)
+            let host = w._platformWindow as! HostWindow
+            w.display()
+            let software = _pixels(host.lastImage!)
+            host.layerHostingEnabled = true
+            w._updateLayerHosting()
+            XCTAssertTrue(w._hostsLayersNatively)
+            w.display()
+            let scene = host.hostedScene!
+            let root = scene.nodes[0]
+            XCTAssertEqual(root.size, CGSize(width: 400, height: 300))
+            XCTAssertEqual(root.transform.ty, 30, accuracy: 0.001, "the content root starts under the 30-point band (y down)")
+            XCTAssertEqual(scene.contentSize, CGSize(width: 400, height: 330))
+            let hosted = _pixels(host.lastImage!)
+            XCTAssertEqual(hosted.count, software.count)
+            // The strip's row is grey and the content's is red on both paths.
+            let image = host.lastImage!
+            let scale = Int(w.backingScaleFactor)
+            func pixel(_ data: Data, _ x: Int, _ y: Int) -> (r: Int, g: Int) {   // content points, y up
+                let i = (image.height - 1 - y * scale) * image.bytesPerRow + x * scale * 4
+                return (Int(data[i + 2]), Int(data[i + 1]))
+            }
+            for data in [software, hosted] {
+                let inContent = pixel(data, 200, 290), inBand = pixel(data, 200, 315)
+                XCTAssertTrue(inContent.r > 200 && inContent.g < 60, "red content under the band \(inContent)")
+                XCTAssertTrue(inBand.g > 150, "the band above it is not red \(inBand)")
+            }
+            host.layerHostingEnabled = false
+            w._updateLayerHosting()
+        }
+    }
+
     func testRightToLeftMirrorsLeadingAndTrailingButNotLeftAndRight() {
         MainActor.assumeIsolated {
             let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
