@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|panels picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -435,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "panels"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -575,8 +575,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(BoxDemoViewController())
         tabs.addChild(ControlsDemoViewController())
         tabs.addChild(DateDemoViewController())
+        tabs.addChild(DiffableDemoViewController())
         tabs.addChild(PanelsDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 720, height: 300)   // wide enough for the thirteen tabs
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 780, height: 300)   // wide enough for the fourteen tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1701,6 +1702,202 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         guard action.description == "toggleSection:", let button = sender as? NSButton else { return false }
         collection.toggleSectionCollapse(button.tag)
         button.title = (collection.collectionViewLayout as? NSCollectionViewFlowLayout)?.section(atIndexIsCollapsed: button.tag) == true ? "Show" : "Hide"
+        return true
+    }
+}
+
+// MARK: Diffable data sources tab (ADR-0029)
+
+/// A table (with section header rows) and a collection view, each driven by a diffable data
+/// source from the same snapshot. The buttons change the snapshot and apply it to both:
+/// Shuffle reorders the items across the two sections, Insert adds one, Delete removes the
+/// table's selected row (or the first item), Reload redraws every item with a new generation.
+/// `APPKITWIN_DIFFABLE_STEPS=shuffle,insert,delete,reload` runs steps on launch (screenshots).
+final class DiffableDemoViewController: NSViewController, NSSelectorHandling {
+    let table = NSTableView(frame: .zero)
+    let collection = NSCollectionView(frame: .zero)
+    let status = NSTextField(labelWithString: "Shuffle, insert, delete or reload: both views follow the snapshot.")
+    var tableSource: NSTableViewDiffableDataSource<String, Int>!
+    var collectionSource: NSCollectionViewDiffableDataSource<String, Int>!
+    var model: [(String, [Int])] = [("Warm", [1, 2, 3, 4]), ("Cool", [5, 6, 7, 8])]
+    var next = 9
+    var generation = 1
+    var seed: UInt64 = 2026
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Diffable"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    static func color(_ n: Int) -> NSColor {
+        NSColor(calibratedHue: CGFloat((n * 37) % 360) / 360, saturation: 0.55, brightness: 0.9, alpha: 1)
+    }
+    func label(_ n: Int) -> String { generation > 1 ? "Item \(n) · r\(generation)" : "Item \(n)" }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 260))
+        // The table: one column, a header row per section.
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
+        column.title = "Item"
+        column.width = 160
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.rowHeight = 20
+        table.style = .fullWidth
+        tableSource = NSTableViewDiffableDataSource<String, Int>(tableView: table) { [unowned self] tableView, _, _, n in
+            let id = NSUserInterfaceItemIdentifier("diffableCell")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? Self.makeCell(id)
+            cell.textField?.stringValue = self.label(n)
+            cell.imageView?.image = Self.dot(Self.color(n))
+            return cell
+        }
+        tableSource.sectionHeaderViewProvider = { tableView, _, section in
+            let id = NSUserInterfaceItemIdentifier("diffableHeader")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? Self.makeCell(id, header: true)
+            cell.textField?.stringValue = section
+            return cell
+        }
+        let tableScroll = NSScrollView()
+        tableScroll.hasVerticalScroller = true
+        tableScroll.borderType = .bezelBorder
+        tableScroll.documentView = table
+        tableScroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(tableScroll)
+
+        // The collection: swatches in two sections.
+        let flow = NSCollectionViewFlowLayout()
+        flow.itemSize = NSSize(width: 56, height: 56)
+        flow.minimumInteritemSpacing = 6
+        flow.minimumLineSpacing = 6
+        flow.sectionInset = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        collection.collectionViewLayout = flow
+        collection.register(CollectionDemoViewController.SwatchItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("swatch"))
+        collection.backgroundColors = [.controlBackgroundColor]
+        collectionSource = NSCollectionViewDiffableDataSource<String, Int>(collectionView: collection) { [unowned self] cv, ip, n in
+            let item = cv.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("swatch"), for: ip) as! CollectionDemoViewController.SwatchItem
+            (item.view as? CollectionDemoViewController.SwatchItem.SwatchView)?.color = Self.color(n)
+            item.textField?.stringValue = self.generation > 1 ? "\(n) r\(self.generation)" : "\(n)"
+            item.view.needsDisplay = true
+            return item
+        }
+        let collectionScroll = NSScrollView()
+        collectionScroll.hasVerticalScroller = true
+        collectionScroll.borderType = .bezelBorder
+        collectionScroll.documentView = collection
+        collectionScroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(collectionScroll)
+
+        let buttons = NSStackView(views: ["Shuffle", "Insert", "Delete", "Reload"].map { title in
+            let b = NSButton(title: title, target: self, action: Selector(("diffable\(title):")))
+            b.bezelStyle = .rounded
+            return b
+        })
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(buttons)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            tableScroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 8),
+            tableScroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            tableScroll.widthAnchor.constraint(equalToConstant: 180),
+            tableScroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            collectionScroll.topAnchor.constraint(equalTo: tableScroll.topAnchor),
+            collectionScroll.leadingAnchor.constraint(equalTo: tableScroll.trailingAnchor, constant: 10),
+            collectionScroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            collectionScroll.bottomAnchor.constraint(equalTo: tableScroll.bottomAnchor),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+        apply(animating: false)
+        for step in (ProcessInfo.processInfo.environment["APPKITWIN_DIFFABLE_STEPS"] ?? "").split(separator: ",") {
+            perform(String(step))
+        }
+    }
+
+    static func makeCell(_ id: NSUserInterfaceItemIdentifier, header: Bool = false) -> NSTableCellView {
+        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: 160, height: 20))
+        cell.identifier = id
+        let text = NSTextField(labelWithString: "")
+        text.frame = NSRect(x: header ? 4 : 24, y: 2, width: 140, height: 16)
+        text.autoresizingMask = [.width]
+        if header { text.font = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize); text.textColor = .secondaryLabelColor }
+        cell.addSubview(text)
+        cell.textField = text
+        if !header {
+            let image = NSImageView(frame: NSRect(x: 4, y: 3, width: 14, height: 14))
+            cell.addSubview(image)
+            cell.imageView = image
+        }
+        return cell
+    }
+
+    static func dot(_ color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 14, height: 14))
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 12, height: 12)).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    func snapshot(reloading: Bool = false) -> NSDiffableDataSourceSnapshot<String, Int> {
+        var s = NSDiffableDataSourceSnapshot<String, Int>()
+        for (section, items) in model {
+            s.appendSections([section])
+            s.appendItems(items, toSection: section)
+        }
+        if reloading { s.reloadItems(s.itemIdentifiers) }
+        return s
+    }
+
+    func apply(animating: Bool, reloading: Bool = false) {
+        let s = snapshot(reloading: reloading)
+        tableSource.apply(s, animatingDifferences: animating)
+        collectionSource.apply(s, animatingDifferences: animating)
+        status.stringValue = "\(s.numberOfItems) items in \(s.numberOfSections) sections."
+    }
+
+    /// A small deterministic generator, so scripted runs render the same on every platform.
+    func random(_ n: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int((seed >> 33) % UInt64(max(1, n)))
+    }
+
+    func perform(_ step: String) {
+        switch step {
+        case "shuffle":
+            var all = model.flatMap { $0.1 }
+            for i in stride(from: all.count - 1, to: 0, by: -1) { all.swapAt(i, random(i + 1)) }
+            let split = all.count / 2
+            model = [(model[0].0, Array(all[..<split])), (model[1].0, Array(all[split...]))]
+        case "insert":
+            let section = random(2)
+            model[section].1.insert(next, at: random(model[section].1.count + 1))
+            next += 1
+        case "delete":
+            let selected = table.selectedRow >= 0 ? tableSource.itemIdentifier(forRow: table.selectedRow) : nil
+            guard let victim = selected ?? model.flatMap({ $0.1 }).first else { return }
+            for i in model.indices { model[i].1.removeAll { $0 == victim } }
+        case "reload":
+            generation += 1
+            apply(animating: true, reloading: true)
+            return
+        default:
+            return
+        }
+        apply(animating: true)
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        let name = action.description
+        guard name.hasPrefix("diffable"), name.hasSuffix(":") else { return false }
+        perform(String(name.dropFirst("diffable".count).dropLast()).lowercased())
         return true
     }
 }

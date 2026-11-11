@@ -32,8 +32,8 @@ struct Node {
     int32_t id = 0;
     int32_t parent = -1;
     int32_t controlType = UIA_CustomControlTypeId;
-    std::wstring name, value, help, automationId, itemType;
-    bool hasName = false, hasValue = false, hasHelp = false, hasAutomationId = false, hasItemType = false;
+    std::wstring name, value, help, automationId, itemType, acceleratorKey;
+    bool hasName = false, hasValue = false, hasHelp = false, hasAutomationId = false, hasItemType = false, hasAcceleratorKey = false;
     RECT rect = {0, 0, 0, 0};
     uint32_t flags = 0;
     double rangeValue = 0, rangeMin = 0, rangeMax = 0, rangeStep = 0;
@@ -675,6 +675,7 @@ STDMETHODIMP Provider::GetPropertyValue(PROPERTYID propertyId, VARIANT *out) {
     case UIA_AutomationIdPropertyId: if (n->hasAutomationId) setStr(n->automationId); else setStr(L"AppKitCross." + std::to_wstring(n->id)); break;
     case UIA_LocalizedControlTypePropertyId: if (n->hasItemType) setStr(n->itemType); break;
     case UIA_ItemTypePropertyId: if (n->hasItemType) setStr(n->itemType); break;
+    case UIA_AcceleratorKeyPropertyId: if (n->hasAcceleratorKey) setStr(n->acceleratorKey); break;
     case UIA_IsEnabledPropertyId: setBool(n->flags & CUIA_ENABLED); break;
     case UIA_IsKeyboardFocusablePropertyId: setBool((n->flags & CUIA_FOCUSABLE) && (n->flags & CUIA_ENABLED)); break;
     case UIA_HasKeyboardFocusPropertyId: setBool(n->flags & CUIA_FOCUSED); break;
@@ -766,6 +767,7 @@ int32_t CUIARoot::hitTest(int32_t id, double x, double y) {
         int32_t hit = hitTest(*it, x, y);
         if (hit >= 0) return hit;
     }
+    if (n->flags & CUIA_SKIP_HIT_TEST) return -1;
     if (x >= n->rect.left && x < n->rect.right && y >= n->rect.top && y < n->rect.bottom) return id;
     return -1;
 }
@@ -803,6 +805,7 @@ void cuia_root_set_nodes(CUIARoot *root, const CUIANode *nodes, int32_t count) {
         n.help = copyString(src.help, n.hasHelp);
         n.automationId = copyString(src.automationId, n.hasAutomationId);
         n.itemType = copyString(src.itemType, n.hasItemType);
+        n.acceleratorKey = copyString(src.acceleratorKey, n.hasAcceleratorKey);
         n.rect.left = src.left; n.rect.top = src.top; n.rect.right = src.right; n.rect.bottom = src.bottom;
         n.flags = src.flags;
         n.rangeValue = src.rangeValue; n.rangeMin = src.rangeMin; n.rangeMax = src.rangeMax; n.rangeStep = src.rangeStep;
@@ -908,6 +911,35 @@ void cuia_root_raise_structure_changed(CUIARoot *root, int32_t id) {
     if (p) traceEvent("structure", id, UiaRaiseStructureChangedEvent(static_cast<IRawElementProviderSimple *>(p), StructureChangeType_ChildrenInvalidated, nullptr, 0));
 }
 
+void cuia_root_raise_structure_child(CUIARoot *root, int32_t parentId, int32_t childId, bool added) {
+    if (added) {
+        Provider *p = providerForEvent(root, childId);
+        if (!p) return;
+        int ids[2] = {UiaAppendRuntimeIdConstant, childId};
+        traceEvent("child added", childId, UiaRaiseStructureChangedEvent(static_cast<IRawElementProviderSimple *>(p), StructureChangeType_ChildAdded, ids, 2));
+    } else {
+        Provider *p = providerForEvent(root, parentId);
+        if (!p) return;
+        // The removed child's runtime id, as it was: [UiaAppendRuntimeId, id].
+        int ids[2] = {UiaAppendRuntimeIdConstant, childId};
+        traceEvent("child removed", childId, UiaRaiseStructureChangedEvent(static_cast<IRawElementProviderSimple *>(p), StructureChangeType_ChildRemoved, ids, 2));
+    }
+}
+
+void cuia_root_raise_menu(CUIARoot *root, int32_t id, bool opened) {
+    if (!root || root->destroyed || !root->hwnd) return;
+    Provider *p = nullptr;
+    if (opened) {
+        p = providerForEvent(root, id);
+    } else {
+        auto it = root->providers.find(id);
+        if (it != root->providers.end()) p = it->second;
+    }
+    if (!p) return;
+    traceEvent(opened ? "menu opened" : "menu closed", id,
+               UiaRaiseAutomationEvent(static_cast<IRawElementProviderSimple *>(p), opened ? UIA_MenuOpenedEventId : UIA_MenuClosedEventId));
+}
+
 void cuia_root_destroy(CUIARoot *root) {
     if (!root) return;
     root->destroyed = true;
@@ -951,6 +983,12 @@ bool cuia_root_debug_property(CUIARoot *root, int32_t id, int32_t propertyId, ui
     }
     VariantClear(&v);
     return writeString(s, buffer, capacity);
+}
+
+int32_t cuia_root_debug_hit_test(CUIARoot *root, double x, double y) {
+    if (!root) return -1;
+    root->ensureFresh();
+    return root->hitTest(root->rootId, x, y);
 }
 
 int32_t cuia_root_debug_child_count(CUIARoot *root, int32_t id) {

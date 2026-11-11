@@ -1120,36 +1120,55 @@ public struct Slider<Label: View, ValueLabel: View>: View, _PrimitiveView {
     let range: ClosedRange<Double>
     let step: Double?
     let onEditingChanged: (Bool) -> Void
+    /// The label's text: the slider's accessibility label (macOS draws it beside the
+    /// slider in a form; here it names the control for assistive technology).
+    let label: String?
     public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where Label == EmptyView, ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
         self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
         range = Double(bounds.lowerBound)...Double(bounds.upperBound)
         self.step = step.map { Double($0) }
         self.onEditingChanged = onEditingChanged
+        label = nil
     }
     public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }, @ViewBuilder label: () -> Label) where ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
         self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
         range = Double(bounds.lowerBound)...Double(bounds.upperBound)
         self.step = step.map { Double($0) }
         self.onEditingChanged = onEditingChanged
+        self.label = (label() as? Text)?._string
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range, step: step, label: label) }
 }
 
 @MainActor
 final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
     var value: Binding<Double>
-    init(value: Binding<Double>, range: ClosedRange<Double>) {
+    var step: Double?
+    var label: String?
+    init(value: Binding<Double>, range: ClosedRange<Double>, step: Double? = nil, label: String? = nil) {
         self.value = value
+        self.step = step
+        self.label = label
         let s = NSSlider(frame: NSRect(x: 0, y: 0, width: 120, height: 20))
         s.minValue = range.lowerBound
         s.maxValue = range.upperBound
         s.doubleValue = value.wrappedValue
+        // The step is what an increment from assistive technology (and the arrow keys) moves.
+        if let step, step > 0 { s.altIncrementValue = step }
+        if let label, !label.isEmpty { s.setAccessibilityLabel(label) }
         super.init(control: s)
         s.target = s
         s.action = Selector(("swiftUISliderAction:"))
         s.setActionHandler(for: Selector(("swiftUISliderAction:"))) { [weak self] _ in
             guard let self else { return }
-            if self.value.wrappedValue != self.control.doubleValue { self.value.wrappedValue = self.control.doubleValue }
+            var v = self.control.doubleValue
+            if let step = self.step, step > 0 {
+                // A stepped slider only takes the range's steps, as SwiftUI's does.
+                let lo = self.control.minValue
+                v = min(self.control.maxValue, lo + ((v - lo) / step).rounded() * step)
+                if v != self.control.doubleValue { self.control.doubleValue = v }
+            }
+            if self.value.wrappedValue != v { self.value.wrappedValue = v }
         }
     }
     override func update(from other: _Primitive) {
@@ -1157,6 +1176,13 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         guard let o = other as? _SliderPrimitive else { return }
         value = o.value
         control.minValue = o.control.minValue; control.maxValue = o.control.maxValue
+        if o.step != step { step = o.step; control.altIncrementValue = (step ?? 0) > 0 ? step! : -1 }
+        if o.label != label {
+            // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
+            // above re-applies its own after the update.
+            label = o.label
+            control.setAccessibilityLabel(label.flatMap { $0.isEmpty ? nil : $0 })
+        }
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1369,7 +1395,10 @@ public struct ProgressView<Label: View, CurrentValueLabel: View>: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let label { label }
-            _ProgressIndicator(value: value, total: total)
+            // The indicator is an AXProgressIndicator (UIA ProgressBar, AT-SPI progress bar)
+            // with the value in 0...total and the label as its name; an indeterminate
+            // one (an AXBusyIndicator when circular) has no value.
+            _ProgressIndicator(value: value, total: total, label: (label as? Text)?._string)
             if let currentValueLabel { currentValueLabel.font(.caption) }
         }
     }
@@ -1381,24 +1410,33 @@ struct _ProgressIndicator: View, _PrimitiveView {
     typealias Body = Never
     let value: Double?
     let total: Double
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _ProgressPrimitive(value: value, total: total) }
+    let label: String?
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ProgressPrimitive(value: value, total: total, label: label) }
 }
 
 @MainActor
 final class _ProgressPrimitive: _ControlPrimitive<NSProgressIndicator> {
     var value: Double?
     var total: Double
-    init(value: Double?, total: Double) {
-        self.value = value; self.total = total
+    var label: String?
+    init(value: Double?, total: Double, label: String?) {
+        self.value = value; self.total = total; self.label = label
         let p = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 160, height: 20))
         p.minValue = 0
         p.maxValue = max(total, 0.0001)
+        if let label, !label.isEmpty { p.setAccessibilityLabel(label) }
         super.init(control: p)
     }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ProgressPrimitive else { return }
         value = o.value; total = o.total
+        if o.label != label {
+            // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
+            // above re-applies its own after the update.
+            label = o.label
+            control.setAccessibilityLabel(label.flatMap { $0.isEmpty ? nil : $0 })
+        }
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
