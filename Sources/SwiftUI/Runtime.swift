@@ -514,15 +514,52 @@ final class _ContainerView: NSView {
     var mouseDownHandler: ((NSEvent) -> Bool)?
     var mouseUpHandler: ((NSEvent) -> Void)?
     var hoverHandler: ((Bool) -> Void)?
+    var continuousHoverHandler: ((HoverPhase) -> Void)?
+    var continuousHoverSpace: CoordinateSpace = .local
+    /// The tracking area behind `.onHover`/`.onContinuousHover`, kept to the bounds.
+    private var hoverArea: NSTrackingArea?
+    /// The hover handlers changed: the area is rebuilt before the window next evaluates it.
+    var needsTrackingAreaUpdate = false { didSet { if needsTrackingAreaUpdate { _setNeedsUpdateTrackingAreas() } } }
     override func draw(_ dirtyRect: NSRect) { drawHandler?(dirtyRect, self) }
+    override func updateTrackingAreas() {
+        if let a = hoverArea { removeTrackingArea(a); hoverArea = nil }
+        if hoverHandler != nil || continuousHoverHandler != nil {
+            var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+            if continuousHoverHandler != nil { options.insert(.mouseMoved) }
+            let a = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+            addTrackingArea(a)
+            hoverArea = a
+        }
+        super.updateTrackingAreas()
+    }
+    private func hoverPoint(_ event: NSEvent) -> CGPoint {
+        let local = convert(event.locationInWindow, from: nil)
+        switch continuousHoverSpace {
+        case .local: return local
+        case .global, .named:
+            // The hosting root's space, as GeometryReader reports global frames.
+            var root: NSView = self
+            while let s = root.superview, !(root is any NSHostingRootHost) { root = s }
+            return root.convert(local, from: self)
+        }
+    }
     override func mouseDown(with event: NSEvent) {
         if mouseDownHandler?(event) != true { super.mouseDown(with: event) }
     }
     override func mouseUp(with event: NSEvent) {
         if let h = mouseUpHandler { h(event) } else { super.mouseUp(with: event) }
     }
-    override func mouseEntered(with event: NSEvent) { hoverHandler?(true) }
-    override func mouseExited(with event: NSEvent) { hoverHandler?(false) }
+    override func mouseEntered(with event: NSEvent) {
+        hoverHandler?(true)
+        continuousHoverHandler?(.active(hoverPoint(event)))
+    }
+    override func mouseExited(with event: NSEvent) {
+        hoverHandler?(false)
+        continuousHoverHandler?(.ended)
+    }
+    override func mouseMoved(with event: NSEvent) {
+        if let h = continuousHoverHandler { h(.active(hoverPoint(event))) } else { super.mouseMoved(with: event) }
+    }
     override var acceptsFirstResponder: Bool { false }
     /// Set by a custom button: the container is then an AXButton that presses through it.
     var accessibilityPress: (() -> Void)?
@@ -548,7 +585,7 @@ final class _ContainerView: NSView {
     var installedRecognizers: [NSGestureRecognizer] = []
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
-        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil, installedRecognizers.isEmpty { return nil }
+        if hit === self, passesThroughHits, mouseDownHandler == nil, hoverHandler == nil, continuousHoverHandler == nil, installedRecognizers.isEmpty { return nil }
         return hit
     }
 }

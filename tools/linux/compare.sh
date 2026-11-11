@@ -12,8 +12,8 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=controls "${BIN:-./.build/debug
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=date "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 # The SwiftUI demo's Data tab (Table) as a second capture.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_DEMO_TAB=data "${BIN:-./.build/debug/HelloWindow}" --swiftui --screenshot "$OUT"
-# The Layout Demo's Combo and Outline tabs, and the Outline tab mirrored right to left.
-for tab in combo outline; do
+# The Layout Demo's Combo, Outline and Pages tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"

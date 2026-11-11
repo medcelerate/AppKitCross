@@ -16,6 +16,7 @@ by a capture of the live window.
 | Layout Demo, Combo tab: two `NSComboBox`es (one over its items with completion, one over a data source) | ![macOS](images/compare/layout-combo-macos.png) | ![Linux](images/compare/layout-combo-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
 | Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Pages tab: an `NSPageController` over three pages (Back/Next, a segmented control through `takeSelectedIndexFrom:`, the transition style), pages that highlight under the pointer through `NSTrackingArea`; the window carries a trailing title bar accessory while the tab shows | ![macOS](images/compare/layout-pages-macos.png) | ![Linux](images/compare/layout-pages-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
