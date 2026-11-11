@@ -197,6 +197,9 @@ import CoreText
                 MainActor.assumeIsolated { self?._relayout() }
             })
         }
+        _observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: parent, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?._parentDidBecomeKey() }
+        })
         _observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?._windowIsClosing() }
         })
@@ -380,6 +383,14 @@ import CoreText
         case .semitransient: if let k = key, k === _positioningView?.window { performClose(nil) }
         case .applicationDefined: break
         }
+    }
+
+    /// The parent window took the keyboard while the popover is up (a click on its title
+    /// bar: on Win32 the popover's deactivation arrives before the parent's activation, so
+    /// `_windowDidResignKey` saw no key window). Transient and semitransient popovers close.
+    internal func _parentDidBecomeKey() {
+        guard _window != nil, !_isClosing, _behavior != .applicationDefined else { return }
+        performClose(nil)
     }
 
     /// Escape in the popover closes it unless the application decides (`.applicationDefined`).

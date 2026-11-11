@@ -62,8 +62,10 @@ needed by popovers and is not included.
   `.applicationDefined` only through `close()`/`performClose(_:)`. Closing by a click goes
   through `performClose`, so `popoverShouldClose` can refuse (the generator config now
   defaults that optional method to true, as AppKit assumes). The popover's window
-  resigning key (the parent's title bar clicked, another application) closes a transient
-  popover and a semitransient one whose parent took the keyboard. Escape in the popover
+  resigning key (another application) closes a transient popover; the parent window
+  becoming key while the popover is up (its title bar clicked: on Win32 the popover's
+  deactivation arrives before the parent's activation, so the resign alone cannot tell)
+  closes transient and semitransient popovers. Escape in the popover
   closes it unless the behaviour is application-defined. A shown popover is kept alive by
   the application until it closes, as a shown panel would be.
 - **Keyboard.** The popover's window is made key. On Wayland the subsurface cannot take

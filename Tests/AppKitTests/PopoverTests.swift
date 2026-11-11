@@ -362,6 +362,19 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(p.isShown, "nor is the desktop")
             clickScreen(w.convertPoint(toScreen: NSPoint(x: 300, y: 250)), in: w)
             XCTAssertFalse(p.isShown, "a click in the parent's content closes it")
+            // The parent's title bar clicked: the window system activates the parent (the
+            // popover resigns first, with no key window yet, as on Win32) and the popover closes.
+            p.show(relativeTo: v.bounds, of: v, preferredEdge: .minY)
+            XCTAssertTrue(p._window!.isKeyWindow)
+            w.makeKey()
+            XCTAssertFalse(p.isShown, "the parent taking the keyboard closes it")
+            XCTAssertTrue(w.isKeyWindow)
+            // An application-defined popover stays through the same.
+            let a = makePopover(.applicationDefined)
+            a.show(relativeTo: v.bounds, of: v, preferredEdge: .minY)
+            w.makeKey()
+            XCTAssertTrue(a.isShown)
+            a.close()
             w.close(); other.close()
         }
     }
