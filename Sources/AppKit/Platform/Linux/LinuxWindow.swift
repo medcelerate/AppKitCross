@@ -603,6 +603,16 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
                     if let owner { owner.platformWindowWillClose() } else { close() }
                 }
             }
+        case LeaveNotify:
+            // The pointer left the window (NotifyGrab/NotifyUngrab modes mean a grab, not a
+            // move out): a far-away move lets the tracking areas and hover states exit.
+            let c = event.xcrossing
+            if c.mode == NotifyNormal, pressedButtons == 0 {
+                backend.lastEventTime = c.time
+                let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(c.state),
+                                            timestamp: seconds(c.time), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+                owner?.platformWindowDispatch(e)
+            }
         case FocusIn:
             isKey = true
             owner?.platformWindowDidBecomeKey()
@@ -614,7 +624,8 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
             backend.lastEventTime = b.time
             switch b.button {
             case 4, 5, 6, 7:
-                let vertical = b.button == 4 || b.button == 5
+                // Shift and the wheel scroll sideways, as AppKit reports it (up: left).
+                let vertical = (b.button == 4 || b.button == 5) && b.state & UInt32(ShiftMask) == 0
                 let delta: CGFloat = (b.button == 4 || b.button == 6) ? 3 : -3
                 let e = NSEvent._scrollEvent(location: contentPoint(x: b.x, y: b.y), modifierFlags: modifierFlags(b.state), timestamp: seconds(b.time),
                                              windowNumber: windowNumber(), deltaX: vertical ? 0 : delta, deltaY: vertical ? delta : 0, precise: false)
