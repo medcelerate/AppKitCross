@@ -676,4 +676,30 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             doc.close()
         }
     }
+
+    func testPagesPrintUnderTheAquaAppearanceEvenFromADarkWindow() {
+        MainActor.assumeIsolated {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: .darkAqua)
+            let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            text.string = "Dark window, light page."
+            window.contentView?.addSubview(text)
+            XCTAssertTrue(text.effectiveAppearance.isDark)
+            XCTAssertTrue(text.drawsBackground)
+            let info = letterInfo()
+            let op = NSPrintOperation(view: text, printInfo: info)
+            guard let image = op._previewImage(page: 1, scale: 1) else { return XCTFail("no preview") }
+            let pixels = _pixels(image)
+            // The text view is centred on the page; sample inside it, away from the text.
+            let p = op._paginate().location(for: op._paginate().rect(forPage: 1)!)
+            let x = Int(p.x) + 290, y = image.height - 1 - (Int(p.y) + 10)
+            let i = y * image.bytesPerRow + x * 4
+            XCTAssertGreaterThan(pixels[i], 240, "the text view's background prints white, not the dark appearance's")
+            XCTAssertGreaterThan(pixels[i + 1], 240)
+            XCTAssertGreaterThan(pixels[i + 2], 240)
+            XCTAssertFalse(NSGraphicsContext._printing)
+            XCTAssertTrue(text.effectiveAppearance.isDark, "the window keeps its appearance")
+            window.close()
+        }
+    }
 }

@@ -342,6 +342,13 @@ import CoreText
 
     // MARK: Drawing
 
+    /// The appearance dynamic colours resolve under while this view draws: its effective
+    /// appearance on screen, aqua while `NSPrintOperation` draws a page or preview (AppKit
+    /// prints light whatever the window shows, so a dark text view prints on white; ADR-0022).
+    internal var _drawingAppearance: NSAppearance {
+        NSGraphicsContext._printing ? NSAppearance._printing : effectiveAppearance
+    }
+
     /// Draws this view and its subviews into `ctx`, which is in the superview's coordinate
     /// system. `dirtyRect` is in superview coordinates too.
     internal func _displayHierarchy(in ctx: CGContext, dirtyRect: NSRect) {
@@ -381,7 +388,7 @@ import CoreText
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         _dirtyRect = localDirty
         draw(localDirty)
@@ -721,7 +728,7 @@ import CoreText
         // Layer contents redrawn during the capture resolve dynamic colours under the
         // view's appearance (a dark window stays dark in the bitmap).
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
         NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
@@ -1886,7 +1893,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }
