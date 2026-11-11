@@ -411,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|collection|grid|box picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -426,7 +426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "collection", "grid", "box"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -555,10 +555,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(MetalDemoViewController())
         tabs.addChild(ComboDemoViewController())
         tabs.addChild(OutlineDemoViewController())
+        tabs.addChild(PagesDemoViewController())
         tabs.addChild(CollectionDemoViewController())
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 520, height: 300)   // wide enough for the nine tabs
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 560, height: 300)   // wide enough for the ten tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1150,6 +1151,139 @@ final class OutlineDemoViewController: NSViewController, NSOutlineViewDataSource
     func outlineViewSelectionDidChange(_ notification: Notification) {
         if let n = outline.item(atRow: outline.selectedRow) as? Node { status.stringValue = "Selected: \(n.name) (level \(outline.level(forItem: n)))" }
         else { status.stringValue = "Nothing selected." }
+    }
+}
+
+/// The Layout Demo's Pages tab: an `NSPageController` over three pages with Back and
+/// Next buttons, a segmented control bound through `takeSelectedIndexFrom`, a transition
+/// style pop-up, and a trailing title bar accessory while the tab shows. The pages
+/// highlight under the pointer through `NSTrackingArea` (ADR-0023).
+final class PagesDemoViewController: NSViewController, NSPageControllerDelegate, NSSelectorHandling {
+    /// A page that lights up while the pointer is over it and shows the hand over its hot spot.
+    final class HoverPage: NSView {
+        var color = NSColor.white
+        var name = ""
+        var hovering = false { didSet { needsDisplay = true } }
+        var inHotSpot = false { didSet { needsDisplay = true } }
+        var hotSpot: NSRect { NSRect(x: bounds.maxX - 70, y: bounds.minY + 16, width: 54, height: 54) }
+        override var isOpaque: Bool { true }
+        override func updateTrackingAreas() {
+            trackingAreas.forEach { removeTrackingArea($0) }
+            addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: ["part": "page"]))
+            addTrackingArea(NSTrackingArea(rect: hotSpot, options: [.mouseEnteredAndExited, .cursorUpdate, .activeInKeyWindow], owner: self, userInfo: ["part": "hot"]))
+            super.updateTrackingAreas()
+        }
+        override func mouseEntered(with event: NSEvent) {
+            if event.trackingArea?.userInfo?["part"] as? String == "hot" { inHotSpot = true } else { hovering = true }
+        }
+        override func mouseExited(with event: NSEvent) {
+            if event.trackingArea?.userInfo?["part"] as? String == "hot" { inHotSpot = false } else { hovering = false }
+        }
+        override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+        override func draw(_ dirtyRect: NSRect) {
+            (hovering ? color.blended(withFraction: 0.15, of: .black) ?? color : color).setFill()
+            NSBezierPath(rect: bounds).fill()
+            if hovering {
+                // Orange, so it reads apart from the blue keyboard focus ring.
+                NSColor.systemOrange.setStroke()
+                let ring = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
+                ring.lineWidth = 3
+                ring.stroke()
+            }
+            (inHotSpot ? NSColor.systemOrange : NSColor.labelColor.withAlphaComponent(0.4)).setFill()
+            NSBezierPath(roundedRect: hotSpot, xRadius: 8, yRadius: 8).fill()
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24, weight: .semibold), .foregroundColor: NSColor.labelColor]
+            name.draw(at: NSPoint(x: 20, y: bounds.maxY - 50), withAttributes: attrs)
+            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+            "Hover to highlight; the square shows the hand. Scroll, swipe or arrow to page.".draw(at: NSPoint(x: 20, y: bounds.minY + 16), withAttributes: hint)
+        }
+    }
+
+    let pages = NSPageController()
+    let picker = NSSegmentedControl(labels: ["Red", "Green", "Blue"], trackingMode: .selectOne, target: nil, action: nil)
+    let style = NSPopUpButton(frame: .zero, pullsDown: false)
+    let status = NSTextField(labelWithString: "Page 1 of 3")
+    let accessory = NSTitlebarAccessoryViewController()
+    let objects: [(String, NSColor)] = [("Red", NSColor(red: 1, green: 0.85, blue: 0.85, alpha: 1)), ("Green", NSColor(red: 0.85, green: 1, blue: 0.85, alpha: 1)), ("Blue", NSColor(red: 0.85, green: 0.9, blue: 1, alpha: 1))]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Pages"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let back = NSButton(title: "Back", target: pages, action: Selector(("navigateBack:")))
+        let next = NSButton(title: "Next", target: pages, action: Selector(("navigateForward:")))
+        picker.target = pages
+        picker.action = Selector(("takeSelectedIndexFrom:"))
+        picker.selectedSegment = 0
+        style.addItems(withTitles: ["Stack history", "Stack book", "Horizontal strip"])
+        style.target = self
+        style.action = Selector(("styleChanged:"))
+        pages.delegate = self
+        pages.arrangedObjects = objects.map { $0.0 }
+        let bar = NSStackView(views: [back, next, picker, style])
+        bar.orientation = .horizontal
+        bar.spacing = 8
+        for v in [bar, pages.view, status] { v.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(v) }
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            bar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            pages.view.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 8),
+            pages.view.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            pages.view.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            pages.view.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8),
+        ])
+        // The title bar accessory: a label at the trailing end of the title bar.
+        let label = NSTextField(labelWithString: "Pages ⌘")
+        label.font = NSFont.systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.sizeToFit()
+        accessory.view = label
+        accessory.layoutAttribute = .trailing
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if let w = view.window, !w.titlebarAccessoryViewControllers.contains(where: { $0 === accessory }) { w.addTitlebarAccessoryViewController(accessory) }
+    }
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        accessory.removeFromParent()
+    }
+
+    func pageController(_ pageController: NSPageController, identifierFor object: Any) -> NSPageController.ObjectIdentifier { "page" }
+    func pageController(_ pageController: NSPageController, viewControllerForIdentifier identifier: NSPageController.ObjectIdentifier) -> NSViewController {
+        let vc = NSViewController()
+        vc.view = HoverPage(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        return vc
+    }
+    func pageController(_ pageController: NSPageController, prepare viewController: NSViewController, with object: Any?) {
+        guard let page = viewController.view as? HoverPage, let name = object as? String, let entry = objects.first(where: { $0.0 == name }) else { return }
+        page.name = name
+        page.color = entry.1
+        page.needsDisplay = true
+    }
+    func pageController(_ pageController: NSPageController, didTransitionTo object: Any) {
+        status.stringValue = "Page \(pageController.selectedIndex + 1) of 3"
+        picker.selectedSegment = pageController.selectedIndex
+        pageController.completeTransition()
+    }
+    func pageControllerWillStartLiveTransition(_ pageController: NSPageController) { status.stringValue = "Paging…" }
+    func pageControllerDidEndLiveTransition(_ pageController: NSPageController) { status.stringValue = "Page \(pageController.selectedIndex + 1) of 3" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch NSStringFromSelector(action) {
+        case "styleChanged:":
+            pages.transitionStyle = [.stackHistory, .stackBook, .horizontalStrip][max(0, style.indexOfSelectedItem)]
+            return true
+        default: return false
+        }
     }
 }
 

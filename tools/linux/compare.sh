@@ -15,6 +15,8 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=grid "${BIN:-./.build/debug/Hel
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=box "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 # The Layout Demo's Combo and Outline tabs, and the Outline tab mirrored right to left.
 for tab in combo outline; do
+# The Layout Demo's Combo, Outline and Pages tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 mkdir -p "$OUT/rtl"

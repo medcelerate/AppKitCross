@@ -335,8 +335,12 @@ final class _NSToolbarView: NSView {
     override var isOpaque: Bool { false }
 
     /// Applies the window's style: the window calls this before placing the view.
-    func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool) {
-        let m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar)
+    /// Room the window keeps free at the row's ends for title bar accessories that share
+    /// the band with a unified toolbar (NSTitlebarAccessoryViewController).
+    func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool, accessoryInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)) {
+        var m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar)
+        m.leadingInset += accessoryInsets.leading
+        m.trailingInset += accessoryInsets.trailing
         if m != metrics { metrics = m; needsLayout = true; needsDisplay = true }
     }
 
