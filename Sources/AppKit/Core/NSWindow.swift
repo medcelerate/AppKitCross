@@ -1195,6 +1195,11 @@ import CoreText
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
         _trackingActivityDidChange()
+        // A window the window system activated (a click on it) is the main window too when
+        // it can be one, as on macOS; a utility panel (the Fonts or Colors panel) cannot, so
+        // the document window stays main and nil-target actions sent while the panel is
+        // key still reach the document's first responder.
+        if canBecomeMain, !_isMain { makeMain() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomemain()
     @MainActor open func becomeMain() {
@@ -2102,7 +2107,7 @@ import CoreText
             let hit = _hitTest(event.locationInWindow)
             if NSView._traceInvalidation { NSView._trace("mouse down '\(_title)' at \(event.locationInWindow) -> \(hit.map { String(describing: type(of: $0)) } ?? "window") accessory host \(_accessoryHost.map { "\($0.frame) hidden \($0.isHidden) bands \($0.paintedBands)" } ?? "none")") }
             _mouseDownView = hit
-            if let v = hit, v.acceptsFirstResponder, firstResponder !== v { _ = makeFirstResponder(v) }
+            if let v = hit, v._takesFirstResponderOnMouseDown, firstResponder !== v { _ = makeFirstResponder(v) }
             _dispatchMouse(event, to: hit ?? self)
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             _lastMouseLocation = _pointerLocation(of: event)

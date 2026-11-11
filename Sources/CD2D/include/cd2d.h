@@ -314,6 +314,10 @@ bool cd2d_print_job_close(CD2DPrintJob *job);
 /// Abandons the job and frees it.
 void cd2d_print_job_abort(CD2DPrintJob *job);
 
+// The common colour dialog (ChooseColorW). `rgb` is COLORREF (0x00BBGGRR) in and out, with
+// the 16 custom colours kept for the process. Returns false when cancelled.
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb);
+
 // Drag and drop (OLE; ADR-0011 stage B)
 /// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit
 /// pasteboard type; "public.utf8-plain-text" travels as CF_UNICODETEXT, "public.file-url"

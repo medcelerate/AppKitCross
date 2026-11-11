@@ -16,6 +16,7 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
+#include <commdlg.h>
 #include <shobjidl.h>
 #include <winspool.h>
 #include <commdlg.h>
@@ -1349,6 +1350,23 @@ void cd2d_print_job_abort(CD2DPrintJob *job) {
     if (job->pageOpen && job->dc) { job->dc->EndDraw(); job->dc->SetTarget(nullptr); }
     if (job->target) job->target->Cancel();
     releasePrintJob(job);
+}
+
+// ---------------------------------------------------------------- Colour dialog
+
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb) {
+    if (!rgb) return false;
+    static COLORREF custom[16] = { 0 };
+    CHOOSECOLORW cc;
+    ZeroMemory(&cc, sizeof(cc));
+    cc.lStructSize = sizeof(cc);
+    cc.hwndOwner = static_cast<HWND>(ownerHwnd);
+    cc.rgbResult = *rgb;
+    cc.lpCustColors = custom;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN | CC_ANYCOLOR;
+    if (!ChooseColorW(&cc)) return false;
+    *rgb = cc.rgbResult;
+    return true;
 }
 
 // ---------------------------------------------------------------- DirectWrite

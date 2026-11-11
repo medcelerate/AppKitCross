@@ -25,8 +25,9 @@ targets += [
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
                          .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
-                         // ADR-0022: printers (winspool), the PrintDlgEx dialog (comdlg32) and the
-                         // print document package target's CLSID/IIDs (uuid).
+                         // ADR-0022: printers (winspool), the PrintDlgEx dialog and the common colour
+                         // dialog (comdlg32, also behind APPKITWIN_COLOR_PANEL=native), print tickets
+                         // (prntvpt) and the print document package target's CLSID/IIDs (uuid).
                          .linkedLibrary("winspool"), .linkedLibrary("comdlg32"), .linkedLibrary("prntvpt"), .linkedLibrary("uuid")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang

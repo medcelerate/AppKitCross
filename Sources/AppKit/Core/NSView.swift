@@ -1195,6 +1195,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needspaneltobecomekey
     @MainActor open var needsPanelToBecomeKey: Bool { false }
+    /// Whether a mouse down on the view makes it the first responder. Views that take the
+    /// keyboard (text, tables, lists) do; buttons, sliders, segmented controls and colour
+    /// wells act on the click without taking focus, as on macOS without Full Keyboard
+    /// Access, so the document's text view keeps the keyboard and the responder chain the
+    /// panels send through (`changeFont:`, `changeColor:`) still starts at it.
+    @MainActor internal var _takesFirstResponderOnMouseDown: Bool { acceptsFirstResponder }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needstodraw(_:)
     @MainActor open func needsToDraw(_ rect: NSRect) -> Bool { (_dirtyRect ?? bounds).intersects(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needsupdateconstraints

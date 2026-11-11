@@ -26,8 +26,8 @@ public protocol NSPasteboardReading: NSObjectProtocol {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSPasteboardReading {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardreading/readabletypes(for:)
-    public static func readableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { unimplementedOptionalRequirement() }
+    public static func readableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardreading/readingoptions(fortype:pasteboard:)
-    public static func readingOptions(forType type: NSPasteboard.PasteboardType, pasteboard: NSPasteboard) -> NSPasteboard.ReadingOptions { unimplementedOptionalRequirement() }
+    public static func readingOptions(forType type: NSPasteboard.PasteboardType, pasteboard: NSPasteboard) -> NSPasteboard.ReadingOptions { return .asData }
 }
 
