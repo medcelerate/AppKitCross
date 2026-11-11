@@ -38,6 +38,7 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
     private var _data1 = 0, _data2 = 0
     private var _trackingNumber = 0
     private var _userData: UnsafeMutableRawPointer? = nil
+    private var _trackingArea: NSTrackingArea? = nil
     private var _phase: NSEvent.Phase = []
     private var _momentumPhase: NSEvent.Phase = []
     private var _magnification: CGFloat = 0
@@ -56,6 +57,15 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
         _timestamp = timestamp
         _windowNumber = windowNumber
         super.init()
+    }
+
+    /// Window helper: a mouse-entered or mouse-exited event for a tracking area (NSTrackingArea).
+    internal static func _enterExitEvent(type: NSEvent.EventType, location: NSPoint, modifierFlags: NSEvent.ModifierFlags,
+                                         timestamp: TimeInterval, windowNumber: Int, trackingArea: NSTrackingArea) -> NSEvent {
+        let e = NSEvent(type: type, location: location, modifierFlags: modifierFlags, timestamp: timestamp, windowNumber: windowNumber)
+        e._trackingArea = trackingArea
+        e._trackingNumber = Int(bitPattern: UInt(bitPattern: ObjectIdentifier(trackingArea).hashValue))
+        return e
     }
 
     /// Backend helper: a scroll-wheel event.
@@ -295,7 +305,7 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/trackswipeevent(options:dampenamountthresholdmin:max:usinghandler:)
     open func trackSwipeEvent(options: NSEvent.SwipeTrackingOptions = [], dampenAmountThresholdMin minDampenThreshold: CGFloat, max maxDampenThreshold: CGFloat, usingHandler trackingHandler: @escaping (CGFloat, NSEvent.Phase, Bool, UnsafeMutablePointer<ObjCBool>) -> Void) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/trackingarea
-    open var trackingArea: NSTrackingArea? { nil }
+    open var trackingArea: NSTrackingArea? { _trackingArea }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/trackingnumber
     open var trackingNumber: Int { _trackingNumber }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/type
