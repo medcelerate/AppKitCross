@@ -20,6 +20,7 @@
 #include <winspool.h>
 #include <commdlg.h>
 #include <documenttarget.h>
+#include <prntvpt.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlguid.h>
@@ -1103,8 +1104,12 @@ bool cd2d_printer_names(uint16_t **names, uint32_t *length) {
     return copyUTF16(joined, names, length);
 }
 
+void cd2d_print_free(void *buffer) { free(buffer); }
+
 bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDialogSettings *s, uint16_t **chosenName, uint32_t *chosenLength) {
     if (!s) return false;
+    s->driverSettings = nullptr;
+    s->driverSettingsSize = 0;
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     PRINTDLGEXW dlg = {};
     dlg.lStructSize = sizeof(dlg);
@@ -1165,6 +1170,12 @@ bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDi
         if (dlg.hDevMode) {
             DEVMODEW *dm = (DEVMODEW *)GlobalLock(dlg.hDevMode);
             if (dm) {
+                // The whole DEVMODE goes back to the caller for the job's print ticket.
+                uint32_t size = dm->dmSize + dm->dmDriverExtra;
+                if (size > 0 && size <= (uint32_t)GlobalSize(dlg.hDevMode)) {
+                    s->driverSettings = malloc(size);
+                    if (s->driverSettings) { memcpy(s->driverSettings, dm, size); s->driverSettingsSize = size; }
+                }
                 if (dm->dmFields & DM_ORIENTATION) s->landscape = dm->dmOrientation == DMORIENT_LANDSCAPE;
                 if (dm->dmFields & DM_COPIES) s->copies = dm->dmCopies > 0 ? dm->dmCopies : s->copies;
                 if ((dm->dmFields & DM_PAPERWIDTH) && (dm->dmFields & DM_PAPERLENGTH) && dm->dmPaperWidth > 0 && dm->dmPaperLength > 0) {
@@ -1235,7 +1246,24 @@ static void releasePrintJob(CD2DPrintJob *job) {
     delete job;
 }
 
-CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName) {
+/// A print ticket (IStream of the PrintTicket XML) from a DEVMODE through the print
+/// ticket provider; NULL when the driver cannot convert it (the job then uses the
+/// printer's defaults).
+static IStream *printTicketFromDevMode(const wchar_t *printer, const void *devMode, uint32_t size) {
+    if (!devMode || size < sizeof(DEVMODEW)) return nullptr;
+    HPTPROVIDER provider = nullptr;
+    if (FAILED(PTOpenProvider(printer, 1, &provider)) || !provider) return nullptr;
+    IStream *stream = nullptr;
+    if (SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) && stream) {
+        HRESULT hr = PTConvertDevModeToPrintTicket(provider, size, (PDEVMODE)const_cast<void *>(devMode), kPTJobScope, stream);
+        LARGE_INTEGER zero = {};
+        if (FAILED(hr) || FAILED(stream->Seek(zero, STREAM_SEEK_SET, nullptr))) { stream->Release(); stream = nullptr; }
+    }
+    PTCloseProvider(provider);
+    return stream;
+}
+
+CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName, const void *driverSettings, uint32_t driverSettingsSize) {
     if (!factory || !factory->factory) return nullptr;
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     wchar_t defaultName[256] = {};
@@ -1251,10 +1279,11 @@ CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printe
     CD2DPrintJob *j = new CD2DPrintJob();
     IPrintDocumentPackageTargetFactory *targetFactory = nullptr;
     IDXGIDevice *dxgiDevice = nullptr;
+    IStream *ticket = printTicketFromDevMode(printer, driverSettings, driverSettingsSize);
     bool ok = false;
     do {
         if (FAILED(CoCreateInstance(__uuidof(PrintDocumentPackageTargetFactory), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&targetFactory))) || !targetFactory) break;
-        if (FAILED(targetFactory->CreateDocumentPackageTargetForPrintJob(printer, job, nullptr, nullptr, &j->target)) || !j->target) break;
+        if (FAILED(targetFactory->CreateDocumentPackageTargetForPrintJob(printer, job, nullptr, ticket, &j->target)) || !j->target) break;
         if (FAILED(createD3DDevice(&j->d3dDevice, &j->d3dContext))) break;
         if (FAILED(j->d3dDevice->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgiDevice)))) break;
         if (FAILED(factory1->CreateDevice(dxgiDevice, &j->d2dDevice))) break;
@@ -1271,6 +1300,7 @@ CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printe
     safeRelease(dxgiDevice);
     safeRelease(targetFactory);
     safeRelease(factory1);
+    safeRelease(ticket);
     if (!ok) { releasePrintJob(j); return nullptr; }
     return j;
 }

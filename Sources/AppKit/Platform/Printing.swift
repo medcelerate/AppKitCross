@@ -40,6 +40,10 @@ public struct PlatformPrintJobSettings: Sendable {
     public var scalingFactor: CGFloat = 1
     /// Where a "print to file" driver should write (Microsoft Print to PDF without its prompt).
     public var outputURL: URL? = nil
+    /// The driver's own settings from the native dialog, opaque to AppKit (Windows: the
+    /// DEVMODE, which becomes the job's print ticket so the printer gets the paper and
+    /// orientation the user chose there); nil when no native dialog ran.
+    public var driverSettings: Data? = nil
     public init(printerName: String?, jobTitle: String, paperSize: CGSize) {
         self.printerName = printerName
         self.jobTitle = jobTitle

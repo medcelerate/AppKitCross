@@ -281,6 +281,7 @@ import CoreText
         s.landscape = _printInfo.orientation == .landscape
         s.scalingFactor = _printInfo.scalingFactor
         s.outputURL = _printInfo.jobDisposition == .save ? _printInfo._jobSavingURL : nil
+        s.driverSettings = _printInfo._driverSettings
         return s
     }
 
@@ -295,6 +296,7 @@ import CoreText
         if abs(paper.width - _printInfo.paperSize.width) > 1 || abs(paper.height - _printInfo.paperSize.height) > 1 { _printInfo.paperSize = paper }
         _printInfo.scalingFactor = s.scalingFactor
         if let url = s.outputURL { _printInfo.jobDisposition = .save; _printInfo._jobSavingURL = url }
+        _printInfo._driverSettings = s.driverSettings
         _pagination = nil
     }
 

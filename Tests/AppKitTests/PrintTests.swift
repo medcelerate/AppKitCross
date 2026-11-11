@@ -538,6 +538,30 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testTypingAPageNumberChoosesTheRangeAndTheFieldsAreNamed() {
+        MainActor.assumeIsolated {
+            let info = letterInfo()
+            let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 1300))
+            let op = NSPrintOperation(view: view, printInfo: info)
+            let form = _NSPrintPanelForm(printInfo: info, options: [.showsCopies, .showsPageRange, .showsScaling], accessories: [], defaultButtonTitle: "Print", operation: op)
+            XCTAssertEqual(form.allPages!.state, .on)
+            XCTAssertEqual(form.toPage!.stringValue, "\(op._paginate().pageCount)", "the range fields open on the whole document")
+            XCTAssertEqual(form.fromPage!.accessibilityLabel(), "From Page")
+            XCTAssertEqual(form.toPage!.accessibilityLabel(), "To Page")
+            XCTAssertEqual(form.scale!.accessibilityIdentifier(), "print.scale")
+            XCTAssertEqual(form.copies!.accessibilityLabel(), "Copies")
+            // Assistive technology (UI automation on Windows) sets the field's value: that
+            // is an edit, so the "From:" radio goes on and the range prints.
+            XCTAssertTrue(form.fromPage!._accessibilitySetValue(.string("2")))
+            XCTAssertEqual(form.somePages!.state, .on)
+            XCTAssertEqual(form.allPages!.state, .off)
+            form.printButton.performClick(nil)
+            XCTAssertEqual(info._pageRange?.first, 2)
+            XCTAssertEqual(info._pageRange?.last, op._paginate().pageCount)
+            XCTAssertEqual(op._pagesToPrint(), Array(2...op._paginate().pageCount))
+        }
+    }
+
     func testPrintPanelAsSheetRunsTheOperationWhenPrintIsPressed() {
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 700))

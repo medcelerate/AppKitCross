@@ -190,6 +190,13 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         get { (_extra[.jobSavingURL] as? URL) ?? (_extra[.jobSavingURL] as? String).map { URL(fileURLWithPath: $0) } }
         set { _extra[.jobSavingURL] = newValue }
     }
+    /// The native dialog's driver settings (Windows: the DEVMODE), kept in the attributes
+    /// so a copy of the info prints with them; nil until a native dialog ran.
+    internal static let _driverSettingsKey = NSPrintInfo.AttributeKey("AppKitCrossDriverSettings")
+    internal var _driverSettings: Data? {
+        get { _extra[NSPrintInfo._driverSettingsKey] as? Data }
+        set { _extra[NSPrintInfo._driverSettingsKey] = newValue }
+    }
     /// `NSCopies`, at least 1.
     internal var _copies: Int {
         get { max(1, _int(.copies) ?? 1) }

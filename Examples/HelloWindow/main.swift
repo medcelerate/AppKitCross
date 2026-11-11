@@ -224,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         // Printing (ADR-0022): both reach the key window through the responder chain; Print…
         // paginates its content view (the Layout Demo's tabs, the canvas) with the print panel
         // as a sheet. Export PDF writes the key window's content with dataWithPDF(inside:).
+        // AppKit's shared print info clips a view wider than the printable area (its default
+        // horizontal pagination); the demo windows are wider than a portrait page, so they
+        // shrink to the page width instead, as a document app would set up its own info.
+        NSPrintInfo.shared.horizontalPagination = .fit
         let pageSetup = file.addItem(withTitle: "Page Setup\u{2026}", action: Selector(("runPageLayout:")), keyEquivalent: "p")
         pageSetup.keyEquivalentModifierMask = [.command, .shift]
         file.addItem(withTitle: "Print\u{2026}", action: Selector(("print:")), keyEquivalent: "p")

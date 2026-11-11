@@ -32,9 +32,11 @@ final class Win32PrintBackend: PlatformPrintBackend {
         guard let factory = backend.d2dFactory else { return nil }
         let printer = Array((settings.printerName ?? "").utf16) + [0]
         let title = Array(settings.jobTitle.utf16) + [0]
-        let job = printer.withUnsafeBufferPointer { p in title.withUnsafeBufferPointer { t in
-            cd2d_print_job_create(factory, settings.printerName == nil ? nil : p.baseAddress, t.baseAddress)
-        } }
+        let driver = settings.driverSettings ?? Data()
+        let job = printer.withUnsafeBufferPointer { p in title.withUnsafeBufferPointer { t in driver.withUnsafeBytes { d in
+            cd2d_print_job_create(factory, settings.printerName == nil ? nil : p.baseAddress, t.baseAddress,
+                                  driver.isEmpty ? nil : d.baseAddress, UInt32(driver.count))
+        } } }
         guard let job else { NSLog("NSPrintOperation: cannot start a print job on \(settings.printerName ?? "the default printer")"); return nil }
         return Win32PrintJob(job: job, factory: factory)
     }
@@ -71,6 +73,12 @@ final class Win32PrintBackend: PlatformPrintBackend {
             settings.printerName = String(decoding: UnsafeBufferPointer(start: chosen, count: Int(chosenLength)), as: UTF16.self)
             cd2d_file_dialog_free(chosen)
         }
+        if let dm = s.driverSettings, s.driverSettingsSize > 0 {
+            settings.driverSettings = Data(bytes: dm, count: Int(s.driverSettingsSize))
+            cd2d_print_free(dm)
+        } else {
+            settings.driverSettings = nil
+        }
         return true
     }
 }
@@ -88,11 +96,18 @@ final class Win32PrintJob: PlatformPrintDocument {
         self.factory = factory
     }
 
+    /// Direct2D's print pages are in DIPs (1/96 inch); the operation draws in points.
+    private static let dipsPerPoint: CGFloat = 96 / 72
+
     func beginPage(size: CGSize) -> CGContext? {
-        guard let job, context == nil, let t = cd2d_print_job_begin_page(job, Float(size.width), Float(size.height)) else { return nil }
+        let k = Win32PrintJob.dipsPerPoint
+        let dips = CGSize(width: size.width * k, height: size.height * k)
+        guard let job, context == nil, let t = cd2d_print_job_begin_page(job, Float(dips.width), Float(dips.height)) else { return nil }
         target = t
-        let flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: size.height)
-        let ctx = CGContext(target: t, factory: factory, baseTransform: flip, width: Int(size.width.rounded(.up)), height: Int(size.height.rounded(.up)))
+        // Flip to bottom-left and scale points to DIPs, so a Letter page is 8.5 by 11 inches
+        // on paper rather than 612 by 792 DIPs (6.4 by 8.3 inches).
+        let flip = CGAffineTransform(a: k, b: 0, c: 0, d: -k, tx: 0, ty: dips.height)
+        let ctx = CGContext(target: t, factory: factory, baseTransform: flip, width: Int(dips.width.rounded(.up)), height: Int(dips.height.rounded(.up)))
         context = ctx
         return ctx
     }

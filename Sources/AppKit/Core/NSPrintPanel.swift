@@ -183,18 +183,23 @@ internal final class _NSPrintPanelForm {
         printerPopUp.addItems(withTitles: allNames)
         if let i = allNames.firstIndex(of: printInfo.printer.name) { printerPopUp.selectItem(at: i) }
         printers = printerPopUp
+        _NSPrintPanelForm.name(printerPopUp, "Printer")
         rows.add(label: "Printer:", [(printerPopUp, formWidth - _NSPrintPanelForm.labelWidth - 8)])
 
         if options.contains(.showsCopies) {
             let f = NSTextField(string: "\(printInfo._copies)")
             f.alignment = .right
             copies = f
+            _NSPrintPanelForm.name(f, "Copies")
             rows.add(label: "Copies:", [(f, 60)])
         }
         if options.contains(.showsPageRange) {
             let all = NSButton(radioButtonWithTitle: "All", target: nil, action: nil)
             let some = NSButton(radioButtonWithTitle: "From:", target: nil, action: nil)
-            let from = NSTextField(string: "1"), to = NSTextField(string: "1")
+            // The fields open on the whole document, so choosing "From:" without typing
+            // changes nothing.
+            let pageCount = operation?._paginate().pageCount ?? 1
+            let from = NSTextField(string: "1"), to = NSTextField(string: "\(max(1, pageCount))")
             from.alignment = .right; to.alignment = .right
             let toLabel = NSTextField(labelWithString: "to:")
             let range = printInfo._pageRange
@@ -202,6 +207,8 @@ internal final class _NSPrintPanelForm {
             some.state = range == nil ? .off : .on
             if let r = range { from.stringValue = "\(r.first)"; to.stringValue = r.last == Int.max ? "" : "\(r.last)" }
             allPages = all; somePages = some; fromPage = from; toPage = to
+            _NSPrintPanelForm.name(all, "All Pages"); _NSPrintPanelForm.name(some, "Page Range")
+            _NSPrintPanelForm.name(from, "From Page"); _NSPrintPanelForm.name(to, "To Page")
             rows.add(label: "Pages:", [(all, 60)])
             rows.add(label: "", [(some, 70), (from, 50), (toLabel, 24), (to, 50)])
         }
@@ -210,6 +217,7 @@ internal final class _NSPrintPanelForm {
             p.addItems(withTitles: NSPrinter.papers.map { "\($0.localized)  \(Int($0.size.width.rounded())) × \(Int($0.size.height.rounded())) pt" })
             if let name = printInfo.paperName, let i = NSPrinter.papers.firstIndex(where: { $0.name == name }) { p.selectItem(at: i) }
             papers = p
+            _NSPrintPanelForm.name(p, "Paper Size")
             rows.add(label: "Paper Size:", [(p, formWidth - _NSPrintPanelForm.labelWidth - 8)])
         }
         if options.contains(.showsOrientation) || showsSetup {
@@ -218,12 +226,14 @@ internal final class _NSPrintPanelForm {
             po.state = printInfo.orientation == .portrait ? .on : .off
             la.state = printInfo.orientation == .landscape ? .on : .off
             portrait = po; landscape = la
+            _NSPrintPanelForm.name(po, "Portrait"); _NSPrintPanelForm.name(la, "Landscape")
             rows.add(label: "Orientation:", [(po, 90), (la, 110)])
         }
         if options.contains(.showsScaling) || showsSetup {
             let s = NSTextField(string: "\(Int((printInfo.scalingFactor * 100).rounded()))")
             s.alignment = .right
             scale = s
+            _NSPrintPanelForm.name(s, "Scale")
             rows.add(label: "Scale:", [(s, 60), (NSTextField(labelWithString: "%"), 20)])
         }
         for accessory in accessories {
@@ -272,8 +282,16 @@ internal final class _NSPrintPanelForm {
         cancelButton.keyEquivalent = "\u{1B}"
         cancelButton.frame = NSRect(x: width - margin - 90 - 12 - 90, y: margin, width: 90, height: buttonsHeight)
         content.addSubview(cancelButton)
+        _NSPrintPanelForm.name(pdfButton, "Save as PDF"); _NSPrintPanelForm.name(printButton, defaultButtonTitle); _NSPrintPanelForm.name(cancelButton, "Cancel")
         wire()
         if let pv = preview { pv.needsDisplay = true }
+    }
+
+    /// Names a control for assistive technology and UI automation (the label beside a
+    /// field is a separate static text, so the field itself says what it is).
+    private static func name(_ control: NSView, _ name: String) {
+        control.setAccessibilityLabel(name)
+        control.setAccessibilityIdentifier("print." + name.lowercased().replacingOccurrences(of: " ", with: "-"))
     }
 
     private func wire() {
@@ -297,10 +315,33 @@ internal final class _NSPrintPanelForm {
             handle(landscape, "printPanelLandscape:") { [weak self] in landscape.state = .on; portrait.state = .off; self?.apply() }
         }
         for field in [copies, fromPage, toPage, scale].compactMap({ $0 }) {
-            field.setActionHandler(for: Selector(("printPanelField:"))) { [weak self] _ in self?.apply() }
+            let isRange = field === fromPage || field === toPage
+            field.setActionHandler(for: Selector(("printPanelField:"))) { [weak self] _ in
+                if isRange { self?.rangeEdited() }
+                self?.apply()
+            }
             field.action = Selector(("printPanelField:"))
             field.target = field
         }
+        // Typing a page number means a range, as in AppKit's panel: the "From:" radio goes
+        // on as soon as either field's text changes, however it is edited (keyboard, or
+        // assistive technology setting the value).
+        for field in [fromPage, toPage].compactMap({ $0 }) {
+            let token = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: field, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.rangeEdited() }
+            }
+            observers.append(token)
+        }
+    }
+
+    private var observers: [NSObjectProtocol] = []
+    deinit { for o in observers { NotificationCenter.default.removeObserver(o) } }
+
+    /// A page number was typed: print that range.
+    private func rangeEdited() {
+        guard let allPages, let somePages, somePages.state != .on else { return }
+        somePages.state = .on
+        allPages.state = .off
     }
 
     /// Reads the controls into the print info and refreshes the preview.

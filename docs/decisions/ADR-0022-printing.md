@@ -124,10 +124,17 @@ viewer.
   hand-written; the Carbon `PM*` accessors, EPS operations, `NSPDFPanel` and
   `takeSettings(from:)` stay unimplemented.
 - `NSWindow` answers `print:` (prints its content view) and `runPageLayout:` on the
-  responder chain, so File > Print… and Page Setup… work in any application;
+  responder chain, so File > Print… and Page Setup… work in any application. That print
+  uses the shared print info, whose default horizontal pagination is `.clip` as in AppKit:
+  a window wider than the printable area loses its right side unless the application sets
+  `.fit` (the HelloWindow demo does);
   `NSDocument.printDocument`/`printOperation(withSettings:error:)` land with the document
   architecture (ADR-0017) once that branch and this one are together.
 - Windows PDF text is outlines or raster, not embedded fonts (see above).
+- A Windows device job draws in points on Direct2D pages declared in DIPs (the job scales
+  by 96/72), and carries the native dialog's DEVMODE as its print ticket
+  (`PTConvertDevModeToPrintTicket`), so the driver gets the paper and orientation chosen
+  there; the package panel's choices reach the driver only through the page size.
 - Printer-specific papers and hardware margins are not read from the drivers yet
   (`imageablePageBounds` is the paper for the generic and host printers); the paper table
   is the port's.
