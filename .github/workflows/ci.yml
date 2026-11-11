@@ -45,7 +45,7 @@ jobs:
     # windows-latest ships VS 2026 (MSVC 14.5x), whose STL needs Clang 20; Swift 6.2's clang is older.
     runs-on: windows-2022
     env:
-      SWIFT_WINDOWS_FLAGS: -Xswiftc -no-emit-module-separately
+      SWIFT_WINDOWS_FLAGS: -Xswiftc -driver-force-response-files
     steps:
       - uses: actions/checkout@v4
       - uses: compnerd/gha-setup-swift@main
@@ -53,13 +53,13 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       - run: swift --version
-      # -no-emit-module-separately on every Windows build and test (the same flags each
-      # time, or SwiftPM rebuilds): Swift 6.2's driver loses AppKit's separate emit-module
-      # job now and then. It is the one job whose command line needs a response file, and
-      # when writing or launching it throws, MultiJobExecutor drops the error, never starts
-      # the job, finishes the batches and exits 1 with nothing said (docs/ci-windows-runner.md).
-      # Without the separate job the batches emit partial modules and a short merge-modules
-      # job joins them. -j 2 is what the fix was measured with, not a memory limit.
+      # -driver-force-response-files on every Windows build and test (the same flags each
+      # time, or SwiftPM rebuilds): Swift 6.2's driver now and then never starts AppKit's
+      # separate emit-module job. MultiJobExecutor drops the error thrown before the job
+      # starts, finishes the batches and exits 1 with nothing said (docs/ci-windows-runner.md).
+      # With every job's arguments in a response file it did not happen (0 of 4 vs 15 of 24).
+      # -no-emit-module-separately also avoids it, but its merge-modules step rejects
+      # SwiftUI's opaque result types.
       - name: Build
         shell: bash
         run: swift build -c debug -j 2 $SWIFT_WINDOWS_FLAGS

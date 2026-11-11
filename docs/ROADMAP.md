@@ -43,7 +43,7 @@ a remote session on a Windows 11 machine from the checklists in the commit histo
 - [x] Package layout that builds on macOS (host) and Windows.
 - [x] CI: macOS host build + test, Windows build (GitHub Actions `windows-2022` with
       the swift.org toolchain), Linux build in the `swift:6.2-noble` container
-      (`.github/workflows/ci.yml`). The Windows builds pass `-no-emit-module-separately`:
+      (`.github/workflows/ci.yml`). The Windows builds pass `-driver-force-response-files`:
       Swift 6.2's driver sometimes never starts AppKit's emit-module job (the one that
       needs a response file) and exits 1 without a diagnostic, which looked like the
       runner killing the compiler; see `docs/ci-windows-runner.md`.

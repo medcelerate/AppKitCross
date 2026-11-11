@@ -8,8 +8,9 @@ second time. PRs 32 and 36 answered it with `-j 2`, resource dumps and one retry
 resumes the incremental build.
 
 The runner was never killing anything. **Swift 6.2's driver (`swiftc.exe`) sometimes never
-starts AppKit's separate emit-module job, and then exits 1 without a diagnostic.** The fix
-is `-Xswiftc -no-emit-module-separately` on every Windows build, and the retries are gone.
+starts AppKit's separate emit-module job, and then exits 1 without a diagnostic.** CI now
+passes `-Xswiftc -driver-force-response-files` on every Windows build, and the retries are
+gone.
 
 ## What the old runs showed
 
@@ -51,6 +52,13 @@ response-file job is classified by the file's contents.
 
 Controls overall: 7 of 12 SwiftPM builds and 8 of 12 bare replays failed. Every changed
 variable gave 0 failures: 0 of 14 builds.
+
+These runs built `--target AppKit` only. The first full CI run with `-no-emit-module-separately`
+(PR 55, 9a3ff9d) got through AppKit, then failed for a different reason. SwiftUI's
+`-merge-modules` job rejected its own partial modules with `type mismatch of function
+'…_DisclosureTriangleV4bodyQrvg' … -> @out some SwiftUI.View`: merging partial modules does not
+handle opaque result types. So CI uses E4's `-driver-force-response-files` instead. It keeps
+the separate emit-module jobs, so no module is ever merged.
 
 ## Why the driver says nothing
 
@@ -100,10 +108,13 @@ The earlier hypotheses, each ruled out by the runs above:
 ## What CI does now
 
 - The Windows job's every `swift build` and `swift test` gets
-  `-Xswiftc -no-emit-module-separately` through `SWIFT_WINDOWS_FLAGS`. Every one gets the
-  same flags, because SwiftPM rebuilds everything when they differ. Each module is then
-  emitted by merging the batches' partial modules, a short `-merge-modules` job that needs
-  no response file. `-j 2` stays because that is what the fix was measured with.
+  `-Xswiftc -driver-force-response-files` through `SWIFT_WINDOWS_FLAGS`. Every one gets the
+  same flags, because SwiftPM rebuilds everything when they differ. This is the workaround
+  that measured clean without changing how modules are emitted. Why it helps is not proven:
+  it moves every job's argument resolution onto the same response-file path, which changes
+  the timing of the two concurrent job starts. `-j 2` stays because that is what it was
+  measured with. If it ever fails again the same way, `-j 1` is the sure fallback (0 of 4,
+  about 40% slower).
 - `tools/library-compat.sh` passes the same flag on Windows. Its verbose retry, and the
   root build's retry and resource dumps, are gone: a failure is real again.
 - `tools/windows/frontend-monitor.ps1` stays for the next time a Windows build dies quietly.
