@@ -175,25 +175,6 @@ extension FileWrapper {
 }
 
 extension IndexPath {
-    /// Initialize for use with `NSCollectionView`.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/indexpath/init(item:section:)
-    public init(item: Int, section: Int) { unimplemented() }
-    /// The item of this index path, when used with `NSCollectionView`.
-    /// 
-    /// - precondition: The index path must have exactly two elements.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/indexpath/item
-    public var item: Int {
-        get { unimplemented() }
-        set { unimplemented() }
-    }
-    /// The section of this index path, when used with `NSCollectionView`.
-    /// 
-    /// - precondition: The index path must have exactly two elements.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/indexpath/section
-    public var section: Int {
-        get { unimplemented() }
-        set { unimplemented() }
-    }
 }
 
 extension NSAffineTransform {
