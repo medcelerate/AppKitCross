@@ -71,6 +71,12 @@ exercised; `--metal-log` prints the device, and every 30th frame's clear colour,
 pixels, drawable size and presentation path (`swap chain` on a DirectComposition-hosted
 window, `readback` otherwise).
 
+If a Windows build of AppKit ends with exit code 1 and no `error:` right after its last
+`Compiling AppKit …` line, build with `-j 1` (CI always does).
+Swift 6.2's driver sometimes never starts AppKit's emit-module job and says nothing
+(`docs/ci-windows-runner.md`). `tools/windows/frontend-monitor.ps1` records every compiler
+process's exit code and peak memory when a build dies quietly again.
+
 Linux, in the container from `tools/linux/Dockerfile` (`swift:6.2-noble` with X11, Wayland,
 Cairo and Pango):
 
