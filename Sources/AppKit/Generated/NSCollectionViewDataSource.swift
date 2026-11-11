@@ -36,6 +36,6 @@ extension NSCollectionViewDataSource {
     @MainActor public func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView { unimplementedOptionalRequirement() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdatasource/numberofsections(in:)
     @available(macOS 10.11, *)
-    @MainActor public func numberOfSections(in collectionView: NSCollectionView) -> Int { unimplementedOptionalRequirement() }
+    @MainActor public func numberOfSections(in collectionView: NSCollectionView) -> Int { return 1 }
 }
 

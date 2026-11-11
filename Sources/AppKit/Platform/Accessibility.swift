@@ -68,6 +68,8 @@ public struct PlatformAccessibilityElement: Sendable {
     public var isMultiline = false
     /// A selection container (table) that allows more than one selected child.
     public var allowsMultipleSelection = false
+    /// Assistive technology may select the element (a row, a collection view item).
+    public var isSelectable = false
     /// Expanded (true) or collapsed (false) for elements that can expand (outline rows,
     /// disclosure triangles); nil for everything else.
     public var isExpanded: Bool? = nil
