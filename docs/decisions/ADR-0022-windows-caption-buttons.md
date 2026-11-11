@@ -68,10 +68,21 @@ messages like any control's, and `_NSWindowButton` fires `performClose:` /
 from the client area does. `WM_NCMOUSEMOVE` over a button becomes a `mouseMoved`
 (hover); over other non-client area (the 8-pixel resize band along the top of the
 buttons) the pointer is reported as gone, so no button stays lit under a resize cursor.
-Either way the message then goes to `DefWindowProc`: the shell's hot-tracking of
-`HTMAXBUTTON` through it is what brings up the snap layouts flyout (a first PC round
-without the pass-through showed the hover fill but no flyout), and with no non-client
-area it has nothing to paint of its own.
+Either way the message then goes to `DefWindowProc`, which with no non-client area has
+nothing to paint of its own.
+
+**What the flyout needed (PC rounds).** With the hit test answering `HTMAXBUTTON`, the
+style carrying `WS_CAPTION|WS_THICKFRAME|WS_MAXIMIZEBOX`, non-client rendering left to
+the style and the non-client messages passed through, Windows 11 still showed no snap
+layouts flyout. Four runs isolated it: keeping the redirection bitmap changed nothing;
+the top margin of `DwmExtendFrameIntoClientArea` did. The custom frame had extended the
+frame by 1 px (ADR-0016, for the DWM shadow), and with 1 px the flyout never appears;
+with 0 or 32 px it does. The default is now what Windows Terminal does: an opaque window
+extends the frame by the title band (28 pt at the window's DPI; DWM paints its frame
+under the band and the window covers it), a translucent window or one with a system
+backdrop extends nothing (DWM's frame would show through; the backdrop keeps the
+shadow). `APPKITWIN_FRAME_TOP_MARGIN=<px>` overrides it for experiments and
+`APPKITWIN_REDIRECTION_BITMAP=1` keeps the redirection surface, both traced.
 Other backends ignore the new regions (their hit tests compare against `.caption`).
 
 ### `standardWindowButton(_:)` semantics

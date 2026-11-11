@@ -226,14 +226,11 @@ final class Win32Window: PlatformWindow {
         }
 
         // Frame: keep the DWM shadow, border and rounded corners while the client area
-        // covers the frame by extending the frame one pixel into the client area. A
-        // borderless window gets a frame to extend (WS_THICKFRAME) while it wants a
-        // shadow; without a shadow nothing is extended and DWM draws no frame at all.
+        // covers the frame by extending the frame into the client area. A borderless
+        // window gets a frame to extend (WS_THICKFRAME) while it wants a shadow; without
+        // a shadow nothing is extended and DWM draws no frame at all.
         updateShadowFrameStyle()
-        let shadowFrame = usesCustomFrame && _chrome.hasShadow
-        let topMargin: Int32 = shadowFrame ? (Win32Window.frameTopMarginOverride ?? 1) : 0
-        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: topMargin, cyBottomHeight: 0)
-        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        let margins = extendFrame()
         if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
         }
@@ -259,6 +256,33 @@ final class Win32Window: PlatformWindow {
         setDwmAttribute(Win32Window.dwmwaNCRenderingPolicy, _chrome.hasShadow ? Win32Window.dwmncrpUseWindowStyle : Win32Window.dwmncrpDisabled)
         // hidesTitle / transparentTitleBar only have a visible effect together with
         // extendsContentIntoTitleBar, where the caption is not drawn at all.
+    }
+
+    /// `DwmExtendFrameIntoClientArea` for a custom frame. How far the frame comes in
+    /// matters to the shell: with a 1 px top margin Windows 11 never shows the snap
+    /// layouts flyout over a package-drawn maximise button that answers HTMAXBUTTON
+    /// (PC rounds of ADR-0022: 1 px no, 0 and 32 px yes). So, as Windows Terminal does,
+    /// an opaque window extends the frame by the title band (28 pt at the window's DPI:
+    /// DWM paints its frame under the band, which the window covers with opaque pixels),
+    /// and a translucent window, or one with a system backdrop, extends nothing (DWM's
+    /// frame would show through its content; the backdrop keeps the shadow).
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` overrides for experiments. Called when the chrome
+    /// changes and when the DPI does.
+    @discardableResult
+    private func extendFrame() -> MARGINS {
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0)
+        guard let hwnd else { return margins }
+        if usesCustomFrame, _chrome.hasShadow {
+            if let forced = Win32Window.frameTopMarginOverride {
+                margins.cyTopHeight = forced
+            } else if _chrome.isTransparent || _chrome.backdrop != .none {
+                margins.cyTopHeight = 0
+            } else {
+                margins.cyTopHeight = Int32((NSWindow._titleBarBandHeight * scale).rounded())
+            }
+        }
+        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        return margins
     }
 
     var scale: CGFloat { CGFloat(dpi) / 96 }
@@ -511,7 +535,7 @@ final class Win32Window: PlatformWindow {
     /// Experiment knobs for the Windows 11 snap layouts investigation (ADR-0022, PC rounds):
     /// `APPKITWIN_REDIRECTION_BITMAP=1` keeps the redirection surface on every window;
     /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` is the top margin `DwmExtendFrameIntoClientArea`
-    /// gets for custom frames instead of 1 (0 = nothing extended, 32 = a caption's worth).
+    /// gets for custom frames instead of the default (`extendFrame()`).
     private static let keepsRedirectionBitmapByRequest = ProcessInfo.processInfo.environment["APPKITWIN_REDIRECTION_BITMAP"] == "1"
     private static let frameTopMarginOverride: Int32? = ProcessInfo.processInfo.environment["APPKITWIN_FRAME_TOP_MARGIN"].flatMap { Int32($0) }
     /// `APPKITWIN_DXGI_DEBUG=1` prints the DXGI debug layer's live-object report to stderr
@@ -1113,6 +1137,7 @@ final class Win32Window: PlatformWindow {
             // the new DPI rather than taking the suggested rect's size (which rounds).
             let pointSize = contentSize
             dpi = UINT(wParam & 0xFFFF)
+            extendFrame()           // the band's extension is in pixels
             if let rt = renderTarget {
                 cd2d_target_set_dpi(rt, Float(dpi))
                 // The content size in points is unchanged, so no scene commit follows: the

@@ -312,7 +312,10 @@ buttons (`PlatformWindowHitRegion.closeButton`/`.miniaturizeButton`/`.zoomButton
 `WM_NCHITTEST` answers `HTCLOSE`/`HTMINBUTTON`/`HTMAXBUTTON`, which gives the snap
 layouts flyout on hover; the Win32 window tracks presses on them itself
 (`WM_NCLBUTTONDOWN` → capture → the button's own mouse tracking) and ends hovers on
-`WM_MOUSELEAVE`/`WM_NCMOUSELEAVE`. The unified toolbar starts at the left and keeps its
+`WM_MOUSELEAVE`/`WM_NCMOUSELEAVE`. The snap layouts flyout turned out to depend on the
+custom frame's `DwmExtendFrameIntoClientArea` margin: 1 px (the ADR-0016 shadow
+extension) suppresses it, so opaque custom frames now extend by the 28 pt band and
+translucent or backdrop windows by nothing, as Windows Terminal does. The unified toolbar starts at the left and keeps its
 trailing edge clear of the buttons. The row is a flipped strip across the band, so
 buttons an application moves through `standardWindowButton(_:)` stay where it put them.
 macOS keeps its real buttons; X11 and Wayland keep the traffic lights.
