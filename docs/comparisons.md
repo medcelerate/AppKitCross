@@ -20,6 +20,9 @@ by a capture of the live window.
 | Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
 | Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Pages tab: an `NSPageController` over three pages (Back/Next, a segmented control through `takeSelectedIndexFrom:`, the transition style), pages that highlight under the pointer through `NSTrackingArea`; the window carries a trailing title bar accessory while the tab shows | ![macOS](images/compare/layout-pages-macos.png) | ![Linux](images/compare/layout-pages-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Panels tab: `NSColorWell`s in the three styles, buttons opening the panels, a rich text view both panels change | ![macOS](images/compare/layout-panels-macos.png) | ![Linux](images/compare/layout-panels-linux.png) | awaiting a capture from the Windows machine |
+| The Colors panel (`NSColorPanel`, ADR-0031), drawn by the package | ![macOS](images/compare/color-panel-macos.png) | ![Linux](images/compare/color-panel-linux.png) | awaiting a capture from the Windows machine |
+| The Fonts panel (`NSFontPanel`), listing the platform's families | ![macOS](images/compare/font-panel-macos.png) | ![Linux](images/compare/font-panel-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
@@ -43,6 +46,7 @@ APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images
 APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
 APPKITWIN_LAYOUT_TAB=controls swift run HelloWindow --layout --screenshot docs/images/compare   # the Controls tab
 APPKITWIN_LAYOUT_TAB=date swift run HelloWindow --layout --screenshot docs/images/compare       # the Date tab
+APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color swift run HelloWindow --layout --screenshot docs/images/compare   # the Panels tab with the Colors panel (font: APPKITWIN_PANELS_OPEN=font)
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
 
@@ -51,6 +55,12 @@ include; `tools/linux/compare.sh` also captures the X screen with the Fruit list
 (`APPKITWIN_COMBO_POPUP=1`):
 
 ![Combo box list open on Linux](images/compare/layout-combo-open-linux.png)
+
+The panels are windows of their own too; the headless renders above show each panel's
+content, and `tools/linux/compare.sh` captures the X screen with the Colors panel open
+beside the Layout Demo (`APPKITWIN_PANELS_OPEN=color`):
+
+![Colors panel open on Linux](images/compare/color-panel-open-linux.png)
 
 The Windows column is captured by the Windows test machine (window captures of the live
 app). More Windows captures show the SwiftUI demo's other tabs and the menus, which are drawn
