@@ -269,6 +269,7 @@ final class Win32Backend: PlatformBackend {
     /// that repaints every frame would starve the timer and animations would never advance.
     private func pump() -> Bool {
         var msg = MSG()
+        var lastService = GetTickCount64()
         while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
             if msg.message == UINT(WM_QUIT) {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
@@ -277,6 +278,11 @@ final class Win32Backend: PlatformBackend {
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
             fireFrameIfDue()
+            // A window whose paint invalidates itself keeps WM_PAINT coming, and this loop
+            // would never reach the main queue below (a DispatchQueue.main block, a Timer,
+            // the demo's probe never ran); the queue is serviced here every 50 ms regardless.
+            let now = GetTickCount64()
+            if now - lastService >= 50 { _ = PlatformMainQueue.service(); lastService = now }
         }
         fireFrameIfDue()
         // Blocks queued on the main queue from other threads, and RunLoop timers.
