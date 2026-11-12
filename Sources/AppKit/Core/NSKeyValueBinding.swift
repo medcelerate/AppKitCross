@@ -558,6 +558,11 @@ enum _NSBindings {
     }
 
     static func store(_ b: _NSBinding, owner: NSObject) {
+        // Drop the bindings of owners that are gone (they would keep their controllers alive).
+        for (key, all) in table where !all.values.contains(where: { $0.owner != nil }) {
+            for dead in all.values { dead.observation?.invalidate() }
+            table[key] = nil
+        }
         let id = ObjectIdentifier(owner)
         var all = (table[id] ?? [:]).filter { $0.value.owner === owner }
         all[b.name] = b
