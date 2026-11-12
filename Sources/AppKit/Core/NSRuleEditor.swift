@@ -765,7 +765,6 @@ final class _NSRuleComparisonPredicate: NSPredicate {
         case .between:
             guard let bounds = _KVC.flatten(rhs).flatMap(_KVC.arrayValue), bounds.count == 2 else { return false }
             return _KVC.compare(lhs, bounds[0]) != .orderedAscending && _KVC.compare(lhs, bounds[1]) != .orderedDescending
-        case .customSelector: unimplemented()
         @unknown default: return false
         }
     }
@@ -829,7 +828,6 @@ final class _NSRuleComparisonPredicate: NSPredicate {
         case .in: return "IN"
         case .contains: return "CONTAINS"
         case .between: return "BETWEEN"
-        case .customSelector: return "FUNCTION"
         @unknown default: return "=="
         }
     }

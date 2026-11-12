@@ -130,17 +130,33 @@ open class NSObjectController: NSController {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/validateuserinterfaceitem(_:)
     open func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
         guard let action = MainActor.assumeIsolated({ item.action }) else { return true }
-        return _canPerform(action.description)
+        let name = action.description
+        return MainActor.assumeIsolated({ _isControllerAction(name) }) ? _canPerform(name) : true
     }
 
-    /// Whether the controller action named `selector` can run.
+    /// Whether the controller action named `selector` can run (false for an unknown one).
     internal func _canPerform(_ selector: String) -> Bool {
         switch selector {
         case "add:": return canAdd
         case "remove:": return canRemove
         case "fetch:": return false
-        default: return true
+        default: return false
         }
+    }
+
+    /// Whether `name` is one of the controller's actions.
+    @MainActor internal func _isControllerAction(_ name: String) -> Bool {
+        ["add:", "remove:", "fetch:", "insert:", "selectNext:", "selectPrevious:", "addChild:", "insertChild:"].contains(name)
+    }
+
+    @MainActor internal override func _performControllerAction(_ name: String, _ sender: Any?) -> Bool? {
+        switch name {
+        case "add:": add(sender)
+        case "remove:": remove(sender)
+        case "fetch:": fetch(sender)
+        default: return nil
+        }
+        return true
     }
 
     // MARK: Change notification

@@ -82,6 +82,19 @@ open class NSUserDefaultsController: NSController {
 
     // MARK: Internals
 
+    @MainActor internal override func _performControllerAction(_ name: String, _ sender: Any?) -> Bool? {
+        switch name {
+        case "save:": save(sender)
+        case "revert:": revert(sender)
+        case "revertToInitialValues:": revertToInitialValues(sender)
+        default: return nil
+        }
+        return true
+    }
+    internal override func _respondsToControllerAction(_ name: String) -> Bool {
+        name == "revert:" || name == "save:" ? hasUnappliedChanges : name == "revertToInitialValues:"
+    }
+
     internal func _value(forKey key: String) -> Any? {
         if let p = _pending[key] { return p }
         return _defaults.object(forKey: key) ?? _initialValues?[key]

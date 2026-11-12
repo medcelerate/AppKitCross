@@ -106,8 +106,10 @@ enum _KVC {
         if let o = object as? _NSKeyValueCodingInternal, let v = o._kvcValue(forKey: key) { return v }
         if let o = object as? NSKeyValueBindingCoding { return flatten(o.bindingValue(forKey: key)) }
         if let a = arrayValue(object) { return arrayValue(a, forKey: key) }
+        // A Foundation dictionary is read as itself: casting it to a Swift dictionary first would
+        // bridge nested Foundation objects into value types (and lose their identity) on corelibs.
+        if isObject(object), let d = object as? NSDictionary { return flatten(d.object(forKey: key)) }
         if let d = object as? [String: Any] { return flatten(d[key]) }
-        if let d = object as? NSDictionary { return flatten(d.object(forKey: key)) }
         #if canImport(ObjectiveC)
         if let o = object as? NSObject, o.responds(to: NSSelectorFromString(key)) { return flatten(o.value(forKey: key)) }
         #endif
@@ -169,9 +171,12 @@ enum _KVC {
     /// The elements of an array-like value (Swift arrays, NSArray, NSOrderedSet, sets).
     static func arrayValue(_ object: Any) -> [Any]? {
         if object is String || object is NSString { return nil }
+        // Foundation collections first, element by element (see value(_:forKey:)).
+        if isObject(object) {
+            if let a = object as? NSArray { return (0..<a.count).map { a.object(at: $0) } }
+            if let s = object as? NSOrderedSet { return (0..<s.count).map { s.object(at: $0) } }
+        }
         if let a = object as? [Any] { return a }
-        if let a = object as? NSArray { return a.map { $0 } }
-        if let s = object as? NSOrderedSet { return s.array }
         if let s = object as? Set<AnyHashable> { return Array(s) }
         return nil
     }
@@ -261,6 +266,9 @@ enum _KVC {
         if a == nil || b == nil { return a == nil && b == nil }
         if isObject(a!), isObject(b!) { return (a! as AnyObject) === (b! as AnyObject) }
         if let x = a as? AnyHashable, let y = b as? AnyHashable { return x == y }
+        // swift-corelibs-foundation hands Foundation collections back as Swift values (an
+        // NSDictionary read out of an NSArray is a [AnyHashable: Any]); compare those by content.
+        if let x = a as? NSObject, let y = b as? NSObject { return x.isEqual(y) }
         return false
     }
 

@@ -276,6 +276,16 @@ open class NSArrayController: NSObjectController {
 
     internal override var _usesMultipleValuesMarker: Bool { _alwaysUsesMultipleValuesMarker }
 
+    @MainActor internal override func _performControllerAction(_ name: String, _ sender: Any?) -> Bool? {
+        switch name {
+        case "insert:": insert(sender)
+        case "selectNext:": selectNext(sender)
+        case "selectPrevious:": selectPrevious(sender)
+        default: return super._performControllerAction(name, sender)
+        }
+        return true
+    }
+
     internal override func _canPerform(_ selector: String) -> Bool {
         switch selector {
         case "insert:": return canInsert

@@ -47,6 +47,11 @@ open class NSController: NSObject, NSCoding, NSEditor, NSEditorRegistration {
     /// - SeeAlso: https://developer.apple.com/documentation/foundation/nscoding/encode(with:)
     open func encode(with coder: NSCoder) { unimplemented() }
 
+    /// Target/action without the runtime: the controller actions (add:, remove:, ...) a button
+    /// or menu item sends to a controller. Subclasses add theirs; returns nil when not handled.
+    @MainActor internal func _performControllerAction(_ name: String, _ sender: Any?) -> Bool? { nil }
+    internal func _respondsToControllerAction(_ name: String) -> Bool { false }
+
     /// Runs a controller action the way AppKit does: after pending edits commit, on the next
     /// pass of the main run loop.
     internal func _performDeferred(_ body: @escaping () -> Void) {
@@ -54,5 +59,16 @@ open class NSController: NSObject, NSCoding, NSEditor, NSEditorRegistration {
             guard MainActor.assumeIsolated({ commitEditing() }) else { return }
             body()
         }
+    }
+}
+
+extension NSController: NSSelectorHandling {
+    public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        _performControllerAction(action.description, sender) != nil
+    }
+    /// Known actions answer while they can run, so a button or menu item that targets the
+    /// controller is validated by it.
+    public func respondsToSelectorAction(_ action: Selector) -> Bool {
+        (self as? NSObjectController)?._canPerform(action.description) ?? _respondsToControllerAction(action.description)
     }
 }
