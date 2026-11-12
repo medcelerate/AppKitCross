@@ -176,7 +176,9 @@ import CoreText
                 NSColor.controlAccentColor.withAlphaComponent(0.2).setFill()
                 NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3).fill()
             }
-            cell.isEnabled = _isEnabled
+            // Not through the setter during a draw: a cell that invalidates its control
+            // while it is drawn paints forever (the Windows pump never left WM_PAINT).
+            if cell.isEnabled != _isEnabled { cell.isEnabled = _isEnabled }
             cell.drawInterior(withFrame: r, in: controlView)
             if _pathStyle == .standard && i < cells.count - 1 {
                 let cx = rtl ? r.minX - NSPathCell.chevronWidth / 2 : r.maxX + NSPathCell.chevronWidth / 2

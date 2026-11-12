@@ -161,6 +161,8 @@ final class HostWindow: PlatformWindow {
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
     private var dirty: NSRect? = nil
+    /// Whether a paint is pending (tests check that a paint does not invalidate itself).
+    var _needsPaint: Bool { dirty != nil }
     private var _frame: NSRect
     /// Title bar height used by this fake window manager.
     static let titleBarHeight: CGFloat = 28

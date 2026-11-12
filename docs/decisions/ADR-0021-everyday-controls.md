@@ -100,7 +100,12 @@ AXDateTimeArea, AXGroup of AXButton children or AXPopUpButton for the path contr
 - **Path control.** The standard style lays the component cells out with chevrons and
   shrinks all but the last when narrow; the pop-up style is a pop-up button whose menu
   lists the ancestors (and "Choose…" with an `NSOpenPanel` when editable). Dragging
-  path items is not provided.
+  path items is not provided. Its draw passes the enabled state to each component cell
+  without going through the cell's setter when nothing changed: that setter invalidates
+  the control, and a view invalidated by its own paint repaints forever (on Windows the
+  pump never left WM_PAINT, so the main queue, timers and the demo's probe never ran;
+  `RepaintLoopTests` keeps the Controls rows settling after each frame, and the Win32
+  pump now services the main queue every 50 ms even while paints keep coming).
 - **SwiftUI.** `ProgressView` hosts an `NSProgressIndicator` (a spinner under
   `.progressViewStyle(.circular)`); `Stepper` and `DatePicker` are new over `NSStepper`
   and `NSDatePicker` (graphical under `.datePickerStyle(.graphical)`).
