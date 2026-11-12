@@ -25,6 +25,6 @@ public protocol NSScrubberFlowLayoutDelegate: NSScrubberDelegate, NSObjectProtoc
 extension NSScrubberFlowLayoutDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberflowlayoutdelegate/scrubber(_:layout:sizeforitemat:)
     @available(macOS 10.12, *)
-    public func scrubber(_ scrubber: NSScrubber, layout: NSScrubberFlowLayout, sizeForItemAt itemIndex: Int) -> NSSize { unimplementedOptionalRequirement() }
+    public func scrubber(_ scrubber: NSScrubber, layout: NSScrubberFlowLayout, sizeForItemAt itemIndex: Int) -> NSSize { return MainActor.assumeIsolated { layout.itemSize } }
 }
 

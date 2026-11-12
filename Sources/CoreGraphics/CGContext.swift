@@ -326,6 +326,8 @@ public final class CGContext {
         state.clipBox = state.clipBox.intersection(currentPath.boundingBoxOfPath)
     }
 
+    /// CoreGraphics' name for the clip's bounding box in user space.
+    public var boundingBoxOfClipPath: CGRect { clipBoundingBox }
     public var clipBoundingBox: CGRect { state.clipBox }
 
     private func popClips(_ n: Int) {
