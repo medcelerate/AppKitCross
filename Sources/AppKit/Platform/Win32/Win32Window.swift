@@ -29,6 +29,14 @@ final class Win32Window: PlatformWindow {
     private(set) var isKey = false
     private var destroying = false
     private var pressedButtons = 0
+    /// `TrackMouseEvent` is armed for the client area / the non-client caption buttons, so
+    /// WM_MOUSELEAVE / WM_NCMOUSELEAVE will tell the owner the pointer left (hover ends).
+    private var trackingLeave = false
+    private var trackingNonClientLeave = false
+    /// Trace bookkeeping (APPKITWIN_TRACE): the last WM_NCHITTEST answer and whether the
+    /// current non-client hover over a caption button was reported.
+    private var lastTracedHitCode: Int32 = -1
+    private var tracedNonClientHover = false
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
     private var dpi: UINT = 96
@@ -58,7 +66,8 @@ final class Win32Window: PlatformWindow {
         // device), which blits into it, and for windows that carry the Win32 menu bar:
         // user32 draws the bar through GDI into the surface, a black strip without one.
         let redirection = Win32WindowPolicy.redirectionBitmap(styleMask: styleMask, applicationHasMenuBar: ownerWantsMenuBar,
-                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available())
+                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available(),
+                                                              requested: Win32Window.keepsRedirectionBitmapByRequest)
         if !redirection.keeps { ex |= Win32Window.wsExNoRedirectionBitmap }
         if NSView._traceInvalidation {
             let why: String
@@ -67,6 +76,7 @@ final class Win32Window: PlatformWindow {
             case .keptForLegacyTarget: why = "legacy HWND target"
             case .keptForMissingDevice: why = "no D3D11/DXGI 1.2 device: HWND target"
             case .keptForMenuBar: why = "window carries the Win32 menu bar"
+            case .keptByRequest: why = "APPKITWIN_REDIRECTION_BITMAP=1"
             }
             NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(redirection.keeps ? "kept" : "none") (\(why))")
         }
@@ -216,13 +226,11 @@ final class Win32Window: PlatformWindow {
         }
 
         // Frame: keep the DWM shadow, border and rounded corners while the client area
-        // covers the frame by extending the frame one pixel into the client area. A
-        // borderless window gets a frame to extend (WS_THICKFRAME) while it wants a
-        // shadow; without a shadow nothing is extended and DWM draws no frame at all.
+        // covers the frame by extending the frame into the client area. A borderless
+        // window gets a frame to extend (WS_THICKFRAME) while it wants a shadow; without
+        // a shadow nothing is extended and DWM draws no frame at all.
         updateShadowFrameStyle()
-        let shadowFrame = usesCustomFrame && _chrome.hasShadow
-        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: shadowFrame ? 1 : 0, cyBottomHeight: 0)
-        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        let margins = extendFrame()
         if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
         }
@@ -248,6 +256,33 @@ final class Win32Window: PlatformWindow {
         setDwmAttribute(Win32Window.dwmwaNCRenderingPolicy, _chrome.hasShadow ? Win32Window.dwmncrpUseWindowStyle : Win32Window.dwmncrpDisabled)
         // hidesTitle / transparentTitleBar only have a visible effect together with
         // extendsContentIntoTitleBar, where the caption is not drawn at all.
+    }
+
+    /// `DwmExtendFrameIntoClientArea` for a custom frame. How far the frame comes in
+    /// matters to the shell: with a 1 px top margin Windows 11 never shows the snap
+    /// layouts flyout over a package-drawn maximise button that answers HTMAXBUTTON
+    /// (PC rounds of ADR-0022: 1 px no, 0 and 32 px yes). So, as Windows Terminal does,
+    /// an opaque window extends the frame by the title band (28 pt at the window's DPI:
+    /// DWM paints its frame under the band, which the window covers with opaque pixels),
+    /// and a translucent window, or one with a system backdrop, extends nothing (DWM's
+    /// frame would show through its content; the backdrop keeps the shadow).
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` overrides for experiments. Called when the chrome
+    /// changes and when the DPI does.
+    @discardableResult
+    private func extendFrame() -> MARGINS {
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0)
+        guard let hwnd else { return margins }
+        if usesCustomFrame, _chrome.hasShadow {
+            if let forced = Win32Window.frameTopMarginOverride {
+                margins.cyTopHeight = forced
+            } else if _chrome.isTransparent || _chrome.backdrop != .none {
+                margins.cyTopHeight = 0
+            } else {
+                margins.cyTopHeight = Int32((NSWindow._titleBarBandHeight * scale).rounded())
+            }
+        }
+        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        return margins
     }
 
     var scale: CGFloat { CGFloat(dpi) / 96 }
@@ -497,6 +532,12 @@ final class Win32Window: PlatformWindow {
     /// `APPKITWIN_LEGACY_D2D=1` selects the Milestone 1 `ID2D1HwndRenderTarget` instead of
     /// the DXGI flip-model swap chain (Milestone 3).
     private static let useLegacyHwndTarget = ProcessInfo.processInfo.environment["APPKITWIN_LEGACY_D2D"] == "1"
+    /// Experiment knobs for the Windows 11 snap layouts investigation (ADR-0022, PC rounds):
+    /// `APPKITWIN_REDIRECTION_BITMAP=1` keeps the redirection surface on every window;
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` is the top margin `DwmExtendFrameIntoClientArea`
+    /// gets for custom frames instead of the default (`extendFrame()`).
+    private static let keepsRedirectionBitmapByRequest = ProcessInfo.processInfo.environment["APPKITWIN_REDIRECTION_BITMAP"] == "1"
+    private static let frameTopMarginOverride: Int32? = ProcessInfo.processInfo.environment["APPKITWIN_FRAME_TOP_MARGIN"].flatMap { Int32($0) }
     /// `APPKITWIN_DXGI_DEBUG=1` prints the DXGI debug layer's live-object report to stderr
     /// whenever a window target is released (and asks for the D3D11 debug layer).
     private static let reportsLiveObjects = ProcessInfo.processInfo.environment["APPKITWIN_DXGI_DEBUG"] == "1"
@@ -814,8 +855,6 @@ final class Win32Window: PlatformWindow {
 
     private func timestamp() -> TimeInterval { TimeInterval(GetTickCount64()) / 1000 }
 
-    /// A WM_MOUSELEAVE is pending from TrackMouseEvent (one per entry of the client area).
-    private var mouseLeaveTracked = false
 
     private func mouse(_ type: NSEvent.EventType, _ lParam: LPARAM, button: Int, clickCount: Int = 1) {
         let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
@@ -823,6 +862,37 @@ final class Win32Window: PlatformWindow {
         let e = NSEvent._mouseEvent(type: type, location: contentPoint(x: x, y: y), modifierFlags: modifierFlags(),
                                     timestamp: timestamp(), windowNumber: windowNumber(), clickCount: clickCount, buttonNumber: button)
         owner?.platformWindowDispatch(e)
+    }
+
+    /// A non-client mouse message (screen coordinates in `lParam`) over a package-drawn
+    /// caption button, delivered as the left-button event the button tracks.
+    private func nonClientMouse(_ type: NSEvent.EventType, _ lParam: LPARAM, clickCount: Int) {
+        let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
+        let y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
+        let e = NSEvent._mouseEvent(type: type, location: contentPoint(screenX: x, screenY: y), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: clickCount, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// The pointer left the window (or moved into non-client area that is not a button):
+    /// a move far outside, as the Wayland backend reports it, ends hover states.
+    private func pointerLeft() {
+        let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// Arms WM_MOUSELEAVE (client) or WM_NCMOUSELEAVE (non-client) once per entry.
+    private func trackMouseLeave(nonClient: Bool) {
+        guard let hwnd else { return }
+        if nonClient ? trackingNonClientLeave : trackingLeave { return }
+        var tme = TRACKMOUSEEVENT()
+        tme.cbSize = DWORD(MemoryLayout<TRACKMOUSEEVENT>.size)
+        tme.dwFlags = DWORD(TME_LEAVE) | (nonClient ? DWORD(TME_NONCLIENT) : 0)
+        tme.hwndTrack = hwnd
+        tme.dwHoverTime = 0
+        _ = TrackMouseEvent(&tme)
+        if nonClient { trackingNonClientLeave = true } else { trackingLeave = true }
     }
 
     /// Virtual keys that AppKit reports as function-key characters (NSEvent.SpecialKey) or
@@ -1071,6 +1141,7 @@ final class Win32Window: PlatformWindow {
             // the new DPI rather than taking the suggested rect's size (which rounds).
             let pointSize = contentSize
             dpi = UINT(wParam & 0xFFFF)
+            extendFrame()           // the band's extension is in pixels
             if let rt = renderTarget {
                 cd2d_target_set_dpi(rt, Float(dpi))
                 // The content size in points is unchanged, so no scene commit follows: the
@@ -1139,10 +1210,68 @@ final class Win32Window: PlatformWindow {
                 ScreenToClient(hwnd, &pt)
             }
             // NSWindow decides: caption when movable by background or in the title bar
-            // band of content that extends into it, unless a control is under the mouse.
+            // band of content that extends into it, unless a control is under the mouse;
+            // the standard buttons it draws answer as the caption buttons (HTCLOSE,
+            // HTMINBUTTON, HTMAXBUTTON: Windows 11 shows snap layouts over the latter).
             let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
             if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) { NSView._trace("win32 popup nchittest client \(pt.x),\(pt.y) -> \(region)") }
-            return LRESULT(region == .caption ? HTCAPTION : HTCLIENT)
+            let code = Win32WindowPolicy.hitCode(for: region)
+            if NSView._traceInvalidation, code != lastTracedHitCode {
+                // What the shell sees while the pointer crosses the caption buttons (the
+                // Windows 11 snap layouts flyout needs HTMAXBUTTON = 9 here), with the style
+                // bits it also checks: WS_MAXIMIZEBOX 0x10000, WS_THICKFRAME 0x40000, WS_CAPTION 0xC00000.
+                lastTracedHitCode = code
+                let style = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_STYLE))
+                NSView._trace("win32 nchittest '\(_title)' client \(pt.x),\(pt.y) -> \(code) (\(region)) style 0x\(String(style, radix: 16)) active \(GetForegroundWindow() == hwnd)")
+            }
+            return LRESULT(code)
+        case WM_NCMOUSEMOVE:
+            // Over a package-drawn caption button the pointer is "non-client": the owner
+            // still sees it move (hover fills). Elsewhere in the non-client area (the resize
+            // band over the buttons) the pointer is reported gone, so no button stays lit.
+            // DefWindowProc gets the message either way: the Windows 11 snap layouts flyout
+            // comes from the shell's hot-tracking of HTMAXBUTTON through it (Windows
+            // Terminal's custom frame relies on the same), and with no non-client area
+            // (WM_NCCALCSIZE) it has nothing of its own to paint.
+            guard usesCustomFrame else { return nil }
+            trackMouseLeave(nonClient: true)
+            if Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) {
+                if NSView._traceInvalidation, !tracedNonClientHover {
+                    tracedNonClientHover = true
+                    NSView._trace("win32 ncmousemove '\(_title)' over caption button \(wParam) -> DefWindowProc")
+                }
+                nonClientMouse(.mouseMoved, lParam, clickCount: 0)
+            } else {
+                tracedNonClientHover = false
+                pointerLeft()
+            }
+            return nil
+        case WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK:
+            // A press on a package-drawn caption button is the button's to track (DefWindowProc
+            // would track a system caption button the frame does not have): capture, so the
+            // drag and the release arrive as client messages like any control's.
+            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            if let hwnd { SetCapture(hwnd) }
+            pressedButtons |= 1
+            NSEvent._pressedMouseButtons = pressedButtons
+            nonClientMouse(.leftMouseDown, lParam, clickCount: 1)
+            return 0
+        case WM_NCLBUTTONUP:
+            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            pressedButtons &= ~1
+            NSEvent._pressedMouseButtons = pressedButtons
+            if pressedButtons == 0 { ReleaseCapture() }
+            nonClientMouse(.leftMouseUp, lParam, clickCount: 1)
+            return 0
+        case WM_NCMOUSELEAVE:
+            trackingNonClientLeave = false
+            tracedNonClientHover = false
+            if pressedButtons == 0 { pointerLeft() }
+            return nil
+        case WM_MOUSELEAVE:
+            trackingLeave = false
+            if pressedButtons == 0 { pointerLeft() }
+            return 0
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
             // last-window-closed check run; NSWindow then calls close() here.
@@ -1227,22 +1356,8 @@ final class Win32Window: PlatformWindow {
             if pressedButtons == 0 { ReleaseCapture() }
             mouse(.otherMouseUp, lParam, button: 2)
             return 0
-        case WM_MOUSELEAVE:
-            // The pointer left the client area (asked for with TrackMouseEvent below): a
-            // far-away move lets the tracking areas and hover states exit.
-            mouseLeaveTracked = false
-            if pressedButtons == 0 {
-                let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
-                                            timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
-                owner?.platformWindowDispatch(e)
-            }
-            return 0
         case WM_MOUSEMOVE:
-            if !mouseLeaveTracked, let hwnd {
-                var tme = TRACKMOUSEEVENT(cbSize: DWORD(MemoryLayout<TRACKMOUSEEVENT>.size), dwFlags: DWORD(TME_LEAVE), hwndTrack: hwnd, dwHoverTime: 0)
-                _ = TrackMouseEvent(&tme)
-                mouseLeaveTracked = true
-            }
+            trackMouseLeave(nonClient: false)
             if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, lParam, button: 0) }
             else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, lParam, button: 1) }
             else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, lParam, button: 2) }

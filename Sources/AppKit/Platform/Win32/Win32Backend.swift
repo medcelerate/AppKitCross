@@ -36,6 +36,9 @@ final class Win32Backend: PlatformBackend {
     private(set) lazy var win32Printing = Win32PrintBackend(backend: self)
     var printing: (any PlatformPrintBackend)? { win32Printing }
 
+    /// Windows caption buttons at the top-right of custom-frame windows (ADR-0022).
+    var windowButtonStyle: PlatformWindowButtonStyle { .caption }
+
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
     }

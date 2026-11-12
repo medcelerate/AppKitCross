@@ -76,6 +76,10 @@ final class HostBackend: PlatformBackend {
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
 
+    /// Test hook: the style of the standard buttons the package draws (ADR-0022). Windows
+    /// answers `.caption`; the host defaults to the traffic lights of macOS and Linux.
+    var windowButtonStyle: PlatformWindowButtonStyle = .trafficLights
+
     /// The host has no native dialog: the panels draw themselves. Tests may install one
     /// (`HostFileDialog` records the options and answers a canned result).
     var fileDialogOverride: (any PlatformFileDialog)? = nil

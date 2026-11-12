@@ -22,6 +22,8 @@ by a capture of the live window.
 | Layout Demo, Panels tab: `NSColorWell`s in the three styles, buttons opening the panels, a rich text view both panels change | ![macOS](images/compare/layout-panels-macos.png) | ![Linux](images/compare/layout-panels-linux.png) | awaiting a capture from the Windows machine |
 | The Colors panel (`NSColorPanel`, ADR-0031), drawn by the package | ![macOS](images/compare/color-panel-macos.png) | ![Linux](images/compare/color-panel-linux.png) | awaiting a capture from the Windows machine |
 | The Fonts panel (`NSFontPanel`), listing the platform's families | ![macOS](images/compare/font-panel-macos.png) | ![Linux](images/compare/font-panel-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Popover tab: a button per `NSPopover` behaviour and an `NSSwitch` | ![macOS](images/compare/layout-popover-macos.png) | ![Linux](images/compare/layout-popover-linux.png) | awaiting a capture from the Windows machine |
+| The transient popover's own window (`APPKITWIN_POPOVER_OPEN=1`): body, arrow, content | ![macOS](images/compare/layout-popover-open-macos.png) | ![Linux](images/compare/layout-popover-open-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
@@ -44,6 +46,7 @@ swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # ma
 APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
 APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color swift run HelloWindow --layout --screenshot docs/images/compare   # the Panels tab with the Colors panel (font: APPKITWIN_PANELS_OPEN=font)
+APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 swift run HelloWindow --layout --screenshot docs/images/compare   # the Popover tab and the popover's window
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
 
@@ -58,6 +61,9 @@ content, and `tools/linux/compare.sh` captures the X screen with the Colors pane
 beside the Layout Demo (`APPKITWIN_PANELS_OPEN=color`):
 
 ![Colors panel open on Linux](images/compare/color-panel-open-linux.png)
+The transient popover open on the Layout Demo's Popover tab under Xvfb (the popover is a transient window of the demo's; X11 shows no transparency, so its surround is the parent's background colour):
+
+![Popover open on Linux](images/compare/layout-popover-screen-linux.png)
 
 The Windows column is captured by the Windows test machine (window captures of the live
 app). More Windows captures show the SwiftUI demo's other tabs and the menus, which are drawn

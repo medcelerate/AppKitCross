@@ -119,12 +119,24 @@ import CoreText
     /// The platform draws no title bar: the frame has a band above the content that
     /// `platformWindowDrawTitleBar` paints (ClientSideDecoration.swift).
     internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
+    /// Traffic lights at the left (macOS, Linux) or Windows caption buttons at the right (ADR-0022).
+    internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.backend.windowButtonStyle }
+    /// What the standard buttons occupy at each edge of the title band (plus a gap), 0 when
+    /// no buttons show there: what a toolbar or a title bar accessory lays out inside.
+    internal var _windowButtonsLeadingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.leadingInset ?? _NSWindowButtonsView.leadingInset(for: _windowButtonStyle)
+    }
+    internal var _windowButtonsTrailingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.trailingInset ?? _NSWindowButtonsView.trailingInset(for: _windowButtonStyle)
+    }
 
     /// Creates the overlay when first needed and keeps it placed and styled.
     @discardableResult
     internal func _ensureWindowButtons(create: Bool = false) -> _NSWindowButtonsView? {
         if _windowButtons == nil, create || _showsWindowButtons {
-            let v = _NSWindowButtonsView()
+            let v = _NSWindowButtonsView(style: _windowButtonStyle)
             v.nextResponder = self
             v._setWindow(self)
             v.close.isDocumentEdited = _isDocumentEdited
@@ -140,6 +152,7 @@ import CoreText
             // and at the top of the frame (in the band above the content) when the package
             // draws the title bar.
             let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : _platformContentSize
+            v.style = _windowButtonStyle
             v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
         }
@@ -162,7 +175,8 @@ import CoreText
     /// How the toolbar is placed and sized for this window; nil when none is shown.
     internal var _toolbarMetrics: _NSToolbarMetrics? {
         guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
-        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
+        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView),
+                                         buttonStyle: _windowButtonStyle)
     }
     /// The height the toolbar takes out of the content area (below the title band). Zero
     /// when the content covers the title bar: the toolbar then overlays the content.
@@ -237,10 +251,13 @@ import CoreText
             top -= NSWindow._titleBarBandHeight
         }
         // Leading and trailing accessories stack outward from their edge of the title row;
-        // the buttons keep the left edge whatever the direction, as on macOS.
+        // the standard buttons keep their edge whatever the direction (left for the traffic
+        // lights as on macOS, right for Windows caption buttons; ADR-0022), and the
+        // accessories keep clear of them through the band insets.
         let rtl = windowTitlebarLayoutDirection == .rightToLeft
-        let buttonsInset: CGFloat = _showsWindowButtons ? _NSWindowButtonsView.width + 4 : 8
-        var leftX = buttonsInset, rightX = pc.width - 8
+        let leadingInset: CGFloat = _showsWindowButtons ? max(8, _windowButtonsLeadingInset) : 8
+        let trailingInset: CGFloat = _showsWindowButtons ? max(8, _windowButtonsTrailingInset) : 8
+        var leftX = leadingInset, rightX = pc.width - trailingInset
         for a in _visibleAccessories where a.layoutAttribute != .bottom {
             let size = a._measuredSize
             let height = min(size.height, l.titleRow.height > 0 ? l.titleRow.height : size.height)
@@ -263,7 +280,7 @@ import CoreText
         if fullSize, let t = l.toolbar, t.maxY == pc.height, _toolbarMetrics?.topInset == 0 {
             // A unified toolbar shares the row: its items start after the left-hand
             // accessories and stop before the right-hand ones.
-            l.toolbarInsets = (max(0, leftX - buttonsInset), max(0, pc.width - 8 - rightX))
+            l.toolbarInsets = (max(0, leftX - leadingInset), max(0, pc.width - trailingInset - rightX))
         }
         for a in _visibleAccessories where a.layoutAttribute == .bottom {
             let h = a._measuredSize.height
@@ -686,6 +703,15 @@ import CoreText
     public func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion {
         guard let content = _contentView else { return .client }
         let hit = _hitTest(point) ?? content.hitTest(point)
+        // A standard button the package draws: Windows reports it as the caption button it
+        // stands for (snap layouts over maximise); a disabled one is plain content.
+        if _showsWindowButtons, let b = hit as? _NSWindowButton, b.superview === _windowButtons, b.isEnabled {
+            switch b.kind {
+            case .closeButton: return .closeButton
+            case .miniaturizeButton: return .miniaturizeButton
+            default: return .zoomButton
+            }
+        }
         if let v = hit, !v.mouseDownCanMoveWindow { return .client }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if let a = _accessoryHost, !a.isHidden, let v = hit, v === a || v.isDescendant(of: a) { return .caption }
@@ -734,10 +760,12 @@ import CoreText
             let color = _isKey ? NSColor.windowFrameTextColor : NSColor.secondaryLabelColor
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let size = _title.size(withAttributes: attributes)
-            // Centred in the band, kept clear of the buttons on the left.
-            let buttonsEnd = _NSWindowButtonsView.width + 8
+            // Centred in the band, kept clear of the buttons at whichever edge they sit.
+            let buttonStyle = _windowButtons?.style ?? _windowButtonStyle
+            let buttonsEnd = buttonStyle == .trafficLights ? _NSWindowButtonsView.width + 8 : 8
+            let trailingEnd = buttonStyle == .caption ? _NSWindowButtonsView.captionWidth + 8 : 8
             let x = max(buttonsEnd, band.midX - size.width / 2)
-            let width = min(size.width, band.maxX - 8 - x)
+            let width = min(size.width, band.maxX - trailingEnd - x)
             if width > 0 {
                 context.saveGState()
                 context.clip(to: NSRect(x: x, y: band.minY, width: width, height: band.height))
@@ -2090,6 +2118,14 @@ import CoreText
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
         defer { _currentEvent = nil }
+        // A child window that is key (a popover) takes the keyboard: on Wayland its keys
+        // arrive here, focus staying with the toplevel (ADR-0025).
+        if let child = _childWindows.last(where: { $0._isKey && $0.isVisible && $0 !== self }) {
+            switch event.type {
+            case .keyDown, .keyUp, .flagsChanged: child.sendEvent(event); return
+            default: break
+            }
+        }
         // Blocked by a sheet: the keyboard goes to the sheet (on Wayland the key events
         // arrive here, focus staying with the toplevel), the content takes no mouse.
         if let sheet = attachedSheet, sheet.isVisible {
@@ -2128,6 +2164,7 @@ import CoreText
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
+            if event.type == .mouseExited { _windowButtons?.updateHover(event.locationInWindow) }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
             // Gestures go to the view under the pointer, or to the one tracking a press.
@@ -2245,7 +2282,7 @@ import CoreText
     @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? {
         switch b {
         case .closeButton, .miniaturizeButton, .zoomButton:
-            let button = _NSWindowButton(kind: b)
+            let button = _NSWindowButton(kind: b, style: Platform.backend.windowButtonStyle)
             button.isEnabled = b == .closeButton ? styleMask.contains(.closable) : b == .miniaturizeButton ? styleMask.contains(.miniaturizable) : styleMask.contains(.resizable)
             return button
         default: return nil
