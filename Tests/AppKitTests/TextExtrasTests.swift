@@ -517,6 +517,63 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The PC's second drop: Explorer drags a PNG onto the lower half of a large image in
+    /// TextEdit's document view, scrolled so that half is on screen. It goes through the
+    /// window system's drag delivery (OLE on Windows) and inserts an attachment.
+    func testExplorerDropOntoAScrolledLargeAttachment() throws {
+        try MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 640, height: 460), styleMask: [.titled], backing: .buffered, defer: false)
+            let scroll = NSScrollView(frame: w.contentView!.bounds)
+            scroll.autoresizingMask = [.width, .height]
+            scroll.hasVerticalScroller = true
+            let tv = NSTextView(frame: scroll.bounds)
+            tv.autoresizingMask = [.width, .height]
+            TextDocument_configure(tv)
+            scroll.documentView = tv
+            w.contentView!.addSubview(scroll)
+            w.makeKeyAndOrderFront(nil)
+            @MainActor func attachment(_ size: NSSize, _ name: String) -> NSAttributedString {
+                let wrapper = FileWrapper(regularFileWithContents: pngImage(size))
+                wrapper.preferredFilename = name
+                return NSAttributedString(attachment: NSTextAttachment(fileWrapper: wrapper))
+            }
+            let text = NSMutableAttributedString(attributedString: attachment(NSSize(width: 320, height: 240), "small.png"))
+            text.append(attachment(NSSize(width: 1400, height: 1000), "large.png"))
+            tv.textStorage?.setAttributedString(text)
+            w.display()
+            let lm = try XCTUnwrap(tv.layoutManager)
+            let large = try XCTUnwrap(lm._attachmentRect(at: 1))
+            XCTAssertGreaterThan(tv.frame.height, large.maxY - 1, "the view holds the image")
+            // Scroll so the image's lower half fills the window, then drop on it.
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: large.minY + 600))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            w.display()
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pr56-drop-\(UUID().uuidString).png")
+            try pngImage(NSSize(width: 40, height: 30)).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            @MainActor func explorerDrag(at point: NSPoint) -> PlatformDragInfo {
+                PlatformDragInfo(location: point, sourceOperations: [.copy, .move, .link], modifierFlags: [], items: [["public.file-url"]], isFromThisApplication: false) { _, type in
+                    type == "public.file-url" ? Data(url.absoluteString.utf8) : nil
+                }
+            }
+            // A drag that crosses the window and leaves without dropping comes first.
+            let stale = FileManager.default.temporaryDirectory.appendingPathComponent("gone-\(UUID().uuidString).png")
+            let passing = PlatformDragInfo(location: NSPoint(x: 300, y: 200), sourceOperations: [.copy], modifierFlags: [], items: [["public.file-url"]], isFromThisApplication: false) { _, _ in Data(stale.absoluteString.utf8) }
+            XCTAssertEqual(w.platformDragEntered(passing), .copy)
+            w.platformDragExited()
+            // Window point (300, 230): content coordinates, bottom-left origin; the lower half
+            // of the image is under it.
+            let drag = explorerDrag(at: NSPoint(x: 300, y: 230))
+            let viewPoint = tv.convert(drag.location, from: nil)
+            XCTAssertTrue(large.offsetBy(dx: tv.textContainerOrigin.x, dy: tv.textContainerOrigin.y).contains(viewPoint), "the drop point \(viewPoint) is on the image \(large)")
+            XCTAssertEqual(w.platformDragEntered(drag), .copy, "the text view takes the file")
+            XCTAssertEqual(w.platformDragUpdated(drag), .copy)
+            XCTAssertEqual(w.platformDrop(drag), .copy, "the drop is performed")
+            XCTAssertEqual(tv.string.unicodeScalars.filter { $0.value == 0xFFFC }.count, 3, "the file was inserted")
+            w.close()
+        }
+    }
+
     /// Distinct attribute values in adjacent runs: on Windows and Linux Foundation reads a
     /// Swift object's CF type from its first stored word and halted on these (CFBridgeLayout).
     func testDistinctAttributeValuesInAdjacentRuns() {

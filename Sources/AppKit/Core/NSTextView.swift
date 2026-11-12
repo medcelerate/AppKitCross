@@ -784,16 +784,29 @@ import CoreText
         _PasteboardTrace.log("NSTextView.paste: readSelection -> \(ok)")
     }
 
-    open override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { _dragOperation(sender) }
+    open override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let op = _dragOperation(sender)
+        _PasteboardTrace.log("NSTextView drag entered at \(convert(sender.draggingLocation, from: nil)) (frame \(frame), visible \(visibleRect)) types \(sender.draggingPasteboard.types?.map(\.rawValue) ?? []) -> \(op.rawValue)")
+        return op
+    }
     open override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
         let op = _dragOperation(sender)
         if !op.isEmpty { setSelectedRange(NSRange(location: _offset(at: convert(sender.draggingLocation, from: nil)), length: 0)) }
         return op
     }
+    open override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        _PasteboardTrace.log("NSTextView drag exited")
+        super.draggingExited(sender)
+    }
     open override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard isEditable else { return false }
-        let at = _offset(at: convert(sender.draggingLocation, from: nil))
-        guard let content = _readContent(from: sender.draggingPasteboard) else { return false }
+        guard isEditable else { _PasteboardTrace.log("NSTextView drop: not editable"); return false }
+        let point = convert(sender.draggingLocation, from: nil)
+        let at = _offset(at: point)
+        guard let content = _readContent(from: sender.draggingPasteboard) else {
+            _PasteboardTrace.log("NSTextView drop at \(point) (index \(at)): nothing readable in \(sender.draggingPasteboard.types?.map(\.rawValue) ?? []), file URL \(sender.draggingPasteboard.string(forType: .fileURL) ?? "none")")
+            return false
+        }
+        _PasteboardTrace.log("NSTextView drop at \(point) (frame \(frame), visible \(visibleRect)): inserting \(content.length) characters at index \(at) of \(_storage.length)")
         setSelectedRange(NSRange(location: at, length: 0))
         _ = window?.makeFirstResponder(self)
         _insertPasted(content)

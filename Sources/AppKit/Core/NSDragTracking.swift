@@ -452,10 +452,16 @@ final class _NSDragTracker: PlatformDragSource {
 @MainActor
 enum _NSPlatformDragDelivery {
     private static var foreign: _NSDragDestinationDriver?
+    /// The drag `foreign` was made for. A backend describes each drag with its own
+    /// PlatformDragInfo, so another one entering means the earlier drag left without a drop
+    /// (OLE sends no "drag over" to the application): its session must not carry the new
+    /// drag's drop, or the drop reads the earlier drag's data.
+    private static weak var foreignInfo: PlatformDragInfo?
 
     private static func driver(for drag: PlatformDragInfo) -> _NSDragDestinationDriver? {
         if drag.isFromThisApplication { return _NSDragTracker.current?.driver }
-        if let f = foreign { return f }
+        if let f = foreign, foreignInfo === drag { return f }
+        if foreign != nil { foreignDragLeft() }
         let load = drag.load
         let items: [NSPasteboardItem] = drag.items.enumerated().map { index, types in
             let item = NSPasteboardItem()
@@ -468,6 +474,7 @@ enum _NSPlatformDragDelivery {
         let session = NSDraggingSession(pasteboard: pb, items: items.map { NSDraggingItem(pasteboardWriter: $0) }, source: nil)
         let d = _NSDragDestinationDriver(info: _NSDraggingInfo(session: session, source: nil, mask: drag.sourceOperations))
         foreign = d
+        foreignInfo = drag
         return d
     }
 
@@ -513,13 +520,18 @@ enum _NSPlatformDragDelivery {
         if !drag.isFromThisApplication {
             d.end()
             foreign = nil
+            foreignInfo = nil
         }
         return performed
     }
 
     /// A foreign drag left the application without dropping (every window told).
     static func foreignDragLeft() {
-        foreign?.exit()
+        guard let d = foreign else { return }
+        d.exit()
+        d.end()
+        foreign = nil
+        foreignInfo = nil
     }
 }
 
