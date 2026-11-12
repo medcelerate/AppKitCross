@@ -800,6 +800,9 @@ import CoreGraphics
     private func _applyRowState(_ rv: NSTableRowView, row: Int) {
         rv.isEmphasized = _isEmphasized
         rv.isSelected = _selectedRows.contains(row)
+        // The row's setters skip unchanged values, and its cells may have just come from
+        // another row (selected, emphasized: light text): give them this row's style.
+        rv._updateCellBackgroundStyles()
         rv.isPreviousRowSelected = row > 0 && _selectedRows.contains(row - 1)
         rv.isNextRowSelected = _selectedRows.contains(row + 1)
         if _usesAlternatingRowBackgroundColors {

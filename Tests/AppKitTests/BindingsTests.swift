@@ -637,6 +637,44 @@ final class BoundViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A cell view recycled out of a selected (emphasized, light-text) row must not keep that
+    /// style in an unselected row: light text on a white row looked like a blank row on Windows.
+    func testRecycledCellsTakeTheirNewRowsBackgroundStyle() {
+        MainActor.assumeIsolated {
+            let ac = NSArrayController(content: people())
+            let (window, table) = makeTable(ac)
+            table.allowsMultipleSelection = true
+            table.tableColumns[0].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.name, ascending: true)
+            table.tableColumns[1].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.age, ascending: true)
+            window.makeKeyAndOrderFront(nil)
+            XCTAssertTrue(window.makeFirstResponder(table))
+            @MainActor func check(_ label: String) {
+                window.display()
+                for row in 0..<table.numberOfRows {
+                    guard let rv = table.rowView(atRow: row, makeIfNecessary: false) else { XCTFail("\(label): row \(row) missing"); continue }
+                    for cell in rv._cellViews.compactMap({ $0 as? NSTableCellView }) {
+                        XCTAssertEqual(cell.backgroundStyle, rv.interiorBackgroundStyle, "\(label): row \(row) cell style")
+                        XCTAssertEqual(cell.textField?.cell?.backgroundStyle, rv.interiorBackgroundStyle, "\(label): row \(row) text style")
+                    }
+                }
+            }
+            table.selectRowIndexes([0, 1, 2], byExtendingSelection: false)
+            check("selected")
+            XCTAssertEqual(table.rowView(atRow: 0, makeIfNecessary: false)?.interiorBackgroundStyle, .emphasized, "a key table emphasizes its selection")
+            table.selectRowIndexes([3], byExtendingSelection: false)
+            check("moved")
+            for i in 0..<6 {
+                table._headerClicked(column: i % 2)
+                check("sort \(i)")
+            }
+            ac.addObject(BindingPerson("New", 1))
+            ac.remove(atArrangedObjectIndexes: ac.selectionIndexes)
+            table.selectRowIndexes([0, 2], byExtendingSelection: false)
+            table._headerClicked(column: 0)
+            check("after add/remove")
+        }
+    }
+
     func testSelectionFollowsBothWays() {
         MainActor.assumeIsolated {
             let ac = NSArrayController(content: people())
