@@ -909,10 +909,13 @@ final class Win32Window: PlatformWindow {
 
     private func key(_ type: NSEvent.EventType, _ wParam: WPARAM, _ lParam: LPARAM) {
         let vk = Int32(truncatingIfNeeded: wParam)
-        if NSView._traceInvalidation { NSView._trace("win32 key \(type == .keyDown ? "down" : "up") vk \(vk) '\(title)' composing \(composing)") }
         // An active input method owns the keyboard: the keystrokes it consumes arrive as
         // VK_PROCESSKEY and come back as WM_IME_* messages, so they are not key events too.
         if vk == VK_PROCESSKEY || composing { return }
+        // The characters Windows itself translated for this key (the pump's TranslateMessage
+        // queued them as WM_CHAR before dispatching the key-down); taken off the queue
+        // whether or not they are needed, so none is left over for a later key.
+        let translated = type == .keyDown ? takeTranslatedUnits() : []
         var chars = "", plain = ""
         var keyCode = UInt16(truncatingIfNeeded: wParam)
         if let special = Win32Window.specialKeys[vk] {
@@ -940,12 +943,49 @@ final class Win32Window: PlatformWindow {
                 owner?.platformWindowDispatch(e)
                 return
             }
+            // ToUnicode gave nothing but the translation did: Unicode input injected as
+            // VK_PACKET (SendInput's KEYEVENTF_UNICODE, used by the touch keyboard and by
+            // UI automation), or a keyboard state ToUnicode reads differently from the
+            // translation (a modifier the injecting process left down). The text field
+            // would otherwise drop the key, Backspace and the other special keys still
+            // working, which is how the print panels' fields refused typed digits.
+            if chars.isEmpty, !translated.isEmpty {
+                var units = translated
+                if let high = pendingHighSurrogate { units.insert(high, at: 0); pendingHighSurrogate = nil }
+                if let last = units.last, UTF16.isLeadSurrogate(last) {
+                    // The first half of a pair: the second comes with the next key-down.
+                    pendingHighSurrogate = last
+                    units.removeLast()
+                    if units.isEmpty { return }
+                }
+                chars = String(decoding: units, as: UTF16.self)
+                if plain.isEmpty { plain = chars }
+            }
         }
+        if NSView._traceInvalidation { NSView._trace("win32 key \(type == .keyDown ? "down" : "up") vk \(vk) chars \(chars.unicodeScalars.map { String($0.value, radix: 16) }) plain \(plain.unicodeScalars.map { String($0.value, radix: 16) }) translated \(translated.map { String($0, radix: 16) }) flags \(modifierFlags().rawValue) '\(title)'") }
         let isRepeat = (lParam & 0x4000_0000) != 0
         let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifierFlags(), timestamp: timestamp(),
                                  windowNumber: windowNumber(), context: nil, characters: chars,
                                  charactersIgnoringModifiers: plain, isARepeat: isRepeat, keyCode: keyCode)!
         owner?.platformWindowDispatch(e)
+    }
+
+    /// The high half of a surrogate pair delivered as two VK_PACKET key-downs, until its low half arrives.
+    private var pendingHighSurrogate: UInt16? = nil
+
+    /// Removes and returns the WM_CHAR (WM_SYSCHAR with Alt down) code units the pump's
+    /// TranslateMessage posted for the key-down being dispatched. Posted messages come off
+    /// the queue before hardware input, so by the time a key-down is dispatched the
+    /// previous key's characters have already gone by: what is queued belongs to this key.
+    private func takeTranslatedUnits() -> [UInt16] {
+        guard let hwnd else { return [] }
+        var units: [UInt16] = []
+        var msg = MSG()
+        while true {
+            if PeekMessageW(&msg, hwnd, UINT(WM_CHAR), UINT(WM_CHAR), UINT(PM_REMOVE)) { units.append(UInt16(truncatingIfNeeded: msg.wParam)); continue }
+            if PeekMessageW(&msg, hwnd, UINT(WM_SYSCHAR), UINT(WM_SYSCHAR), UINT(PM_REMOVE)) { units.append(UInt16(truncatingIfNeeded: msg.wParam)); continue }
+            return units
+        }
     }
 
     // MARK: Input methods (IME)
