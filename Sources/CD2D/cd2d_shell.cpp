@@ -19,6 +19,7 @@
 #include <vector>
 #include <cstring>
 #include <cstdlib>
+#include <cwctype>
 
 namespace {
 
@@ -142,21 +143,40 @@ bool cd2d_shell_icon(const uint16_t *path, bool useFileAttributes, bool isDirect
     return ok;
 }
 
+// A path as the shell parser and Explorer's command line take it: backslashes, and no
+// leading separator before a drive letter (Foundation's URL.path can answer "/C:/x").
+static std::wstring nativePath(const wchar_t *p, size_t len) {
+    std::wstring path(p, len);
+    for (wchar_t &ch : path) if (ch == L'/') ch = L'\\';
+    if (path.size() >= 3 && path[0] == L'\\' && iswalpha(path[1]) && path[2] == L':') path.erase(0, 1);
+    return path;
+}
+
+// Explorer's own command line: a new folder window with the item selected. This is the
+// one way that shows a window whatever the caller's state (SHOpenFolderAndSelectItems
+// answers S_OK yet shows nothing from an elevated process, or when its Explorer window is
+// already open behind others).
+static bool explorerSelect(const std::wstring &path) {
+    std::wstring args = L"/select,\"" + path + L"\"";
+    HINSTANCE r = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    return reinterpret_cast<intptr_t>(r) > 32;
+}
+
 bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count) {
     if (!paths || count == 0) return false;
     ensureCom();
-    std::vector<PIDLIST_ABSOLUTE> items;
     std::vector<std::wstring> names;
     const wchar_t *p = reinterpret_cast<const wchar_t *>(paths);
     for (uint32_t i = 0; i < count; i++) {
         size_t len = wcslen(p);
-        // The shell parser wants backslashes; a forward-slash path parses into something
-        // that is not the file-system item and Explorer then opens nothing.
-        std::wstring path(p, len);
-        for (wchar_t &ch : path) if (ch == L'/') ch = L'\\';
-        names.push_back(path);
-        if (PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(path.c_str())) items.push_back(pidl);
+        names.push_back(nativePath(p, len));
         p += len + 1;
+    }
+    if (names.size() == 1) return explorerSelect(names[0]);
+    // Several items: only the shell can select them all at once.
+    std::vector<PIDLIST_ABSOLUTE> items;
+    for (const std::wstring &name : names) {
+        if (PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(name.c_str())) items.push_back(pidl);
     }
     bool ok = false;
     if (!items.empty()) {
@@ -172,14 +192,8 @@ bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count) {
         if (folder) ILFree(folder);
         for (PIDLIST_ABSOLUTE item : items) ILFree(item);
     }
-    if (!ok && !names.empty()) {
-        // Explorer's own command line selects one item; the shell refused the request
-        // (no PIDL, or an error from a shell that has no folder window to show it in).
-        std::wstring args = L"/select,\"" + names[0] + L"\"";
-        HINSTANCE r = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-        ok = reinterpret_cast<intptr_t>(r) > 32;
-    }
-    return ok;
+    // The shell refused (no PIDL, or no folder window to show them in): the first item.
+    return ok || explorerSelect(names[0]);
 }
 
 bool cd2d_shell_app_exec_link(const uint16_t *path, uint16_t *aumid, uint32_t capacity) {

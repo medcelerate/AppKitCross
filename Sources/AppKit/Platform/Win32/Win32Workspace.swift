@@ -415,6 +415,15 @@ final class Win32Workspace: PlatformWorkspace {
 
     // MARK: Opening
 
+    /// A file path as the Win32 shell takes it: backslashes, and no leading separator
+    /// before the drive letter (Foundation's `URL.path` can answer "/C:/x" on Windows).
+    static func nativePath(_ path: String) -> String {
+        var p = path.replacingOccurrences(of: "/", with: "\\")
+        if p.count >= 3, p.hasPrefix("\\"), p.dropFirst().first?.isLetter == true, p.dropFirst(2).first == ":" { p.removeFirst() }
+        return p
+    }
+    static func nativePath(_ url: URL) -> String { nativePath(url.path) }
+
     private func execute(_ file: String, parameters: String, show: Int32) -> DWORD? {
         var pid: UInt32 = 0
         let ok = shellCall {
@@ -442,22 +451,22 @@ final class Win32Workspace: PlatformWorkspace {
     }
 
     func open(_ url: URL) -> Bool {
-        execute(url.isFileURL ? url.path : url.absoluteString, parameters: "", show: SW_SHOWNORMAL) != nil
+        execute(url.isFileURL ? Win32Workspace.nativePath(url) : url.absoluteString, parameters: "", show: SW_SHOWNORMAL) != nil
     }
 
     func open(_ urls: [URL], withApplicationAt applicationURL: URL?, options: PlatformLaunchOptions) throws -> PlatformRunningApplication {
         let show = options.hides ? SW_SHOWMINNOACTIVE : (options.activates ? SW_SHOWNORMAL : SW_SHOWNOACTIVATE)
-        let documents = urls.map { $0.isFileURL ? $0.path : $0.absoluteString }
+        let documents = urls.map { $0.isFileURL ? Win32Workspace.nativePath($0) : $0.absoluteString }
         let file: String
         var parameters = (options.arguments + documents).map(Win32Workspace.quote).joined(separator: " ")
         if let applicationURL {
             guard FileManager.default.fileExists(atPath: applicationURL.path) else { throw PlatformWorkspaceError.noApplication(applicationURL.path) }
-            file = applicationURL.path
+            file = Win32Workspace.nativePath(applicationURL)
         } else {
             guard let first = urls.first else { throw PlatformWorkspaceError.noApplication("nothing") }
             let target: PlatformOpenTarget = first.isFileURL ? .file(first) : .scheme(first.scheme?.lowercased() ?? "")
             if let handler = applicationURLs(toOpen: target).first {
-                file = handler.path
+                file = Win32Workspace.nativePath(handler)
             } else {
                 // The shell may still know (a verb without an executable): ask it directly.
                 guard let pid = execute(documents[0], parameters: "", show: show), pid != 0 else { throw PlatformWorkspaceError.noApplication(first.absoluteString) }
@@ -477,7 +486,7 @@ final class Win32Workspace: PlatformWorkspace {
     /// package activation manager launches it and answers the application's own process
     /// id, where ShellExecute answers the stub's, which exits as soon as it has handed off.
     private func activatePackaged(_ file: String, parameters: String) -> DWORD? {
-        let path = file.replacingOccurrences(of: "/", with: "\\")
+        let path = Win32Workspace.nativePath(file)
         var candidates = [path]
         if let windir = ProcessInfo.processInfo.environment["SystemRoot"] ?? ProcessInfo.processInfo.environment["windir"],
            path.lowercased().hasPrefix(windir.lowercased()),
@@ -510,8 +519,9 @@ final class Win32Workspace: PlatformWorkspace {
     }
 
     func revealFiles(_ urls: [URL], selecting: Bool) -> Bool {
-        let paths = urls.map(\.path)
+        let paths = urls.map { Win32Workspace.nativePath($0) }
         guard !paths.isEmpty else { return false }
+        if trace { NSView._trace("win32 workspace: reveal \(paths) selecting \(selecting)") }
         if !selecting { return execute(paths[0], parameters: "", show: SW_SHOWNORMAL) != nil }
         var joined: [UInt16] = []
         for p in paths { joined += Array(p.utf16) + [0] }

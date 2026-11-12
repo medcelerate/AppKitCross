@@ -149,9 +149,20 @@ answer), launch date, active, hidden, whether it shows windows.
   a new windowed process with the same executable name, or failing that one already
   running, takes its place through `PlatformWorkspaceEvent.applicationDidHandOff`, and the
   `NSRunningApplication` the caller holds keeps its identity and now describes the real
-  process (no launch or termination notification for the stub).
-- Reveal: `SHOpenFolderAndSelectItems` on backslash paths (the shell parser does not take
-  forward slashes), with `explorer.exe /select,` when the shell refuses.
+  process (no launch or termination notification for the stub). When the process it
+  hands off to was already known and running (a single-instance application took the
+  request, as AppKit's `openApplication` answers the running instance), that object is
+  left as it is and the stub's object terminates with the usual notification: the caller
+  never ends up holding, and terminating, an instance the user had open. The activation
+  manager answers that running instance's process id directly, which `NSWorkspace`
+  returns as the existing object.
+- Paths handed to the shell go through `Win32Workspace.nativePath`: backslashes, and no
+  leading separator before the drive letter (Foundation's `URL.path` can answer
+  "/C:/x"). Reveal of one item runs `explorer.exe /select,"<path>"`, the one request
+  that always opens a folder window (`SHOpenFolderAndSelectItems` answers S_OK from an
+  elevated process, or with its folder window already open behind others, and shows
+  nothing); several items go through `SHOpenFolderAndSelectItems`, falling back to the
+  first item's `/select`.
 - Dock tile: `ITaskbarList3::SetOverlayIcon` with the badge on every titled window (the
   taskbar shows the active window's overlay for the group), `WM_SETICON` with the
   composed icon when the tile has a content view or the application an icon image, and

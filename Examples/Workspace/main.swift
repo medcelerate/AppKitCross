@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     /// matched by its process identifier, never by name, so an instance the user already
     /// had running (with unsaved work, say) is never touched.
     var launched: NSRunningApplication?
+    /// The processes running before Launch: one of them answering for the launch (a
+    /// single-instance application, like Windows 11's Notepad, takes the request itself)
+    /// is the user's instance, and the demo leaves it alone.
+    var runningBeforeLaunch: Set<pid_t> = []
 
     static let act = Selector(("workspaceAction:"))
     /// `--open` / `--stay` (see the header).
@@ -33,7 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     static var stay: TimeInterval?
 
     #if os(Windows)
-    static let defaultApplication = "notepad"
+    // charmap allows several instances; notepad (packaged, single-instance) would hand
+    // Launch to an instance already running, which the demo then refuses to touch.
+    static let defaultApplication = "charmap"
     #elseif os(Linux)
     static let defaultApplication = "org.gnome.TextEditor"
     #else
@@ -215,10 +221,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
         case 7:
             let id = appField.stringValue
             guard let url = ws.urlForApplication(withBundleIdentifier: id) else { report("no application for '\(id)'"); return true }
+            let before = Set(ws.runningApplications.map(\.processIdentifier))
             ws.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, error in
                 MainActor.assumeIsolated {
-                    if let app { self.launched = app; self.report("launched \(app.localizedName ?? "?") (pid \(app.processIdentifier)) from \(url.path)") }
-                    else { self.report("launch failed: \(error.map { "\($0)" } ?? "?")") }
+                    guard let app else { self.report("launch failed: \(error.map { "\($0)" } ?? "?")"); return }
+                    self.launched = app
+                    self.runningBeforeLaunch = before
+                    if before.contains(app.processIdentifier) {
+                        self.report("launch of \(id) went to the instance already running, \(app.localizedName ?? "?") (pid \(app.processIdentifier)): a single-instance application; Activate, Hide and Terminate will not touch it. Quit it first, or launch one that allows several instances (charmap, msinfo32).")
+                    } else {
+                        self.report("launched \(app.localizedName ?? "?") (pid \(app.processIdentifier)) from \(url.path)")
+                    }
                 }
             }
         case 8, 9, 10:
@@ -230,6 +243,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
                 return true
             }
             let name = app.localizedName ?? appField.stringValue
+            // A launch a running instance took (or a stub that handed off to one) is the
+            // user's instance, perhaps with unsaved work: never acted on.
+            guard !runningBeforeLaunch.contains(app.processIdentifier) else {
+                report("\(name) (pid \(app.processIdentifier)) was already running before Launch: not touching it")
+                return true
+            }
             switch button.tag {
             case 8: report("activate \(name) (pid \(pid)): \(app.activate(options: []))")
             case 9: report("\(app.isHidden ? "unhide" : "hide") \(name) (pid \(pid)): \(app.isHidden ? app.unhide() : app.hide())")

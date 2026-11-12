@@ -21,6 +21,9 @@ public final class HostWorkspace: PlatformWorkspace {
     public private(set) var openedURLs: [URL] = []
     public private(set) var revealedURLs: [URL] = []
     public private(set) var launches: [(application: URL?, urls: [URL], options: PlatformLaunchOptions)] = []
+    /// A process identifier in `otherApplications` that every launch answers with instead
+    /// of a new one: a single-instance application already running took the request.
+    public var launchResolvesTo: Int32?
     /// Test hooks: whether `open` succeeds, what the handlers are, what the icons are.
     public var opensSucceed = true
     public var handlers: [PlatformOpenTarget: [URL]] = [:]
@@ -41,7 +44,7 @@ public final class HostWorkspace: PlatformWorkspace {
     public let trashURL = FileManager.default.temporaryDirectory.appendingPathComponent("AppKitCross-Trash-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
 
     public func reset() {
-        openedURLs.removeAll(); revealedURLs.removeAll(); launches.removeAll(); handlers.removeAll(); applicationsByIdentifier.removeAll()
+        openedURLs.removeAll(); revealedURLs.removeAll(); launches.removeAll(); launchResolvesTo = nil; handlers.removeAll(); applicationsByIdentifier.removeAll()
         icons.removeAll(); iconRequests.removeAll(); dockTiles.removeAll(); fileSystemNotes.removeAll(); otherApplications.removeAll()
         activated.removeAll(); hidden.removeAll(); terminated.removeAll(); desktopImages.removeAll()
         opensSucceed = true
@@ -62,6 +65,7 @@ public final class HostWorkspace: PlatformWorkspace {
         if let applicationURL { app = applicationURL }
         else if let first = urls.first, let handler = applicationURLs(toOpen: .file(first)).first ?? applicationURLs(toOpen: .scheme(first.scheme ?? "")).first { app = handler }
         else { throw PlatformWorkspaceError.noApplication(urls.first?.absoluteString ?? "nothing") }
+        if let pid = launchResolvesTo, let running = otherApplications.first(where: { $0.processIdentifier == pid }) { return running }
         nextPID += 1
         let process = PlatformRunningApplication(processIdentifier: nextPID, localizedName: app.deletingPathExtension().lastPathComponent,
                                                  bundleIdentifier: app.deletingPathExtension().lastPathComponent, executableURL: app, applicationURL: app,

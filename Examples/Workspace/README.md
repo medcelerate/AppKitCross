@@ -19,17 +19,20 @@ What it demonstrates:
   Windows; the launcher count and the window icon on Linux).
 - The frontmost application, kept current by `didActivateApplicationNotification`;
   launching another application found by `urlForApplication(withBundleIdentifier:)`
-  (`notepad` on Windows, a desktop entry id such as `org.gnome.TextEditor` on Linux), then
+  (`charmap` on Windows, a desktop entry id such as `org.gnome.TextEditor` on Linux), then
   activating, hiding and terminating that instance only, matched by the process identifier
   `openApplication` returned, never by name: an instance already running before Launch,
   perhaps with unsaved work, is never touched. Press Launch first; a test of Activate,
-  Hide or Terminate uses the fresh instance the demo started. On Windows 11 `notepad`
-  (like `calc` and `mspaint`) is a packaged application: System32 holds a launcher stub
-  that hands off to the Store package and exits, and the workspace follows the hand-off,
-  so the launched application is the real Notepad (activated through its app execution
-  alias when the alias is enabled, else matched by executable name when its window
-  appears). An unpackaged application with a window, for a test that must not involve a
-  package, is `charmap` or `msinfo32`.
+  Hide or Terminate uses the fresh instance the demo started. The demo also remembers
+  which processes ran before Launch: when the launch went to one of them (as AppKit's
+  `openApplication` answers the running instance of a single-instance application), the
+  log says so and the three buttons refuse to act on it. On Windows 11 `notepad` (like
+  `calc` and `mspaint`) is such an application and packaged besides: System32 holds a
+  launcher stub that hands off to the Store package and exits, the workspace activates the
+  package through its app execution alias (or follows the stub's hand-off by executable
+  name when its window appears), and while a Notepad is already open that is the instance
+  the launch answers with. So the default is `charmap`, an unpackaged application that
+  starts a new process with a window every time; `msinfo32` is another.
 - The log lists the workspace notifications as they arrive: application activation and
   lifetime, sleep and wake, screens, the session, accessibility settings.
 

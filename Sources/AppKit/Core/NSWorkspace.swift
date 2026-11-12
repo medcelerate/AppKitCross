@@ -562,11 +562,17 @@ open class NSWorkspace: NSObject {
     }
 
     /// The object for the stub keeps its identity (callers hold it) and now describes the
-    /// real process; a stub nobody knew is a plain launch.
+    /// real process; a stub nobody knew is a plain launch. A hand-off to a process that was
+    /// already running (a single-instance application took the request) leaves that
+    /// process's object alone: the stub simply terminated.
     @MainActor private func _applicationDidHandOff(from fromPID: Int32, to info: PlatformRunningApplication) {
         guard let app = _applications[fromPID], !app.isTerminated else { _ = _application(for: info, isNew: true); return }
+        if let other = _applications[info.processIdentifier], other !== app, !other.isTerminated {
+            other._update(info, workspace: self, posting: _monitoring)
+            _applicationDidTerminate(app, posting: true)
+            return
+        }
         _applications[fromPID] = nil
-        if let other = _applications[info.processIdentifier], other !== app { other._markTerminated() }
         var info = info
         info.launchDate = info.launchDate ?? app._info.launchDate
         app._update(info, workspace: self, posting: false)

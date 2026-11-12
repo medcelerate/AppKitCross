@@ -313,6 +313,66 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A single-instance application already running takes the launch: the stub's hand-off
+    /// goes to that process, whose object (the user's instance) is left alone; the stub's
+    /// object terminates.
+    func testHandOffToARunningInstanceLeavesThatInstanceAlone() {
+        MainActor.assumeIsolated {
+            _ = NSWorkspace.shared.runningApplications
+            let users = PlatformRunningApplication(processIdentifier: 2416, localizedName: "Notepad", bundleIdentifier: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+                                                   executableURL: URL(fileURLWithPath: "/w/WindowsApps/Notepad/Notepad.exe"), launchDate: Date(timeIntervalSinceNow: -600))
+            host.otherApplications.append(users)
+            host.postEvent(.applicationDidLaunch(users))
+            guard let existing = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == 2416 }) else { return XCTFail("the running instance is not listed") }
+            let stub = PlatformRunningApplication(processIdentifier: 5151, localizedName: "notepad", bundleIdentifier: "notepad", executableURL: URL(fileURLWithPath: "/w/System32/notepad.exe"))
+            host.otherApplications.append(stub)
+            host.postEvent(.applicationDidLaunch(stub))
+            guard let launched = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == 5151 }) else { return XCTFail("the stub is not listed") }
+            let seen = _NotificationLog()
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { note in
+                    seen.add("\(name.rawValue):\((note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier ?? -1)")
+                })
+            }
+            host.otherApplications = host.otherApplications.filter { $0.processIdentifier != 5151 }
+            host.postEvent(.applicationDidHandOff(fromProcessIdentifier: 5151, to: users))
+            XCTAssertTrue(NSWorkspace.shared.runningApplications.first { $0.processIdentifier == 2416 } === existing, "the user's instance keeps its object")
+            XCTAssertFalse(existing.isTerminated)
+            XCTAssertTrue(launched.isTerminated, "the stub exited")
+            XCTAssertEqual(launched.processIdentifier, 5151, "the stub's object never comes to stand for the running instance")
+            XCTAssertEqual(seen.entries, ["NSWorkspaceDidTerminateApplicationNotification:5151"])
+        }
+    }
+
+    /// The platform answers a launch with a process that was already running (the
+    /// activation manager names the single instance): the workspace returns that process's
+    /// existing object, as AppKit does, and posts no launch.
+    func testLaunchAnsweredByARunningInstanceReturnsItsObject() async throws {
+        let app = file("notepad", "#!/bin/sh\n")
+        let users = PlatformRunningApplication(processIdentifier: 2416, localizedName: "Notepad", bundleIdentifier: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+                                               executableURL: URL(fileURLWithPath: "/w/WindowsApps/Notepad/Notepad.exe"), launchDate: Date(timeIntervalSinceNow: -600))
+        let existing: NSRunningApplication? = await MainActor.run {
+            _ = NSWorkspace.shared.runningApplications
+            host.otherApplications.append(users)
+            host.postEvent(.applicationDidLaunch(users))
+            host.launchResolvesTo = 2416
+            return NSWorkspace.shared.runningApplications.first { $0.processIdentifier == 2416 }
+        }
+        let log = _NotificationLog()
+        record([NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification], into: log)
+        let fresh = NSWorkspace.OpenConfiguration()
+        fresh.createsNewApplicationInstance = true
+        let running = try await NSWorkspace.shared.openApplication(at: app, configuration: fresh)
+        XCTAssertEqual(running.processIdentifier, 2416)
+        XCTAssertTrue(running === existing, "the object for the running instance")
+        XCTAssertFalse(running.isTerminated)
+        await MainActor.run {
+            XCTAssertEqual(host.launches.count, 1)
+            XCTAssertEqual(log.entries, [], "an instance already running was not launched")
+            XCTAssertEqual(NSWorkspace.shared.runningApplications.filter { $0.processIdentifier == 2416 }.count, 1)
+        }
+    }
+
     func testObserverAskingForTheFrontmostApplicationDoesNotRecurse() {
         MainActor.assumeIsolated {
             NSApplication.shared.activate(ignoringOtherApps: true)
