@@ -126,6 +126,15 @@ final class LayoutEngine {
     /// root's size free (used by `fittingSize`); returns the root's engine size.
     @discardableResult
     func solve(root: NSView, fittingRoot: Bool = false, apply: Bool = true) -> NSSize {
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        var tBuilt = t0
+        var intrinsicMs = 0.0, views = 0, convertMs = 0.0
+        let misses0 = _NSTextMeasureCache.misses, hits0 = _NSTextMeasureCache.hits
+        defer {
+            if NSView._traceFrames {
+                NSView._trace(String(format: "frames solve %@%@ %d constraints %.1f ms (gather %.1f ms, intrinsic sizes of %d views %.1f ms, constraints %.1f ms; text measured %d, cached %d)", "\(type(of: root))", fittingRoot ? " (fitting)" : "", solver.constraintCount, NSView._traceClock() - t0, tBuilt - t0, views, intrinsicMs, convertMs, _NSTextMeasureCache.misses - misses0, _NSTextMeasureCache.hits - hits0))
+            }
+        }
         solver = LayoutSolver()
         items = [:]
         var constrainedViews: [NSView] = []
@@ -137,7 +146,13 @@ final class LayoutEngine {
         }
 
         func addIntrinsic(_ view: NSView, _ v: ItemVariables) {
+            let ti = NSView._traceFrames ? NSView._traceClock() : 0
             let intrinsic = view.intrinsicContentSize
+            if NSView._traceFrames {
+                let ms = NSView._traceClock() - ti
+                intrinsicMs += ms; views += 1
+                if ms > 0.5 { NSView._trace(String(format: "frames   intrinsic size of %@ %.1f ms", "\(type(of: view))", ms)) }
+            }
             if intrinsic.width != NSView.noIntrinsicMetric {
                 let w = Double(intrinsic.width)
                 add(LayoutExpression(v.width) - w, .lessOrEqual, LayoutEngine.strength(for: view.contentHuggingPriority(for: .horizontal)))
@@ -191,12 +206,15 @@ final class LayoutEngine {
                 add(LayoutExpression(gv.width), .greaterOrEqual, LayoutStrength.required)
                 add(LayoutExpression(gv.height), .greaterOrEqual, LayoutStrength.required)
             }
+            let tc = NSView._traceFrames ? NSView._traceClock() : 0
             for c in view._allConstraints {
                 if let sc = solverConstraint(for: c) { solverConstraints.append((c, sc)) }
             }
+            if NSView._traceFrames { convertMs += NSView._traceClock() - tc }
             for s in view.subviews { visit(s) }
         }
         visit(root)
+        if NSView._traceFrames { tBuilt = NSView._traceClock() }
 
         for (c, sc) in solverConstraints {
             do { try solver.addConstraint(sc) } catch {

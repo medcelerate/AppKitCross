@@ -45,7 +45,7 @@ import CoreText
     @MainActor internal func _measure(maxWidth: CGFloat?) -> NSSize {
         var s = stringValue.size(withAttributes: _attributes)
         if _isMultiline, let maxWidth, maxWidth > 0 {
-            s = Platform.backend.text.measure(stringValue, font: _effectiveFont.handle, maxWidth: maxWidth)
+            s = _NSTextMeasureCache.measure(stringValue, font: _effectiveFont, maxWidth: maxWidth)
         }
         if stringValue.isEmpty { s.height = _effectiveFont.ascender - _effectiveFont.descender }
         return s

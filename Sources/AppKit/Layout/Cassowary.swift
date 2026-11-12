@@ -175,13 +175,23 @@ final class LayoutSolver {
             }
         }
 
-        var sortedSymbols: [Symbol] { cells.keys.sorted() }
+        /// The lowest-id symbol satisfying `where`, without sorting (the tableau is scanned
+        /// on every pivot, and a sort there was most of a layout pass in a debug build).
+        func firstSymbol(where ok: (Symbol, Double) -> Bool) -> Symbol {
+            var found = Symbol.invalid
+            for (sym, c) in cells where ok(sym, c) {
+                if found.type == .invalid || sym < found { found = sym }
+            }
+            return found
+        }
     }
 
     private struct Tag { var marker = Symbol.invalid; var other = Symbol.invalid }
     private struct EditInfo { var tag: Tag; var constraint: LayoutSolverConstraint; var constant: Double }
 
     private var constraints: [LayoutSolverConstraint: Tag] = [:]
+    /// How many constraints the solver holds (for the frame trace).
+    var constraintCount: Int { constraints.count }
     private var rows: [Symbol: Row] = [:]
     private var variables: [LayoutVariable: Symbol] = [:]
     private var edits: [LayoutVariable: EditInfo] = [:]
@@ -247,17 +257,17 @@ final class LayoutSolver {
     private func markerLeavingSymbol(_ marker: Symbol) -> Symbol {
         var r1 = Double.greatestFiniteMagnitude, r2 = Double.greatestFiniteMagnitude
         var first = Symbol.invalid, second = Symbol.invalid, third = Symbol.invalid
-        for (sym, row) in rows.sorted(by: { $0.key < $1.key }) {
+        for (sym, row) in rows {
             let c = row.coefficient(for: marker)
             if c == 0 { continue }
             if sym.type == .external {
-                third = sym
+                if third.type == .invalid || sym > third { third = sym }
             } else if c < 0 {
                 let r = -row.constant / c
-                if r < r1 { r1 = r; first = sym }
+                if r < r1 || (r == r1 && sym < first) { r1 = r; first = sym }
             } else {
                 let r = row.constant / c
-                if r < r2 { r2 = r; second = sym }
+                if r < r2 || (r == r2 && sym < second) { r2 = r; second = sym }
             }
         }
         if first.type != .invalid { return first }
@@ -359,7 +369,8 @@ final class LayoutSolver {
     }
 
     private func chooseSubject(_ row: Row, _ tag: Tag) -> Symbol {
-        for sym in row.sortedSymbols where sym.type == .external { return sym }
+        let external = row.firstSymbol { sym, _ in sym.type == .external }
+        if external.type != .invalid { return external }
         if tag.marker.type == .slack || tag.marker.type == .error {
             if row.coefficient(for: tag.marker) < 0 { return tag.marker }
         }
@@ -424,37 +435,31 @@ final class LayoutSolver {
     }
 
     private func enteringSymbol(_ objective: Row) -> Symbol {
-        for sym in objective.sortedSymbols where sym.type != .dummy && objective.cells[sym]! < 0 { return sym }
-        return .invalid
+        objective.firstSymbol { sym, c in sym.type != .dummy && c < 0 }
     }
 
     private func dualEnteringSymbol(_ row: Row) -> Symbol {
         var entering = Symbol.invalid
         var ratio = Double.greatestFiniteMagnitude
-        for sym in row.sortedSymbols {
-            let c = row.cells[sym]!
-            if c > 0 && sym.type != .dummy {
-                let coeff = objective.coefficient(for: sym)
-                let r = coeff / c
-                if r < ratio { ratio = r; entering = sym }
-            }
+        for (sym, c) in row.cells where c > 0 && sym.type != .dummy {
+            let r = objective.coefficient(for: sym) / c
+            if r < ratio || (r == ratio && sym < entering) { ratio = r; entering = sym }
         }
         return entering
     }
 
     private func anyPivotableSymbol(_ row: Row) -> Symbol {
-        for sym in row.sortedSymbols where sym.type == .slack || sym.type == .error { return sym }
-        return .invalid
+        row.firstSymbol { sym, _ in sym.type == .slack || sym.type == .error }
     }
 
     private func leavingSymbol(_ entering: Symbol) -> Symbol {
         var ratio = Double.greatestFiniteMagnitude
         var found = Symbol.invalid
-        for (sym, row) in rows.sorted(by: { $0.key < $1.key }) where sym.type != .external {
+        for (sym, row) in rows where sym.type != .external {
             let c = row.coefficient(for: entering)
             if c < 0 {
                 let temp = -row.constant / c
-                if temp < ratio { ratio = temp; found = sym }
+                if temp < ratio || (temp == ratio && sym < found) { ratio = temp; found = sym }
             }
         }
         return found
