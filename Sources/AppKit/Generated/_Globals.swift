@@ -17,789 +17,716 @@ import CoreText
 #endif
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityhourminutedatetimecomponentsflag
-public var NSAccessibilityHourMinuteDateTimeComponentsFlag: Int { unimplemented() }
+public var NSAccessibilityHourMinuteDateTimeComponentsFlag: Int { 12 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityhourminuteseconddatetimecomponentsflag
-public var NSAccessibilityHourMinuteSecondDateTimeComponentsFlag: Int { unimplemented() }
+public var NSAccessibilityHourMinuteSecondDateTimeComponentsFlag: Int { 14 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchcurrentelementkey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchCurrentElementKey: String { unimplemented() }
+public var NSAccessibilitySearchCurrentElementKey: String { "AXStartElement" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchcurrentrangekey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchCurrentRangeKey: String { unimplemented() }
+public var NSAccessibilitySearchCurrentRangeKey: String { "AXStartRange" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchdirectionkey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchDirectionKey: String { unimplemented() }
+public var NSAccessibilitySearchDirectionKey: String { "AXDirection" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchdirectionnext
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchDirectionNext: String { unimplemented() }
+public var NSAccessibilitySearchDirectionNext: String { "AXDirectionNext" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchdirectionprevious
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchDirectionPrevious: String { unimplemented() }
+public var NSAccessibilitySearchDirectionPrevious: String { "AXDirectionPrevious" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchidentifierskey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchIdentifiersKey: String { unimplemented() }
+public var NSAccessibilitySearchIdentifiersKey: String { "AXSearchKey" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchresultdescriptionoverridekey
 @available(macOS 10.13, *)
-public var NSAccessibilitySearchResultDescriptionOverrideKey: String { unimplemented() }
+public var NSAccessibilitySearchResultDescriptionOverrideKey: String { "AXSearchResultDescriptionOverride" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchresultelementkey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchResultElementKey: String { unimplemented() }
+public var NSAccessibilitySearchResultElementKey: String { "AXSearchResultElement" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchresultloaderkey
 @available(macOS 10.13, *)
-public var NSAccessibilitySearchResultLoaderKey: String { unimplemented() }
+public var NSAccessibilitySearchResultLoaderKey: String { "AXSearchResultLoader" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchresultrangekey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchResultRangeKey: String { unimplemented() }
+public var NSAccessibilitySearchResultRangeKey: String { "AXSearchResultRange" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchresultslimitkey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchResultsLimitKey: String { unimplemented() }
+public var NSAccessibilitySearchResultsLimitKey: String { "AXResultsLimit" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitysearchtextkey
 @available(macOS 10.12, *)
-public var NSAccessibilitySearchTextKey: String { unimplemented() }
+public var NSAccessibilitySearchTextKey: String { "AXSearchText" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilitytextcompletionattribute
 @available(macOS 14.0, *)
-public var NSAccessibilityTextCompletionAttribute: String { unimplemented() }
+public var NSAccessibilityTextCompletionAttribute: String { "AXTextCompletion" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityyearmonthdatetimecomponentsflag
-public var NSAccessibilityYearMonthDateTimeComponentsFlag: Int { unimplemented() }
+public var NSAccessibilityYearMonthDateTimeComponentsFlag: Int { 192 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityyearmonthdaydatetimecomponentsflag
-public var NSAccessibilityYearMonthDayDateTimeComponentsFlag: Int { unimplemented() }
+public var NSAccessibilityYearMonthDayDateTimeComponentsFlag: Int { 224 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalertalternatereturn
-public var NSAlertAlternateReturn: Int { unimplemented() }
+public var NSAlertAlternateReturn: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalertdefaultreturn
-public var NSAlertDefaultReturn: Int { unimplemented() }
+public var NSAlertDefaultReturn: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalerterrorreturn
-public var NSAlertErrorReturn: Int { unimplemented() }
+public var NSAlertErrorReturn: Int { -2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalertotherreturn
-public var NSAlertOtherReturn: Int { unimplemented() }
+public var NSAlertOtherReturn: Int { -1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsallromaninputsourceslocaleidentifier
-public var NSAllRomanInputSourcesLocaleIdentifier: String { unimplemented() }
+public var NSAllRomanInputSourcesLocaleIdentifier: String { "NSAllRomanInputSourcesLocaleIdentifier" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationtriggerorderin
-public var NSAnimationTriggerOrderIn: String { unimplemented() }
+public var NSAnimationTriggerOrderIn: String { "NSAnimationTriggerOrderIn" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationtriggerorderout
-public var NSAnimationTriggerOrderOut: String { unimplemented() }
+public var NSAnimationTriggerOrderOut: String { "NSAnimationTriggerOrderOut" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbacktabcharacter
-public var NSBackTabCharacter: Int { unimplemented() }
+public var NSBackTabCharacter: Int { 25 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbackspacecharacter
-public var NSBackspaceCharacter: Int { unimplemented() }
+public var NSBackspaceCharacter: Int { 8 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbacktabtextmovement
-public var NSBacktabTextMovement: Int { unimplemented() }
+public var NSBacktabTextMovement: Int { 18 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbeginfunctionkey
-public var NSBeginFunctionKey: Int { unimplemented() }
+public var NSBeginFunctionKey: Int { 63274 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbreakfunctionkey
-public var NSBreakFunctionKey: Int { unimplemented() }
+public var NSBreakFunctionKey: Int { 63282 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscancelbutton
-public var NSCancelButton: Int { unimplemented() }
+public var NSCancelButton: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscanceltextmovement
-public var NSCancelTextMovement: Int { unimplemented() }
+public var NSCancelTextMovement: Int { 23 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscarriagereturncharacter
-public var NSCarriageReturnCharacter: Int { unimplemented() }
+public var NSCarriageReturnCharacter: Int { 13 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscleardisplayfunctionkey
-public var NSClearDisplayFunctionKey: Int { unimplemented() }
+public var NSClearDisplayFunctionKey: Int { 63290 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclearlinefunctionkey
-public var NSClearLineFunctionKey: Int { unimplemented() }
+public var NSClearLineFunctionKey: Int { 63289 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrolglyph
-public var NSControlGlyph: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsconvertglyphstopackedglyphs(_:_:_:_:)
-public func NSConvertGlyphsToPackedGlyphs(_ glBuf: UnsafeMutablePointer<NSGlyph>, _ count: Int, _ packing: NSMultibyteGlyphPacking, _ packedGlyphs: UnsafeMutablePointer<CChar>) -> Int { unimplemented() }
+public var NSControlGlyph: Int { 16777215 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscopybits(_:_:_:)
 public func NSCopyBits(_ srcGState: Int, _ srcRect: NSRect, _ destPoint: NSPoint) { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdeletecharfunctionkey
-public var NSDeleteCharFunctionKey: Int { unimplemented() }
+public var NSDeleteCharFunctionKey: Int { 63294 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdeletecharacter
-public var NSDeleteCharacter: Int { unimplemented() }
+public var NSDeleteCharacter: Int { 127 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdeletefunctionkey
-public var NSDeleteFunctionKey: Int { unimplemented() }
+public var NSDeleteFunctionKey: Int { 63272 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdeletelinefunctionkey
-public var NSDeleteLineFunctionKey: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdirectionaledgeinsetszero
-@available(macOS 10.15, *)
-public var NSDirectionalEdgeInsetsZero: NSDirectionalEdgeInsets { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdisablescreenupdates()
-public func NSDisableScreenUpdates() { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdottedframerect(_:)
-public func NSDottedFrameRect(_ rect: NSRect) { unimplemented() }
+public var NSDeleteLineFunctionKey: Int { 63292 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdownarrowfunctionkey
-public var NSDownArrowFunctionKey: Int { unimplemented() }
+public var NSDownArrowFunctionKey: Int { 63233 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdowntextmovement
-public var NSDownTextMovement: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawbitmap(_:_:_:_:_:_:_:_:_:_:_:)
-public func NSDrawBitmap(_ rect: NSRect, _ width: Int, _ height: Int, _ bps: Int, _ spp: Int, _ bpp: Int, _ bpr: Int, _ isPlanar: Bool, _ hasAlpha: Bool, _ colorSpaceName: NSColorSpaceName, _ data: UnsafePointer<UnsafePointer<UInt8>?>) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawbutton(_:_:)
-public func NSDrawButton(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawcolortiledrects(_:_:_:_:_:)
-public func NSDrawColorTiledRects(_ boundsRect: NSRect, _ clipRect: NSRect, _ sides: UnsafePointer<NSRectEdge>, _ colors: AutoreleasingUnsafeMutablePointer<NSColor>, _ count: Int) -> NSRect { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawdarkbezel(_:_:)
-public func NSDrawDarkBezel(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawgraybezel(_:_:)
-public func NSDrawGrayBezel(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawgroove(_:_:)
-public func NSDrawGroove(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawlightbezel(_:_:)
-public func NSDrawLightBezel(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawninepartimage(_:_:_:_:_:_:_:_:_:_:_:_:_:)
-public func NSDrawNinePartImage(_ frame: NSRect, _ topLeftCorner: NSImage?, _ topEdgeFill: NSImage?, _ topRightCorner: NSImage?, _ leftEdgeFill: NSImage?, _ centerFill: NSImage?, _ rightEdgeFill: NSImage?, _ bottomLeftCorner: NSImage?, _ bottomEdgeFill: NSImage?, _ bottomRightCorner: NSImage?, _ op: NSCompositingOperation, _ alphaFraction: CGFloat, _ flipped: Bool) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawthreepartimage(_:_:_:_:_:_:_:_:)
-public func NSDrawThreePartImage(_ frame: NSRect, _ startCap: NSImage?, _ centerFill: NSImage?, _ endCap: NSImage?, _ vertical: Bool, _ op: NSCompositingOperation, _ alphaFraction: CGFloat, _ flipped: Bool) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawtiledrects(_:_:_:_:_:)
-public func NSDrawTiledRects(_ boundsRect: NSRect, _ clipRect: NSRect, _ sides: UnsafePointer<NSRectEdge>, _ grays: UnsafePointer<CGFloat>, _ count: Int) -> NSRect { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawwhitebezel(_:_:)
-public func NSDrawWhiteBezel(_ rect: NSRect, _ clipRect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawwindowbackground(_:)
-public func NSDrawWindowBackground(_ rect: NSRect) { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsenablescreenupdates()
-public func NSEnableScreenUpdates() { unimplemented() }
+public var NSDownTextMovement: Int { 22 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsendfunctionkey
-public var NSEndFunctionKey: Int { unimplemented() }
+public var NSEndFunctionKey: Int { 63275 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsentercharacter
-public var NSEnterCharacter: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nseraserect(_:)
-public func NSEraseRect(_ rect: NSRect) { unimplemented() }
+public var NSEnterCharacter: Int { 3 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsexecutefunctionkey
-public var NSExecuteFunctionKey: Int { unimplemented() }
+public var NSExecuteFunctionKey: Int { 63298 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf10functionkey
-public var NSF10FunctionKey: Int { unimplemented() }
+public var NSF10FunctionKey: Int { 63245 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf11functionkey
-public var NSF11FunctionKey: Int { unimplemented() }
+public var NSF11FunctionKey: Int { 63246 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf12functionkey
-public var NSF12FunctionKey: Int { unimplemented() }
+public var NSF12FunctionKey: Int { 63247 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf13functionkey
-public var NSF13FunctionKey: Int { unimplemented() }
+public var NSF13FunctionKey: Int { 63248 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf14functionkey
-public var NSF14FunctionKey: Int { unimplemented() }
+public var NSF14FunctionKey: Int { 63249 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf15functionkey
-public var NSF15FunctionKey: Int { unimplemented() }
+public var NSF15FunctionKey: Int { 63250 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf16functionkey
-public var NSF16FunctionKey: Int { unimplemented() }
+public var NSF16FunctionKey: Int { 63251 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf17functionkey
-public var NSF17FunctionKey: Int { unimplemented() }
+public var NSF17FunctionKey: Int { 63252 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf18functionkey
-public var NSF18FunctionKey: Int { unimplemented() }
+public var NSF18FunctionKey: Int { 63253 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf19functionkey
-public var NSF19FunctionKey: Int { unimplemented() }
+public var NSF19FunctionKey: Int { 63254 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf1functionkey
-public var NSF1FunctionKey: Int { unimplemented() }
+public var NSF1FunctionKey: Int { 63236 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf20functionkey
-public var NSF20FunctionKey: Int { unimplemented() }
+public var NSF20FunctionKey: Int { 63255 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf21functionkey
-public var NSF21FunctionKey: Int { unimplemented() }
+public var NSF21FunctionKey: Int { 63256 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf22functionkey
-public var NSF22FunctionKey: Int { unimplemented() }
+public var NSF22FunctionKey: Int { 63257 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf23functionkey
-public var NSF23FunctionKey: Int { unimplemented() }
+public var NSF23FunctionKey: Int { 63258 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf24functionkey
-public var NSF24FunctionKey: Int { unimplemented() }
+public var NSF24FunctionKey: Int { 63259 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf25functionkey
-public var NSF25FunctionKey: Int { unimplemented() }
+public var NSF25FunctionKey: Int { 63260 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf26functionkey
-public var NSF26FunctionKey: Int { unimplemented() }
+public var NSF26FunctionKey: Int { 63261 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf27functionkey
-public var NSF27FunctionKey: Int { unimplemented() }
+public var NSF27FunctionKey: Int { 63262 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf28functionkey
-public var NSF28FunctionKey: Int { unimplemented() }
+public var NSF28FunctionKey: Int { 63263 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf29functionkey
-public var NSF29FunctionKey: Int { unimplemented() }
+public var NSF29FunctionKey: Int { 63264 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf2functionkey
-public var NSF2FunctionKey: Int { unimplemented() }
+public var NSF2FunctionKey: Int { 63237 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf30functionkey
-public var NSF30FunctionKey: Int { unimplemented() }
+public var NSF30FunctionKey: Int { 63265 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf31functionkey
-public var NSF31FunctionKey: Int { unimplemented() }
+public var NSF31FunctionKey: Int { 63266 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf32functionkey
-public var NSF32FunctionKey: Int { unimplemented() }
+public var NSF32FunctionKey: Int { 63267 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf33functionkey
-public var NSF33FunctionKey: Int { unimplemented() }
+public var NSF33FunctionKey: Int { 63268 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf34functionkey
-public var NSF34FunctionKey: Int { unimplemented() }
+public var NSF34FunctionKey: Int { 63269 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf35functionkey
-public var NSF35FunctionKey: Int { unimplemented() }
+public var NSF35FunctionKey: Int { 63270 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf3functionkey
-public var NSF3FunctionKey: Int { unimplemented() }
+public var NSF3FunctionKey: Int { 63238 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf4functionkey
-public var NSF4FunctionKey: Int { unimplemented() }
+public var NSF4FunctionKey: Int { 63239 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf5functionkey
-public var NSF5FunctionKey: Int { unimplemented() }
+public var NSF5FunctionKey: Int { 63240 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf6functionkey
-public var NSF6FunctionKey: Int { unimplemented() }
+public var NSF6FunctionKey: Int { 63241 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf7functionkey
-public var NSF7FunctionKey: Int { unimplemented() }
+public var NSF7FunctionKey: Int { 63242 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf8functionkey
-public var NSF8FunctionKey: Int { unimplemented() }
+public var NSF8FunctionKey: Int { 63243 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsf9functionkey
-public var NSF9FunctionKey: Int { unimplemented() }
+public var NSF9FunctionKey: Int { 63244 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfilehandlingpanelcancelbutton
-public var NSFileHandlingPanelCancelButton: Int { unimplemented() }
+public var NSFileHandlingPanelCancelButton: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfilehandlingpanelokbutton
-public var NSFileHandlingPanelOKButton: Int { unimplemented() }
+public var NSFileHandlingPanelOKButton: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfindfunctionkey
-public var NSFindFunctionKey: Int { unimplemented() }
+public var NSFindFunctionKey: Int { 63301 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontboldtrait
-public var NSFontBoldTrait: Int { unimplemented() }
+public var NSFontBoldTrait: Int { 2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontclarendonserifsclass
-public var NSFontClarendonSerifsClass: Int { unimplemented() }
+public var NSFontClarendonSerifsClass: Int { 1073741824 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontcondensedtrait
-public var NSFontCondensedTrait: Int { unimplemented() }
+public var NSFontCondensedTrait: Int { 64 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontexpandedtrait
-public var NSFontExpandedTrait: Int { unimplemented() }
+public var NSFontExpandedTrait: Int { 32 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontfamilyclassmask
-public var NSFontFamilyClassMask: UInt32 { unimplemented() }
+public var NSFontFamilyClassMask: UInt32 { 4026531840 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontfreeformserifsclass
-public var NSFontFreeformSerifsClass: Int { unimplemented() }
+public var NSFontFreeformSerifsClass: Int { 1879048192 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontitalictrait
-public var NSFontItalicTrait: Int { unimplemented() }
+public var NSFontItalicTrait: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontmodernserifsclass
-public var NSFontModernSerifsClass: Int { unimplemented() }
+public var NSFontModernSerifsClass: Int { 805306368 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontmonospacetrait
-public var NSFontMonoSpaceTrait: Int { unimplemented() }
+public var NSFontMonoSpaceTrait: Int { 1024 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontoldstyleserifsclass
-public var NSFontOldStyleSerifsClass: Int { unimplemented() }
+public var NSFontOldStyleSerifsClass: Int { 268435456 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontornamentalsclass
-public var NSFontOrnamentalsClass: Int { unimplemented() }
+public var NSFontOrnamentalsClass: Int { -1879048192 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelalleffectsmodemask
-public var NSFontPanelAllEffectsModeMask: UInt32 { unimplemented() }
+public var NSFontPanelAllEffectsModeMask: UInt32 { 1048320 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelallmodesmask
-public var NSFontPanelAllModesMask: UInt32 { unimplemented() }
+public var NSFontPanelAllModesMask: UInt32 { 4294967295 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelcollectionmodemask
-public var NSFontPanelCollectionModeMask: UInt32 { unimplemented() }
+public var NSFontPanelCollectionModeMask: UInt32 { 4 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpaneldocumentcoloreffectmodemask
-public var NSFontPanelDocumentColorEffectModeMask: UInt32 { unimplemented() }
+public var NSFontPanelDocumentColorEffectModeMask: UInt32 { 2048 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelfacemodemask
-public var NSFontPanelFaceModeMask: UInt32 { unimplemented() }
+public var NSFontPanelFaceModeMask: UInt32 { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelshadoweffectmodemask
-public var NSFontPanelShadowEffectModeMask: UInt32 { unimplemented() }
+public var NSFontPanelShadowEffectModeMask: UInt32 { 4096 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelsizemodemask
-public var NSFontPanelSizeModeMask: UInt32 { unimplemented() }
+public var NSFontPanelSizeModeMask: UInt32 { 2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelstandardmodesmask
-public var NSFontPanelStandardModesMask: UInt32 { unimplemented() }
+public var NSFontPanelStandardModesMask: UInt32 { 65535 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelstrikethrougheffectmodemask
-public var NSFontPanelStrikethroughEffectModeMask: UInt32 { unimplemented() }
+public var NSFontPanelStrikethroughEffectModeMask: UInt32 { 512 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpaneltextcoloreffectmodemask
-public var NSFontPanelTextColorEffectModeMask: UInt32 { unimplemented() }
+public var NSFontPanelTextColorEffectModeMask: UInt32 { 1024 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontpanelunderlineeffectmodemask
-public var NSFontPanelUnderlineEffectModeMask: UInt32 { unimplemented() }
+public var NSFontPanelUnderlineEffectModeMask: UInt32 { 256 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontsansserifclass
-public var NSFontSansSerifClass: Int { unimplemented() }
+public var NSFontSansSerifClass: Int { -2147483648 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontscriptsclass
-public var NSFontScriptsClass: Int { unimplemented() }
+public var NSFontScriptsClass: Int { -1610612736 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontslabserifsclass
-public var NSFontSlabSerifsClass: Int { unimplemented() }
+public var NSFontSlabSerifsClass: Int { 1342177280 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontsymbolicclass
-public var NSFontSymbolicClass: Int { unimplemented() }
+public var NSFontSymbolicClass: Int { -1073741824 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfonttransitionalserifsclass
-public var NSFontTransitionalSerifsClass: Int { unimplemented() }
+public var NSFontTransitionalSerifsClass: Int { 536870912 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontuioptimizedtrait
-public var NSFontUIOptimizedTrait: Int { unimplemented() }
+public var NSFontUIOptimizedTrait: Int { 4096 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontunknownclass
-public var NSFontUnknownClass: Int { unimplemented() }
+public var NSFontUnknownClass: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsfontverticaltrait
-public var NSFontVerticalTrait: Int { unimplemented() }
+public var NSFontVerticalTrait: Int { 2048 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsformfeedcharacter
-public var NSFormFeedCharacter: Int { unimplemented() }
+public var NSFormFeedCharacter: Int { 12 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgetwindowservermemory(_:_:_:_:)
 public func NSGetWindowServerMemory(_ context: Int, _ virtualMemory: UnsafeMutablePointer<Int>, _ windowBackingMemory: UnsafeMutablePointer<Int>, _ windowDumpString: AutoreleasingUnsafeMutablePointer<NSString>) -> Int { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsglyphattributebidilevel
-public var NSGlyphAttributeBidiLevel: Int { unimplemented() }
+public var NSGlyphAttributeBidiLevel: Int { 2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsglyphattributeelastic
-public var NSGlyphAttributeElastic: Int { unimplemented() }
+public var NSGlyphAttributeElastic: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsglyphattributeinscribe
-public var NSGlyphAttributeInscribe: Int { unimplemented() }
+public var NSGlyphAttributeInscribe: Int { 5 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsglyphattributesoft
-public var NSGlyphAttributeSoft: Int { unimplemented() }
+public var NSGlyphAttributeSoft: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpfunctionkey
-public var NSHelpFunctionKey: Int { unimplemented() }
+public var NSHelpFunctionKey: Int { 63302 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshomefunctionkey
-public var NSHomeFunctionKey: Int { unimplemented() }
+public var NSHomeFunctionKey: Int { 63273 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage_unavailable_maccatalyst
-public var NSIMAGE_UNAVAILABLE_MACCATALYST: Int32 { unimplemented() }
+public var NSIMAGE_UNAVAILABLE_MACCATALYST: Int32 { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsillegaltextmovement
-public var NSIllegalTextMovement: Int { unimplemented() }
+public var NSIllegalTextMovement: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimagerepmatchesdevice
-public var NSImageRepMatchesDevice: Int { unimplemented() }
+public var NSImageRepMatchesDevice: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsinsertcharfunctionkey
-public var NSInsertCharFunctionKey: Int { unimplemented() }
+public var NSInsertCharFunctionKey: Int { 63293 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsinsertfunctionkey
-public var NSInsertFunctionKey: Int { unimplemented() }
+public var NSInsertFunctionKey: Int { 63271 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsinsertlinefunctionkey
-public var NSInsertLineFunctionKey: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsiscontrollermarker(_:)
-public func NSIsControllerMarker(_ object: Any?) -> Bool { unimplemented() }
+public var NSInsertLineFunctionKey: Int { 63291 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsleftarrowfunctionkey
-public var NSLeftArrowFunctionKey: Int { unimplemented() }
+public var NSLeftArrowFunctionKey: Int { 63234 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslefttextmovement
-public var NSLeftTextMovement: Int { unimplemented() }
+public var NSLeftTextMovement: Int { 19 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslineseparatorcharacter
-public var NSLineSeparatorCharacter: Int { unimplemented() }
+public var NSLineSeparatorCharacter: Int { 8232 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenufunctionkey
-public var NSMenuFunctionKey: Int { unimplemented() }
+public var NSMenuFunctionKey: Int { 63285 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmodeswitchfunctionkey
-public var NSModeSwitchFunctionKey: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmultiplevaluesmarker
-public var NSMultipleValuesMarker: AnyObject { unimplemented() }
+public var NSModeSwitchFunctionKey: Int { 63303 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnewlinecharacter
-public var NSNewlineCharacter: Int { unimplemented() }
+public var NSNewlineCharacter: Int { 10 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnextfunctionkey
-public var NSNextFunctionKey: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnoselectionmarker
-public var NSNoSelectionMarker: AnyObject { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnotapplicablemarker
-public var NSNotApplicableMarker: AnyObject { unimplemented() }
+public var NSNextFunctionKey: Int { 63296 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsnullglyph
-public var NSNullGlyph: Int { unimplemented() }
+public var NSNullGlyph: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsokbutton
-public var NSOKButton: Int { unimplemented() }
+public var NSOKButton: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaaccelerated
-public var NSOpenGLPFAAccelerated: Int { unimplemented() }
+public var NSOpenGLPFAAccelerated: Int { 73 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaacceleratedcompute
-public var NSOpenGLPFAAcceleratedCompute: Int { unimplemented() }
+public var NSOpenGLPFAAcceleratedCompute: Int { 97 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaaccumsize
-public var NSOpenGLPFAAccumSize: Int { unimplemented() }
+public var NSOpenGLPFAAccumSize: Int { 14 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaallrenderers
-public var NSOpenGLPFAAllRenderers: Int { unimplemented() }
+public var NSOpenGLPFAAllRenderers: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaallowofflinerenderers
-public var NSOpenGLPFAAllowOfflineRenderers: Int { unimplemented() }
+public var NSOpenGLPFAAllowOfflineRenderers: Int { 96 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaalphasize
-public var NSOpenGLPFAAlphaSize: Int { unimplemented() }
+public var NSOpenGLPFAAlphaSize: Int { 11 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaauxbuffers
-public var NSOpenGLPFAAuxBuffers: Int { unimplemented() }
+public var NSOpenGLPFAAuxBuffers: Int { 7 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaauxdepthstencil
-public var NSOpenGLPFAAuxDepthStencil: Int { unimplemented() }
+public var NSOpenGLPFAAuxDepthStencil: Int { 57 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfabackingstore
-public var NSOpenGLPFABackingStore: Int { unimplemented() }
+public var NSOpenGLPFABackingStore: Int { 76 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaclosestpolicy
-public var NSOpenGLPFAClosestPolicy: Int { unimplemented() }
+public var NSOpenGLPFAClosestPolicy: Int { 74 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfacolorfloat
-public var NSOpenGLPFAColorFloat: Int { unimplemented() }
+public var NSOpenGLPFAColorFloat: Int { 58 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfacolorsize
-public var NSOpenGLPFAColorSize: Int { unimplemented() }
+public var NSOpenGLPFAColorSize: Int { 8 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfadepthsize
-public var NSOpenGLPFADepthSize: Int { unimplemented() }
+public var NSOpenGLPFADepthSize: Int { 12 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfadoublebuffer
-public var NSOpenGLPFADoubleBuffer: Int { unimplemented() }
+public var NSOpenGLPFADoubleBuffer: Int { 5 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfamaximumpolicy
-public var NSOpenGLPFAMaximumPolicy: Int { unimplemented() }
+public var NSOpenGLPFAMaximumPolicy: Int { 52 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaminimumpolicy
-public var NSOpenGLPFAMinimumPolicy: Int { unimplemented() }
+public var NSOpenGLPFAMinimumPolicy: Int { 51 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfamultisample
-public var NSOpenGLPFAMultisample: Int { unimplemented() }
+public var NSOpenGLPFAMultisample: Int { 59 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfanorecovery
-public var NSOpenGLPFANoRecovery: Int { unimplemented() }
+public var NSOpenGLPFANoRecovery: Int { 72 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfaopenglprofile
-public var NSOpenGLPFAOpenGLProfile: Int { unimplemented() }
+public var NSOpenGLPFAOpenGLProfile: Int { 99 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfarendererid
-public var NSOpenGLPFARendererID: Int { unimplemented() }
+public var NSOpenGLPFARendererID: Int { 70 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfasamplealpha
-public var NSOpenGLPFASampleAlpha: Int { unimplemented() }
+public var NSOpenGLPFASampleAlpha: Int { 61 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfasamplebuffers
-public var NSOpenGLPFASampleBuffers: Int { unimplemented() }
+public var NSOpenGLPFASampleBuffers: Int { 55 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfasamples
-public var NSOpenGLPFASamples: Int { unimplemented() }
+public var NSOpenGLPFASamples: Int { 56 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfascreenmask
-public var NSOpenGLPFAScreenMask: Int { unimplemented() }
+public var NSOpenGLPFAScreenMask: Int { 84 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfastencilsize
-public var NSOpenGLPFAStencilSize: Int { unimplemented() }
+public var NSOpenGLPFAStencilSize: Int { 13 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfastereo
-public var NSOpenGLPFAStereo: Int { unimplemented() }
+public var NSOpenGLPFAStereo: Int { 6 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfasupersample
-public var NSOpenGLPFASupersample: Int { unimplemented() }
+public var NSOpenGLPFASupersample: Int { 60 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfatriplebuffer
-public var NSOpenGLPFATripleBuffer: Int { unimplemented() }
+public var NSOpenGLPFATripleBuffer: Int { 3 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpfavirtualscreencount
-public var NSOpenGLPFAVirtualScreenCount: Int { unimplemented() }
+public var NSOpenGLPFAVirtualScreenCount: Int { 128 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglprofileversion3_2core
-public var NSOpenGLProfileVersion3_2Core: Int { unimplemented() }
+public var NSOpenGLProfileVersion3_2Core: Int { 12800 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglprofileversion4_1core
 @available(macOS 10.10, *)
-public var NSOpenGLProfileVersion4_1Core: Int { unimplemented() }
+public var NSOpenGLProfileVersion4_1Core: Int { 16640 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglprofileversionlegacy
-public var NSOpenGLProfileVersionLegacy: Int { unimplemented() }
+public var NSOpenGLProfileVersionLegacy: Int { 4096 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsothertextmovement
-public var NSOtherTextMovement: Int { unimplemented() }
+public var NSOtherTextMovement: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineviewdroponitemindex
 public var NSOutlineViewDropOnItemIndex: Int { -1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspagedownfunctionkey
-public var NSPageDownFunctionKey: Int { unimplemented() }
+public var NSPageDownFunctionKey: Int { 63277 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspageupfunctionkey
-public var NSPageUpFunctionKey: Int { unimplemented() }
+public var NSPageUpFunctionKey: Int { 63276 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsparagraphseparatorcharacter
-public var NSParagraphSeparatorCharacter: Int { unimplemented() }
+public var NSParagraphSeparatorCharacter: Int { 8233 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardcommunicationerror
 @available(macOS 15.4, *)
-public var NSPasteboardCommunicationError: Int { unimplemented() }
+public var NSPasteboardCommunicationError: Int { 67585 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardcontentsnotavailableerror
 @available(macOS 15.4, *)
-public var NSPasteboardContentsNotAvailableError: Int { unimplemented() }
+public var NSPasteboardContentsNotAvailableError: Int { 67587 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarderrormaximum
 @available(macOS 15.4, *)
-public var NSPasteboardErrorMaximum: Int { unimplemented() }
+public var NSPasteboardErrorMaximum: Int { 67839 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarderrorminimum
 @available(macOS 15.4, *)
-public var NSPasteboardErrorMinimum: Int { unimplemented() }
+public var NSPasteboardErrorMinimum: Int { 67584 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardinvalidargumenterror
 @available(macOS 15.4, *)
-public var NSPasteboardInvalidArgumentError: Int { unimplemented() }
+public var NSPasteboardInvalidArgumentError: Int { 67586 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardmiscellaneouserror
 @available(macOS 15.4, *)
-public var NSPasteboardMiscellaneousError: Int { unimplemented() }
+public var NSPasteboardMiscellaneousError: Int { 67584 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspausefunctionkey
-public var NSPauseFunctionKey: Int { unimplemented() }
+public var NSPauseFunctionKey: Int { 63280 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsperformservice(_:_:)
 public func NSPerformService(_ itemName: String, _ pboard: NSPasteboard?) -> Bool { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprevfunctionkey
-public var NSPrevFunctionKey: Int { unimplemented() }
+public var NSPrevFunctionKey: Int { 63295 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintfunctionkey
-public var NSPrintFunctionKey: Int { unimplemented() }
+public var NSPrintFunctionKey: Int { 63288 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintscreenfunctionkey
-public var NSPrintScreenFunctionKey: Int { unimplemented() }
-
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsreadpixel(_:)
-public func NSReadPixel(_ passedPoint: NSPoint) -> NSColor? { unimplemented() }
+public var NSPrintScreenFunctionKey: Int { 63278 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsredofunctionkey
-public var NSRedoFunctionKey: Int { unimplemented() }
+public var NSRedoFunctionKey: Int { 63300 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsregisterservicesprovider(_:_:)
 public func NSRegisterServicesProvider(_ provider: Any?, _ name: NSServiceProviderName) { unimplemented() }
 
-/// - SeeAlso: https://developer.apple.com/documentation/appkit/nsreleasealertpanel(_:)
-public func NSReleaseAlertPanel(_ panel: Any!) { unimplemented() }
-
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresetfunctionkey
-public var NSResetFunctionKey: Int { unimplemented() }
+public var NSResetFunctionKey: Int { 63283 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsreturntextmovement
-public var NSReturnTextMovement: Int { unimplemented() }
+public var NSReturnTextMovement: Int { 16 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrightarrowfunctionkey
-public var NSRightArrowFunctionKey: Int { unimplemented() }
+public var NSRightArrowFunctionKey: Int { 63235 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrighttextmovement
-public var NSRightTextMovement: Int { unimplemented() }
+public var NSRightTextMovement: Int { 20 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrunabortedresponse
-public var NSRunAbortedResponse: Int { unimplemented() }
+public var NSRunAbortedResponse: Int { -1001 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsruncontinuesresponse
-public var NSRunContinuesResponse: Int { unimplemented() }
+public var NSRunContinuesResponse: Int { -1002 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrunstoppedresponse
-public var NSRunStoppedResponse: Int { unimplemented() }
+public var NSRunStoppedResponse: Int { -1000 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrolllockfunctionkey
-public var NSScrollLockFunctionKey: Int { unimplemented() }
+public var NSScrollLockFunctionKey: Int { 63279 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsselectfunctionkey
-public var NSSelectFunctionKey: Int { unimplemented() }
+public var NSSelectFunctionKey: Int { 63297 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssetshowsservicesmenuitem(_:_:)
 public func NSSetShowsServicesMenuItem(_ itemName: String, _ enabled: Bool) -> Int { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsshowcontrolglyphs
-public var NSShowControlGlyphs: Int { unimplemented() }
+public var NSShowControlGlyphs: Int { 1 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsshowinvisibleglyphs
-public var NSShowInvisibleGlyphs: Int { unimplemented() }
+public var NSShowInvisibleGlyphs: Int { 2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsshowsservicesmenuitem(_:)
 public func NSShowsServicesMenuItem(_ itemName: String) -> Bool { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstopfunctionkey
-public var NSStopFunctionKey: Int { unimplemented() }
+public var NSStopFunctionKey: Int { 63284 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssysreqfunctionkey
-public var NSSysReqFunctionKey: Int { unimplemented() }
+public var NSSysReqFunctionKey: Int { 63281 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssystemfunctionkey
-public var NSSystemFunctionKey: Int { unimplemented() }
+public var NSSystemFunctionKey: Int { 63287 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabcharacter
-public var NSTabCharacter: Int { unimplemented() }
+public var NSTabCharacter: Int { 9 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabtextmovement
-public var NSTabTextMovement: Int { unimplemented() }
+public var NSTabTextMovement: Int { 17 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextwritingdirectionembedding
-public var NSTextWritingDirectionEmbedding: Int { unimplemented() }
+public var NSTextWritingDirectionEmbedding: Int { 0 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextwritingdirectionoverride
-public var NSTextWritingDirectionOverride: Int { unimplemented() }
+public var NSTextWritingDirectionOverride: Int { 2 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypeidentifieraddresstext
 @available(macOS 10.10, *)
-public var NSTypeIdentifierAddressText: String { unimplemented() }
+public var NSTypeIdentifierAddressText: String { "com.apple.structured-text.address" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypeidentifierdatetext
 @available(macOS 10.10, *)
-public var NSTypeIdentifierDateText: String { unimplemented() }
+public var NSTypeIdentifierDateText: String { "com.apple.structured-text.date" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypeidentifierphonenumbertext
 @available(macOS 10.10, *)
-public var NSTypeIdentifierPhoneNumberText: String { unimplemented() }
+public var NSTypeIdentifierPhoneNumberText: String { "com.apple.structured-text.telephone-number" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypeidentifiertransitinformationtext
 @available(macOS 10.10, *)
-public var NSTypeIdentifierTransitInformationText: String { unimplemented() }
+public var NSTypeIdentifierTransitInformationText: String { "com.apple.structured-text.transit-information" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsundofunctionkey
-public var NSUndoFunctionKey: Int { unimplemented() }
+public var NSUndoFunctionKey: Int { 63299 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsunregisterservicesprovider(_:)
 public func NSUnregisterServicesProvider(_ name: NSServiceProviderName) { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuparrowfunctionkey
-public var NSUpArrowFunctionKey: Int { unimplemented() }
+public var NSUpArrowFunctionKey: Int { 63232 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuptextmovement
-public var NSUpTextMovement: Int { unimplemented() }
+public var NSUpTextMovement: Int { 21 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsupdatedynamicservices()
 public func NSUpdateDynamicServices() { unimplemented() }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuseractivitydocumenturlkey
 @available(macOS 10.10, *)
-public var NSUserActivityDocumentURLKey: String { unimplemented() }
+public var NSUserActivityDocumentURLKey: String { "NSUserActivityDocumentURL" }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuserfunctionkey
-public var NSUserFunctionKey: Int { unimplemented() }
+public var NSUserFunctionKey: Int { 63286 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswantsbidilevels
-public var NSWantsBidiLevels: Int { unimplemented() }
+public var NSWantsBidiLevels: Int { 4 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowsharingerrormaximum
 @available(macOS 13.3, *)
-public var NSWindowSharingErrorMaximum: Int { unimplemented() }
+public var NSWindowSharingErrorMaximum: Int { 67466 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowsharingerrorminimum
 @available(macOS 13.3, *)
-public var NSWindowSharingErrorMinimum: Int { unimplemented() }
+public var NSWindowSharingErrorMinimum: Int { 67456 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowsharingrequestalreadyrequested
 @available(macOS 13.3, *)
-public var NSWindowSharingRequestAlreadyRequested: Int { unimplemented() }
+public var NSWindowSharingRequestAlreadyRequested: Int { 67456 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowsharingrequestnoeligiblesession
 @available(macOS 13.3, *)
-public var NSWindowSharingRequestNoEligibleSession: Int { unimplemented() }
+public var NSWindowSharingRequestNoEligibleSession: Int { 67457 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowsharingrequestunspecifiederror
 @available(macOS 13.3, *)
-public var NSWindowSharingRequestUnspecifiedError: Int { unimplemented() }
+public var NSWindowSharingRequestUnspecifiedError: Int { 67458 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspaceauthorizationinvaliderror
 @available(macOS 10.14, *)
-public var NSWorkspaceAuthorizationInvalidError: Int { unimplemented() }
+public var NSWorkspaceAuthorizationInvalidError: Int { 67328 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspaceerrormaximum
 @available(macOS 10.14, *)
-public var NSWorkspaceErrorMaximum: Int { unimplemented() }
+public var NSWorkspaceErrorMaximum: Int { 67455 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspaceerrorminimum
 @available(macOS 10.14, *)
-public var NSWorkspaceErrorMinimum: Int { unimplemented() }
+public var NSWorkspaceErrorMinimum: Int { 67328 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/ns_user_activity_supported
-public var NS_USER_ACTIVITY_SUPPORTED: Int32 { unimplemented() }
+public var NS_USER_ACTIVITY_SUPPORTED: Int32 { 1 }
 
