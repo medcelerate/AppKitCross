@@ -150,6 +150,9 @@ final class GradientTests: XCTestCase, @unchecked Sendable {
 
 // MARK: - NSAnimation
 
+/// Marks seen by a notification closure (a captured `var` there is a Sendable error on Linux and Windows).
+private final class MarkBox: @unchecked Sendable { var marks: [Float] = [] }
+
 private final class AnimationRecorder: NSObject, NSAnimationDelegate, @unchecked Sendable {
     var marks: [Float] = []
     var ended = 0, stopped = 0
@@ -188,9 +191,9 @@ final class AnimationTests: XCTestCase, @unchecked Sendable {
                 XCTAssertEqual(a.progressMarks.map { $0.floatValue }, [0.25, 0.5, 1])
                 let r = AnimationRecorder()
                 a.delegate = r
-                var notified: [Float] = []
+                let notified = MarkBox()
                 let token = NotificationCenter.default.addObserver(forName: NSAnimation.progressMarkNotification, object: a, queue: nil) { n in
-                    notified.append((n.userInfo?[NSAnimation.progressMarkUserInfoKey] as? NSNumber)?.floatValue ?? -1)
+                    notified.marks.append((n.userInfo?[NSAnimation.progressMarkUserInfoKey] as? NSNumber)?.floatValue ?? -1)
                 }
                 defer { NotificationCenter.default.removeObserver(token) }
                 a.start()
@@ -206,7 +209,7 @@ final class AnimationTests: XCTestCase, @unchecked Sendable {
                 XCTAssertEqual(a.currentProgress, 1)
                 XCTAssertFalse(a.isAnimating)
                 XCTAssertEqual(r.marks, [0.25, 0.5, 1])
-                XCTAssertEqual(notified, [0.25, 0.5, 1])
+                XCTAssertEqual(notified.marks, [0.25, 0.5, 1])
                 XCTAssertEqual(r.ended, 1)
                 XCTAssertEqual(r.stopped, 0)
                 // A finished animation starts again from the beginning.
