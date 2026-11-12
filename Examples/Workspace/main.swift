@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
     var log: NSTextView!
     var badgeCount = 0
     var observers: [NSObjectProtocol] = []
+    /// The application Launch started, the only one Activate, Hide and Terminate act on:
+    /// matched by its process identifier, never by name, so an instance the user already
+    /// had running (with unsaved work, say) is never touched.
+    var launched: NSRunningApplication?
 
     static let act = Selector(("workspaceAction:"))
     /// `--open` / `--stay` (see the header).
@@ -211,18 +215,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
             guard let url = ws.urlForApplication(withBundleIdentifier: id) else { report("no application for '\(id)'"); return true }
             ws.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, error in
                 MainActor.assumeIsolated {
-                    if let app { self.report("launched \(app.localizedName ?? "?") (pid \(app.processIdentifier)) from \(url.path)") }
+                    if let app { self.launched = app; self.report("launched \(app.localizedName ?? "?") (pid \(app.processIdentifier)) from \(url.path)") }
                     else { self.report("launch failed: \(error.map { "\($0)" } ?? "?")") }
                 }
             }
         case 8, 9, 10:
-            let id = appField.stringValue
-            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: id)
-            guard let app = apps.first else { report("'\(id)' is not running (\(ws.runningApplications.compactMap(\.bundleIdentifier).joined(separator: ", ")))"); return true }
+            // Only the instance Launch started, found again by its process identifier.
+            guard let pid = launched?.processIdentifier else { report("nothing launched yet: press Launch first"); return true }
+            guard let app = ws.runningApplications.first(where: { $0.processIdentifier == pid }) ?? (launched?.isTerminated == false ? launched : nil) else {
+                report("the launched application (pid \(pid)) is no longer running")
+                launched = nil
+                return true
+            }
+            let name = app.localizedName ?? appField.stringValue
             switch button.tag {
-            case 8: report("activate \(app.localizedName ?? id): \(app.activate(options: []))")
-            case 9: report("\(app.isHidden ? "unhide" : "hide") \(app.localizedName ?? id): \(app.isHidden ? app.unhide() : app.hide())")
-            default: report("terminate \(app.localizedName ?? id): \(app.terminate())")
+            case 8: report("activate \(name) (pid \(pid)): \(app.activate(options: []))")
+            case 9: report("\(app.isHidden ? "unhide" : "hide") \(name) (pid \(pid)): \(app.isHidden ? app.unhide() : app.hide())")
+            default: report("terminate \(name) (pid \(pid)): \(app.terminate())")
             }
         default:
             return false

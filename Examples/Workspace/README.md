@@ -18,9 +18,12 @@ What it demonstrates:
 - `NSApp.dockTile.badgeLabel` shows a count on the taskbar button (an overlay icon on
   Windows; the launcher count and the window icon on Linux).
 - The frontmost application, kept current by `didActivateApplicationNotification`;
-  launching, activating, hiding and terminating another application found by
-  `urlForApplication(withBundleIdentifier:)` and `runningApplications(withBundleIdentifier:)`
-  (`notepad` on Windows, a desktop entry id such as `org.gnome.TextEditor` on Linux).
+  launching another application found by `urlForApplication(withBundleIdentifier:)`
+  (`notepad` on Windows, a desktop entry id such as `org.gnome.TextEditor` on Linux), then
+  activating, hiding and terminating that instance only, matched by the process identifier
+  `openApplication` returned, never by name: an instance already running before Launch,
+  perhaps with unsaved work, is never touched. Press Launch first; a test of Activate,
+  Hide or Terminate uses the fresh instance the demo started.
 - The log lists the workspace notifications as they arrive: application activation and
   lifetime, sleep and wake, screens, the session, accessibility settings.
 
