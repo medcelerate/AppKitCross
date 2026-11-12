@@ -640,7 +640,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(DiffableDemoViewController())
         tabs.addChild(PanelsDemoViewController())
         tabs.addChild(PopoverDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 840, height: 300)   // wide enough for the fifteen tabs
+        tabs.addChild(LegacyDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 900, height: 300)   // wide enough for the sixteen tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1471,6 +1472,111 @@ final class PopoverDemoViewController: NSViewController, NSPopoverDelegate, NSSe
         case "switched:": status.stringValue = "Switch is \(toggle.state == .on ? "on" : "off")"; return true
         default: return false
         }
+    }
+}
+
+/// The legacy controls (ADR-0034): an NSGradient swatch (linear and radial), a text view
+/// with its horizontal NSRulerView (drag the tab stop and indent markers; click the rule
+/// to add a tab stop, drag one off to remove it), an NSDrawer on the window's right edge
+/// and an NSScrubber strip of twenty items with arrow buttons and a rounded selection.
+final class LegacyDemoViewController: NSViewController, NSScrubberDataSource, NSScrubberDelegate, NSSelectorHandling {
+    let scrubber = NSScrubber(frame: NSRect(x: 16, y: 56, width: 588, height: 32))
+    let status = NSTextField(labelWithString: "Drag the ruler markers, toggle the drawer, pick a scrubber item.")
+    lazy var drawer: NSDrawer = {
+        let d = NSDrawer(contentSize: NSSize(width: 160, height: 200), preferredEdge: .maxX)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 200))
+        let label = NSTextField(wrappingLabelWithString: "A drawer slides out of the window's edge and follows the window.")
+        label.frame = NSRect(x: 8, y: 120, width: 144, height: 64)
+        label.autoresizingMask = [.minYMargin]
+        content.addSubview(label)
+        let close = NSButton(title: "Close", target: self, action: Selector(("closeDrawer:")))
+        close.frame = NSRect(x: 8, y: 80, width: 80, height: 24)
+        close.autoresizingMask = [.minYMargin]
+        content.addSubview(close)
+        d.contentView = content
+        d.minContentSize = NSSize(width: 100, height: 50)
+        d.maxContentSize = NSSize(width: 320, height: 2000)
+        for (name, text) in [(NSDrawer.didOpenNotification, "Drawer open"), (NSDrawer.didCloseNotification, "Drawer closed")] {
+            NotificationCenter.default.addObserver(forName: name, object: d, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.status.stringValue = text }
+            }
+        }
+        return d
+    }()
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Legacy"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 260))
+        let swatch = GradientSwatch(frame: NSRect(x: 16, y: 104, width: 160, height: 140))
+        root.addSubview(swatch)
+
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 192, y: 104, width: 412, height: 140)
+        scroll.borderType = .lineBorder
+        let tv = scroll.documentView as! NSTextView
+        let ps = NSMutableParagraphStyle()
+        ps.tabStops = [NSTextTab(textAlignment: .left, location: 72), NSTextTab(textAlignment: .right, location: 216)]
+        ps.headIndent = 12
+        tv.textStorage?.setAttributedString(NSAttributedString(string: "Name\tKind\tSize\nRuler\tview\t12\nDrawer\twindow\t160\nScrubber\tstrip\t20\n",
+                                                                attributes: [.paragraphStyle: ps, .font: NSFont.systemFont(ofSize: 12)]))
+        root.addSubview(scroll)
+        scroll.hasHorizontalRuler = true
+        scroll.rulersVisible = true
+        scroll.horizontalRulerView?.measurementUnits = .inches
+        scroll.horizontalRulerView?.clientView = tv
+        tv.setSelectedRange(NSRange(location: 0, length: 0))
+        tv.updateRuler()
+
+        scrubber.register(NSScrubberTextItemView.self, forItemIdentifier: NSUserInterfaceItemIdentifier("item"))
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSize = NSSize(width: 72, height: 28)
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSpacing = 6
+        scrubber.selectionBackgroundStyle = .roundedBackground
+        scrubber.showsArrowButtons = true
+        scrubber.showsAdditionalContentIndicators = true
+        scrubber.delegate = self
+        scrubber.dataSource = self
+        root.addSubview(scrubber)
+
+        let toggle = NSButton(title: "Toggle Drawer", target: self, action: Selector(("toggleDrawer:")))
+        toggle.frame = NSRect(x: 16, y: 16, width: 120, height: 24)
+        root.addSubview(toggle)
+        status.frame = NSRect(x: 148, y: 18, width: 456, height: 20)
+        root.addSubview(status)
+        view = root
+    }
+
+    func numberOfItems(for scrubber: NSScrubber) -> Int { 20 }
+    func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
+        let item = scrubber.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("item"), owner: nil) as! NSScrubberTextItemView
+        item.title = "Item \(index + 1)"
+        return item
+    }
+    func scrubber(_ scrubber: NSScrubber, didSelectItemAt selectedIndex: Int) { status.stringValue = "Scrubber: Item \(selectedIndex + 1) selected" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "toggleDrawer:":
+            if drawer.parentWindow == nil { drawer.parentWindow = view.window }
+            drawer.toggle(sender)
+            return true
+        case "closeDrawer:": drawer.close(sender); return true
+        default: return false
+        }
+    }
+}
+
+/// A linear gradient across the top half and a radial one below.
+final class GradientSwatch: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let top = NSRect(x: 0, y: bounds.midY + 2, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(colorsAndLocations: (.systemRed, 0), (.systemYellow, 0.5), (.systemBlue, 1))?.draw(in: NSBezierPath(roundedRect: top, xRadius: 8, yRadius: 8), angle: 0)
+        let bottom = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(starting: .white, ending: .systemTeal)?.draw(in: bottom, relativeCenterPosition: NSPoint(x: -0.4, y: 0.4))
     }
 }
 

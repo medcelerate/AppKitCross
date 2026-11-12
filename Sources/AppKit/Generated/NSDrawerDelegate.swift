@@ -33,14 +33,14 @@ extension NSDrawerDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawerdidopen(_:)
     public func drawerDidOpen(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawershouldclose(_:)
-    public func drawerShouldClose(_ sender: NSDrawer) -> Bool { return false }
+    public func drawerShouldClose(_ sender: NSDrawer) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawershouldopen(_:)
-    public func drawerShouldOpen(_ sender: NSDrawer) -> Bool { return false }
+    public func drawerShouldOpen(_ sender: NSDrawer) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawerwillclose(_:)
     public func drawerWillClose(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawerwillopen(_:)
     public func drawerWillOpen(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdrawerdelegate/drawerwillresizecontents(_:to:)
-    public func drawerWillResizeContents(_ sender: NSDrawer, to contentSize: NSSize) -> NSSize { unimplementedOptionalRequirement() }
+    public func drawerWillResizeContents(_ sender: NSDrawer, to contentSize: NSSize) -> NSSize { return contentSize }
 }
 
