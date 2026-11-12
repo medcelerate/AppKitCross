@@ -682,8 +682,11 @@ import CoreGraphics
             return v
         }
         let value = _objectValue(for: c, row: row)
-        let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell")
+        // Reused per column: a cell keeps its width (and its layer's raster size) across reloads
+        // instead of moving between columns of different widths.
+        let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell." + c.identifier.rawValue)
         let cell = (makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? NSTableCellView._makeLabelCell(frame: frame)
+        cell.identifier = id
         cell.frame = frame
         cell.objectValue = value
         if let s = value as? String { cell.textField?.stringValue = s }
