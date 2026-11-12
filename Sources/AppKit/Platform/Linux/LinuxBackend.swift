@@ -57,6 +57,17 @@ final class LinuxBackend: PlatformBackend {
     }
     /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013); nil without an accessibility bus.
     private(set) var atspi: AtspiBridge?
+    /// The workspace (LinuxWorkspace.swift, ADR-0022) over the X11 window list; made on first use.
+    private var linuxWorkspace: LinuxWorkspace?
+    private(set) var x11WindowSystem: LinuxX11WindowSystem?
+    var workspace: any PlatformWorkspace {
+        if let w = linuxWorkspace { return w }
+        let ws = LinuxX11WindowSystem(backend: self)
+        x11WindowSystem = ws
+        let w = LinuxWorkspace(windowSystem: ws)
+        linuxWorkspace = w
+        return w
+    }
 
     init() {
         guard let d = XOpenDisplay(nil) else {
@@ -142,6 +153,7 @@ final class LinuxBackend: PlatformBackend {
                        pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
             if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
             if let s = statusNotifier, s.fileDescriptor >= 0 { fds.append(pollfd(fd: s.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
+            for fd in linuxWorkspace?.fileDescriptors ?? [] where fd >= 0 { fds.append(pollfd(fd: fd, events: Int16(POLLIN), revents: 0)) }
             var timeout: Int32 = -1
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
@@ -162,6 +174,7 @@ final class LinuxBackend: PlatformBackend {
         }
         atspi?.dispatch()
         statusNotifier?.dispatch()
+        linuxWorkspace?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }
@@ -197,6 +210,10 @@ final class LinuxBackend: PlatformBackend {
                                                    state: UInt32(g.mods.effective), cancelled: g.flags & XIGestureSwipeEventCancelled != 0)
             default: break
             }
+            return
+        }
+        if xid == root, Int32(event.type) == PropertyNotify {
+            if let ws = x11WindowSystem, ws.concernsWindowList(event.xproperty.atom) { linuxWorkspace?.windowListDidChange() }
             return
         }
         guard let w = window(for: xid) else { return }

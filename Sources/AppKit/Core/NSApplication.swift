@@ -128,6 +128,7 @@ import CoreText
         delegate?.applicationWillBecomeActive(post(NSApplication.willBecomeActiveNotification))
         _isActive = true
         delegate?.applicationDidBecomeActive(post(NSApplication.didBecomeActiveNotification))
+        NSWorkspace.shared._currentApplicationDidChange(active: true)
         for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/activatecontexthelpmode(_:)
@@ -145,8 +146,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationiconimage
     @MainActor open var applicationIconImage: NSImage! {
         get { _applicationIconImage }
-        set { _applicationIconImage = newValue }
+        set { _applicationIconImage = newValue; _dockTile?.display() }
     }
+    /// The icon image when one was set (the dock tile and `NSRunningApplication.icon`).
+    @MainActor internal var _applicationIconImageIfSet: NSImage? { _applicationIconImage }
+    @MainActor internal var _isFinishedLaunching: Bool { _finishedLaunching }
+    private var _dockTile: NSDockTile? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationshouldsuppresshighdynamicrangecontent
     @available(macOS 26.0, *)
     @MainActor open var applicationShouldSuppressHighDynamicRangeContent: Bool { unimplemented() }
@@ -179,6 +184,7 @@ import CoreText
         delegate?.applicationWillResignActive(post(NSApplication.willResignActiveNotification))
         _isActive = false
         delegate?.applicationDidResignActive(post(NSApplication.didResignActiveNotification))
+        NSWorkspace.shared._currentApplicationDidChange(active: false)
         for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/delegate
@@ -213,7 +219,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/displaywindowrunloopordering
     class public var displayWindowRunLoopOrdering: Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/docktile
-    @MainActor open var dockTile: NSDockTile { unimplemented() }
+    @MainActor open var dockTile: NSDockTile {
+        if let t = _dockTile { return t }
+        let t = NSDockTile(owner: self)
+        _dockTile = t
+        return t
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/effectiveappearance
     @available(macOS 10.14, *)
     @MainActor open var effectiveAppearance: NSAppearance { _appearance ?? NSAppearance(named: Platform.backend.systemAppearanceIsDark ? .darkAqua : .aqua)! }
@@ -272,9 +283,10 @@ import CoreText
         _isHidden = true
         for w in _windows where w.isVisible && w.canHide { w.orderOut(nil) }
         delegate?.applicationDidHide(post(NSApplication.didHideNotification))
+        NSWorkspace.shared._currentApplicationDidChange(hidden: true)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/hideotherapplications(_:)
-    @MainActor open func hideOtherApplications(_ sender: Any?) { unimplemented() }
+    @MainActor open func hideOtherApplications(_ sender: Any?) { NSWorkspace.shared.hideOtherApplications() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/isactive
     @MainActor open var isActive: Bool { _isActive }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/isautomaticcustomizetouchbarmenuitemenabled
@@ -593,7 +605,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhide(_:)
     @MainActor open func unhide(_ sender: Any?) { unhideWithoutActivation(); activate(ignoringOtherApps: true) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhideallapplications(_:)
-    @MainActor open func unhideAllApplications(_ sender: Any?) { unimplemented() }
+    @MainActor open func unhideAllApplications(_ sender: Any?) { NSWorkspace.shared._unhideAllApplications() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhidewithoutactivation()
     @MainActor open func unhideWithoutActivation() {
         guard _isHidden else { return }
@@ -601,6 +613,7 @@ import CoreText
         _isHidden = false
         for w in _windows { w.orderFront(nil) }
         delegate?.applicationDidUnhide(post(NSApplication.didUnhideNotification))
+        NSWorkspace.shared._currentApplicationDidChange(hidden: false)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unregisterforremotenotifications()
     @MainActor open func unregisterForRemoteNotifications() { unimplemented() }
@@ -676,7 +689,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/yieldactivation(to:)
     @available(macOS 14.0, *)
-    @MainActor open func yieldActivation(to application: NSRunningApplication) { unimplemented() }
+    @MainActor open func yieldActivation(to application: NSRunningApplication) { _ = application.activate(options: []) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/yieldactivation(toapplicationwithbundleidentifier:)
     @available(macOS 14.0, *)
     @MainActor open func yieldActivation(toApplicationWithBundleIdentifier bundleIdentifier: String) { unimplemented() }

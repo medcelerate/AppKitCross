@@ -1542,7 +1542,13 @@ import CoreText
         set { _displaysWhenScreenProfileChanges = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/docktile
-    @MainActor open var dockTile: NSDockTile { unimplemented() }
+    @MainActor open var dockTile: NSDockTile {
+        if let t = _dockTile { return t }
+        let t = NSDockTile(owner: self)
+        _dockTile = t
+        return t
+    }
+    private var _dockTile: NSDockTile? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/drag(_:at:offset:event:pasteboard:source:slideback:)
     @MainActor open func drag(_ image: NSImage, at baseLocation: NSPoint, offset initialOffset: NSSize, event: NSEvent, pasteboard pboard: NSPasteboard, source sourceObj: Any, slideBack slideFlag: Bool) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/drawers

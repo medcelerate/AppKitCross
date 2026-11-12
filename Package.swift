@@ -25,6 +25,8 @@ targets += [
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
                          .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
+                         // ADR-0026: the shell (version resources, session notifications).
+                         .linkedLibrary("version"), .linkedLibrary("wtsapi32"), .linkedLibrary("user32"),
                          // ADR-0022: printers (winspool), the PrintDlgEx dialog and the common colour
                          // dialog (comdlg32, also behind APPKITWIN_COLOR_PANEL=native), print tickets
                          // (prntvpt) and the print document package target's CLSID/IIDs (uuid).
@@ -281,6 +283,7 @@ targets += [
     // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
     .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
+    .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,

@@ -9,19 +9,19 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 161 |
-| Types generated | 378 |
+| Types handwritten | 164 |
+| Types generated | 375 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10223 |
-| Members blocked | 177 |
+| Members emitted | 10212 |
+| Members blocked | 175 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
 | Members duplicate | 51 |
-| Members nested | 456 |
+| Members nested | 455 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1033 |
+| Members unimplemented-calls | 1044 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 38 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 34 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | generated | 38 | 1 | 0 |  |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -193,7 +193,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDirectionalEdgeInsets | struct | generated | 6 | 0 | 0 |  |
 | NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
 | NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |
-| NSDockTile | class | generated | 6 | 0 | 0 |  |
+| NSDockTile | class | handwritten | 6 | 0 | 0 | 0 |
 | NSDockTilePlugIn | protocol | generated | 2 | 0 | 0 |  |
 | NSDocument | class | handwritten | 149 | 9 | 2 | 3 |
 | NSDocumentController | class | handwritten | 44 | 0 | 0 | 3 |
@@ -353,7 +353,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSRulerMarker | class | generated | 14 | 0 | 0 |  |
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
-| NSRunningApplication | class | generated | 22 | 2 | 0 |  |
+| NSRunningApplication | class | handwritten | 22 | 2 | 0 | 2 |
 | NSSavePanel | class | handwritten | 24 | 4 | 0 | 1 |
 | NSScreen | class | handwritten | 30 | 0 | 0 | 15 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
@@ -561,13 +561,13 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
 | NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
 | NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 143 |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 142 |
 | NSWindowController | class | handwritten | 28 | 0 | 1 | 4 |
 | NSWindowDelegate | protocol | generated | 53 | 0 | 0 |  |
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |
 | NSWindowTab | class | generated | 4 | 0 | 0 |  |
 | NSWindowTabGroup | class | generated | 8 | 0 | 0 |  |
-| NSWorkspace | class | generated | 255 | 9 | 48 |  |
+| NSWorkspace | class | handwritten | 244 | 7 | 47 | 14 |
 | NSWritingDirection | enum | generated | 3 | 0 | 0 |  |
 | NSWritingDirectionFormatType | enum | generated | 2 | 0 | 0 |  |
 | NSWritingToolsBehavior | enum | generated | 4 | 0 | 0 |  |

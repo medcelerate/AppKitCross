@@ -37,6 +37,7 @@
     "NSDatePicker",
     "NSDatePickerCell",
     "NSDiffableDataSourceSnapshot",
+    "NSDockTile",
     "NSDocument",
     "NSDocumentController",
     "NSDraggingImageComponent",
@@ -49,11 +50,11 @@
     "NSFontManager",
     "NSFontPanel",
     "NSGestureRecognizer",
+    "NSGraphicsContext",
     "NSGridCell",
     "NSGridColumn",
     "NSGridRow",
     "NSGridView",
-    "NSGraphicsContext",
     "NSImage",
     "NSImageCell",
     "NSImageRep",
@@ -99,6 +100,7 @@
     "NSProgressIndicator",
     "NSResponder",
     "NSRotationGestureRecognizer",
+    "NSRunningApplication",
     "NSSavePanel",
     "NSScreen",
     "NSScrollView",
@@ -160,7 +162,8 @@
     "NSViewController",
     "NSVisualEffectView",
     "NSWindow",
-    "NSWindowController"
+    "NSWindowController",
+    "NSWorkspace"
   ],
   "pending": [
     "NSTextSuggestionsDelegate",
@@ -172,6 +175,9 @@
   },
   "skipTypes": [],
   "skipMembers": [
+    "IndexPath.init(item:section:)",
+    "IndexPath.item",
+    "IndexPath.section",
     "NSApp",
     "NSApplicationDelegate.main()",
     "NSApplicationMain",
@@ -204,9 +210,7 @@
     "NSString.draw(in:withAttributes:)",
     "NSString.draw(with:options:attributes:)",
     "NSString.size(withAttributes:)",
-    "IndexPath.init(item:section:)",
-    "IndexPath.item",
-    "IndexPath.section"
+    "NSWorkspace.OpenConfiguration"
   ],
   "coreGraphicsTypes": [
     "CGFloat",
