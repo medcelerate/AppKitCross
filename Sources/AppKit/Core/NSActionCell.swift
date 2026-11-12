@@ -19,6 +19,12 @@ import CoreText
     private weak var _target: AnyObject?
     private var _action: Selector? = nil
 
+    @MainActor internal override func _copyCellState(from other: NSCell) {
+        super._copyCellState(from: other)
+        guard let o = other as? NSActionCell else { return }
+        _target = o._target; _action = o._action
+    }
+
     @MainActor open override var controlView: NSView? {
         get { _controlView }
         set { _controlView = newValue }

@@ -9,24 +9,31 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 172 |
-| Types generated | 367 |
+| Types handwritten | 179 |
+| Types generated | 360 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10214 |
+| Members emitted | 10097 |
 | Members blocked | 175 |
 | Members unavailable | 0 |
-| Members synthesized | 1495 |
+| Members synthesized | 1435 |
 | Members duplicate | 51 |
-| Members nested | 455 |
+| Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1057 |
+| Members unimplemented-calls | 1059 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
 **generated** compiles as a stub; **pending** is generated but excluded from the
 build (see reason); **blocked** members reference a type not yet available on Windows.
+
+## Globals and Foundation extensions
+
+| Group | Hand-written in Core | Still stubbed (unimplemented) |
+| --- | ---: | ---: |
+| Free functions and variables (`_Globals.swift`) | 24 | 8 |
+| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | 48 | 19 |
 
 ## Types
 
@@ -96,9 +103,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 28 |
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
 | NSBox | class | handwritten | 29 | 0 | 2 | 2 |
-| NSBrowser | class | generated | 95 | 1 | 3 |  |
-| NSBrowserCell | class | generated | 12 | 0 | 0 |  |
-| NSBrowserDelegate | protocol | generated | 34 | 0 | 0 |  |
+| NSBrowser | class | handwritten | 95 | 1 | 3 | 1 |
+| NSBrowserCell | class | handwritten | 12 | 0 | 0 | 0 |
+| NSBrowserDelegate | protocol | handwritten | 34 | 0 | 0 | 0 |
 | NSButton | class | handwritten | 77 | 0 | 3 | 15 |
 | NSButtonCell | class | handwritten | 32 | 1 | 0 | 9 |
 | NSButtonTouchBarItem | class | generated | 9 | 1 | 0 |  |
@@ -190,7 +197,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |
 | NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |
 | NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |
-| NSDirectionalEdgeInsets | struct | generated | 6 | 0 | 0 |  |
+| NSDirectionalEdgeInsets | struct | handwritten | 6 | 0 | 0 | 0 |
 | NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
 | NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |
 | NSDockTile | class | handwritten | 6 | 0 | 0 | 0 |
@@ -234,8 +241,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
-| NSForm | class | generated | 21 | 0 | 0 |  |
-| NSFormCell | class | generated | 13 | 0 | 0 |  |
+| NSForm | class | handwritten | 21 | 0 | 0 | 0 |
+| NSFormCell | class | handwritten | 13 | 0 | 0 | 0 |
 | NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |
 | NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |
 | NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |
@@ -279,7 +286,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLevelIndicatorCell | class | handwritten | 11 | 0 | 0 | 1 |
 | NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |
 | NSMagnificationGestureRecognizer | class | handwritten | 1 | 0 | 0 | 0 |
-| NSMatrix | class | generated | 83 | 0 | 1 |  |
+| NSMatrix | class | handwritten | 83 | 0 | 1 | 1 |
 | NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
 | NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
 | NSMenu | class | handwritten | 72 | 1 | 3 | 14 |
@@ -567,7 +574,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |
 | NSWindowTab | class | generated | 4 | 0 | 0 |  |
 | NSWindowTabGroup | class | generated | 8 | 0 | 0 |  |
-| NSWorkspace | class | handwritten | 244 | 7 | 47 | 14 |
+| NSWorkspace | class | handwritten | 127 | 7 | 7 | 14 |
 | NSWritingDirection | enum | generated | 3 | 0 | 0 |  |
 | NSWritingDirectionFormatType | enum | generated | 2 | 0 | 0 |  |
 | NSWritingToolsBehavior | enum | generated | 4 | 0 | 0 |  |
