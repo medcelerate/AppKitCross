@@ -763,6 +763,31 @@ final class RuleEditorTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testPlusAndMinusButtonsEditRows() {
+        MainActor.assumeIsolated {
+            let rules = PeopleRules()
+            let e = editor(.compound, rules)
+            e.addRow(nil)
+            @MainActor func button(_ row: Int, _ title: String) -> NSButton {
+                let rowViews = e.subviews.compactMap { $0 as? _NSRuleEditorRowView }
+                return rowViews[row].subviews.compactMap { $0 as? NSButton }.first { $0.title == title }!
+            }
+            button(1, "+")._fireAction()
+            XCTAssertEqual(e.numberOfRows, 3, "+ on a simple row adds a sibling after it")
+            XCTAssertEqual(e.parentRow(forRow: 2), 0)
+            button(0, "+")._fireAction()
+            XCTAssertEqual(e.numberOfRows, 4, "+ on a compound row adds a child at its end")
+            XCTAssertEqual(e.subrowIndexes(forRow: 0), [1, 2, 3])
+            button(2, "\u{2212}")._fireAction()
+            XCTAssertEqual(e.numberOfRows, 3)
+            e.canRemoveAllRows = false
+            XCTAssertFalse(button(0, "\u{2212}").isEnabled, "the root row holds every row")
+            XCTAssertTrue(button(1, "\u{2212}").isEnabled)
+            e.isEditable = false
+            XCTAssertTrue(e.subviews.compactMap { $0 as? _NSRuleEditorRowView }.allSatisfy { $0.subviews.allSatisfy { !($0 is NSButton) || $0 is NSPopUpButton } })
+        }
+    }
+
     func testRowQueriesAndSelection() {
         MainActor.assumeIsolated {
             let rules = PeopleRules()

@@ -559,6 +559,8 @@ import CoreGraphics
     func _layoutControls() {
         let h = bounds.height
         var x: CGFloat = 8 + CGFloat(depth) * 22
+        let buttonCount = CGFloat([addButton, removeButton].compactMap { $0 }.count)
+        let limit = bounds.width - 6 - buttonCount * 24 - 4
         for v in controls {
             var size = v.frame.size
             if v is NSPopUpButton || (v as? NSTextField)?.isEditable == false {
@@ -567,6 +569,8 @@ import CoreGraphics
                 if fit.height > 0 { size.height = fit.height }
             }
             size.height = min(size.height, h - 2)
+            // Controls that would run under the +/− buttons give up width (down to a minimum).
+            if x + size.width > limit { size.width = max(24, limit - x) }
             v.frame = NSRect(x: x, y: ((h - size.height) / 2).rounded(), width: size.width, height: size.height)
             x += size.width + 6
         }

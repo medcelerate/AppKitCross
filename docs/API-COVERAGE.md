@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 455 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1058 |
+| Members unimplemented-calls | 1057 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -349,7 +349,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
 | NSResponder | class | handwritten | 69 | 2 | 0 | 16 |
 | NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
-| NSRuleEditor | class | handwritten | 44 | 0 | 3 | 4 |
+| NSRuleEditor | class | handwritten | 44 | 0 | 3 | 3 |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSRulerMarker | class | generated | 14 | 0 | 0 |  |
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
