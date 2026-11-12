@@ -617,9 +617,117 @@ extension View {
         return _SheetModified(content: self, isPresented: presented, onDismiss: onDismiss, make: { item.wrappedValue.map { AnyView(content($0)) } ?? AnyView(EmptyView()) })
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/popover(ispresented:attachmentanchor:arrowedge:content:)
-    public func popover<Content: View>(isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) -> some View {
-        sheet(isPresented: isPresented, content: content)
+    public func popover<Content: View>(isPresented: Binding<Bool>, attachmentAnchor: PopoverAttachmentAnchor = .rect(.bounds), arrowEdge: Edge = .top, @ViewBuilder content: @escaping () -> Content) -> some View {
+        _PopoverModified(content: self, isPresented: isPresented, anchor: attachmentAnchor, arrowEdge: arrowEdge, make: { AnyView(content()) })
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/popover(item:attachmentanchor:arrowedge:content:)
+    public func popover<Item: Identifiable, Content: View>(item: Binding<Item?>, attachmentAnchor: PopoverAttachmentAnchor = .rect(.bounds), arrowEdge: Edge = .top, @ViewBuilder content: @escaping (Item) -> Content) -> some View {
+        let presented = Binding<Bool>(get: { item.wrappedValue != nil }, set: { if !$0 { item.wrappedValue = nil } })
+        return _PopoverModified(content: self, isPresented: presented, anchor: attachmentAnchor, arrowEdge: arrowEdge, make: { item.wrappedValue.map { AnyView(content($0)) } ?? AnyView(EmptyView()) })
+    }
+}
+
+// MARK: Popovers
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/popoverattachmentanchor
+public enum PopoverAttachmentAnchor {
+    case rect(Anchor<CGRect>.Source)
+    case point(UnitPoint)
+}
+
+/// Presents an `NSPopover` holding the content, anchored on the modified view's frame in
+/// the hosting view, with the arrow on `arrowEdge` of the popover (so `.top` puts the
+/// popover below the view). Transient: a click outside closes it and clears the binding.
+@MainActor
+final class _PopoverPrimitive: _Primitive {
+    var isPresented: Binding<Bool>
+    var anchor: PopoverAttachmentAnchor
+    var arrowEdge: Edge
+    var make: () -> AnyView
+    private var popover: NSPopover?
+    private var observer: Any?
+
+    init(isPresented: Binding<Bool>, anchor: PopoverAttachmentAnchor, arrowEdge: Edge, make: @escaping () -> AnyView, content: _AnyViewBox) {
+        self.isPresented = isPresented; self.anchor = anchor; self.arrowEdge = arrowEdge; self.make = make
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    override func attach(to node: _ViewNode) { super.attach(to: node); sync() }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _PopoverPrimitive else { return }
+        isPresented = o.isPresented; anchor = o.anchor; arrowEdge = o.arrowEdge; make = o.make
+        sync()
+    }
+    override func detach() { close() }
+
+    private func sync() {
+        if isPresented.wrappedValue { if popover == nil { present() } } else if popover != nil { close() }
+    }
+
+    /// The modified view's frame in the host view: the node is layout-transparent, so its
+    /// leaf (the content) carries the frame.
+    private var anchorFrame: CGRect? {
+        guard let node else { return nil }
+        let leaves = node.layoutLeaves
+        guard let first = leaves.first(where: { $0.hasLaidOut }) else { return node.hasLaidOut ? node.frame : nil }
+        return leaves.filter { $0.hasLaidOut }.dropFirst().reduce(first.frame) { $0.union($1.frame) }
+    }
+
+    private func present() {
+        guard let node, let host = node.root?.host?.hostView, host.window != nil, let frame = anchorFrame else { return }
+        let rect: CGRect
+        switch anchor {
+        case .rect(let source): rect = source.resolve(frame)
+        case .point(let p): rect = CGRect(x: frame.minX + frame.width * p.x, y: frame.minY + frame.height * p.y, width: 1, height: 1)
+        }
+        // The host view is flipped: its maxY edge is the bottom.
+        let rtl = node.environment.layoutDirection == .rightToLeft
+        let edge: NSRectEdge
+        switch arrowEdge {
+        case .top: edge = .maxY
+        case .bottom: edge = .minY
+        case .leading: edge = rtl ? .minX : .maxX
+        case .trailing: edge = rtl ? .maxX : .minX
+        }
+        let dismiss = DismissAction { [weak self] in self?.isPresented.wrappedValue = false }
+        let content = make().environment(\.dismiss, dismiss)
+        let hosting = NSHostingView(rootView: content)
+        let size = hosting.sizeThatFits(.unspecified)
+        hosting.frame = NSRect(x: 0, y: 0, width: max(size.width.rounded(.up), 40), height: max(size.height.rounded(.up), 20))
+        let vc = NSViewController(nibName: nil, bundle: nil)
+        vc.view = hosting
+        let p = NSPopover()
+        p.behavior = .transient
+        p.contentViewController = vc
+        popover = p
+        observer = NotificationCenter.default.addObserver(forName: NSPopover.didCloseNotification, object: p, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.popover === p else { return }
+                self.popover = nil
+                if self.isPresented.wrappedValue { self.isPresented.wrappedValue = false }
+            }
+        }
+        p.show(relativeTo: rect, of: host, preferredEdge: edge)
+    }
+
+    private func close() {
+        guard let p = popover else { return }
+        popover = nil
+        if let o = observer { NotificationCenter.default.removeObserver(o); observer = nil }
+        p.close()
+    }
+}
+
+struct _PopoverModified<Content: View>: View, _PrimitiveView {
+    typealias Body = Never
+    let content: Content
+    let isPresented: Binding<Bool>
+    let anchor: PopoverAttachmentAnchor
+    let arrowEdge: Edge
+    let make: () -> AnyView
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _PopoverPrimitive(isPresented: isPresented, anchor: anchor, arrowEdge: arrowEdge, make: make, content: _ViewBox(content)) }
 }
 
 // MARK: Alerts
