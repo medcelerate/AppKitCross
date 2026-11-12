@@ -277,6 +277,46 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         XCTAssertFalse(FileManager.default.fileExists(atPath: temp.appendingPathComponent("g copy.txt").path))
     }
 
+    /// What the Workspace example does on the PC: an observer of didDeactivate asks for the
+    /// frontmost application, which refreshes the list mid-notification. The change must
+    /// already be recorded, or the refresh posts it again without end (a stack overflow on
+    /// Windows, inside the foreground hook's callback).
+    func testObserverAskingForTheFrontmostApplicationDoesNotRecurse() {
+        MainActor.assumeIsolated {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            _ = NSWorkspace.shared.runningApplications
+            var other = PlatformRunningApplication(processIdentifier: 4343, localizedName: "Notepad", bundleIdentifier: "notepad", executableURL: URL(fileURLWithPath: "/w/notepad.exe"))
+            host.otherApplications.append(other)
+            host.postEvent(.applicationDidLaunch(other))
+            let seen = _NotificationLog()
+            for name in [NSWorkspace.didDeactivateApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
+                observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { note in
+                    let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier ?? -1
+                    seen.add("\(name.rawValue):\(pid)")
+                    // Re-enters the workspace from inside the notification, as the example's
+                    // "Frontmost:" label does.
+                    _ = NSWorkspace.shared.frontmostApplication
+                    _ = NSWorkspace.shared.runningApplications
+                })
+            }
+            // Notepad comes to the front.
+            other.isActive = true
+            host.otherApplications = [other]
+            host.postEvent(.applicationDidActivate(processIdentifier: 4343))
+            let me = NSRunningApplication.current.processIdentifier
+            XCTAssertEqual(seen.entries, ["NSWorkspaceDidDeactivateApplicationNotification:\(me)", "NSWorkspaceDidActivateApplicationNotification:4343"])
+            XCTAssertEqual(NSWorkspace.shared.frontmostApplication?.processIdentifier, 4343)
+            XCTAssertFalse(NSApplication.shared.isActive)
+            // And back.
+            other.isActive = false
+            host.otherApplications = [other]
+            seen.removeAll()
+            host.postEvent(.applicationDidActivate(processIdentifier: me))
+            XCTAssertEqual(seen.entries, ["NSWorkspaceDidDeactivateApplicationNotification:4343", "NSWorkspaceDidActivateApplicationNotification:\(me)"])
+            XCTAssertTrue(NSWorkspace.shared.frontmostApplication === NSRunningApplication.current)
+        }
+    }
+
     func testApplicationNotificationsFollowThePlatform() {
         MainActor.assumeIsolated {
             let log = _NotificationLog()

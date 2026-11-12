@@ -25,6 +25,10 @@ open class NSWorkspace: NSObject {
     @MainActor private var _applicationsRefreshed = false
     @MainActor private var _monitoring = false
     @MainActor private var _lastActivePID: Int32? = nil
+    /// A refresh in progress, and the list it last produced: an observer of a notification
+    /// posted mid-refresh that asks for the applications gets that list, not a nested refresh.
+    @MainActor private var _refreshing = false
+    @MainActor private var _liveApplications: [NSRunningApplication] = []
     @MainActor private var _iconCache: [PlatformIconTarget: NSImage] = [:]
     @MainActor internal var _currentApplication: NSRunningApplication?
 
@@ -514,6 +518,9 @@ open class NSWorkspace: NSObject {
     /// Re-reads the platform's process list; posts launch/terminate notifications for the
     /// differences when asked. Returns the live applications.
     @MainActor @discardableResult internal func _refreshApplications(postingChanges: Bool) -> [NSRunningApplication] {
+        guard !_refreshing else { return _liveApplications }
+        _refreshing = true
+        defer { _refreshing = false }
         let current = NSRunningApplication.current
         var live: [NSRunningApplication] = [current]
         var seen: Set<Int32> = [current.processIdentifier]
@@ -533,10 +540,11 @@ open class NSWorkspace: NSObject {
         }
         // The frontmost application, from the platform unless this one knows it is active.
         let frontmost: Int32? = selfActive ? current.processIdentifier : _platform.frontmostProcessIdentifier
+        _applicationsRefreshed = true
+        _liveApplications = live
         if frontmost != _lastActivePID {
             _activeApplicationDidChange(to: frontmost.flatMap { pid in live.first { $0.processIdentifier == pid } })
         }
-        _applicationsRefreshed = true
         return live
     }
 
@@ -563,15 +571,16 @@ open class NSWorkspace: NSObject {
     @MainActor private func _activeApplicationDidChange(to app: NSRunningApplication?) {
         let newPID = app?.processIdentifier
         guard newPID != _lastActivePID else { return }
-        if let old = _lastActivePID, let previous = _applications[old] ?? (old == NSRunningApplication.current.processIdentifier ? NSRunningApplication.current : nil) {
-            previous._setActive(false)
-            _post(NSWorkspace.didDeactivateApplicationNotification, application: previous)
-        }
+        let previous = _lastActivePID.flatMap { old in _applications[old] ?? (old == NSRunningApplication.current.processIdentifier ? NSRunningApplication.current : nil) }
+        // The state first, the notifications after: an observer that asks for the frontmost
+        // application from didDeactivate must see the change made, or the refresh it
+        // triggers finds the old pid and posts the same change again without end
+        // (a stack overflow on Windows, inside the foreground hook's callback).
         _lastActivePID = newPID
-        if let app {
-            app._setActive(true)
-            _post(NSWorkspace.didActivateApplicationNotification, application: app)
-        }
+        previous?._setActive(false)
+        app?._setActive(true)
+        if let previous { _post(NSWorkspace.didDeactivateApplicationNotification, application: previous) }
+        if let app { _post(NSWorkspace.didActivateApplicationNotification, application: app) }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/runningapplications
