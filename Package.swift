@@ -43,6 +43,13 @@ targets += [
         path: "Sources/CUIAutomation",
         linkerSettings: [.linkedLibrary("uiautomationcore"), .linkedLibrary("oleaut32"), .linkedLibrary("ole32")]
     ),
+    // extern "C" shim over the Text Services Framework: composition, candidate list, IME state
+    // and reconversion for the window's text input (ADR-0016).
+    .target(
+        name: "CTextServices",
+        path: "Sources/CTextServices",
+        linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("oleaut32")]
+    ),
 ]
 targets += [
     // extern "C" shim over DirectWrite (fonts, shaping, glyph runs) for the CoreText module.
@@ -76,7 +83,7 @@ targets += [
     .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
-appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers", "CTextServices"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]

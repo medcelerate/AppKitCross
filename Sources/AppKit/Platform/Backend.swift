@@ -328,6 +328,14 @@ public struct PlatformTextInput {
     public var insertText: @MainActor (String) -> Void
     /// The caret or composition rectangle in window content coordinates (points, bottom-left).
     public var markedRect: @MainActor () -> NSRect?
+    /// The text the text services read and edit (ADR-0016). Defaults keep the WM_IME path unchanged.
+    public var documentText: @MainActor () -> String = { "" }
+    public var selectedRange: @MainActor () -> NSRange = { NSRange(location: 0, length: 0) }
+    public var setSelectedRange: @MainActor (NSRange) -> Void = { _ in }
+    /// Replaces a range of the document with text; `marked` keeps it as the composition.
+    public var replaceRange: @MainActor (NSRange, String, Bool) -> Void = { _, _, _ in }
+    /// Marks a range of the document as the composition, leaving its text as it is.
+    public var markRange: @MainActor (NSRange) -> Void = { _ in }
     public init(hasMarkedText: @escaping @MainActor () -> Bool, setMarkedText: @escaping @MainActor (String, NSRange) -> Void, unmarkText: @escaping @MainActor () -> Void, insertText: @escaping @MainActor (String) -> Void, markedRect: @escaping @MainActor () -> NSRect?) {
         self.hasMarkedText = hasMarkedText; self.setMarkedText = setMarkedText; self.unmarkText = unmarkText; self.insertText = insertText; self.markedRect = markedRect
     }

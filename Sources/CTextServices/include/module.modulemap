@@ -1,0 +1,5 @@
+// Hand-written, like CUIAutomation's: the Text Services shim (ADR-0016).
+module CTextServices {
+    umbrella header "cts.h"
+    export *
+}

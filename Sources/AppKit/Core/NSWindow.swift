@@ -660,7 +660,7 @@ import CoreText
     /// Input methods talk to the first responder when it accepts text input.
     public func platformWindowTextInput() -> PlatformTextInput? {
         guard let client = _firstResponder as? NSTextInputClient, let view = client as? NSView else { return nil }
-        return PlatformTextInput(
+        var input = PlatformTextInput(
             hasMarkedText: { client.hasMarkedText() },
             setMarkedText: { text, selected in client.setMarkedText(text, selectedRange: selected, replacementRange: NSRange(location: NSNotFound, length: 0)) },
             unmarkText: { client.unmarkText() },
@@ -670,6 +670,25 @@ import CoreText
                 if let tv = view as? NSTextView { return tv._inputMethodRect }
                 return self.convertFromScreen(client.firstRect(forCharacterRange: client.selectedRange(), actualRange: nil))
             })
+        // The text services (TSF, ADR-0016) read and edit the same text through these.
+        let text = view as? NSText
+        input.documentText = { text?.string ?? "" }
+        input.selectedRange = { client.selectedRange() }
+        input.setSelectedRange = { range in text?.selectedRange = range }
+        input.replaceRange = { range, string, marked in
+            if marked {
+                client.setMarkedText(string, selectedRange: NSRange(location: string.utf16.count, length: 0), replacementRange: range)
+            } else {
+                client.insertText(string, replacementRange: range)
+            }
+        }
+        input.markRange = { range in
+            let units = Array((text?.string ?? "").utf16)
+            guard range.location >= 0, range.location + range.length <= units.count else { return }
+            let marked = String(decoding: units[range.location..<(range.location + range.length)], as: UTF16.self)
+            client.setMarkedText(marked, selectedRange: NSRange(location: marked.utf16.count, length: 0), replacementRange: range)
+        }
+        return input
     }
 
     /// The chrome the backend should show for the current properties.
