@@ -868,29 +868,118 @@ import UniformTypeIdentifiers
         get { nil }
         set { }
     }
+    // Printing (ADR-0022): the print info lives on the document; `printOperation(withSettings:)`
+    // is the subclass's to override (the default cannot know which view to print); the
+    // menu actions run that operation as a sheet on the document's window.
+    private var _printInfo: NSPrintInfo? = nil
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/pdfprintoperation
-    @MainActor open var pdfPrintOperation: NSPrintOperation { unimplemented() }
+    /// The print operation used for "Save as PDF": `printOperation(withSettings:)` with a
+    /// `.save` disposition.
+    @MainActor open var pdfPrintOperation: NSPrintOperation {
+        do {
+            return try printOperation(withSettings: [.jobDisposition: NSPrintInfo.JobDisposition.save.rawValue])
+        } catch {
+            let op = NSPrintOperation(view: windowForSheet?.contentView ?? NSView(frame: .zero), printInfo: printInfo.copy() as! NSPrintInfo)
+            op.printInfo.jobDisposition = .save
+            return op
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/preparepagelayout(_:)
     @MainActor open func preparePageLayout(_ pageLayout: NSPageLayout) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/print(withsettings:showprintpanel:delegate:didprint:contextinfo:)
-    @MainActor open func print(withSettings printSettings: [NSPrintInfo.AttributeKey : Any], showPrintPanel: Bool, delegate: Any?, didPrint didPrintSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) { unimplemented() }
+    /// Makes the operation with `printOperation(withSettings:)` (presenting its error when
+    /// it throws) and runs it, as a sheet on the document's window when it has one;
+    /// `didPrintSelector` (`document:didPrint:contextInfo:`) is sent to `delegate` with the
+    /// document as the sender afterwards.
+    @MainActor open func print(withSettings printSettings: [NSPrintInfo.AttributeKey : Any], showPrintPanel: Bool, delegate: Any?, didPrint didPrintSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let op: NSPrintOperation
+        do { op = try printOperation(withSettings: printSettings) } catch {
+            _ = presentError(error)
+            if let delegate = delegate as AnyObject?, let sel = didPrintSelector { _ = ActionRegistry.perform(sel, on: delegate, with: self) }
+            return
+        }
+        op.showsPrintPanel = showPrintPanel
+        runModalPrintOperation(op, delegate: delegate, didRun: didPrintSelector, contextInfo: contextInfo)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/printdocument(_:)
-    @MainActor open func printDocument(_ sender: Any?) { unimplemented() }
+    @MainActor open func printDocument(_ sender: Any?) {
+        print(withSettings: [:], showPrintPanel: true, delegate: nil, didPrint: nil, contextInfo: nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/printinfo
+    /// The document's own copy of the shared print info until one is set.
     @MainActor open var printInfo: NSPrintInfo {
-        get { unimplemented() }
-        set { unimplemented() }
+        get {
+            if let p = _printInfo { return p }
+            let p = NSPrintInfo.shared.copy() as! NSPrintInfo
+            _printInfo = p
+            return p
+        }
+        set { _printInfo = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/printoperation(withsettings:)
-    @MainActor open func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey : Any]) throws -> NSPrintOperation { unimplemented() }
+    /// Subclasses override this to print their view: a copy of `printInfo` with
+    /// `printSettings` applied (`NSPrintInfo(dictionary:)` over the info's dictionary and the
+    /// settings) and `NSPrintOperation(view:printInfo:)`. The default throws
+    /// `NSFeatureUnsupportedError`.
+    @MainActor open func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey : Any]) throws -> NSPrintOperation {
+        throw NSError(domain: NSCocoaErrorDomain, code: 3328 /* NSFeatureUnsupportedError */,
+                      userInfo: [NSLocalizedDescriptionKey: "\(displayName ?? "This document") cannot be printed.",
+                                 NSLocalizedRecoverySuggestionErrorKey: "The document class does not implement printOperation(withSettings:)."])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/runmodalpagelayout(with:delegate:didrun:contextinfo:)
-    @MainActor open func runModalPageLayout(with printInfo: NSPrintInfo, delegate: Any?, didRun didRunSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) { unimplemented() }
+    /// Page Setup as a sheet on the document's window (modally without one); `printInfo`
+    /// takes the result when `shouldChangePrintInfo` agrees, and `didRunSelector`
+    /// (`document:didRunPageLayoutAndUserAccepted:contextInfo:`) goes to `delegate` with the
+    /// document as the sender.
+    @MainActor open func runModalPageLayout(with printInfo: NSPrintInfo, delegate: Any?, didRun didRunSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let layout = NSPageLayout()
+        guard preparePageLayout(layout) else { return }
+        let finish: @MainActor (NSApplication.ModalResponse) -> Void = { [self] response in
+            if response == .OK, shouldChangePrintInfo(printInfo) { self.printInfo = printInfo }
+            if let delegate = delegate as AnyObject?, let sel = didRunSelector { _ = ActionRegistry.perform(sel, on: delegate, with: self) }
+        }
+        if let w = windowForSheet, w.isVisible {
+            layout._beginSheet(with: printInfo, modalFor: w, completion: finish)
+        } else {
+            finish(layout.runModal(with: printInfo) == NSApplication.ModalResponse.OK.rawValue ? .OK : .cancel)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/runmodalprintoperation(_:delegate:didrun:contextinfo:)
-    @MainActor open func runModalPrintOperation(_ printOperation: NSPrintOperation, delegate: Any?, didRun didRunSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) { unimplemented() }
+    /// Runs the operation with its panel as a sheet on the document's window (modally
+    /// without one); `didRunSelector` (`document:didPrint:contextInfo:`) goes to `delegate`
+    /// with the document as the sender, `printOperation._lastRunSucceeded` holding the result.
+    @MainActor open func runModalPrintOperation(_ printOperation: NSPrintOperation, delegate: Any?, didRun didRunSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        let finish: @MainActor (Bool) -> Void = { [self] _ in
+            if let delegate = delegate as AnyObject?, let sel = didRunSelector { _ = ActionRegistry.perform(sel, on: delegate, with: self) }
+        }
+        if let w = windowForSheet, w.isVisible {
+            printOperation._runModal(for: w, completion: finish)
+        } else {
+            finish(printOperation.run())
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/runpagelayout(_:)
-    @MainActor open func runPageLayout(_ sender: Any?) { unimplemented() }
+    @MainActor open func runPageLayout(_ sender: Any?) {
+        runModalPageLayout(with: printInfo.copy() as! NSPrintInfo, delegate: nil, didRun: nil, contextInfo: nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/savetopdf(_:)
-    @MainActor open func saveToPDF(_ sender: Any?) { unimplemented() }
+    /// Asks for a file, then runs `pdfPrintOperation` without the print panel.
+    @MainActor open func saveToPDF(_ sender: Any?) {
+        let panel = NSSavePanel()
+        panel.allowedFileTypes = ["pdf"]
+        panel.title = "Save as PDF"
+        panel.nameFieldStringValue = ((displayName ?? "Untitled") as NSString).deletingPathExtension + ".pdf"
+        let finish: @MainActor (NSApplication.ModalResponse) -> Void = { [self] response in
+            guard response == .OK, let url = panel.url else { return }
+            let op = pdfPrintOperation
+            op.printInfo.jobDisposition = .save
+            op.printInfo._jobSavingURL = url
+            op.showsPrintPanel = false
+            runModalPrintOperation(op, delegate: nil, didRun: nil, contextInfo: nil)
+        }
+        if let w = windowForSheet, w.isVisible { panel.beginSheetModal(for: w, completionHandler: finish) } else { finish(panel.runModal()) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/shouldchangeprintinfo(_:)
     @MainActor open func shouldChangePrintInfo(_ newPrintInfo: NSPrintInfo) -> Bool { true }
 
@@ -943,13 +1032,17 @@ import UniformTypeIdentifiers
     // MARK: Menu actions and validation
 
     /// The File menu actions a document answers through the responder chain.
-    private static let _actions: Set<String> = ["saveDocument:", "saveDocumentAs:", "saveDocumentTo:", "revertDocumentToSaved:", "duplicateDocument:", "renameDocument:", "moveDocument:", "lockDocument:", "unlockDocument:"]
+    private static let _actions: Set<String> = ["saveDocument:", "saveDocumentAs:", "saveDocumentTo:", "revertDocumentToSaved:", "duplicateDocument:", "renameDocument:", "moveDocument:", "lockDocument:", "unlockDocument:",
+                                                 "printDocument:", "print:", "runPageLayout:", "saveDocumentToPDF:", "saveToPDF:"]
 
     open func respondsToSelectorAction(_ action: Selector) -> Bool { NSDocument._actions.contains(NSStringFromSelector(action)) }
 
     open func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch NSStringFromSelector(action) {
         case "saveDocument:": save(sender)
+        case "printDocument:", "print:": printDocument(sender)
+        case "runPageLayout:": runPageLayout(sender)
+        case "saveDocumentToPDF:", "saveToPDF:": saveToPDF(sender)
         case "saveDocumentAs:": saveAs(sender)
         case "saveDocumentTo:": saveTo(sender)
         case "revertDocumentToSaved:": revertToSaved(sender)

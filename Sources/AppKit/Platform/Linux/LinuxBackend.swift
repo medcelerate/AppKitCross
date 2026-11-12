@@ -42,6 +42,9 @@ final class LinuxBackend: PlatformBackend {
     var lastEventTime: Time = Time(CurrentTime)
     private(set) var x11DragDrop: X11DragDrop!
     var dragDrop: (any PlatformDragDrop)? { x11DragDrop }
+    /// Printing (LinuxPrinting.swift): Cairo PDF and CUPS.
+    let linuxPrinting = LinuxPrintBackend()
+    var printing: (any PlatformPrintBackend)? { linuxPrinting }
     /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
     private var statusNotifier: LinuxStatusNotifierHost?
     private var statusNotifierTried = false

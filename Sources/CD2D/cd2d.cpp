@@ -18,6 +18,10 @@
 #include <shlwapi.h>
 #include <commdlg.h>
 #include <shobjidl.h>
+#include <winspool.h>
+#include <commdlg.h>
+#include <documenttarget.h>
+#include <prntvpt.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlguid.h>
@@ -1064,6 +1068,289 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
 }
 
 void cd2d_file_dialog_free(uint16_t *paths) { free(paths); }
+
+// ---------------------------------------------------------------- Printing (ADR-0022)
+
+static bool copyUTF16(const std::wstring &joined, uint16_t **out, uint32_t *length) {
+    uint16_t *buf = (uint16_t *)malloc((joined.size() + 2) * sizeof(uint16_t));
+    if (!buf) return false;
+    memcpy(buf, joined.data(), joined.size() * sizeof(uint16_t));
+    buf[joined.size()] = 0;
+    buf[joined.size() + 1] = 0;
+    *out = buf;
+    *length = (uint32_t)joined.size();
+    return true;
+}
+
+bool cd2d_printer_names(uint16_t **names, uint32_t *length) {
+    if (!names || !length) return false;
+    DWORD needed = 0, count = 0;
+    EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, nullptr, 4, nullptr, 0, &needed, &count);
+    if (needed == 0) return false;
+    std::vector<BYTE> buffer(needed);
+    if (!EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, nullptr, 4, buffer.data(), needed, &needed, &count)) return false;
+    wchar_t defaultName[256] = {};
+    DWORD defaultLength = 256;
+    bool hasDefault = GetDefaultPrinterW(defaultName, &defaultLength) != 0;
+    PRINTER_INFO_4W *info = reinterpret_cast<PRINTER_INFO_4W *>(buffer.data());
+    std::wstring joined;
+    if (hasDefault) { joined += defaultName; joined.push_back(L'\0'); }
+    for (DWORD i = 0; i < count; i++) {
+        if (!info[i].pPrinterName) continue;
+        if (hasDefault && wcscmp(info[i].pPrinterName, defaultName) == 0) continue;
+        joined += info[i].pPrinterName;
+        joined.push_back(L'\0');
+    }
+    if (joined.empty()) return false;
+    return copyUTF16(joined, names, length);
+}
+
+void cd2d_print_free(void *buffer) { free(buffer); }
+
+bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDialogSettings *s, uint16_t **chosenName, uint32_t *chosenLength) {
+    if (!s) return false;
+    s->driverSettings = nullptr;
+    s->driverSettingsSize = 0;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    PRINTDLGEXW dlg = {};
+    dlg.lStructSize = sizeof(dlg);
+    dlg.hwndOwner = (HWND)ownerHwnd;
+    if (!dlg.hwndOwner) dlg.hwndOwner = GetDesktopWindow();
+    PRINTPAGERANGE range = { s->fromPage ? s->fromPage : 1, s->toPage ? s->toPage : (s->pageCount ? s->pageCount : 1) };
+    dlg.lpPageRanges = &range;
+    dlg.nMaxPageRanges = 1;
+    dlg.nPageRanges = s->fromPage ? 1 : 0;
+    dlg.nMinPage = 1;
+    dlg.nMaxPage = s->pageCount ? s->pageCount : 1;
+    dlg.nCopies = s->copies ? s->copies : 1;
+    dlg.nStartPage = START_PAGE_GENERAL;
+    dlg.Flags = PD_NOCURRENTPAGE | PD_NOSELECTION | (s->fromPage ? PD_PAGENUMS : PD_ALLPAGES) | (s->collate ? PD_COLLATE : 0);
+    // Preselect the printer and orientation through DEVNAMES / DEVMODE.
+    if (printerName && printerName[0]) {
+        const wchar_t *name = reinterpret_cast<const wchar_t *>(printerName);
+        size_t nameLength = wcslen(name);
+        size_t bytes = sizeof(DEVNAMES) + (nameLength + 1 + 1 + 1) * sizeof(wchar_t);
+        dlg.hDevNames = GlobalAlloc(GHND, bytes);
+        if (dlg.hDevNames) {
+            DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+            wchar_t *strings = reinterpret_cast<wchar_t *>(dn + 1);
+            dn->wDriverOffset = (WORD)(sizeof(DEVNAMES) / sizeof(wchar_t));
+            strings[0] = 0;
+            dn->wDeviceOffset = (WORD)(dn->wDriverOffset + 1);
+            wcscpy(strings + 1, name);
+            dn->wOutputOffset = (WORD)(dn->wDeviceOffset + nameLength + 1);
+            strings[1 + nameLength + 1] = 0;
+            dn->wDefault = 0;
+            GlobalUnlock(dlg.hDevNames);
+        }
+        HANDLE printer = nullptr;
+        if (OpenPrinterW(const_cast<wchar_t *>(name), &printer, nullptr)) {
+            LONG size = DocumentPropertiesW(dlg.hwndOwner, printer, const_cast<wchar_t *>(name), nullptr, nullptr, 0);
+            if (size > 0) {
+                dlg.hDevMode = GlobalAlloc(GHND, size);
+                if (dlg.hDevMode) {
+                    DEVMODEW *dm = (DEVMODEW *)GlobalLock(dlg.hDevMode);
+                    if (DocumentPropertiesW(dlg.hwndOwner, printer, const_cast<wchar_t *>(name), dm, nullptr, DM_OUT_BUFFER) == IDOK) {
+                        dm->dmFields |= DM_ORIENTATION;
+                        dm->dmOrientation = s->landscape ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+                    }
+                    GlobalUnlock(dlg.hDevMode);
+                }
+            }
+            ClosePrinter(printer);
+        }
+    }
+    HRESULT hr = PrintDlgExW(&dlg);
+    bool printed = SUCCEEDED(hr) && dlg.dwResultAction == PD_RESULT_PRINT;
+    if (printed) {
+        s->copies = dlg.nCopies ? dlg.nCopies : 1;
+        s->collate = (dlg.Flags & PD_COLLATE) != 0;
+        if ((dlg.Flags & PD_PAGENUMS) && dlg.nPageRanges > 0) { s->fromPage = range.nFromPage; s->toPage = range.nToPage; }
+        else { s->fromPage = 0; s->toPage = 0; }
+        s->printToFile = (dlg.Flags & PD_PRINTTOFILE) != 0;
+        if (dlg.hDevMode) {
+            DEVMODEW *dm = (DEVMODEW *)GlobalLock(dlg.hDevMode);
+            if (dm) {
+                // The whole DEVMODE goes back to the caller for the job's print ticket.
+                uint32_t size = dm->dmSize + dm->dmDriverExtra;
+                if (size > 0 && size <= (uint32_t)GlobalSize(dlg.hDevMode)) {
+                    s->driverSettings = malloc(size);
+                    if (s->driverSettings) { memcpy(s->driverSettings, dm, size); s->driverSettingsSize = size; }
+                }
+                if (dm->dmFields & DM_ORIENTATION) s->landscape = dm->dmOrientation == DMORIENT_LANDSCAPE;
+                if (dm->dmFields & DM_COPIES) s->copies = dm->dmCopies > 0 ? dm->dmCopies : s->copies;
+                if ((dm->dmFields & DM_PAPERWIDTH) && (dm->dmFields & DM_PAPERLENGTH) && dm->dmPaperWidth > 0 && dm->dmPaperLength > 0) {
+                    s->paperWidth = dm->dmPaperWidth / 10.0f * 72.0f / 25.4f;      // tenths of a millimetre to points
+                    s->paperHeight = dm->dmPaperLength / 10.0f * 72.0f / 25.4f;
+                } else if (dlg.hDevNames) {
+                    // The paper size by its DEVMODE paper code, from the driver's table.
+                    DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+                    if (dn) {
+                        const wchar_t *device = reinterpret_cast<const wchar_t *>(dn) + dn->wDeviceOffset;
+                        const wchar_t *port = reinterpret_cast<const wchar_t *>(dn) + dn->wOutputOffset;
+                        DWORD n = DeviceCapabilitiesW(device, port, DC_PAPERS, nullptr, nullptr);
+                        if (n > 0 && n < 4096) {
+                            std::vector<WORD> codes(n);
+                            std::vector<POINT> sizes(n);
+                            DeviceCapabilitiesW(device, port, DC_PAPERS, reinterpret_cast<LPWSTR>(codes.data()), nullptr);
+                            DeviceCapabilitiesW(device, port, DC_PAPERSIZE, reinterpret_cast<LPWSTR>(sizes.data()), nullptr);
+                            for (DWORD i = 0; i < n; i++) {
+                                if (codes[i] == dm->dmPaperSize && sizes[i].x > 0 && sizes[i].y > 0) {
+                                    s->paperWidth = sizes[i].x / 10.0f * 72.0f / 25.4f;
+                                    s->paperHeight = sizes[i].y / 10.0f * 72.0f / 25.4f;
+                                    break;
+                                }
+                            }
+                        }
+                        GlobalUnlock(dlg.hDevNames);
+                    }
+                }
+                GlobalUnlock(dlg.hDevMode);
+            }
+        }
+        if (dlg.hDevNames && chosenName && chosenLength) {
+            DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+            if (dn) {
+                std::wstring device(reinterpret_cast<const wchar_t *>(dn) + dn->wDeviceOffset);
+                copyUTF16(device, chosenName, chosenLength);
+                GlobalUnlock(dlg.hDevNames);
+            }
+        }
+    }
+    if (dlg.hDevMode) GlobalFree(dlg.hDevMode);
+    if (dlg.hDevNames) GlobalFree(dlg.hDevNames);
+    if (dlg.hDC) DeleteDC(dlg.hDC);
+    return printed;
+}
+
+struct CD2DPrintJob {
+    ID3D11Device *d3dDevice = nullptr;
+    ID3D11DeviceContext *d3dContext = nullptr;
+    ID2D1Device *d2dDevice = nullptr;
+    ID2D1DeviceContext *dc = nullptr;
+    IPrintDocumentPackageTarget *target = nullptr;
+    ID2D1PrintControl *printControl = nullptr;
+    ID2D1CommandList *commandList = nullptr;
+    float pageWidth = 0, pageHeight = 0;
+    bool pageOpen = false;
+};
+
+static void releasePrintJob(CD2DPrintJob *job) {
+    if (!job) return;
+    safeRelease(job->commandList);
+    safeRelease(job->printControl);
+    safeRelease(job->target);
+    safeRelease(job->dc);
+    safeRelease(job->d2dDevice);
+    safeRelease(job->d3dContext);
+    safeRelease(job->d3dDevice);
+    delete job;
+}
+
+/// A print ticket (IStream of the PrintTicket XML) from a DEVMODE through the print
+/// ticket provider; NULL when the driver cannot convert it (the job then uses the
+/// printer's defaults).
+static IStream *printTicketFromDevMode(const wchar_t *printer, const void *devMode, uint32_t size) {
+    if (!devMode || size < sizeof(DEVMODEW)) return nullptr;
+    HPTPROVIDER provider = nullptr;
+    if (FAILED(PTOpenProvider(printer, 1, &provider)) || !provider) return nullptr;
+    IStream *stream = nullptr;
+    if (SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) && stream) {
+        HRESULT hr = PTConvertDevModeToPrintTicket(provider, size, (PDEVMODE)const_cast<void *>(devMode), kPTJobScope, stream);
+        LARGE_INTEGER zero = {};
+        if (FAILED(hr) || FAILED(stream->Seek(zero, STREAM_SEEK_SET, nullptr))) { stream->Release(); stream = nullptr; }
+    }
+    PTCloseProvider(provider);
+    return stream;
+}
+
+CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName, const void *driverSettings, uint32_t driverSettingsSize) {
+    if (!factory || !factory->factory) return nullptr;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    wchar_t defaultName[256] = {};
+    DWORD defaultLength = 256;
+    const wchar_t *printer = reinterpret_cast<const wchar_t *>(printerName);
+    if (!printer || !printer[0]) {
+        if (!GetDefaultPrinterW(defaultName, &defaultLength)) return nullptr;
+        printer = defaultName;
+    }
+    const wchar_t *job = jobName && jobName[0] ? reinterpret_cast<const wchar_t *>(jobName) : L"Untitled";
+    ID2D1Factory1 *factory1 = nullptr;
+    if (FAILED(factory->factory->QueryInterface(__uuidof(ID2D1Factory1), reinterpret_cast<void **>(&factory1)))) return nullptr;
+    CD2DPrintJob *j = new CD2DPrintJob();
+    IPrintDocumentPackageTargetFactory *targetFactory = nullptr;
+    IDXGIDevice *dxgiDevice = nullptr;
+    IStream *ticket = printTicketFromDevMode(printer, driverSettings, driverSettingsSize);
+    bool ok = false;
+    do {
+        if (FAILED(CoCreateInstance(__uuidof(PrintDocumentPackageTargetFactory), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&targetFactory))) || !targetFactory) break;
+        if (FAILED(targetFactory->CreateDocumentPackageTargetForPrintJob(printer, job, nullptr, ticket, &j->target)) || !j->target) break;
+        if (FAILED(createD3DDevice(&j->d3dDevice, &j->d3dContext))) break;
+        if (FAILED(j->d3dDevice->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgiDevice)))) break;
+        if (FAILED(factory1->CreateDevice(dxgiDevice, &j->d2dDevice))) break;
+        if (FAILED(j->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &j->dc))) break;
+        D2D1_PRINT_CONTROL_PROPERTIES props = {};
+        props.fontSubset = D2D1_PRINT_FONT_SUBSET_MODE_DEFAULT;
+        props.rasterDPI = 300.0f;
+        props.colorSpace = D2D1_COLOR_SPACE_SRGB;
+        IWICImagingFactory *wic = wicFactory();
+        if (!wic) break;
+        if (FAILED(j->d2dDevice->CreatePrintControl(wic, j->target, &props, &j->printControl))) break;
+        ok = true;
+    } while (false);
+    safeRelease(dxgiDevice);
+    safeRelease(targetFactory);
+    safeRelease(factory1);
+    safeRelease(ticket);
+    if (!ok) { releasePrintJob(j); return nullptr; }
+    return j;
+}
+
+CD2DTarget *cd2d_print_job_begin_page(CD2DPrintJob *job, float widthDips, float heightDips) {
+    if (!job || !job->dc || job->pageOpen) return nullptr;
+    safeRelease(job->commandList);
+    if (FAILED(job->dc->CreateCommandList(&job->commandList))) return nullptr;
+    job->dc->SetTarget(job->commandList);
+    job->dc->SetDpi(96, 96);
+    job->dc->BeginDraw();
+    job->dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    job->pageWidth = widthDips;
+    job->pageHeight = heightDips;
+    job->pageOpen = true;
+    CD2DTarget *t = new CD2DTarget();
+    t->target = job->dc;
+    job->dc->AddRef();
+    t->dpi = 96;
+    return t;
+}
+
+bool cd2d_print_job_end_page(CD2DPrintJob *job) {
+    if (!job || !job->dc || !job->pageOpen) return false;
+    job->pageOpen = false;
+    HRESULT hr = job->dc->EndDraw();
+    job->dc->SetTarget(nullptr);
+    bool ok = SUCCEEDED(hr);
+    if (job->commandList) {
+        if (FAILED(job->commandList->Close())) ok = false;
+        if (ok && job->printControl && FAILED(job->printControl->AddPage(job->commandList, D2D1::SizeF(job->pageWidth, job->pageHeight), nullptr))) ok = false;
+        safeRelease(job->commandList);
+    }
+    return ok;
+}
+
+bool cd2d_print_job_close(CD2DPrintJob *job) {
+    if (!job) return false;
+    bool ok = job->printControl && SUCCEEDED(job->printControl->Close());
+    releasePrintJob(job);
+    return ok;
+}
+
+void cd2d_print_job_abort(CD2DPrintJob *job) {
+    if (!job) return;
+    if (job->pageOpen && job->dc) { job->dc->EndDraw(); job->dc->SetTarget(nullptr); }
+    if (job->target) job->target->Cancel();
+    releasePrintJob(job);
+}
 
 // ---------------------------------------------------------------- Colour dialog
 

@@ -738,6 +738,10 @@ extension View {
     public func textFieldStyle<S: TextFieldStyle>(_ style: S) -> some View { environment(\.textFieldStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/togglestyle(_:)
     public func toggleStyle<S: ToggleStyle>(_ style: S) -> some View { environment(\.toggleStyle, style._kind) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/progressviewstyle(_:)
+    public func progressViewStyle<S: ProgressViewStyle>(_ style: S) -> some View { environment(\.progressViewStyle, style.kind) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/datepickerstyle(_:)
+    public func datePickerStyle<S: DatePickerStyle>(_ style: S) -> some View { environment(\.datePickerStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/liststyle(_:)
     public func listStyle<S: ListStyle>(_ style: S) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/controlsize(_:)
@@ -799,7 +803,36 @@ extension EnvironmentValues {
     var buttonStyle: _ButtonStyleKind { get { self[ButtonStyleKey.self] } set { self[ButtonStyleKey.self] = newValue } }
     var textFieldStyle: _TextFieldStyleKind { get { self[TextFieldStyleKey.self] } set { self[TextFieldStyleKey.self] = newValue } }
     var _keyShortcut: (KeyEquivalent, EventModifiers)? { get { self[KeyShortcutKey.self] } set { self[KeyShortcutKey.self] = newValue } }
+    private struct ProgressViewStyleKey: EnvironmentKey { static let defaultValue: _ProgressViewStyleKind = .automatic }
+    private struct DatePickerStyleKey: EnvironmentKey { static let defaultValue: _DatePickerStyleKind = .automatic }
+    var progressViewStyle: _ProgressViewStyleKind { get { self[ProgressViewStyleKey.self] } set { self[ProgressViewStyleKey.self] = newValue } }
+    var datePickerStyle: _DatePickerStyleKind { get { self[DatePickerStyleKey.self] } set { self[DatePickerStyleKey.self] = newValue } }
 }
+
+public enum _ProgressViewStyleKind: Sendable { case automatic, linear, circular }
+public enum _DatePickerStyleKind: Sendable { case automatic, compact, field, stepperField, graphical }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressviewstyle
+public protocol ProgressViewStyle { var kind: _ProgressViewStyleKind { get } }
+public struct DefaultProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .automatic } }
+public struct LinearProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .linear } }
+public struct CircularProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .circular } }
+extension ProgressViewStyle where Self == DefaultProgressViewStyle { public static var automatic: DefaultProgressViewStyle { DefaultProgressViewStyle() } }
+extension ProgressViewStyle where Self == LinearProgressViewStyle { public static var linear: LinearProgressViewStyle { LinearProgressViewStyle() } }
+extension ProgressViewStyle where Self == CircularProgressViewStyle { public static var circular: CircularProgressViewStyle { CircularProgressViewStyle() } }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepickerstyle
+public protocol DatePickerStyle { var kind: _DatePickerStyleKind { get } }
+public struct DefaultDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .automatic } }
+public struct CompactDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .compact } }
+public struct FieldDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .field } }
+public struct StepperFieldDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .stepperField } }
+public struct GraphicalDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .graphical } }
+extension DatePickerStyle where Self == DefaultDatePickerStyle { public static var automatic: DefaultDatePickerStyle { DefaultDatePickerStyle() } }
+extension DatePickerStyle where Self == CompactDatePickerStyle { public static var compact: CompactDatePickerStyle { CompactDatePickerStyle() } }
+extension DatePickerStyle where Self == FieldDatePickerStyle { public static var field: FieldDatePickerStyle { FieldDatePickerStyle() } }
+extension DatePickerStyle where Self == StepperFieldDatePickerStyle { public static var stepperField: StepperFieldDatePickerStyle { StepperFieldDatePickerStyle() } }
+extension DatePickerStyle where Self == GraphicalDatePickerStyle { public static var graphical: GraphicalDatePickerStyle { GraphicalDatePickerStyle() } }
 
 public enum _ButtonStyleKind: Sendable { case automatic, bordered, borderedProminent, borderless, plain, link }
 public enum _TextFieldStyleKind: Sendable { case automatic, roundedBorder, plain, squareBorder }

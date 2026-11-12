@@ -346,6 +346,11 @@ import CoreText
 
     // MARK: Drawing
 
+    /// The appearance dynamic colours resolve under while this view draws: its effective
+    /// appearance on screen, aqua while `NSPrintOperation` draws a page or preview (AppKit
+    /// prints light whatever the window shows, so a dark text view prints on white; ADR-0022).
+    internal var _drawingAppearance: NSAppearance { effectiveAppearance }
+
     /// Draws this view and its subviews into `ctx`, which is in the superview's coordinate
     /// system. `dirtyRect` is in superview coordinates too.
     internal func _displayHierarchy(in ctx: CGContext, dirtyRect: NSRect) {
@@ -385,7 +390,7 @@ import CoreText
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         _dirtyRect = localDirty
         draw(localDirty)
@@ -428,8 +433,12 @@ import CoreText
 
     /// Inherited from the superview, then the window, then the application.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/effectiveappearance
+    /// While `NSPrintOperation` draws a page or preview every view answers aqua (AppKit
+    /// prints light whatever the window shows), so the text system lays its colours out
+    /// again for the page and dynamic colours resolve light (ADR-0022).
     @MainActor public var effectiveAppearance: NSAppearance {
-        _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
+        if NSGraphicsContext._printing { return NSAppearance._printing }
+        return _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
     }
 
     internal func _effectiveAppearanceDidChange() {
@@ -556,9 +565,43 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustpageheightnew(_:top:bottom:limit:)
-    @MainActor open func adjustPageHeightNew(_ newBottom: UnsafeMutablePointer<CGFloat>, top oldTop: CGFloat, bottom oldBottom: CGFloat, limit bottomLimit: CGFloat) { unimplemented() }
+    /// Moves a page break so that no subview is cut in two: a subview straddling the
+    /// proposed bottom pushes the break up to its top edge, as far as `limit` allows;
+    /// subviews get the same question in their own coordinates.
+    @MainActor open func adjustPageHeightNew(_ newBottom: UnsafeMutablePointer<CGFloat>, top oldTop: CGFloat, bottom oldBottom: CGFloat, limit bottomLimit: CGFloat) {
+        // "Down" is towards the bottom of the page: +y in a flipped view, -y otherwise.
+        let down: CGFloat = isFlipped ? 1 : -1
+        var best = oldBottom
+        for sub in _subviews where !sub.isHidden {
+            let f = sub.frame
+            let near = isFlipped ? f.minY : f.maxY      // the edge nearer the top of the page
+            let far = isFlipped ? f.maxY : f.minY
+            let straddles = (near - oldBottom) * down < 0 && (far - oldBottom) * down > 0
+            guard straddles else { continue }
+            var candidate = near
+            if (candidate - bottomLimit) * down < 0 { candidate = bottomLimit }   // too tall: cut it at the limit
+            // Let the subview refine the break inside itself.
+            var inner = sub._fromSuperview(NSPoint(x: 0, y: oldBottom)).y
+            let innerTop = sub._fromSuperview(NSPoint(x: 0, y: oldTop)).y
+            let innerLimit = sub._fromSuperview(NSPoint(x: 0, y: bottomLimit)).y
+            sub.adjustPageHeightNew(&inner, top: innerTop, bottom: inner, limit: innerLimit)
+            let refined = sub._toSuperview(NSPoint(x: 0, y: inner)).y
+            if abs(refined - oldBottom) > 0.5, (refined - oldBottom) * down < 0, (refined - bottomLimit) * down >= 0 { candidate = refined }
+            if (candidate - best) * down < 0 { best = candidate }
+        }
+        newBottom.pointee = best
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustpagewidthnew(_:left:right:limit:)
-    @MainActor open func adjustPageWidthNew(_ newRight: UnsafeMutablePointer<CGFloat>, left oldLeft: CGFloat, right oldRight: CGFloat, limit rightLimit: CGFloat) { unimplemented() }
+    @MainActor open func adjustPageWidthNew(_ newRight: UnsafeMutablePointer<CGFloat>, left oldLeft: CGFloat, right oldRight: CGFloat, limit rightLimit: CGFloat) {
+        var best = oldRight
+        for sub in _subviews where !sub.isHidden {
+            let f = sub.frame
+            guard f.minX < oldRight, f.maxX > oldRight else { continue }
+            let candidate = max(f.minX, rightLimit)
+            if candidate < best { best = candidate }
+        }
+        newRight.pointee = best
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustscroll(_:)
     @MainActor open func adjustScroll(_ newVisible: NSRect) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alignmentrect(forframe:)
@@ -616,7 +659,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/baselineoffsetfrombottom
     @MainActor open var baselineOffsetFromBottom: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindocument()
-    @MainActor open func beginDocument() { unimplemented() }
+    /// Called by `NSPrintOperation` before the first page; the default does nothing.
+    @MainActor open func beginDocument() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)
     /// Starts a drag. Unlike AppKit this returns at once: the session tracks through the
     /// application's event stream and reports to `source` as it goes.
@@ -624,7 +668,30 @@ import CoreText
         _NSDragTracker.begin(items: items, event: event, source: source, view: self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/beginpage(in:atplacement:)
-    @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) { unimplemented() }
+    /// Sets the current (printing) context up so that `rect` of this view lands with its
+    /// bottom-left corner at `location` on the paper, scaled by the print operation's
+    /// scale; `endPage` restores it. The context is left in the superview's coordinate
+    /// system, which is what the hierarchy drawing expects.
+    @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) {
+        guard let cg = NSGraphicsContext.current?.cgContext else { return }
+        let scale = NSPrintOperation.current?._pageScale ?? NSPrintInfo.shared.scalingFactor
+        cg.saveGState()
+        cg.translateBy(x: location.x, y: location.y)
+        cg.scaleBy(x: scale, y: scale)
+        let sr = _rectInSuperviewSpace(rect)
+        if _superview?.isFlipped ?? false {
+            cg.translateBy(x: 0, y: sr.height)
+            cg.scaleBy(x: 1, y: -1)
+        }
+        cg.translateBy(x: -sr.minX, y: -sr.minY)
+        cg.clip(to: sr)
+    }
+    /// `rect` (bounds coordinates) in the superview's coordinate system (the window's
+    /// content space for a view without one).
+    internal func _rectInSuperviewSpace(_ rect: NSRect) -> NSRect {
+        let a = _toSuperview(NSPoint(x: rect.minX, y: rect.minY)), b = _toSuperview(NSPoint(x: rect.maxX, y: rect.maxY))
+        return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bitmapimagerepforcachingdisplay(in:)
     @MainActor open func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? {
         let scale = window?.backingScaleFactor ?? 1
@@ -670,7 +737,7 @@ import CoreText
         // Layer contents redrawn during the capture resolve dynamic colours under the
         // view's appearance (a dark window stays dark in the bitmap).
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
         NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
@@ -776,7 +843,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/datawitheps(inside:)
     @MainActor open func dataWithEPS(inside rect: NSRect) -> Data { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/datawithpdf(inside:)
-    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data { unimplemented() }
+    /// A one-page PDF of `rect`, through `NSPrintOperation.pdfOperation`.
+    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data {
+        let data = NSMutableData()
+        _ = NSPrintOperation.pdfOperation(with: self, inside: rect, to: data).run()
+        return data as Data
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/defaultfocusringtype
     @MainActor class public var defaultFocusRingType: NSFocusRingType { NSFocusRingType(rawValue: 2)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/defaultmenu
@@ -828,7 +900,20 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawfocusringmask()
     @MainActor open func drawFocusRingMask() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawpageborder(with:)
-    @MainActor open func drawPageBorder(with borderSize: NSSize) { unimplemented() }
+    /// Draws `pageHeader` at the top margin and `pageFooter` at the bottom margin of a
+    /// page of `borderSize` (the current context is in paper coordinates).
+    @MainActor open func drawPageBorder(with borderSize: NSSize) {
+        let info = NSPrintOperation.current?.printInfo ?? NSPrintInfo.shared
+        let header = pageHeader, footer = pageFooter
+        let headerSize = header.size(), footerSize = footer.size()
+        if header.length > 0 {
+            header.draw(at: NSPoint(x: info.leftMargin, y: borderSize.height - info.topMargin + 6))
+        }
+        if footer.length > 0 {
+            footer.draw(at: NSPoint(x: (borderSize.width - footerSize.width) / 2, y: max(0, info.bottomMargin - footerSize.height - 6)))
+        }
+        _ = headerSize
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawsheetborder(with:)
     @MainActor open func drawSheetBorder(with borderSize: NSSize) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/edgeinsets(for:)
@@ -843,9 +928,11 @@ import CoreText
         return nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enddocument()
-    @MainActor open func endDocument() { unimplemented() }
+    /// Called by `NSPrintOperation` after the last page; the default does nothing.
+    @MainActor open func endDocument() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/endpage()
-    @MainActor open func endPage() { unimplemented() }
+    /// Undoes `beginPage(in:atPlacement:)`.
+    @MainActor open func endPage() { NSGraphicsContext.current?.cgContext.restoreGState() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enterfullscreenmode(_:withoptions:)
     @MainActor open func enterFullScreenMode(_ screen: NSScreen, withOptions options: [NSView.FullScreenModeOptionKey : Any]? = nil) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/exerciseambiguityinlayout()
@@ -921,7 +1008,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/hasambiguouslayout
     @MainActor open var hasAmbiguousLayout: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightadjustlimit
-    @MainActor open var heightAdjustLimit: CGFloat { unimplemented() }
+    /// How far up a page break may move to keep a subview whole: a fraction of the page.
+    @MainActor open var heightAdjustLimit: CGFloat { 0.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightanchor
     @available(macOS 10.11, *)
     @MainActor open var heightAnchor: NSLayoutDimension { anchorDimension(.height) }
@@ -996,7 +1084,9 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/knowspagerange(_:)
-    @MainActor open func knowsPageRange(_ range: NSRangePointer) -> Bool { unimplemented() }
+    /// False: the print operation paginates the bounds itself. A view that lays its own
+    /// pages out returns true with the range and answers `rectForPage(_:)`.
+    @MainActor open func knowsPageRange(_ range: NSRangePointer) -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lastbaselineanchor
     @available(macOS 10.11, *)
     @MainActor open var lastBaselineAnchor: NSLayoutYAxisAnchor { anchorY(.lastBaseline) }
@@ -1070,7 +1160,17 @@ import CoreText
     @available(macOS 10.11, *)
     @MainActor open var leftAnchor: NSLayoutXAxisAnchor { anchorX(.left) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/locationofprintrect(_:)
-    @MainActor open func locationOfPrintRect(_ rect: NSRect) -> NSPoint { unimplemented() }
+    /// Where a page rect lands on the paper: centred in the printable area when the print
+    /// info centres, else at its top-left.
+    @MainActor open func locationOfPrintRect(_ rect: NSRect) -> NSPoint {
+        let info = NSPrintOperation.current?.printInfo ?? NSPrintInfo.shared
+        let printable = _NSPrintPagination.printableRect(for: info)
+        let scale = NSPrintOperation.current?._pageScale ?? info.scalingFactor
+        let w = rect.width * scale, h = rect.height * scale
+        let x = info.isHorizontallyCentered ? printable.minX + (printable.width - w) / 2 : printable.minX
+        let y = info.isVerticallyCentered ? printable.minY + (printable.height - h) / 2 : printable.maxY - h
+        return NSPoint(x: x, y: y)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocus()
     @MainActor open func lockFocus() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocusifcandraw()
@@ -1131,9 +1231,19 @@ import CoreText
         return nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/pagefooter
-    @MainActor open var pageFooter: NSAttributedString { unimplemented() }
+    /// "Page n of m" (drawn when the print info's `NSPrintHeaderAndFooter` is set).
+    @MainActor open var pageFooter: NSAttributedString {
+        let op = NSPrintOperation.current
+        let text = op.map { "Page \($0.currentPage) of \($0.pageRange.length)" } ?? ""
+        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.black])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/pageheader
-    @MainActor open var pageHeader: NSAttributedString { unimplemented() }
+    /// The job title and the date.
+    @MainActor open var pageHeader: NSAttributedString {
+        let title = NSPrintOperation.current?.jobTitle ?? printJobTitle
+        let date = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+        return NSAttributedString(string: "\(title)    \(date)", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.black])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/performkeyequivalent(with:)
     @MainActor open override func performKeyEquivalent(with event: NSEvent) -> Bool {
         for s in _subviews where !s._isHidden { if s.performKeyEquivalent(with: event) { return true } }
@@ -1177,14 +1287,30 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/previousvalidkeyview
     @MainActor open var previousValidKeyView: NSView? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/printjobtitle
-    @MainActor open var printJobTitle: String { unimplemented() }
+    /// The window's title, else "Untitled".
+    @MainActor open var printJobTitle: String {
+        if let t = _window?.title, !t.isEmpty { return t }
+        return "Untitled"
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/printview(_:)
-    @MainActor open func printView(_ sender: Any?) { unimplemented() }
+    /// Prints the view with the print panel (File > Print… lands here through the responder chain).
+    @MainActor open func printView(_ sender: Any?) {
+        let op = NSPrintOperation(view: self)
+        if let w = _window, w.isVisible {
+            op._runModal(for: w) { _ in }
+        } else {
+            _ = op.run()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rect(for:)
     @available(macOS 26.0, *)
     @MainActor open func rect(for region: NSView.LayoutRegion) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectforpage(_:)
-    @MainActor open func rectForPage(_ page: Int) -> NSRect { unimplemented() }
+    /// The rect of page `page` for a view that `knowsPageRange`; the default answers the
+    /// print operation's own pagination.
+    @MainActor open func rectForPage(_ page: Int) -> NSRect {
+        NSPrintOperation.current?._paginate().rect(forPage: page) ?? bounds
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectforsmartmagnification(at:in:)
     @MainActor open func rectForSmartMagnification(at location: NSPoint, in visibleRect: NSRect) -> NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectpreservedduringliveresize
@@ -1620,7 +1746,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsupdatelayer
     @MainActor open var wantsUpdateLayer: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/widthadjustlimit
-    @MainActor open var widthAdjustLimit: CGFloat { unimplemented() }
+    /// How far left a page break may move to keep a subview whole: a fraction of the page.
+    @MainActor open var widthAdjustLimit: CGFloat { 0.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/widthanchor
     @available(macOS 10.11, *)
     @MainActor open var widthAnchor: NSLayoutDimension { anchorDimension(.width) }
@@ -1634,7 +1761,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writeeps(inside:to:)
     @MainActor open func writeEPS(inside rect: NSRect, to pasteboard: NSPasteboard) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writepdf(inside:to:)
-    @MainActor open func writePDF(inside rect: NSRect, to pasteboard: NSPasteboard) { unimplemented() }
+    @MainActor open func writePDF(inside rect: NSRect, to pasteboard: NSPasteboard) {
+        let data = dataWithPDF(inside: rect)
+        _ = pasteboard.declareTypes([.pdf], owner: nil)
+        _ = pasteboard.setData(data, forType: .pdf)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writingtoolscoordinator
     @available(macOS 15.2, *)
     @MainActor open var writingToolsCoordinator: NSWritingToolsCoordinator? {
@@ -1822,7 +1953,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }

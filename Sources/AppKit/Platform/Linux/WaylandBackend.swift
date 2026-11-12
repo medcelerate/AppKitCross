@@ -75,6 +75,9 @@ final class WaylandBackend: PlatformBackend {
     /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
     private(set) var dataDevice: WaylandDataDevice!
     var dragDrop: (any PlatformDragDrop)? { dataDevice }
+    /// Printing (LinuxPrinting.swift): Cairo PDF and CUPS.
+    let linuxPrinting = LinuxPrintBackend()
+    var printing: (any PlatformPrintBackend)? { linuxPrinting }
     /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
     /// Wayland has no global coordinates: a host's position is taken as the top-left of
     /// the first output.

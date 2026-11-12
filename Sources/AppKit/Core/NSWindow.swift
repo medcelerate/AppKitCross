@@ -88,11 +88,18 @@ import CoreText
         case "performZoom:": return _styleMask.contains(.resizable)
         case "toggleToolbarShown:": return _toolbar != nil
         case "runToolbarCustomizationPalette:": return _toolbar?.allowsUserCustomization == true
+        case "print:", "printWindow:": return _contentView != nil && !_hasDocument
+        case "runPageLayout:": return !_hasDocument
         default: return false
         }
     }
+    /// A document's window leaves `print:` and `runPageLayout:` to the document, which is
+    /// next in the responder chain.
+    private var _hasDocument: Bool { (windowController?.document as? NSDocument) != nil }
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch NSStringFromSelector(action) {
+        case "print:", "printWindow:": guard !_hasDocument else { return false }; printWindow(sender)
+        case "runPageLayout:": guard !_hasDocument else { return false }; NSApplication.shared.runPageLayout(sender)
         case "performClose:": performClose(sender)
         case "performMiniaturize:": performMiniaturize(sender)
         case "performZoom:": performZoom(sender)
@@ -1967,7 +1974,8 @@ import CoreText
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/printwindow(_:)
-    @MainActor open func printWindow(_ sender: Any?) { unimplemented() }
+    /// File > Print… reaching the window: prints the content view (ADR-0022).
+    @MainActor open func printWindow(_ sender: Any?) { _contentView?.printView(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/recalculatekeyviewloop()
     @MainActor open func recalculateKeyViewLoop() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/registerfordraggedtypes(_:)
