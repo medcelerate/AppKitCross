@@ -17,6 +17,10 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor
 /// `@unchecked Sendable` as Apple's (`NS_SWIFT_SENDABLE`): a colour is immutable once made.
 open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, NSCoding, NSPasteboardReading, NSPasteboardWriting, @unchecked Sendable {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     // MARK: Storage
     //
     // Colors are stored as sRGB components (or a gray level). Semantic (system) colors

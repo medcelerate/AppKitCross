@@ -172,6 +172,10 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
             for l in lines { XCTAssertLessThanOrEqual(l.width, 120) }
             tv.isHorizontallyResizable = true
             tv.isVerticallyResizable = true
+            // AppKit's defaults keep the initial frame as the minimum and its width as the
+            // maximum; a view that fits its text both ways says so.
+            tv.minSize = .zero
+            tv.maxSize = NSSize(width: 10_000_000, height: 10_000_000)
             tv.sizeToFit()
             XCTAssertEqual(tv._layoutLines().count, 1)
             XCTAssertGreaterThan(tv.frame.width, 120)

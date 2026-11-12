@@ -64,9 +64,9 @@ extension NSTextFinderClient {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfinderclient/string
     public var string: String { unimplementedOptionalRequirement() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfinderclient/string(at:effectiverange:endswithsearchboundary:)
-    public func string(at characterIndex: Int, effectiveRange outRange: NSRangePointer, endsWithSearchBoundary outFlag: UnsafeMutablePointer<ObjCBool>) -> String { unimplementedOptionalRequirement() }
+    public func string(at characterIndex: Int, effectiveRange outRange: NSRangePointer, endsWithSearchBoundary outFlag: UnsafeMutablePointer<ObjCBool>) -> String { outRange.pointee = NSRange(location: 0, length: (string as NSString).length); outFlag.pointee = false; return string }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfinderclient/stringlength()
-    public func stringLength() -> Int { unimplementedOptionalRequirement() }
+    public func stringLength() -> Int { return (string as NSString).length }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfinderclient/visiblecharacterranges
     public var visibleCharacterRanges: [NSValue] { unimplementedOptionalRequirement() }
 }
