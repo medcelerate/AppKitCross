@@ -1204,6 +1204,8 @@ class Generator:
         # Nested types are emitted at file scope as extensions of the parent so that
         # hand-written parents do not have to carry them (and nesting depth is unbounded).
         for nt in nested_types:
+            if ".".join(nt["pathComponents"]) in self.skip_members:
+                continue
             stats["nested"] += 1
             nl, ns = self.emit_type(nt, "", parent_sym=sym)
             lines.append("")
@@ -1384,6 +1386,9 @@ class Generator:
         for mid in self.inv.members.get(pid, []):
             m = self.inv.sym(mid)
             if m and m["kind"]["identifier"] in ("swift.class", "swift.struct", "swift.enum", "swift.protocol", "swift.typealias"):
+                # A nested type listed in skipMembers is hand-written next to its parent.
+                if ".".join(m["pathComponents"]) in self.skip_members:
+                    continue
                 nl, _ = self.emit_type(m, "", parent_sym=sym)
                 k = self.first_file_scope_index(nl)
                 out += self.availability_line(m, "") or self.availability_line(sym, "")

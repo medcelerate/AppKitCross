@@ -31,6 +31,14 @@ final class Win32Backend: PlatformBackend {
     /// The notification area (Win32StatusItem.swift).
     private(set) var win32StatusItems: Win32StatusItems?
     var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
+    /// The shell (Win32Workspace.swift, ADR-0026); made on first use.
+    private(set) var win32Workspace: Win32Workspace?
+    var workspace: any PlatformWorkspace {
+        if let w = win32Workspace { return w }
+        let w = Win32Workspace(backend: self)
+        win32Workspace = w
+        return w
+    }
     /// Printing (Win32Printing.swift): the PDF writer, print jobs through Direct2D's print
     /// control, the PrintDlgEx dialog.
     private(set) lazy var win32Printing = Win32PrintBackend(backend: self)
@@ -46,6 +54,7 @@ final class Win32Backend: PlatformBackend {
     func register(_ window: Win32Window) {
         windows.append(window)
         if let hwnd = window.hwnd, window.wantsMenuBar { menuBar.apply(to: hwnd) }
+        win32Workspace?.apply(to: window)
     }
 
     func unregister(_ window: Win32Window) {
@@ -269,6 +278,7 @@ final class Win32Backend: PlatformBackend {
     /// that repaints every frame would starve the timer and animations would never advance.
     private func pump() -> Bool {
         var msg = MSG()
+        var lastService = GetTickCount64()
         while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
             if msg.message == UINT(WM_QUIT) {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
@@ -277,6 +287,11 @@ final class Win32Backend: PlatformBackend {
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
             fireFrameIfDue()
+            // A window whose paint invalidates itself keeps WM_PAINT coming, and this loop
+            // would never reach the main queue below (a DispatchQueue.main block, a Timer,
+            // the demo's probe never ran); the queue is serviced here every 50 ms regardless.
+            let now = GetTickCount64()
+            if now - lastService >= 50 { _ = PlatformMainQueue.service(); lastService = now }
         }
         fireFrameIfDue()
         // Blocks queued on the main queue from other threads, and RunLoop timers.
@@ -488,6 +503,17 @@ final class Win32Backend: PlatformBackend {
         }
     }
 
+    /// An invisible top-level window of the message window's class: broadcasts
+    /// (WM_SETTINGCHANGE, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE) reach top-level windows
+    /// only, never message-only ones.
+    func makeBroadcastWindow() -> HWND? {
+        let hwnd = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
+            CreateWindowExW(DWORD(WS_EX_TOOLWINDOW), name, name, DWORD(WS_OVERLAPPED), 0, 0, 0, 0, nil, nil, hInstance, nil)
+        }
+        if let hwnd { SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))) }
+        return hwnd
+    }
+
     private func createMessageWindow() {
         messageWindow = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
             CreateWindowExW(0, name, name, 0, 0, 0, 0, 0, HWND(bitPattern: -3) /* HWND_MESSAGE */, nil, hInstance, nil)
@@ -498,6 +524,15 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
+        if msg == UINT(WM_SETTINGCHANGE) || msg == UINT(WM_POWERBROADCAST) || msg == 0x02B1 /* WM_WTSSESSION_CHANGE */ || msg == Win32Workspace.eventMessage || msg == Win32Workspace.kickMessage || (msg == UINT(WM_TIMER) && wParam != Win32Backend.dragTimer) {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                let handled = MainActor.assumeIsolated { backend.win32Workspace?.handle(message: msg, wParam: wParam, lParam: lParam) ?? false }
+                if handled { return msg == UINT(WM_POWERBROADCAST) ? 1 /* TRUE */ : 0 }
+            }
+            return DefWindowProcW(hwnd, msg, wParam, lParam)
+        }
         if msg == UINT(WM_TIMER), wParam == Win32Backend.dragTimer {
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
             if ptr != 0 {

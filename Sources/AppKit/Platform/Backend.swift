@@ -87,6 +87,10 @@ public protocol PlatformBackend: AnyObject {
     var dragDrop: (any PlatformDragDrop)? { get }
     /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
     var statusItems: (any PlatformStatusItemHost)? { get }
+    /// The shell: opening, associations, icons, running applications, the dock tile
+    /// (Workspace.swift). A requirement, not only an extension default, so the backend's
+    /// own implementation is reached through the `any PlatformBackend` existential.
+    var workspace: any PlatformWorkspace { get }
     /// Printers, PDF documents and device jobs (see Printing.swift, ADR-0022); nil when the
     /// platform cannot print.
     var printing: (any PlatformPrintBackend)? { get }

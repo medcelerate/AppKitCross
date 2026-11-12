@@ -27,7 +27,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
       - name: Drawing example headless PNG export
         run: .build/debug/Drawing --export drawing-macos.png
       - name: TextEdit example headless document round trip (NSDocumentController, RTF)
@@ -69,7 +69,25 @@ jobs:
         run: swift build -c debug -j 1
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build -j 1 --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build -j 1 --product $p; done
+      # The Win32 backend, not the host one: a URL opened through a stub scheme handler
+      # (Notepad), then the window, the WinEvent hooks and the poll timer run for five
+      # seconds while the handler launches and comes to the front (ADR-0026). A crash in a
+      # hook or in the shell's re-entrant pump shows up as a non-zero exit.
+      - name: Workspace example opens a URL through a stub handler and stays alive
+        shell: pwsh
+        run: |
+          reg add "HKCU\Software\Classes\appkitcross-test" /ve /d "URL:AppKitCross test" /f | Out-Null
+          reg add "HKCU\Software\Classes\appkitcross-test" /v "URL Protocol" /t REG_SZ /f | Out-Null
+          reg add "HKCU\Software\Classes\appkitcross-test\shell\open\command" /ve /d '"C:\Windows\System32\notepad.exe" "%1"' /f | Out-Null
+          $log = & .build/debug/Workspace.exe --open appkitcross-test://ci --stay 5 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          Write-Host $log
+          taskkill /F /IM notepad.exe 2>$null | Out-Null
+          reg delete "HKCU\Software\Classes\appkitcross-test" /f | Out-Null
+          if ($code -ne 0) { Write-Error "Workspace.exe exited with $code"; exit 1 }
+          if ($log -notmatch 'open appkitcross-test://ci: true') { Write-Error "the URL was not opened"; exit 1 }
+          if ($log -notmatch 'alive after 5') { Write-Error "the example did not reach the 5 s mark"; exit 1 }
       - name: AudioPlayer example offline render (WASAPI absent on the runner)
         run: .build/debug/AudioPlayer.exe --render audio-windows.wav
       - name: TextEdit example headless document round trip
@@ -111,7 +129,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
       - name: Drawing example headless PNG export on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
       - name: TextEdit example headless document round trip on the host backend
@@ -140,7 +158,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
       - name: Tests on the host backend with the validation layer
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device
