@@ -126,6 +126,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         _layoutValid = false
         _typesetter = nil
         _fragments = []
+        _blockFrames = []
         _laidOutLength = 0
         _extraContainer = nil
         delegate?.layoutManagerDidInvalidateLayout(self)
@@ -191,6 +192,16 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         // draws light text), not whatever appearance happens to be current during layout.
         let appearance: NSAppearance? = MainActor.assumeIsolated { firstTextView?.effectiveAppearance }
         _layoutIsDark = appearance?.isDark ?? MainActor.assumeIsolated { NSAppearance.currentIsDark }
+        // Tab stops reach CoreText through a CTParagraphStyle (alignment, indents and spacing
+        // are applied here, line by line).
+        var ctStyles: [ObjectIdentifier: CTParagraphStyle] = [:]
+        func ctStyle(_ ps: NSParagraphStyle) -> CTParagraphStyle? {
+            guard !ps.tabStops.isEmpty || ps.defaultTabInterval > 0 else { return nil }
+            if let cached = ctStyles[ObjectIdentifier(ps)] { return cached }
+            let made = NSLayoutManager._ctParagraphStyle(tabStops: ps.tabStops, defaultTabInterval: ps.defaultTabInterval)
+            ctStyles[ObjectIdentifier(ps)] = made
+            return made
+        }
         func convert(_ attrs: [NSAttributedString.Key: Any], into range: NSRange) {
             var ct: [NSAttributedString.Key: Any] = [:]
             MainActor.assumeIsolated {
@@ -204,6 +215,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                 if let u = attrs[.underlineStyle] as? NSNumber, u.intValue != 0 { ct[NSAttributedString.Key(kCTUnderlineStyleAttributeName as String)] = u }
                 if let ucg { ct[NSAttributedString.Key(kCTUnderlineColorAttributeName as String)] = ucg }
             }
+            if let ps = attrs[.paragraphStyle] as? NSParagraphStyle, let cts = ctStyle(ps) { ct[NSAttributedString.Key(kCTParagraphStyleAttributeName as String)] = cts }
             if let k = attrs[.kern] as? NSNumber { ct[NSAttributedString.Key(kCTKernAttributeName as String)] = k }
             if let b = attrs[.baselineOffset] as? NSNumber { ct[NSAttributedString.Key(kCTBaselineOffsetAttributeName as String)] = b }
             out.addAttributes(ct, range: range)
@@ -225,7 +237,74 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                 convert(m, into: NSRange(location: lo, length: hi - lo))
             }
         }
+        // Attachments: their characters advance by the attachment's width and raise the
+        // line to its height (a run delegate); the attachment draws after the glyphs.
+        _attachments = [:]
+        let units = storage.string as NSString
+        let container = _textContainers.first
+        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: n), options: []) { value, range, _ in
+            guard let attachment = value as? NSTextAttachment else { return }
+            for i in range.location..<(range.location + range.length) where units.character(at: i) == 0xFFFC {
+                var m = attachment._layoutMetrics(in: container, characterIndex: i)
+                if let override = _attachmentSizeOverrides[i] { m.size = override }
+                _attachments[i] = (attachment, m.size, m.baselineOffset)
+                let delegate = NSLayoutManager._runDelegate(width: m.size.width, ascent: max(0, m.size.height + m.baselineOffset), descent: max(0, -m.baselineOffset))
+                if let delegate {
+                    out.addAttribute(NSAttributedString.Key(kCTRunDelegateAttributeName as String), value: delegate, range: NSRange(location: i, length: 1))
+                }
+                out.addAttribute(NSAttributedString.Key(kCTForegroundColorAttributeName as String), value: NSLayoutManager._clearColor, range: NSRange(location: i, length: 1))
+            }
+        }
         return out
+    }
+
+    /// Attachments by character index: the attachment and its laid-out size and baseline offset.
+    internal var _attachments: [Int: (attachment: NSTextAttachment, size: CGSize, baselineOffset: CGFloat)] = [:]
+    private var _attachmentSizeOverrides: [Int: CGSize] = [:]
+    private static let _clearColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0)
+
+    /// Metrics a run delegate reports, retained by the delegate.
+    private final class _DelegateMetrics {
+        let width: CGFloat, ascent: CGFloat, descent: CGFloat
+        init(width: CGFloat, ascent: CGFloat, descent: CGFloat) { self.width = width; self.ascent = ascent; self.descent = descent }
+    }
+
+    private static func _runDelegate(width: CGFloat, ascent: CGFloat, descent: CGFloat) -> CTRunDelegate? {
+        var callbacks = CTRunDelegateCallbacks(
+            version: kCTRunDelegateVersion1,
+            dealloc: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).release() },
+            getAscent: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().ascent },
+            getDescent: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().descent },
+            getWidth: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().width })
+        let box = Unmanaged.passRetained(_DelegateMetrics(width: width, ascent: ascent, descent: descent)).toOpaque()
+        guard let d = CTRunDelegateCreate(&callbacks, box) else { Unmanaged<_DelegateMetrics>.fromOpaque(box).release(); return nil }
+        return d
+    }
+
+    /// A CoreText paragraph style carrying only tab stops.
+    internal static func _ctParagraphStyle(tabStops: [NSTextTab], defaultTabInterval: CGFloat) -> CTParagraphStyle {
+        let tabs: [CTTextTab] = tabStops.map { t in
+            let a: CTTextAlignment
+            switch t.alignment {
+            case .right: a = .right
+            case .center: a = .center
+            default: a = .left
+            }
+            return CTTextTabCreate(a, Double(t.location), nil)
+        }
+        #if canImport(Darwin)
+        var array: CFArray = tabs as CFArray
+        #else
+        var array: CFArray = NSArray(array: tabs)
+        #endif
+        var interval = defaultTabInterval
+        return withUnsafeBytes(of: &array) { tp in
+            withUnsafeBytes(of: &interval) { ip in
+                var settings = [CTParagraphStyleSetting(spec: .tabStops, valueSize: MemoryLayout<CFArray>.size, value: tp.baseAddress!)]
+                if defaultTabInterval > 0 { settings.append(CTParagraphStyleSetting(spec: .defaultTabInterval, valueSize: MemoryLayout<CGFloat>.size, value: ip.baseAddress!)) }
+                return CTParagraphStyleCreate(settings, settings.count)
+            }
+        }
     }
 
     private func _paragraphStyle(at index: Int) -> NSParagraphStyle? {
@@ -248,10 +327,28 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         return (u == 0x0A || u == 0x2028 || u == 0x2029 || u == 0x0C) ? 1 : 0
     }
 
+    /// Where the next line goes while laying out (one column of text).
+    private struct _Cursor {
+        var container: Int
+        var y: CGFloat
+        var linesInContainer: Int
+    }
+
     private func _ensureLayout() {
-        guard !_layoutValid else { return }
+        // A text view fitting its frame to the new layout can change the wrapping width (a
+        // scroll view shows its scroller and narrows the clip view), which invalidates the
+        // layout again: lay out until it holds, so callers never read an emptied layout.
+        var passes = 0
+        while !_layoutValid, passes < 4 {
+            passes += 1
+            _layoutPass()
+        }
+    }
+
+    private func _layoutPass() {
         _layoutValid = true
         _fragments = []
+        _blockFrames = []
         _extraContainer = nil
         guard _textStorage != nil, !_textContainers.isEmpty else { return }
         let ct = _coreTextString()
@@ -259,38 +356,94 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         _typesetter = ts
         let units = Array(ct.string.utf16)
         let length = units.count
-        var ci = 0
-        var y: CGFloat = 0
+        var cursor = _Cursor(container: 0, y: 0, linesInContainer: 0)
         var index = 0
-        var paragraphStart = true
-        var linesInContainer = 0
-        var lastFragmentEnd: CGFloat = 0
-        while index < length {
-            guard ci < _textContainers.count else { break }
+        while index < length, cursor.container < _textContainers.count {
+            let blocks = _paragraphStyle(at: index)?.textBlocks ?? []
+            if let cell = blocks.first as? NSTextTableBlock {
+                index = _layoutTable(cell.table, from: index, units: units, typesetter: ts, cursor: &cursor)
+            } else if let block = blocks.first {
+                index = _layoutBlock(block, from: index, units: units, typesetter: ts, cursor: &cursor)
+            } else {
+                let end = _paragraphEnd(from: index, units: units)
+                let container = _textContainers[cursor.container]
+                let column = NSRect(x: 0, y: 0, width: container.size.width, height: container.size.height)
+                index = _layoutLines(NSRange(location: index, length: end - index), in: column, units: units, typesetter: ts, cursor: &cursor, breaksContainers: true)
+            }
+        }
+        _laidOutLength = index
+        // The extra line fragment: after a trailing newline or for empty text.
+        if index >= length, cursor.container < _textContainers.count, length == 0 || _fragments.last?.newlineLength ?? 0 > 0 {
+            let ci = cursor.container
             let container = _textContainers[ci]
+            let font = _font(at: max(0, length - 1))
+            let height = MainActor.assumeIsolated { (font.ascender - font.descender + font.leading).rounded(.up) }
+            let top = _fragments.isEmpty ? 0 : cursor.y
+            if container.size.height >= CGFloat.greatestFiniteMagnitude / 2 || top + height <= container.size.height || _fragments.isEmpty {
+                _extraContainer = ci
+                _extraRect = NSRect(x: 0, y: top, width: container.size.width, height: height)
+                _extraUsedRect = NSRect(x: container.lineFragmentPadding, y: top, width: 0, height: height)
+            }
+        }
+        for c in _textContainers { delegate?.layoutManager(self, didCompleteLayoutFor: c, atEnd: true) }
+        MainActor.assumeIsolated {
+            for c in _textContainers { c._textView?._layoutManagerDidLayout() }
+        }
+    }
+
+    /// The end of the paragraph starting at `index` (after its newline).
+    private func _paragraphEnd(from index: Int, units: [UInt16]) -> Int {
+        var i = index
+        while i < units.count {
+            let nl = _newlineLength(at: i, in: units)
+            if nl > 0 { return i + nl }
+            i += 1
+        }
+        return units.count
+    }
+
+    /// The paragraphs from `index` whose outermost text block satisfies `belongs`.
+    private func _run(from index: Int, units: [UInt16], while belongs: (NSTextBlock) -> Bool) -> Int {
+        var i = index
+        while i < units.count, let b = _paragraphStyle(at: i)?.textBlocks.first, belongs(b) { i = _paragraphEnd(from: i, units: units) }
+        return max(i, _paragraphEnd(from: index, units: units))
+    }
+
+    /// Lays `range` out as lines inside `column` (container coordinates; the fragments are
+    /// `column.width` wide at `column.minX`), from `cursor.y`. Returns where it stopped:
+    /// the range's end, or earlier when the containers ran out.
+    private func _layoutLines(_ range: NSRange, in column: NSRect, units: [UInt16], typesetter ts: CTTypesetter, cursor: inout _Cursor, breaksContainers: Bool) -> Int {
+        let end = range.location + range.length
+        var index = range.location
+        var paragraphStart = index == 0 || _newlineLength(at: index - 1, in: units) > 0 || (index >= 2 && units[index - 2] == 0x0D && units[index - 1] == 0x0A)
+        var firstInColumn = true
+        var column = column
+        while index < end {
+            guard cursor.container < _textContainers.count else { break }
+            let container = _textContainers[cursor.container]
             let style = _paragraphStyle(at: index)
             let padding = container.lineFragmentPadding
-            let containerWidth = container.size.width
+            let columnWidth = column.width
             let head = paragraphStart ? (style?.firstLineHeadIndent ?? 0) : (style?.headIndent ?? 0)
             let tail = style?.tailIndent ?? 0
-            let width = max(1, (tail > 0 ? tail : containerWidth + tail) - head - 2 * padding)
+            let width = max(1, (tail > 0 ? tail : columnWidth + tail) - head - 2 * padding)
             let mode = container.lineBreakMode == .byWordWrapping ? (style?.lineBreakMode ?? .byWordWrapping) : container.lineBreakMode
             var count: Int
             switch mode {
             case .byClipping, .byTruncatingHead, .byTruncatingTail, .byTruncatingMiddle:
                 count = 0
-                while index + count < length {
+                while index + count < end {
                     let nl = _newlineLength(at: index + count, in: units)
                     if nl > 0 { count += nl; break }
                     count += 1
                 }
             case .byCharWrapping:
-                count = CTTypesetterSuggestClusterBreak(ts, index, Double(width))
+                count = CTTypesetterSuggestClusterBreakWithOffset(ts, index, Double(width + head), Double(head))
             default:
-                count = CTTypesetterSuggestLineBreak(ts, index, Double(width))
+                count = CTTypesetterSuggestLineBreakWithOffset(ts, index, Double(width + head), Double(head))
             }
-            count = max(1, min(count, length - index))
-            let line = CTTypesetterCreateLine(ts, CFRangeMake(index, count))
+            count = max(1, min(count, end - index))
+            let line = CTTypesetterCreateLineWithOffset(ts, CFRangeMake(index, count), Double(head))
             var drawn = line
             switch mode {
             case .byTruncatingHead: drawn = CTLineCreateTruncatedLine(line, Double(width), .start, nil) ?? line
@@ -308,13 +461,15 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                 if s.minimumLineHeight > 0, h < s.minimumLineHeight { ascent += s.minimumLineHeight - h }
             }
             let height = (ascent + descent + leading).rounded(.up)
-            let spacingBefore = (paragraphStart && !_fragments.isEmpty) ? (style?.paragraphSpacingBefore ?? 0) : 0
-            let top = y + spacingBefore
+            // Space before a paragraph, except at the top of the text or of a block's column.
+            let spacingBefore = paragraphStart && !_fragments.isEmpty && !(firstInColumn && !breaksContainers) ? (style?.paragraphSpacingBefore ?? 0) : 0
+            let top = cursor.y + spacingBefore
             let maxLines = container.maximumNumberOfLines
             let overflow = (container.size.height < CGFloat.greatestFiniteMagnitude / 2 && top + height > container.size.height)
-                || (maxLines > 0 && linesInContainer >= maxLines)
-            if overflow && linesInContainer > 0 {
-                ci += 1; y = 0; linesInContainer = 0
+                || (maxLines > 0 && cursor.linesInContainer >= maxLines)
+            if breaksContainers && overflow && cursor.linesInContainer > 0 {
+                cursor.container += 1; cursor.y = 0; cursor.linesInContainer = 0
+                if cursor.container < _textContainers.count { column.size.width = _textContainers[cursor.container].size.width }
                 continue
             }
             let flush: CGFloat
@@ -326,35 +481,141 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             }
             let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
             let flushOffset = max(0, width - (lineWidth - trailing)) * flush
-            let textX = padding + head + flushOffset
+            let textX = column.minX + padding + head + flushOffset
             let nl = _newlineLength(at: index + count - 1, in: units) > 0 ? (count >= 2 && units[index + count - 2] == 0x0D && units[index + count - 1] == 0x0A ? 2 : 1) : 0
             let fragment = _NSLineFragment(charRange: NSRange(location: index, length: count), newlineLength: nl,
-                                           rect: NSRect(x: 0, y: top, width: containerWidth, height: height),
+                                           rect: NSRect(x: column.minX, y: top, width: columnWidth, height: height),
                                            usedRect: NSRect(x: textX, y: top, width: lineWidth - trailing, height: height),
-                                           container: ci, baseline: ascent, textX: textX, line: line, drawnLine: drawn)
+                                           container: cursor.container, baseline: ascent, textX: textX, line: line, drawnLine: drawn)
             _fragments.append(fragment)
-            linesInContainer += 1
-            lastFragmentEnd = top + height
-            y = top + height + (style?.lineSpacing ?? 0)
-            if nl > 0 { y += style?.paragraphSpacing ?? 0 }
+            cursor.linesInContainer += 1
+            firstInColumn = false
+            cursor.y = top + height + (style?.lineSpacing ?? 0)
+            if nl > 0 { cursor.y += style?.paragraphSpacing ?? 0 }
             paragraphStart = nl > 0
             index += count
         }
-        _laidOutLength = index
-        // The extra line fragment: after a trailing newline or for empty text.
-        if index >= length, ci < _textContainers.count, length == 0 || _fragments.last?.newlineLength ?? 0 > 0 {
-            let container = _textContainers[ci]
-            let font = _font(at: max(0, length - 1))
-            let height = MainActor.assumeIsolated { (font.ascender - font.descender + font.leading).rounded(.up) }
-            let top = _fragments.isEmpty ? 0 : y
-            if container.size.height >= CGFloat.greatestFiniteMagnitude / 2 || top + height <= container.size.height || _fragments.isEmpty {
-                _extraContainer = ci
-                _extraRect = NSRect(x: 0, y: top, width: container.size.width, height: height)
-                _extraUsedRect = NSRect(x: container.lineFragmentPadding, y: top, width: 0, height: height)
+        return index
+    }
+
+    // MARK: Text blocks and tables
+
+    /// A block's box as laid out, for drawing its background and for `boundsRect(for:...)`.
+    internal struct _BlockFrame {
+        var block: NSTextBlock
+        var bounds: NSRect
+        var layout: NSRect
+        var charRange: NSRange
+        var container: Int
+    }
+    private var _blockFrames: [_BlockFrame] = []
+
+    /// A plain text block: its paragraphs in the block's content rect, then the box around them.
+    private func _layoutBlock(_ block: NSTextBlock, from index: Int, units: [UInt16], typesetter ts: CTTypesetter, cursor: inout _Cursor) -> Int {
+        let end = _run(from: index, units: units) { $0 === block }
+        let container = _textContainers[cursor.container]
+        let outer = NSRect(x: 0, y: 0, width: container.size.width, height: CGFloat.greatestFiniteMagnitude / 4)
+        let content = block.rectForLayout(at: NSPoint(x: 0, y: cursor.y), in: outer, textContainer: container, characterRange: NSRange(location: index, length: end - index))
+        var inner = _Cursor(container: cursor.container, y: content.minY, linesInContainer: cursor.linesInContainer)
+        let stop = _layoutLines(NSRange(location: index, length: end - index), in: content, units: units, typesetter: ts, cursor: &inner, breaksContainers: false)
+        let used = NSRect(x: content.minX, y: content.minY, width: content.width, height: max(0, inner.y - content.minY))
+        let bounds = block.boundsRect(forContentRect: used, in: outer, textContainer: container, characterRange: NSRange(location: index, length: end - index))
+        _blockFrames.append(_BlockFrame(block: block, bounds: bounds, layout: content, charRange: NSRange(location: index, length: stop - index), container: cursor.container))
+        cursor.y = bounds.maxY
+        cursor.linesInContainer = inner.linesInContainer
+        return stop
+    }
+
+    /// A table: the columns first (from the cells' natural widths), then row by row, each
+    /// row's cells side by side and the row as tall as the tallest cell.
+    private func _layoutTable(_ table: NSTextTable, from index: Int, units: [UInt16], typesetter ts: CTTypesetter, cursor: inout _Cursor) -> Int {
+        let end = _run(from: index, units: units) { ($0 as? NSTextTableBlock)?.table === table }
+        // Cells: consecutive paragraphs with the same cell block.
+        var cells: [(block: NSTextTableBlock, range: NSRange)] = []
+        var i = index
+        while i < end {
+            let pEnd = _paragraphEnd(from: i, units: units)
+            let b = (_paragraphStyle(at: i)?.textBlocks.first as? NSTextTableBlock) ?? NSTextTableBlock(table: table, startingRow: 0, rowSpan: 1, startingColumn: 0, columnSpan: 1)
+            if let last = cells.last, last.block === b {
+                cells[cells.count - 1].range.length = pEnd - last.range.location
+            } else {
+                cells.append((b, NSRange(location: i, length: pEnd - i)))
             }
+            i = pEnd
         }
-        _ = lastFragmentEnd
-        for c in _textContainers { delegate?.layoutManager(self, didCompleteLayoutFor: c, atEnd: true) }
+        let container = _textContainers[cursor.container]
+        let padding = container.lineFragmentPadding
+        let outer = NSRect(x: 0, y: cursor.y, width: container.size.width, height: CGFloat.greatestFiniteMagnitude / 4)
+        // Natural widths: each paragraph of the cell on one line.
+        var natural: [ObjectIdentifier: (block: NSTextTableBlock, width: CGFloat)] = [:]
+        for cell in cells {
+            var w: CGFloat = 0
+            var p = cell.range.location
+            while p < cell.range.location + cell.range.length {
+                let pEnd = _paragraphEnd(from: p, units: units)
+                let line = CTTypesetterCreateLine(ts, CFRangeMake(p, pEnd - p))
+                w = max(w, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil) - CTLineGetTrailingWhitespaceWidth(line)))
+                p = pEnd
+            }
+            let basis = container.size.width
+            w += 2 * padding + cell.block._inset(.minX, basis: basis) + cell.block._inset(.maxX, basis: basis)
+            let key = ObjectIdentifier(cell.block)
+            natural[key] = (cell.block, max(natural[key]?.width ?? 0, w.rounded(.up)))
+        }
+        table._layoutColumns(in: outer, natural: natural)
+        let tableTop = cursor.y
+        var rowTop = table._contentRect.minY
+        var k = 0
+        while k < cells.count {
+            // A row: the cells sharing the first one's starting row.
+            let row = cells[k].block.startingRow
+            var r = k
+            while r < cells.count, cells[r].block.startingRow == row { r += 1 }
+            if r == k { r = k + 1 }
+            var rowBottom = rowTop
+            var laid: [(cell: Int, firstFragment: Int, bounds: NSRect, content: NSRect)] = []
+            for c in k..<r {
+                let cell = cells[c]
+                let content = cell.block.rectForLayout(at: NSPoint(x: table._contentRect.minX, y: rowTop), in: outer, textContainer: container, characterRange: cell.range)
+                var inner = _Cursor(container: cursor.container, y: content.minY, linesInContainer: cursor.linesInContainer)
+                let first = _fragments.count
+                _ = _layoutLines(cell.range, in: content, units: units, typesetter: ts, cursor: &inner, breaksContainers: false)
+                let used = NSRect(x: content.minX, y: content.minY, width: content.width, height: max(0, inner.y - content.minY))
+                let bounds = cell.block.boundsRect(forContentRect: used, in: outer, textContainer: container, characterRange: cell.range)
+                rowBottom = max(rowBottom, bounds.maxY)
+                laid.append((c, first, bounds, used))
+            }
+            // Every cell of the row is as tall as the row; vertical alignment moves its lines.
+            for (n, entry) in laid.enumerated() {
+                let cell = cells[entry.cell]
+                var b = entry.bounds
+                let slack = rowBottom - b.maxY
+                b.size.height = rowBottom - b.minY
+                let shift: CGFloat
+                switch cell.block.verticalAlignment {
+                case .middleAlignment: shift = (slack / 2).rounded()
+                case .bottomAlignment: shift = slack
+                default: shift = 0
+                }
+                let lastFragment = n + 1 < laid.count ? laid[n + 1].firstFragment : _fragments.count
+                if shift != 0 {
+                    for f in entry.firstFragment..<lastFragment {
+                        _fragments[f].rect.origin.y += shift
+                        _fragments[f].usedRect.origin.y += shift
+                    }
+                }
+                _blockFrames.append(_BlockFrame(block: cell.block, bounds: b, layout: entry.content, charRange: cell.range, container: cursor.container))
+            }
+            rowTop = rowBottom
+            k = r
+        }
+        let tableContent = NSRect(x: table._contentRect.minX, y: table._contentRect.minY, width: table._contentRect.width, height: max(0, rowTop - table._contentRect.minY))
+        let tableBounds = table.boundsRect(forContentRect: tableContent, in: outer, textContainer: container, characterRange: NSRange(location: index, length: end - index))
+        // The table's own box draws beneath its cells.
+        _blockFrames.insert(_BlockFrame(block: table, bounds: tableBounds, layout: tableContent, charRange: NSRange(location: index, length: end - index), container: cursor.container),
+                            at: _blockFrames.count - cells.count)
+        cursor.y = max(tableBounds.maxY, tableTop)
+        return end
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/ensurelayout(for:)
@@ -602,6 +863,14 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         if point.y < first.element.rect.minY { return first.element.charRange.location }
         var chosen = first
         for f in fs where point.y >= f.element.rect.minY { chosen = f }
+        // Side-by-side fragments (table cells): the one under the point, or the nearest in x.
+        let row = fs.filter { point.y >= $0.element.rect.minY && point.y < $0.element.rect.maxY }
+        if row.count > 1 {
+            chosen = row.min { a, b in
+                func d(_ r: NSRect) -> CGFloat { point.x < r.minX ? r.minX - point.x : point.x > r.maxX ? point.x - r.maxX : 0 }
+                return d(a.element.rect) < d(b.element.rect)
+            } ?? chosen
+        }
         if let ec = _extraContainer, ec == ci, point.y >= _extraRect.minY { return _laidOutLength }
         let f = chosen.element
         let x = point.x - f.textX
@@ -703,6 +972,21 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         _ensureLayout()
         MainActor.assumeIsolated {
             guard let storage = _textStorage, let ctx = NSGraphicsContext.current else { return }
+            // Text blocks and table cells, outermost first.
+            if !_blockFrames.isEmpty {
+                let end = glyphsToShow.location + glyphsToShow.length
+                let view: NSView = firstTextView ?? NSView(frame: .zero)
+                for b in _blockFrames where b.charRange.location < max(end, glyphsToShow.location + 1) && b.charRange.location + b.charRange.length > glyphsToShow.location {
+                    b.block.drawBackground(withFrame: b.bounds.offsetBy(dx: origin.x, dy: origin.y), in: view, characterRange: b.charRange, layoutManager: self)
+                }
+            }
+            for t in _temporary {
+                guard let color = t.attrs[.backgroundColor] as? NSColor, let container = textContainer(forGlyphAt: t.range.location, effectiveRange: nil) else { continue }
+                color.setFill()
+                enumerateEnclosingRects(forGlyphRange: t.range, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container) { r, _ in
+                    NSBezierPath.fill(r.offsetBy(dx: origin.x, dy: origin.y))
+                }
+            }
             // Background colour attribute runs.
             let end = min(storage.length, glyphsToShow.location + glyphsToShow.length)
             if end > glyphsToShow.location {
@@ -746,11 +1030,62 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             let end = glyphsToShow.location + glyphsToShow.length
             for f in _fragments where f.charRange.location < end && f.charRange.location + f.charRange.length > glyphsToShow.location {
                 ctx.saveGState()
-                ctx.translateBy(x: origin.x + f.rect.minX + f.textX, y: origin.y + f.rect.minY + f.baseline)
+                ctx.translateBy(x: origin.x + f.textX, y: origin.y + f.rect.minY + f.baseline)
                 if flipped { ctx.scaleBy(x: 1, y: -1) }
                 ctx.textPosition = .zero
                 CTLineDraw(f.drawnLine, ctx)
                 ctx.restoreGState()
+            }
+            _drawAttachments(forGlyphRange: glyphsToShow, at: origin)
+            _drawSpellingMarks(forGlyphRange: glyphsToShow, at: origin)
+        }
+    }
+
+    /// The rect an attachment occupies (container coordinates, flipped), from its line.
+    internal func _attachmentRect(at index: Int) -> NSRect? {
+        guard let a = _attachments[index], let fi = _fragmentIndex(forCharacter: index) else { return nil }
+        let f = _fragments[fi]
+        let x = f.textX + CTLineGetOffsetForStringIndex(f.line, index, nil)
+        let baselineY = f.rect.minY + f.baseline
+        return NSRect(x: x, y: baselineY - a.size.height - a.baselineOffset, width: a.size.width, height: a.size.height)
+    }
+
+    @MainActor private func _drawAttachments(forGlyphRange range: NSRange, at origin: NSPoint) {
+        guard !_attachments.isEmpty else { return }
+        let end = range.location + range.length
+        let view = firstTextView
+        let sel = view?.selectedRange ?? NSRange(location: NSNotFound, length: 0)
+        for (index, entry) in _attachments where index >= range.location && index < end {
+            guard let r = _attachmentRect(at: index), r.width > 0 || r.height > 0 else { continue }
+            let rect = r.offsetBy(dx: origin.x, dy: origin.y)
+            let selected = sel.location != NSNotFound && index >= sel.location && index < sel.location + sel.length
+            if let cell = entry.attachment.attachmentCell as? NSCell, !(cell is NSTextAttachmentCell) {
+                showAttachmentCell(cell, in: rect, characterIndex: index)
+            } else {
+                entry.attachment._draw(in: rect, characterIndex: index, layoutManager: self, view: view, selected: selected)
+            }
+        }
+    }
+
+    /// Misspelled words (temporary `.spellingState`) get AppKit's dotted underline: red for
+    /// spelling, green for grammar.
+    @MainActor private func _drawSpellingMarks(forGlyphRange range: NSRange, at origin: NSPoint) {
+        let marks = _temporary.filter { ($0.attrs[.spellingState] as? NSNumber)?.intValue ?? 0 != 0 }
+        guard !marks.isEmpty else { return }
+        let end = range.location + range.length
+        for m in marks where m.range.location < end && m.range.location + m.range.length > range.location {
+            let state = (m.attrs[.spellingState] as? NSNumber)?.intValue ?? 1
+            (state & 2 != 0 && state & 1 == 0 ? NSColor.systemGreen : NSColor.systemRed).setFill()
+            for f in _fragments where f.charRange.location < m.range.location + m.range.length && f.visibleEnd > m.range.location {
+                let a = max(m.range.location, f.charRange.location), b = min(m.range.location + m.range.length, f.visibleEnd)
+                guard b > a else { continue }
+                let x0 = f.textX + CTLineGetOffsetForStringIndex(f.line, a, nil), x1 = f.textX + CTLineGetOffsetForStringIndex(f.line, b, nil)
+                let y = origin.y + f.rect.minY + f.baseline + 2
+                var x = origin.x + x0
+                while x < origin.x + x1 {
+                    NSBezierPath.fill(NSRect(x: x, y: y, width: min(2, origin.x + x1 - x), height: 2))
+                    x += 3
+                }
             }
         }
     }
@@ -840,8 +1175,9 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     open func setTemporaryAttributes(_ attrs: [NSAttributedString.Key: Any], forCharacterRange charRange: NSRange) {
         let r = _clampTemp(charRange)
         _temporary.removeAll { NSIntersectionRange($0.range, r).length > 0 || ($0.range.length == 0) }
+        let before = _temporary.contains { NSIntersectionRange($0.range, r).length > 0 && !$0.attrs.keys.allSatisfy(NSLayoutManager._displayOnlyKeys.contains) }
         if r.length > 0, !attrs.isEmpty { _temporary.append((r, attrs)) }
-        _invalidateAll()
+        if before || !attrs.keys.allSatisfy(NSLayoutManager._displayOnlyKeys.contains) { _invalidateAll() }
         _redisplay()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/addtemporaryattributes(_:forcharacterrange:)
@@ -857,6 +1193,9 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         addTemporaryAttributes([attrName: value], forCharacterRange: charRange)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/removetemporaryattribute(_:forcharacterrange:)
+    /// Temporary attributes drawn over the laid-out text without changing its layout.
+    private static let _displayOnlyKeys: Set<NSAttributedString.Key> = [.spellingState, .backgroundColor]
+
     open func removeTemporaryAttribute(_ attrName: NSAttributedString.Key, forCharacterRange charRange: NSRange) {
         let r = _clampTemp(charRange)
         _temporary = _temporary.compactMap { t in
@@ -865,7 +1204,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             a[attrName] = nil
             return a.isEmpty ? nil : (t.range, a)
         }
-        _invalidateAll()
+        if !NSLayoutManager._displayOnlyKeys.contains(attrName) { _invalidateAll() }
         _redisplay()
     }
 
@@ -963,21 +1302,50 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setdrawsoutsidelinefragment(_:forglyphat:)
     open func setDrawsOutsideLineFragment(_ flag: Bool, forGlyphAt glyphIndex: Int) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setattachmentsize(_:forglyphrange:)
-    open func setAttachmentSize(_ attachmentSize: NSSize, forGlyphRange glyphRange: NSRange) { unimplemented() }
+    open func setAttachmentSize(_ attachmentSize: NSSize, forGlyphRange glyphRange: NSRange) {
+        for i in glyphRange.location..<(glyphRange.location + max(1, glyphRange.length)) { _attachmentSizeOverrides[i] = attachmentSize }
+        _invalidateAll()
+        _redisplay()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/attachmentsize(forglyphat:)
-    open func attachmentSize(forGlyphAt glyphIndex: Int) -> NSSize { unimplemented() }
+    open func attachmentSize(forGlyphAt glyphIndex: Int) -> NSSize {
+        _ensureLayout()
+        return _attachments[glyphIndex]?.size ?? NSSize(width: -1, height: -1)    // AppKit's "no attachment" answer
+    }
+    private func _blockFrame(_ block: NSTextBlock, at glyphIndex: Int) -> _BlockFrame? {
+        _ensureLayout()
+        return _blockFrames.first { $0.block === block && glyphIndex >= $0.charRange.location && glyphIndex < $0.charRange.location + max(1, $0.charRange.length) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/boundsrect(for:at:effectiverange:)
-    open func boundsRect(for block: NSTextBlock, at glyphIndex: Int, effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect { unimplemented() }
+    open func boundsRect(for block: NSTextBlock, at glyphIndex: Int, effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect {
+        guard let f = _blockFrame(block, at: glyphIndex) else { effectiveGlyphRange?.pointee = NSRange(location: NSNotFound, length: 0); return .zero }
+        effectiveGlyphRange?.pointee = f.charRange
+        return f.bounds
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/boundsrect(for:glyphrange:)
-    open func boundsRect(for block: NSTextBlock, glyphRange: NSRange) -> NSRect { unimplemented() }
+    open func boundsRect(for block: NSTextBlock, glyphRange: NSRange) -> NSRect { boundsRect(for: block, at: glyphRange.location, effectiveRange: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/layoutrect(for:at:effectiverange:)
-    open func layoutRect(for block: NSTextBlock, at glyphIndex: Int, effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect { unimplemented() }
+    open func layoutRect(for block: NSTextBlock, at glyphIndex: Int, effectiveRange effectiveGlyphRange: NSRangePointer?) -> NSRect {
+        guard let f = _blockFrame(block, at: glyphIndex) else { effectiveGlyphRange?.pointee = NSRange(location: NSNotFound, length: 0); return .zero }
+        effectiveGlyphRange?.pointee = f.charRange
+        return f.layout
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/layoutrect(for:glyphrange:)
-    open func layoutRect(for block: NSTextBlock, glyphRange: NSRange) -> NSRect { unimplemented() }
+    open func layoutRect(for block: NSTextBlock, glyphRange: NSRange) -> NSRect { layoutRect(for: block, at: glyphRange.location, effectiveRange: nil) }
+    /// Typesetters call these while laying out; the CoreText layout records its own rects,
+    /// so a value set here lasts until the next layout pass.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setboundsrect(_:for:glyphrange:)
-    open func setBoundsRect(_ rect: NSRect, for block: NSTextBlock, glyphRange: NSRange) { unimplemented() }
+    open func setBoundsRect(_ rect: NSRect, for block: NSTextBlock, glyphRange: NSRange) {
+        _ensureLayout()
+        if let i = _blockFrames.firstIndex(where: { $0.block === block && NSIntersectionRange($0.charRange, glyphRange).length > 0 }) { _blockFrames[i].bounds = rect }
+        else { _blockFrames.append(_BlockFrame(block: block, bounds: rect, layout: rect, charRange: glyphRange, container: 0)) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setlayoutrect(_:for:glyphrange:)
-    open func setLayoutRect(_ rect: NSRect, for block: NSTextBlock, glyphRange: NSRange) { unimplemented() }
+    open func setLayoutRect(_ rect: NSRect, for block: NSTextBlock, glyphRange: NSRange) {
+        _ensureLayout()
+        if let i = _blockFrames.firstIndex(where: { $0.block === block && NSIntersectionRange($0.charRange, glyphRange).length > 0 }) { _blockFrames[i].layout = rect }
+        else { _blockFrames.append(_BlockFrame(block: block, bounds: rect, layout: rect, charRange: glyphRange, container: 0)) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/ruleraccessoryview(for:paragraphstyle:ruler:enabled:)
     open func rulerAccessoryView(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView, enabled isEnabled: Bool) -> NSView? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/rulermarkers(for:paragraphstyle:ruler:)

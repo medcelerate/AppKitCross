@@ -55,7 +55,7 @@ public final class CTRun: NSObject {
     /// Draws glyphs `range` at `origin` (the line origin in `ctx` user space).
     func draw(in ctx: CGContext, range: CFRange, origin: CGPoint, lineAscent: CGFloat, lineDescent: CGFloat) {
         let r = resolvedRange(range)
-        guard !r.isEmpty else { return }
+        guard !r.isEmpty, attributes[.ctRunDelegate] == nil else { return }   // a delegate's space draws nothing
         let m = ctx.textMatrix
         let color: CGColor = {
             if let c = foregroundColor { return c }
@@ -69,12 +69,15 @@ public final class CTRun: NSObject {
             ctx.restoreGState()
         }
         var absolute: [CGPoint] = []
+        var drawn: [CGGlyph] = []
         absolute.reserveCapacity(r.count)
         for i in r {
+            // Whitespace has no ink; tabs and line breaks would show the font's missing-glyph box.
+            if isWhitespace[i] { continue }
             let p = positions[i].applying(m)
             absolute.append(CGPoint(x: origin.x + p.x, y: origin.y + p.y))
+            drawn.append(glyphs[i])
         }
-        let drawn = Array(glyphs[r])
         font.engine.draw(glyphs: drawn, positions: absolute, color: color, in: ctx)
         if let styleValue = _ctNumber(attributes[.ctUnderlineStyle]).map({ Int32($0) }), styleValue != 0 {
             let style = CTUnderlineStyle(rawValue: styleValue & 0xFF)
@@ -162,8 +165,14 @@ public final class CTLine: NSObject {
         self.trailingWhitespaceWidth = trailingWhitespaceWidth
         self.fallbackFont = fallbackFont
         var a: CGFloat = 0, d: CGFloat = 0, l: CGFloat = 0
-        let fonts = runs.isEmpty ? [fallbackFont] : runs.map(\.font)
-        for f in fonts { a = max(a, f.engine.ascent); d = max(d, f.engine.descent); l = max(l, f.engine.leading) }
+        if runs.isEmpty { a = fallbackFont.engine.ascent; d = fallbackFont.engine.descent; l = fallbackFont.engine.leading }
+        for r in runs {
+            if let delegate = r.attributes[.ctRunDelegate] as? CTRunDelegate {
+                a = max(a, delegate.ascent); d = max(d, delegate.descent)
+            } else {
+                a = max(a, r.font.engine.ascent); d = max(d, r.font.engine.descent); l = max(l, r.font.engine.leading)
+            }
+        }
         ascent = a; descent = d; leading = l
     }
 

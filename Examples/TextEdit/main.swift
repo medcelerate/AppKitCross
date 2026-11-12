@@ -5,9 +5,17 @@
 // document controller; closing an edited window or quitting asks about unsaved changes;
 // the window title carries the file name and the edited mark.
 //
+// The text view is an editor (ADR-0030): Edit > Find (the find bar), Spelling and Grammar
+// (continuous checking, the Spelling panel, guesses in the context menu), Substitutions
+// and Complete; Format > Lists and Table; images dropped or pasted into rich text become
+// attachments, and a rich document with attachments is saved as RTFD.
+//
 // Headless modes for CI: `--roundtrip out.rtf` makes a document through the document
 // controller, writes it as RTF, reads it back and checks the attributes;
+// `--roundtrip-rtfd out.rtfd` does the same for a list, a table and an attachment in RTFD;
 // `--show-save-panel` opens an untitled document with the save panel up (screenshots);
+// `--sample-screenshot dir` renders a document with a list, a table and an attachment to
+// dir/textedit-sample-<platform>.png (the comparison page).
 // `--print-pdf out.pdf` prints a ninety-line document to a PDF and checks its page count.
 
 import AppKit
@@ -46,8 +54,42 @@ final class TextDocument: NSDocument {
     private var changeObserver: NSObjectProtocol?
 
     nonisolated static let rtfType = "public.rtf"
+    nonisolated static let rtfdType = "com.apple.rtfd"
 
-    var isRichText: Bool { fileType == TextDocument.rtfType }
+    var isRichText: Bool { fileType == TextDocument.rtfType || fileType == TextDocument.rtfdType }
+
+    // MARK: RTFD (a directory: TXT.rtf and the attachments' files)
+
+    override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
+        guard typeName == TextDocument.rtfdType else { return try super.read(from: fileWrapper, ofType: typeName) }
+        guard let parsed = NSAttributedString(RTFDFileWrapper: fileWrapper, documentAttributes: nil) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.Code.fileReadCorruptFile.rawValue,
+                          userInfo: [NSLocalizedDescriptionKey: "The file is not a valid RTFD document."])
+        }
+        // Parsed here, handed to the main actor: nothing else holds it.
+        nonisolated(unsafe) let text = parsed
+        MainActor.assumeIsolated {
+            contents = text
+            if let tv = textView { tv.textStorage?.setAttributedString(text) }
+        }
+    }
+
+    override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
+        guard typeName == TextDocument.rtfdType else { return try super.fileWrapper(ofType: typeName) }
+        let text = textView?.textStorage.map { $0.copy() as! NSAttributedString } ?? contents
+        guard let wrapper = text.rtfdFileWrapper(from: NSRange(location: 0, length: text.length), documentAttributes: [:]) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.Code.fileWriteUnknown.rawValue, userInfo: [NSLocalizedDescriptionKey: "The text could not be written as RTFD."])
+        }
+        return wrapper
+    }
+
+    /// A rich text document that gains an attachment becomes RTFD (RTF cannot hold one),
+    /// as TextEdit converts it; the next save writes the .rtfd next to the .rtf.
+    private func convertToRTFDIfNeeded() {
+        guard fileType == TextDocument.rtfType, let st = textView?.textStorage, st.containsAttachments else { return }
+        fileType = TextDocument.rtfdType
+        if let url = fileURL { fileURL = url.deletingPathExtension().appendingPathExtension("rtfd") }
+    }
 
     // MARK: Reading and writing
 
@@ -73,7 +115,7 @@ final class TextDocument: NSDocument {
     }
 
     override func data(ofType typeName: String) throws -> Data {
-        let text = textView?.textStorage.map { NSAttributedString(attributedString: $0) } ?? contents
+        let text = textView?.textStorage.map { $0.copy() as! NSAttributedString } ?? contents
         if typeName == TextDocument.rtfType {
             guard let data = text.rtf(from: NSRange(location: 0, length: text.length)) else {
                 throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.Code.fileWriteUnknown.rawValue, userInfo: [NSLocalizedDescriptionKey: "The text could not be written as RTF."])
@@ -97,7 +139,7 @@ final class TextDocument: NSDocument {
         scroll.hasVerticalScroller = true
         let tv = NSTextView(frame: scroll.bounds)
         tv.autoresizingMask = [.width, .height]
-        tv.isRichText = isRichText
+        TextDocument.configure(tv, rich: isRichText)
         tv.font = NSFont.userFont(ofSize: 13)
         tv.textStorage?.setAttributedString(contents)
         tv.setAccessibilityLabel("Document text")
@@ -108,7 +150,10 @@ final class TextDocument: NSDocument {
         // Each edit is a change (the text view does not register undo actions yet, so the
         // undo manager cannot drive the change count).
         changeObserver = NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: tv, queue: nil) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateChangeCount(.changeDone) }
+            MainActor.assumeIsolated {
+                self?.convertToRTFDIfNeeded()
+                self?.updateChangeCount(.changeDone)
+            }
         }
         let controller = NSWindowController(window: window)
         controller.shouldCascadeWindows = true
@@ -126,9 +171,22 @@ final class TextDocument: NSDocument {
 
     /// Format > Make Rich Text / Make Plain Text: switches the document's type; the next
     /// save goes through the save panel with the matching extension.
+    /// The editor settings TextEdit uses: the find bar, spell checking while typing, and
+    /// for rich text graphics (attachments by drag and drop or paste).
+    static func configure(_ tv: NSTextView, rich: Bool) {
+        tv.isRichText = rich
+        tv.importsGraphics = rich
+        tv.usesFindBar = true
+        tv.isIncrementalSearchingEnabled = true
+        tv.isContinuousSpellCheckingEnabled = true
+        tv.allowsUndo = true
+        tv.isAutomaticQuoteSubstitutionEnabled = rich
+        tv.isAutomaticDashSubstitutionEnabled = rich
+    }
+
     func toggleRichText() {
         fileType = isRichText ? "public.plain-text" : TextDocument.rtfType
-        textView?.isRichText = isRichText
+        if let tv = textView { TextDocument.configure(tv, rich: isRichText) }
         fileURL = nil
         updateChangeCount(.changeDone)
     }
@@ -202,8 +260,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         edit.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
         edit.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+        let matchStyle = edit.addItem(withTitle: "Paste and Match Style", action: Selector(("pasteAsPlainText:")), keyEquivalent: "v")
+        matchStyle.keyEquivalentModifierMask = [.command, .option, .shift]
         edit.addItem(NSMenuItem.separator())
         edit.addItem(withTitle: "Select All", action: Selector(("selectAll:")), keyEquivalent: "a")
+        let complete = edit.addItem(withTitle: "Complete", action: Selector(("complete:")), keyEquivalent: "\u{1B}")
+        complete.keyEquivalentModifierMask = [.option]
+        edit.addItem(NSMenuItem.separator())
+        edit.addItem(submenu("Find", AppDelegate.findItems()))
+        edit.addItem(submenu("Spelling and Grammar", [
+            item("Show Spelling and Grammar", "showGuessPanel:", ":"),
+            item("Check Document Now", "checkSpelling:", ";"),
+            .separator(),
+            item("Check Spelling While Typing", "toggleContinuousSpellChecking:"),
+            item("Check Grammar With Spelling", "toggleGrammarChecking:"),
+            item("Correct Spelling Automatically", "toggleAutomaticSpellingCorrection:"),
+        ]))
+        edit.addItem(submenu("Substitutions", [
+            item("Show Substitutions", "orderFrontSubstitutionsPanel:"),
+            .separator(),
+            item("Smart Copy/Paste", "toggleSmartInsertDelete:"),
+            item("Smart Quotes", "toggleAutomaticQuoteSubstitution:"),
+            item("Smart Dashes", "toggleAutomaticDashSubstitution:"),
+            item("Text Replacement", "toggleAutomaticTextReplacement:"),
+        ]))
         editItem.submenu = edit
         main.addItem(editItem)
 
@@ -211,6 +291,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let format = NSMenu(title: "Format")
         let rich = format.addItem(withTitle: "Make Rich Text", action: Selector(("toggleRichText:")), keyEquivalent: "t")
         rich.keyEquivalentModifierMask = [.command, .shift]
+        format.addItem(NSMenuItem.separator())
+        // Items naming a marker format (or a table size) act at once; the plain ones open
+        // the text view's Lists and Table panels.
+        func list(_ title: String, _ format: String) -> NSMenuItem {
+            let i = item(title, "orderFrontListPanel:")
+            i.representedObject = format
+            return i
+        }
+        format.addItem(submenu("Lists", [
+            list("Bulleted List", "{disc}"), list("Dashed List", "{hyphen}"), list("Numbered List", "{decimal}."),
+            list("Lettered List", "{lower-alpha}."), list("Roman Numeral List", "{upper-roman}."),
+            list("Remove List", ""), .separator(), item("Lists\u{2026}", "orderFrontListPanel:"),
+        ]))
+        let table3 = item("Insert 3 \u{00D7} 3 Table", "orderFrontTablePanel:")
+        table3.representedObject = [3, 3]
+        format.addItem(submenu("Table", [item("Table\u{2026}", "orderFrontTablePanel:"), table3]))
         formatItem.submenu = format
         main.addItem(formatItem)
 
@@ -218,6 +314,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Edit > Find, by NSTextFinder action tag as AppKit's menu has them.
+    static func findItems() -> [NSMenuItem] {
+        let entries: [(String, String, NSEvent.ModifierFlags, NSTextFinder.Action)] = [
+            ("Find\u{2026}", "f", [.command], .showFindInterface),
+            ("Find and Replace\u{2026}", "f", [.command, .option], .showReplaceInterface),
+            ("Find Next", "g", [.command], .nextMatch),
+            ("Find Previous", "g", [.command, .shift], .previousMatch),
+            ("Use Selection for Find", "e", [.command], .setSearchString),
+        ]
+        return entries.map { title, key, mods, action in
+            let i = NSMenuItem(title: title, action: Selector(("performTextFinderAction:")), keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods
+            i.tag = action.rawValue
+            return i
+        }
+    }
+}
+
+@MainActor func item(_ title: String, _ action: String, _ key: String = "") -> NSMenuItem {
+    NSMenuItem(title: title, action: Selector((action)), keyEquivalent: key)
+}
+
+@MainActor func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
+    let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    let menu = NSMenu(title: title)
+    for i in items { menu.addItem(i) }
+    parent.submenu = menu
+    return parent
 }
 
 // MARK: - Headless modes
@@ -260,6 +385,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// The sample for `--roundtrip-rtfd` and `--sample-screenshot`: a heading, a numbered
+/// list with a nested item, a 2×3 table and an image attachment.
+@MainActor func sampleDocument() -> NSAttributedString {
+    let font = NSFont.systemFont(ofSize: 13)
+    let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 560, height: 400))
+    TextDocument.configure(tv, rich: true)
+    tv.font = font
+    tv.typingAttributes = [.font: font, .foregroundColor: NSColor.textColor]
+    tv.insertText("Text extras\n")
+    tv.textStorage?.addAttribute(.font, value: NSFont.boldSystemFont(ofSize: 17), range: NSRange(location: 0, length: 11))
+    tv.typingAttributes = [.font: font, .foregroundColor: NSColor.textColor]
+    tv.insertText("Groceries")
+    tv.orderFrontListPanel(listItem("{decimal}."))
+    for (text, nest) in [("Apples", false), ("Pears", false), ("Conference pears", true)] {
+        tv.insertNewline(nil)
+        if nest { tv.insertTab(nil) }
+        tv.insertText(text)
+    }
+    tv.insertNewline(nil)
+    tv.insertBacktab(nil)
+    tv.insertNewline(nil)
+    tv.insertNewline(nil)
+    tv.insertSampleTable()
+    let image = NSImage(size: NSSize(width: 48, height: 32), flipped: false) { r in
+        NSColor.systemBlue.setFill(); NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6).fill()
+        NSColor.white.setFill(); NSBezierPath(ovalIn: NSRect(x: 16, y: 8, width: 16, height: 16)).fill()
+        return true
+    }
+    let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+    let wrapper = FileWrapper(regularFileWithContents: rep.representation(using: .png, properties: [:])!)
+    wrapper.preferredFilename = "badge.png"
+    let attachment = NSTextAttachment(fileWrapper: wrapper)
+    tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+    tv.insertText("An attachment: ")
+    tv.insertText(NSAttributedString(attachment: attachment), replacementRange: NSRange(location: NSNotFound, length: 0))
+    tv.insertText(" sits on the baseline, and a mispeled word is underlined.")
+    // copy(): corelibs' init(attributedString:) does not read an NSTextStorage's backing.
+    return tv.textStorage!.copy() as! NSAttributedString
+}
+
+@MainActor func listItem(_ format: String) -> NSMenuItem {
+    let i = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    i.representedObject = format
+    return i
+}
+
+extension NSTextView {
+    /// A 2×3 table through the Format menu's path, its cells filled by Tab.
+    @MainActor func insertSampleTable() {
+        let insert = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        insert.representedObject = [2, 3]
+        orderFrontTablePanel(insert)
+        for (i, text) in ["Fruit", "Kind", "Price", "Apple", "Gala", "0.40"].enumerated() {
+            if i > 0 { insertTab(nil) }
+            insertText(text)
+        }
+        setSelectedRange(NSRange(location: (string as NSString).length, length: 0))
+    }
+}
+
+/// `--roundtrip-rtfd out.rtfd`: the sample written as RTFD through the document and read back.
+@MainActor func roundTripRTFD(to path: String) -> Int32 {
+    let dc = NSDocumentController.shared
+    let url = URL(fileURLWithPath: path)
+    do {
+        let doc = try dc.makeUntitledDocument(ofType: TextDocument.rtfdType) as! TextDocument
+        let text = sampleDocument()
+        doc.contents = text
+        try doc.write(to: url, ofType: TextDocument.rtfdType)
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+        print("wrote \(url.path): \(files.sorted())")
+        let back = try dc.makeDocument(withContentsOf: url, ofType: TextDocument.rtfdType) as! TextDocument
+        let s = back.contents
+        guard s.string == text.string else { print("FAIL: text differs:\n\(s.string.debugDescription)\n\(text.string.debugDescription)"); return 1 }
+        guard s.containsAttachments else { print("FAIL: attachment lost (written \(text.length) characters, attachment \(text.containsAttachments))"); return 1 }
+        var lists = 0, cells = 0
+        s.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: s.length), options: []) { v, _, _ in
+            guard let p = v as? NSParagraphStyle else { return }
+            if !p.textLists.isEmpty { lists += 1 }
+            if p.textBlocks.first is NSTextTableBlock { cells += 1 }
+        }
+        guard lists > 0 else { print("FAIL: lists lost"); return 1 }
+        guard cells >= 6 else { print("FAIL: table lost (\(cells) cell runs)"); return 1 }
+        print("RTFD round trip OK: \(s.length) characters, list paragraphs, \(cells) table cells and the attachment kept")
+        return 0
+    } catch {
+        print("FAIL: \(error)")
+        return 1
+    }
+}
+
 /// `--print-pdf out.pdf`: a document with ninety lines of text, its window made (not
 /// shown), printed to a PDF through the document's own print operation without the
 /// panels (ADR-0022); the page count must be more than one. Runs on every CI job: the
@@ -295,6 +511,13 @@ let arguments = CommandLine.arguments.dropFirst()
 if let i = arguments.firstIndex(of: "--roundtrip"), i + 1 <= arguments.endIndex - 1 {
     exit(roundTrip(to: arguments[i + 1]))
 }
+if let i = arguments.firstIndex(of: "--roundtrip-rtfd"), i + 1 <= arguments.endIndex - 1 {
+    exit(roundTripRTFD(to: arguments[i + 1]))
+}
+
+if arguments.contains("--paste-selftest") {
+    exit(pasteSelfTest())
+}
 if let i = arguments.firstIndex(of: "--print-pdf"), i + 1 <= arguments.endIndex - 1 {
     exit(printToPDF(arguments[i + 1]))
 }
@@ -302,6 +525,24 @@ if let i = arguments.firstIndex(of: "--print-pdf"), i + 1 <= arguments.endIndex 
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
+if let i = arguments.firstIndex(of: "--sample-screenshot"), i + 1 <= arguments.endIndex - 1 {
+    // For the comparison page: the sample in a document window, rendered once laid out.
+    let dir = arguments[i + 1]
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        MainActor.assumeIsolated {
+            guard let doc = NSDocumentController.shared.currentDocument as? TextDocument,
+                  let w = doc.windowControllers.first?.window,
+                  let tv = w.initialFirstResponder as? NSTextView else { exit(1) }
+            if doc.fileType != TextDocument.rtfdType { doc.fileType = TextDocument.rtfdType; TextDocument.configure(tv, rich: true) }
+            tv.textStorage?.setAttributedString(sampleDocument())
+            tv.setSelectedRange(NSRange(location: 0, length: 0))
+            tv.checkTextInDocument(nil)
+            w.display()
+            writeScreenshot(of: w, named: "textedit-sample", to: dir)
+            exit(0)
+        }
+    }
+}
 if arguments.contains("--show-save-panel") {
     // For screenshots: an untitled document with its save panel up (the package-drawn
     // panel under Xvfb without a portal, or with APPKITWIN_FILE_DIALOG=package).
@@ -310,3 +551,128 @@ if arguments.contains("--show-save-panel") {
     }
 }
 app.run()
+
+/// `--paste-selftest`: puts a 2×2 bitmap on the system clipboard the way other Windows
+/// applications do (CF_BITMAP only; elsewhere a BMP through NSPasteboard), then checks each
+/// stage of pasting it: the pasteboard types, the image decoding, the type of a new
+/// document, and Paste's validation and result in a plain-text and a rich-text view.
+/// Prints PASS/FAIL per stage; exit status 1 when a stage that should pass fails. Combine
+/// with APPKITWIN_TRACE_PASTEBOARD=1 for the detailed log.
+@MainActor func pasteSelfTest() -> Int32 {
+    var failed = false
+    func stage(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
+        let d = detail()
+        print("\(ok ? "PASS" : "FAIL"): \(name)\(d.isEmpty ? "" : " (\(d))")")
+        fflush(nil)
+        if !ok { failed = true }
+    }
+    let pb = NSPasteboard.general
+    let bmpType = NSPasteboard.PasteboardType("com.microsoft.bmp")
+    #if os(Windows)
+    let realClipboard = ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == nil
+    #else
+    let realClipboard = false
+    #endif
+    if realClipboard {
+    #if os(Windows)
+    var pixels: [UInt32] = [0x00FF0000, 0x000000FF, 0x0000FF00, 0x00FFFFFF]
+    var placed = false
+    if let hbm = CreateBitmap(2, 2, 1, 32, &pixels) {
+        if OpenClipboard(nil) {
+            EmptyClipboard()
+            placed = SetClipboardData(UINT(CF_BITMAP), HANDLE(hbm)) != nil
+            CloseClipboard()
+        }
+        if !placed { DeleteObject(HGDIOBJ(hbm)) }
+    }
+    stage("1 put a CF_BITMAP on the Windows clipboard", placed, placed ? "" : "error \(GetLastError())")
+    #endif
+    } else {
+    var dib = Data()
+    func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+    le(0x4D42, 2); le(14 + 40 + 16, 4); le(0, 4); le(54, 4)
+    le(40, 4); le(2, 4); le(2, 4); le(1, 2); le(32, 2); le(0, 4); le(16, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+    dib.append(contentsOf: [0, 0, 255, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255, 255, 255, 0])
+    _ = pb.clearContents()
+    stage("1 put a BMP on the general pasteboard", pb.setData(dib, forType: bmpType))
+    }
+    let types = (pb.types ?? []).map(\.rawValue)
+    let imageType = [NSPasteboard.PasteboardType.png, .tiff, bmpType].first { pb.types?.contains($0) == true }
+    stage("2 NSPasteboard.general reports an image type", imageType != nil, "types \(types)")
+    let image = imageType.flatMap { pb.data(forType: $0) }.flatMap { NSImage(data: $0) }
+    stage("3 the image data decodes", image != nil, image.map { "size \($0.size)" } ?? "NSImage(data:) nil")
+
+    let dc = NSDocumentController.shared
+    let defaultType = dc.defaultType ?? "none"
+    let defaultIsRich = defaultType == TextDocument.rtfType || defaultType == TextDocument.rtfdType
+    print("INFO: File > New makes \(defaultType) documents (\(defaultIsRich ? "rich text: images paste" : "plain text: Paste stays disabled for an image; use Format > Make Rich Text"))")
+
+    let paste = NSMenuItem(title: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
+    let matchStyle = NSMenuItem(title: "Paste and Match Style", action: Selector(("pasteAsPlainText:")), keyEquivalent: "v")
+    for rich in [false, true] {
+        let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+        TextDocument.configure(tv, rich: rich)
+        tv.string = "ab"
+        tv.setSelectedRange(NSRange(location: 1, length: 0))
+        let kind = rich ? "rich" : "plain"
+        let enabled = tv.validateMenuItem(paste)
+        stage("4 \(kind) text view: Paste \(rich ? "enabled" : "disabled") for an image", enabled == rich,
+              "readable \(tv.readablePasteboardTypes.map(\.rawValue)), Paste \(enabled ? "enabled" : "disabled"), Paste and Match Style \(tv.validateMenuItem(matchStyle) ? "enabled" : "disabled")")
+        let drags = tv.registeredDraggedTypes.map(\.rawValue)
+        stage("4 \(kind) text view: drop types \(rich ? "include file URLs and images" : "are text only")", rich == (drags.contains("public.file-url") && drags.contains("com.microsoft.bmp")), "registered \(drags)")
+        guard rich else { continue }
+        tv.paste(nil)
+        let a = tv.textStorage.flatMap { $0.length > 1 ? $0.attribute(.attachment, at: 1, effectiveRange: nil) as? NSTextAttachment : nil }
+        stage("5 rich text view: Paste inserts an attachment", a != nil, "text \(tv.string.unicodeScalars.map { $0.value == 0xFFFC ? "<attachment>" : String($0) }.joined()), file \(a?.fileWrapper?.preferredFilename ?? "none")")
+        // Save as RTFD through the document and open it again, as File > Save and Open do.
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("paste-selftest-\(ProcessInfo.processInfo.processIdentifier).rtfd")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let doc = try dc.makeUntitledDocument(ofType: TextDocument.rtfdType) as! TextDocument
+            doc.contents = tv.textStorage!.copy() as! NSAttributedString
+            try doc.write(to: url, ofType: TextDocument.rtfdType)
+            let files = ((try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []).sorted()
+            let rtf = (try? String(contentsOf: url.appendingPathComponent("TXT.rtf"), encoding: .utf8)) ?? ""
+            stage("6 saved as RTFD", files.contains("TXT.rtf") && files.contains("Pasted Graphic.bmp"), "files \(files)")
+            print("INFO: TXT.rtf: \(rtf.debugDescription)")
+            let type = (try? dc.typeForContents(of: url)) ?? "unknown"
+            let back = try dc.makeDocument(withContentsOf: url, ofType: type) as! TextDocument
+            let s = back.contents
+            let b = s.length > 1 ? s.attribute(.attachment, at: 1, effectiveRange: nil) as? NSTextAttachment : nil
+            stage("7 reopened RTFD keeps the attachment", b != nil && b?.fileWrapper?.regularFileContents != nil,
+                  "type \(type), text \(s.string.unicodeScalars.map { $0.value == 0xFFFC ? "<attachment>" : String($0) }.joined().debugDescription), file \(b?.fileWrapper?.preferredFilename ?? "none") \(b?.fileWrapper?.regularFileContents?.count ?? -1) bytes")
+        } catch {
+            stage("6 save and reopen as RTFD", false, "\(error)")
+        }
+    }
+    print(failed ? "paste self-test: FAILED" : "paste self-test: passed")
+    return failed ? 1 : 0
+}
+
+/// Renders a window's content over its background to <dir>/<name>-<platform>.png.
+@MainActor func writeScreenshot(of w: NSWindow, named name: String, to dir: String) {
+    #if os(Windows)
+    let platform = "windows"
+    #elseif os(Linux)
+    let platform = "linux"
+    #else
+    let platform = "macos"
+    #endif
+    try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    guard let cv = w.contentView, let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { return }
+    cv.cacheDisplay(in: cv.bounds, to: rep)
+    let composed = NSImage(size: cv.bounds.size)
+    composed.lockFocus()
+    w.effectiveAppearance.performAsCurrentDrawingAppearance {
+        w.backgroundColor.setFill()
+        NSBezierPath.fill(NSRect(origin: .zero, size: cv.bounds.size))
+    }
+    if let cg = rep.cgImage { NSGraphicsContext.current?.cgContext.draw(cg, in: NSRect(origin: .zero, size: cv.bounds.size)) }
+    composed.unlockFocus()
+    guard let final = composed.cgImage(forProposedRect: nil, context: nil, hints: nil),
+          let png = NSBitmapImageRep(cgImage: final).representation(using: .png, properties: [:]) else { return }
+    let path = (dir as NSString).appendingPathComponent("\(name)-\(platform).png")
+    try? png.write(to: URL(fileURLWithPath: path))
+    print("screenshot: \(path)")
+    fflush(nil)
+}

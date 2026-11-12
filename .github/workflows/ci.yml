@@ -32,6 +32,10 @@ jobs:
         run: .build/debug/Drawing --export drawing-macos.png
       - name: TextEdit example headless document round trip (NSDocumentController, RTF)
         run: .build/debug/TextEdit --roundtrip textedit-macos.rtf
+      - name: TextEdit example RTFD round trip (a list, a table and an attachment)
+        run: .build/debug/TextEdit --roundtrip-rtfd textedit-macos.rtfd
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: APPKITWIN_TRACE_PASTEBOARD=1 .build/debug/TextEdit --paste-selftest
       - name: TextEdit example prints to PDF (ADR-0022, Apple's PDF writer)
         run: .build/debug/TextEdit --print-pdf textedit-macos.pdf
       - name: AudioPlayer example offline render (Apple's AVFoundation)
@@ -72,6 +76,15 @@ jobs:
         run: .build/debug/TextEdit.exe --roundtrip textedit-windows.rtf
         env:
           APPKITWIN_HOST_BACKEND: "1"
+      - name: TextEdit example RTFD round trip (a list, a table and an attachment)
+        run: .build/debug/TextEdit.exe --roundtrip-rtfd textedit-windows.rtfd
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: .build/debug/TextEdit.exe --paste-selftest
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
+          APPKITWIN_TRACE_PASTEBOARD: "1"
       - name: TextEdit example prints to PDF (ADR-0022, the recording CGContext and the PDF writer)
         run: .build/debug/TextEdit.exe --print-pdf textedit-windows.pdf
         env:
@@ -94,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install packages (Azure Ubuntu mirror, with retries)
-        run: tools/ci/apt-install.sh pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev
+        run: tools/ci/apt-install.sh pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev libhunspell-1.7-0 hunspell-en-us
       - run: swift build
       - name: Build every example
         shell: bash
@@ -103,6 +116,10 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
       - name: TextEdit example headless document round trip on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --roundtrip textedit-linux.rtf
+      - name: TextEdit example RTFD round trip (a list, a table and an attachment)
+        run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --roundtrip-rtfd textedit-linux.rtfd
+      - name: TextEdit paste self-test (paste an image, save as RTFD, reopen)
+        run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_TRACE_PASTEBOARD=1 .build/debug/TextEdit --paste-selftest
       - name: TextEdit example prints to PDF (ADR-0022, Cairo's PDF surface)
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --print-pdf textedit-linux.pdf
       - name: AudioPlayer example offline render (no sound device on the runner)
