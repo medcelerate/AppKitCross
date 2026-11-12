@@ -187,19 +187,26 @@ final class GlobalsFoundationTests: XCTestCase, @unchecked Sendable {
 
     func testDrawBitmapAndBezels() {
         MainActor.assumeIsolated {
-            // A 2x1 meshed RGB bitmap: red then blue, stretched over the whole context.
-            var bytes: [UInt8] = [255, 0, 0, 0, 0, 255]
+            // A 4x4 meshed RGB bitmap, left half red and right half blue, stretched over the
+            // bottom half. Samples sit in the middle of each colour block: a scaled image is
+            // filtered, and at the image's outer edge Cairo blends with transparent padding
+            // where CoreGraphics clamps, so edge pixels differ by backend.
+            let red: [UInt8] = [255, 0, 0], blue: [UInt8] = [0, 0, 255]
+            let row = [red, red, blue, blue].flatMap { $0 }
+            var bytes: [UInt8] = Array(repeating: row, count: 4).flatMap { $0 }
             let ctx = withBitmapContext { _ in
                 bytes.withUnsafeBufferPointer { buf in
                     var planes: [UnsafePointer<UInt8>?] = [buf.baseAddress, nil, nil, nil, nil]
-                    NSDrawBitmap(NSRect(x: 0, y: 0, width: 40, height: 20), 2, 1, 8, 3, 24, 6, false, false, .deviceRGB, &planes)
+                    NSDrawBitmap(NSRect(x: 0, y: 0, width: 40, height: 20), 4, 4, 8, 3, 24, 12, false, false, .deviceRGB, &planes)
                 }
                 NSDrawButton(NSRect(x: 0, y: 20, width: 40, height: 20), NSRect(x: 0, y: 0, width: 40, height: 40))
             }
             let image = ctx.makeImage()!
-            XCTAssertEqual(rgba(image, 5, 10).r, 255)
-            XCTAssertEqual(rgba(image, 5, 10).b, 0)
-            XCTAssertEqual(rgba(image, 35, 10).b, 255)
+            // (10, 10) and (30, 10) map to source (1, 2) and (3, 2): between two pixels of one colour.
+            XCTAssertEqual(rgba(image, 10, 10).r, 255)
+            XCTAssertEqual(rgba(image, 10, 10).b, 0)
+            XCTAssertEqual(rgba(image, 30, 10).b, 255)
+            XCTAssertEqual(rgba(image, 30, 10).r, 0)
             // NSDrawButton: black outer bottom/right, white top/left, light grey face.
             XCTAssertEqual(rgba(image, 39, 30).r, 0, "outer right edge is black")
             XCTAssertEqual(rgba(image, 0, 30).r, 255, "left edge is white")
