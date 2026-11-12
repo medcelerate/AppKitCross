@@ -6,7 +6,7 @@ What it demonstrates:
 
 - `NSWorkspace.open(_:)` with a URL: the default browser opens it (ShellExecute on
   Windows, the `x-scheme-handler` desktop entry or `xdg-open` on Linux).
-- `activateFileViewerSelecting(_:)` reveals this executable in Explorer or the file
+- `selectFile(_:inFileViewerRootedAtPath:)` reveals this executable in Explorer or the file
   manager (`org.freedesktop.FileManager1.ShowItems`); `selectFile(nil, inFileViewerRootedAtPath:)`
   opens a folder.
 - `icon(forFileType:)`, `icon(for: UTType)`, `icon(forFile:)` and

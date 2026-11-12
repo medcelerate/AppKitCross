@@ -195,9 +195,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
             report("open \(url): \(ws.open(url))")
         case 2:
             let exe = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).standardizedFileURL
-            ws.activateFileViewerSelecting([exe])
-            // The same reveal through the API that answers, so the log says whether the
-            // shell took it (activateFileViewerSelecting returns nothing, as AppKit's).
+            // One reveal only: selectFile is the same request with an answer for the log
+            // (activateFileViewerSelecting returns nothing, as AppKit's), and each reveal
+            // opens a folder window.
             report("revealed \(exe.path): \(ws.selectFile(exe.path, inFileViewerRootedAtPath: exe.deletingLastPathComponent().path))")
         case 3:
             report("open folder: \(ws.selectFile(nil, inFileViewerRootedAtPath: FileManager.default.temporaryDirectory.path))")
