@@ -236,6 +236,15 @@ enum _KVC {
         }
     }
 
+    /// An integer from a bound value without trapping: selection markers, non-numbers and values
+    /// outside Int's range (NSNotFound is Int.max) give nil.
+    static func int(_ value: Any?) -> Int? {
+        guard let v = flatten(value), !(v is NSBindingSelectionMarker) else { return nil }
+        if let i = v as? Int { return i }
+        guard let d = number(v), d.isFinite, d >= -9.0e18, d <= 9.0e18 else { return nil }
+        return Int(d)
+    }
+
     static func bool(_ value: Any?) -> Bool {
         guard let v = flatten(value) else { return false }
         if let b = v as? Bool { return b }

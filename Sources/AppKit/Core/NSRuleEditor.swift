@@ -68,6 +68,9 @@ import CoreGraphics
 
     open override var isFlipped: Bool { true }
 
+    /// An action cell holds the target and action (a control without a cell would drop them).
+    @MainActor open override class func _makeDefaultCell() -> NSCell? { NSActionCell(textCell: "") }
+
     // MARK: Rows
 
     /// Adds a row: on an empty editor a compound row with one simple subrow (compound and simple
@@ -626,7 +629,7 @@ enum _NSRulePredicates {
     static func logicalType(_ value: Any?) -> NSCompoundPredicate.LogicalType? {
         guard let v = _KVC.flatten(value) else { return nil }
         if let t = v as? NSCompoundPredicate.LogicalType { return t }
-        if let n = _KVC.number(v) { return NSCompoundPredicate.LogicalType(rawValue: UInt(n)) }
+        if let n = _KVC.int(v), n >= 0 { return NSCompoundPredicate.LogicalType(rawValue: UInt(n)) }
         return nil
     }
 
@@ -641,21 +644,21 @@ enum _NSRulePredicates {
     static func operatorType(_ value: Any?) -> NSComparisonPredicate.Operator? {
         guard let v = _KVC.flatten(value) else { return nil }
         if let o = v as? NSComparisonPredicate.Operator { return o }
-        if let n = _KVC.number(v) { return NSComparisonPredicate.Operator(rawValue: UInt(n)) }
+        if let n = _KVC.int(v), n >= 0 { return NSComparisonPredicate.Operator(rawValue: UInt(n)) }
         return nil
     }
 
     static func modifier(_ value: Any?) -> NSComparisonPredicate.Modifier {
         guard let v = _KVC.flatten(value) else { return .direct }
         if let m = v as? NSComparisonPredicate.Modifier { return m }
-        if let n = _KVC.number(v), let m = NSComparisonPredicate.Modifier(rawValue: UInt(n)) { return m }
+        if let n = _KVC.int(v), n >= 0, let m = NSComparisonPredicate.Modifier(rawValue: UInt(n)) { return m }
         return .direct
     }
 
     static func options(_ value: Any?) -> NSComparisonPredicate.Options {
         guard let v = _KVC.flatten(value) else { return [] }
         if let o = v as? NSComparisonPredicate.Options { return o }
-        if let n = _KVC.number(v) { return NSComparisonPredicate.Options(rawValue: UInt(n)) }
+        if let n = _KVC.int(v), n >= 0 { return NSComparisonPredicate.Options(rawValue: UInt(n)) }
         return []
     }
 

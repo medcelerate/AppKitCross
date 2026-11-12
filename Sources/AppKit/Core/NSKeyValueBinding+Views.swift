@@ -209,14 +209,17 @@ extension NSPopUpButton {
         _conditionallySetEnabled(for: v, binding: b)
         switch b.name {
         case .selectedIndex:
-            selectItem(at: (v.flatMap { _KVC.number($0) }).map { Int($0) } ?? -1)
+            // NSNotFound (no selection), a marker or an index past the items selects nothing.
+            let index = _KVC.int(v).flatMap { $0 >= 0 && $0 < numberOfItems ? $0 : nil } ?? -1
+            selectItem(at: index)
         case .selectedObject:
             let objects = itemArray.map { $0.representedObject }
             selectItem(at: objects.firstIndex { _KVC.same($0, v) } ?? -1)
         case .selectedValue:
             if let v, !(v is NSBindingSelectionMarker) { selectItem(withTitle: String(describing: v)) } else { selectItem(at: -1) }
         case .selectedTag:
-            _ = selectItem(withTag: (v.flatMap { _KVC.number($0) }).map { Int($0) } ?? -1)
+            if let tag = _KVC.int(v), selectItem(withTag: tag) { break }
+            selectItem(at: -1)
         default: return false
         }
         return true
@@ -281,8 +284,8 @@ extension NSTableView {
         let rows = (b.value as? IndexSet) ?? IndexSet()
         _applyingSelectionBinding = true
         defer { _applyingSelectionBinding = false }
+        // Like AppKit, a bound selection does not scroll the table.
         if rows != selectedRowIndexes { selectRowIndexes(rows, byExtendingSelection: false) }
-        if let last = rows.last { scrollRowToVisible(last) }
     }
 
     /// The rows from the content binding, or implicitly from the first column bound to

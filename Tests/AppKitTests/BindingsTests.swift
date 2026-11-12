@@ -386,6 +386,41 @@ final class BoundViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testHeaderSortRedrawsEveryRow() {
+        MainActor.assumeIsolated {
+            let ac = NSArrayController(content: people())
+            let (window, table) = makeTable(ac)
+            table.tableColumns[0].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.name, ascending: true)
+            table.tableColumns[1].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.age, ascending: true)
+            @MainActor func shown() -> [String] {
+                window.display()
+                var out: [(Int, String)] = []
+                table.enumerateAvailableRowViews { rv, row in
+                    let texts = rv._cellViews.map { ($0 as? NSTableCellView)?.textField?.stringValue ?? "?" }
+                    out.append((row, texts.joined(separator: "/")))
+                }
+                return out.sorted { $0.0 < $1.0 }.map { $0.1 }
+            }
+            XCTAssertEqual(shown(), ["Cleo/41", "Abe/29", "Dana/35", "Bea/52"])
+            table._headerClicked(column: 0)
+            XCTAssertEqual(shown(), ["Abe/29", "Bea/52", "Cleo/41", "Dana/35"])
+            table._headerClicked(column: 1)
+            XCTAssertEqual(shown(), ["Abe/29", "Dana/35", "Cleo/41", "Bea/52"])
+            table._headerClicked(column: 1)
+            XCTAssertEqual(shown(), ["Bea/52", "Cleo/41", "Dana/35", "Abe/29"])
+            XCTAssertEqual(names(ac.selectedObjects), ["Cleo"], "the selection follows the object")
+            XCTAssertEqual(table.selectedRowIndexes, [1])
+            // Six rows, a multiple selection and repeated toggles: every visible row redraws.
+            ac.add(contentsOf: [BindingPerson("Eve", 72), BindingPerson("Fay", 18)])
+            table.selectRowIndexes([0, 2], byExtendingSelection: false)
+            for i in 0..<12 {
+                table._headerClicked(column: i % 3 == 0 ? 0 : 1)
+                let expected = (ac.arrangedObjects as! [BindingPerson]).map { "\($0.name)/\($0.age)" }
+                XCTAssertEqual(shown(), expected, "after click \(i)")
+            }
+        }
+    }
+
     func testSelectionFollowsBothWays() {
         MainActor.assumeIsolated {
             let ac = NSArrayController(content: people())
@@ -429,6 +464,43 @@ final class BoundViewTests: XCTestCase, @unchecked Sendable {
             field.unbind(NSBindingName.value)
             _ = ac.setSelectionIndex(0)
             XCTAssertEqual(field.stringValue, "Daniela")
+        }
+    }
+
+    func testMultipleAndEmptySelectionAreSafeForEveryBoundView() {
+        MainActor.assumeIsolated {
+            let ac = NSArrayController(content: people())
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 24), pullsDown: false)
+            popup.bind(NSBindingName.content, to: ac, withKeyPath: "arrangedObjects")
+            popup.bind(NSBindingName.contentValues, to: ac, withKeyPath: "arrangedObjects.name")
+            popup.bind(NSBindingName.selectedIndex, to: ac, withKeyPath: "selectionIndex")
+            let valuePopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 24), pullsDown: false)
+            valuePopup.bind(NSBindingName.contentValues, to: ac, withKeyPath: "arrangedObjects.name")
+            valuePopup.bind(NSBindingName.selectedValue, to: ac, withKeyPath: "selection.name")
+            let tagPopup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 24), pullsDown: false)
+            tagPopup.bind(NSBindingName.selectedTag, to: ac, withKeyPath: "selection.age")
+            let field = NSTextField(frame: .zero)
+            field.bind(NSBindingName.value, to: ac, withKeyPath: "selection.age")
+            let box = NSButton(checkboxWithTitle: "Member", target: nil, action: nil)
+            box.bind(NSBindingName.value, to: ac, withKeyPath: "selection.isMember")
+            _ = ac.setSelectionIndexes([1, 2])
+            XCTAssertEqual(popup.indexOfSelectedItem, 1, "selectionIndex is the first selected index")
+            XCTAssertEqual(field.placeholderString, "Multiple Values")
+            _ = ac.setSelectionIndexes([2])
+            XCTAssertEqual(popup.indexOfSelectedItem, 2)
+            XCTAssertEqual(field.stringValue, "35")
+            _ = ac.setSelectionIndexes([])
+            XCTAssertNotEqual(popup.indexOfSelectedItem, 2, "NSNotFound does not keep the old index")
+            XCTAssertFalse(valuePopup.isEnabled, "no selection disables a pop-up bound to the selection")
+            XCTAssertEqual(field.placeholderString, "No Selection")
+            XCTAssertFalse(box.isEnabled)
+            XCTAssertEqual(box.state, .off)
+            _ = ac.setSelectionIndexes([0, 3])
+            _ = ac.setSelectionIndexes([3])
+            XCTAssertEqual(popup.titleOfSelectedItem, "Bea")
+            XCTAssertTrue(box.isEnabled)
+            XCTAssertTrue(valuePopup.isEnabled)
+            XCTAssertEqual(valuePopup.titleOfSelectedItem, "Bea")
         }
     }
 
@@ -785,6 +857,42 @@ final class RuleEditorTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(button(1, "\u{2212}").isEnabled)
             e.isEditable = false
             XCTAssertTrue(e.subviews.compactMap { $0 as? _NSRuleEditorRowView }.allSatisfy { $0.subviews.allSatisfy { !($0 is NSButton) || $0 is NSPopUpButton } })
+        }
+    }
+
+    func testTypingInARowFieldUpdatesThePredicateAndSendsTheAction() {
+        MainActor.assumeIsolated {
+            final class Sink: NSObject, NSSelectorHandling {
+                var formats: [String] = []
+                weak var editor: NSRuleEditor?
+                @MainActor func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+                    formats.append(editor?.predicate?.predicateFormat ?? "nil")
+                    return true
+                }
+            }
+            let rules = PeopleRules()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            let e = editor(.list, rules)
+            window.contentView!.addSubview(e)
+            window.makeKeyAndOrderFront(nil)
+            let sink = Sink()
+            sink.editor = e
+            e.target = sink
+            e.action = Selector(("rulesChanged:"))
+            XCTAssertTrue(e.target === sink, "the rule editor keeps its target")
+            XCTAssertEqual(e.action, Selector(("rulesChanged:")))
+            e.addRow(nil)
+            let first = popUps(e, row: 0)[0]
+            first.selectItem(at: 1)                    // age
+            first._fireAction()
+            let f = field(e, row: 0)
+            XCTAssertTrue(window.makeFirstResponder(f))
+            let editorView = f._fieldEditor!
+            editorView.insertText("4", replacementRange: NSRange(location: NSNotFound, length: 0))
+            editorView.insertText("0", replacementRange: NSRange(location: NSNotFound, length: 0))
+            XCTAssertEqual(e.predicate?.predicateFormat, "age > 40", "the live field value, while editing")
+            XCTAssertEqual(sink.formats.suffix(2), ["age > 4", "age > 40"], "each keystroke sends the action")
+            XCTAssertTrue(sink.formats.contains("age > 0"), "picking a criterion sends the action")
         }
     }
 
