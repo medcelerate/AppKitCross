@@ -663,6 +663,11 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             layout._beginSheet(with: info, modalFor: window) { result = $0 }
             let form = layout._currentForm!
             XCTAssertEqual(form.panel.title, "Page Setup")
+            // The sheet takes the keyboard but not main-window status (NSPanel, as in AppKit):
+            // File > Print… still validates against the document window's responder chain.
+            XCTAssertTrue(form.panel.isKeyWindow)
+            XCTAssertFalse(form.panel.isMainWindow)
+            XCTAssertTrue(NSApplication.shared.mainWindow === window)
             XCTAssertTrue(form.pdfButton.isHidden)
             XCTAssertNil(form.copies)
             form.landscape!.performClick(nil)
@@ -739,6 +744,11 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             // Page Setup as a sheet changes the document's print info.
             doc.runPageLayout(nil)
             XCTAssertNotNil(window.attachedSheet)
+            // The sheet is key but the document window stays main, so File > Print… still
+            // finds the document (the PC pressed Ctrl+P with Page Setup up and nothing came).
+            XCTAssertTrue(window.attachedSheet!.isKeyWindow)
+            XCTAssertTrue(NSApplication.shared.mainWindow === window)
+            XCTAssertTrue(NSApplication.shared._target(forAction: Selector(("printDocument:"))) === doc)
             let layoutForm = (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "Landscape" }
             layoutForm!.performClick(nil)
             (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "OK" }!.performClick(nil)

@@ -145,6 +145,11 @@ viewer.
   width was drawn nowhere, so the field went blank once focused (found on the Windows
   PC, reproduced on the host). `NSTextContainer._alignmentWidth` gives the layout
   manager the view's visible width to flush against when the container is unbounded.
+- A panel never becomes the main window (`NSPanel.canBecomeMain` is false, as in AppKit).
+  The print and page-setup sheets are panels; while one was key it was also main, so a
+  nil-target `printDocument:` validated against the sheet's responder chain, found no
+  document, and the key equivalent was consumed with no panel shown (Ctrl+P with Page
+  Setup still up on the Windows PC). Spelling marks are not drawn while printing.
 - Printer-specific papers and hardware margins are not read from the drivers yet
   (`imageablePageBounds` is the paper for the generic and host printers); the paper table
   is the port's.

@@ -16,6 +16,11 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspanel
 @MainActor open class NSPanel: NSWindow {
+    /// A panel never becomes the main window, as in AppKit: a sheet or an inspector that
+    /// takes the keyboard leaves its document window main, so nil-target actions (File >
+    /// Print… while Page Setup is up) still reach the document through the main window's
+    /// responder chain instead of validating as disabled against the panel's.
+    @MainActor open override var canBecomeMain: Bool { false }
     private var _becomesKeyOnlyIfNeeded = false
     private var _isFloatingPanel = false
     private var _worksWhenModal = false
