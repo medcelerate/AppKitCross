@@ -1073,6 +1073,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// Misspelled words (temporary `.spellingState`) get AppKit's dotted underline: red for
     /// spelling, green for grammar.
     @MainActor private func _drawSpellingMarks(forGlyphRange range: NSRange, at origin: NSPoint) {
+        guard !NSGraphicsContext._printing else { return }   // screen-only, as in AppKit
         let marks = _temporary.filter { ($0.attrs[.spellingState] as? NSNumber)?.intValue ?? 0 != 0 }
         guard !marks.isEmpty else { return }
         let end = range.location + range.length

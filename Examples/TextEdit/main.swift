@@ -211,6 +211,9 @@ final class TextDocument: NSDocument {
         let scale = max(info.scalingFactor, 0.01)
         let printView = NSTextView(frame: NSRect(x: 0, y: 0, width: (info.imageablePageBounds.width / scale).rounded(.down), height: 10))
         TextDocument.configure(printView, rich: isRichText)
+        // Nobody edits the printed copy: no spell checking over the whole text, no find bar.
+        printView.isContinuousSpellCheckingEnabled = false
+        printView.usesFindBar = false
         printView.font = tv.font
         if let text = tv.textStorage?.copy() as? NSAttributedString { printView.textStorage?.setAttributedString(text) }
         printView.sizeToFit()   // the whole text, not the part the scroll view shows
