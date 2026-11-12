@@ -101,6 +101,9 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         }
     }
 
+    /// The window has the default (opaque) visual: alpha is not composited.
+    var supportsTransparency: Bool { false }
+
     // MARK: Sheets (ADR-0019)
 
     /// The window this one is attached to as a sheet.

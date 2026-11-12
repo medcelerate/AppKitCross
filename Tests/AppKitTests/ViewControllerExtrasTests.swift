@@ -462,6 +462,33 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// Under Windows caption buttons (ADR-0022) the accessories keep clear of the right
+    /// edge instead: leading starts at the left margin, trailing ends before the buttons,
+    /// and a unified toolbar's items start after the leading accessory.
+    func testAccessoriesKeepClearOfCaptionButtonsOnTheRight() {
+        MainActor.assumeIsolated {
+            let host = Platform.backend as! HostBackend
+            host.windowButtonStyle = .caption
+            defer { host.windowButtonStyle = .trafficLights }
+            let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            let width = w.contentView!.bounds.width
+            let lead = accessory(.leading, size: NSSize(width: 60, height: 20))
+            let trail = accessory(.trailing, size: NSSize(width: 40, height: 20))
+            w.addTitlebarAccessoryViewController(lead)
+            w.addTitlebarAccessoryViewController(trail)
+            XCTAssertEqual(lead.view.frame.minX, 8, "nothing at the left but the margin")
+            XCTAssertEqual(trail.view.frame.maxX, width - _NSWindowButtonsView.captionWidth - 4, "trailing stops before the caption buttons")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: width - 20, y: w.contentView!.bounds.height - 14)), .closeButton, "the buttons stay on top")
+            let tb = NSToolbar(identifier: "test.accessory.caption")
+            w.toolbar = tb
+            w.display()
+            let m = tb._view!.metrics
+            XCTAssertEqual(m.leadingInset, 8 + 60 + 8, "items start after the leading accessory")
+            XCTAssertEqual(m.trailingInset, _NSWindowButtonsView.captionWidth + 4 + 40 + 8, "and stop before the trailing accessory and the buttons")
+        }
+    }
+
     func testClientSideTitleBandHoldsTheSideAccessoriesBesideTheButtons() {
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)

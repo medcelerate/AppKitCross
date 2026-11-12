@@ -31,7 +31,7 @@ final class Win32Backend: PlatformBackend {
     /// The notification area (Win32StatusItem.swift).
     private(set) var win32StatusItems: Win32StatusItems?
     var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
-    /// The shell (Win32Workspace.swift, ADR-0022); made on first use.
+    /// The shell (Win32Workspace.swift, ADR-0026); made on first use.
     private(set) var win32Workspace: Win32Workspace?
     var workspace: any PlatformWorkspace {
         if let w = win32Workspace { return w }
@@ -39,6 +39,9 @@ final class Win32Backend: PlatformBackend {
         win32Workspace = w
         return w
     }
+
+    /// Windows caption buttons at the top-right of custom-frame windows (ADR-0022).
+    var windowButtonStyle: PlatformWindowButtonStyle { .caption }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
