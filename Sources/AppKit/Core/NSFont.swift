@@ -28,6 +28,15 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
     private let _italic: Bool
     private let _monospaced: Bool
 
+    /// What makes two fonts measure alike: the face, size and traits (the text measurement
+    /// cache's key, so a label is measured once however many `NSFont` objects name its font).
+    internal struct _Identity: Hashable {
+        let name: String, size: CGFloat, weight: CGFloat, system: Bool, italic: Bool, monospaced: Bool
+    }
+    internal var _identity: _Identity {
+        _Identity(name: _fontName, size: pointSize, weight: _weight, system: _isSystem, italic: _italic, monospaced: _monospaced)
+    }
+
     private init(handle: any PlatformFontHandle, fontName: String, weight: CGFloat, isSystem: Bool, italic: Bool, monospaced: Bool) {
         self.handle = handle
         _fontName = fontName

@@ -986,7 +986,6 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
             r.spacing = 8
             let l = NSTextField(labelWithString: label)
             l.setContentHuggingPriority(.required, for: .horizontal)
-            l.widthAnchor.constraint(equalToConstant: 84).isActive = true
             r.addArrangedSubview(l)
             for v in views { r.addArrangedSubview(v) }
             return r
@@ -1088,6 +1087,7 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
     }
     private func printStepperProbe() {
         guard let w = view.window, let screen = w.screen ?? NSScreen.main else { return }
+        w.layoutIfNeeded()      // a window not yet painted (occluded on the macOS host) has no frames yet
         let r = stepper.convert(stepper.bounds, to: nil)
         let s = w.convertToScreen(r)
         // X screen coordinates: origin top-left, points to pixels at the backing scale.
@@ -1095,6 +1095,23 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
         let x = Int((s.midX * scale).rounded())
         let y = Int(((screen.frame.maxY - (s.minY + s.height * 0.75)) * scale).rounded())
         print("stepper at \(x) \(y)"); fflush(nil)
+        // APPKITWIN_STEPPER_HOLD=<seconds>: the demo holds its own stepper (the events go
+        // through the window, as a press would) for that long, then quits, so a script
+        // reads the step offsets without a hand on the mouse.
+        if let hold = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_HOLD"].flatMap(Double.init), hold > 0 {
+            let p = NSPoint(x: r.midX, y: r.minY + r.height * 0.75)
+            let down = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            w.sendEvent(down)
+            DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
+                guard let self, let w = self.view.window else { return }
+                let up = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!
+                w.sendEvent(up)
+                print("stepper hold done"); fflush(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
+            }
+        }
     }
 
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
@@ -1117,6 +1134,9 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
                 if now - probeLast > 1 { probeStart = now }
                 probeLast = now
                 print(String(format: "stepper value %d +%.3fs", stepper.integerValue, now - probeStart)); fflush(nil)
+                // A self-driven hold lays the window out at once, so the frame trace shows
+                // what each step costs even where the window is not being painted.
+                if ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_HOLD"] != nil { view.window?.layoutIfNeeded() }
             }
             return true
         case Selector(("stepperTyped:")):

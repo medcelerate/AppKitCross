@@ -109,7 +109,14 @@ import CoreText
     /// (`force` false) only does so once an engine exists: re-laying out the whole root
     /// for every frame set would turn any two disagreeing sizes into an endless loop.
     internal func _setNeedsConstraintLayout(force: Bool = true) {
+        // Whatever changed here changes the fitting size of this view and its ancestors;
+        // siblings' subtrees keep theirs (a stepper's repeat re-lays its window ten times
+        // a second, and solving every row's fitting size again each pass was the cost).
         let root = _layoutRoot
+        if !root._applyingLayout {       // frames the engine applies do not change what fits
+            var v: NSView? = self
+            while let cur = v { cur._fittingSizeCache = nil; v = cur._superview }
+        }
         guard force || root._engine != nil else { return }
         root._constraintsDirty = true
         root._needsLayout = true
@@ -412,6 +419,12 @@ import CoreText
     nonisolated(unsafe) public static let _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
     /// Unbuffered, so a killed process keeps the tail of the trace.
     public static func _trace(_ message: String) { fputs("[trace] \(message)\n", stderr) }
+    /// `APPKITWIN_TRACE_FRAMES=1` logs what each frame costs (the constraint solve, the
+    /// layout and draw of each window, the frame tick), for finding what holds the frame
+    /// clock up on a platform without a profiler to hand. One line per pass, in ms.
+    nonisolated(unsafe) public static let _traceFrames = ProcessInfo.processInfo.environment["APPKITWIN_TRACE_FRAMES"] != nil
+    /// Milliseconds on a monotonic clock, for `_traceFrames` lines.
+    public static func _traceClock() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
 
     private func _invalidate(_ rect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
@@ -947,15 +960,22 @@ import CoreText
     @MainActor open var firstBaselineOffsetFromTop: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/fittingsize
     @MainActor open var fittingSize: NSSize {
+        if let cached = _fittingSizeCache { return cached }
+        let result: NSSize
         if _subtreeUsesConstraints {
             updateConstraintsForSubtreeIfNeeded()
             let engine = LayoutEngine(root: self)
             let s = engine.solve(root: self, fittingRoot: true, apply: false)
-            return NSSize(width: s.width.rounded(), height: s.height.rounded())
+            result = NSSize(width: s.width.rounded(), height: s.height.rounded())
+        } else {
+            let s = intrinsicContentSize
+            result = NSSize(width: max(0, s.width), height: max(0, s.height))
         }
-        let s = intrinsicContentSize
-        return NSSize(width: max(0, s.width), height: max(0, s.height))
+        _fittingSizeCache = result
+        return result
     }
+    /// The last `fittingSize`, until something in this subtree changes (`_setNeedsConstraintLayout`).
+    internal var _fittingSizeCache: NSSize?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringmaskbounds
     @MainActor open var focusRingMaskBounds: NSRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringtype
