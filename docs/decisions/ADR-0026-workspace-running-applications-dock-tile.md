@@ -141,8 +141,10 @@ answer), launch date, active, hidden, whether it shows windows.
   display; the screen argument is ignored).
 - Dock tile: `ITaskbarList3::SetOverlayIcon` with the badge on every titled window (the
   taskbar shows the active window's overlay for the group), `WM_SETICON` with the
-  composed icon when the tile has a content view or the application an icon image;
-  windows created later get both.
+  composed icon when the tile has a content view or the application an icon image, and
+  with the executable's own icon otherwise (never a null handle: the taskbar keeps showing
+  the last icon it was given, so a badge cleared would linger on the button); windows
+  created later get both.
 
 ### Linux (`LinuxWorkspace.swift`, `LinuxWorkspaceBus.swift`, `LinuxWorkspaceX11.swift`)
 

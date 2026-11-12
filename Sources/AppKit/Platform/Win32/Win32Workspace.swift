@@ -44,6 +44,11 @@ final class Win32Workspace: PlatformWorkspace {
     private var overlayIcon: HICON?
     private var applicationIcon: HICON?
     private var applicationSmallIcon: HICON?
+    /// The executable's own icons, sent in place of a null handle when the tile has no
+    /// icon: a null WM_SETICON leaves the window without one, and the taskbar then keeps
+    /// showing the last handle it cached, the badged icon a clear was meant to remove.
+    private var defaultIcon: HICON?
+    private var defaultSmallIcon: HICON?
     private var overlayDescription: [WCHAR] = [0]
     /// The broadcast window, for the hook callback (which runs outside the actor).
     nonisolated(unsafe) private static var broadcastHWND: HWND?
@@ -573,8 +578,19 @@ final class Win32Workspace: PlatformWorkspace {
     func apply(to window: Win32Window) {
         guard let hwnd = window.hwnd, window.wantsMenuBar || window.styleMask.contains(.titled) else { return }
         _ = cd2d_shell_set_overlay_icon(UnsafeMutableRawPointer(hwnd), overlayIcon.map { UnsafeMutableRawPointer($0) }, overlayDescription)
-        SendMessageW(hwnd, UINT(WM_SETICON), WPARAM(ICON_BIG), applicationIcon.map { LPARAM(Int(bitPattern: UnsafeRawPointer($0))) } ?? 0)
-        SendMessageW(hwnd, UINT(WM_SETICON), WPARAM(ICON_SMALL), applicationSmallIcon.map { LPARAM(Int(bitPattern: UnsafeRawPointer($0))) } ?? 0)
+        let big = applicationIcon ?? executableIcon(size: 32)
+        let small = applicationSmallIcon ?? executableIcon(size: 16)
+        SendMessageW(hwnd, UINT(WM_SETICON), WPARAM(ICON_BIG), big.map { LPARAM(Int(bitPattern: UnsafeRawPointer($0))) } ?? 0)
+        SendMessageW(hwnd, UINT(WM_SETICON), WPARAM(ICON_SMALL), small.map { LPARAM(Int(bitPattern: UnsafeRawPointer($0))) } ?? 0)
+    }
+
+    /// The executable's icon at a size, made once and kept for the process's lifetime.
+    private func executableIcon(size: CGFloat) -> HICON? {
+        if size <= 16, let icon = defaultSmallIcon { return icon }
+        if size > 16, let icon = defaultIcon { return icon }
+        guard let image = icon(for: .process(Int32(bitPattern: GetCurrentProcessId())), size: size, scale: 1), let icon = Win32StatusItem.makeIcon(image) else { return nil }
+        if size <= 16 { defaultSmallIcon = icon } else { defaultIcon = icon }
+        return icon
     }
 }
 #endif
