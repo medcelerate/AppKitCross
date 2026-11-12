@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 164 |
-| Types generated | 375 |
+| Types handwritten | 170 |
+| Types generated | 369 |
 | Types pending | 2 |
 | Types skipped | 0 |
 | Members emitted | 10212 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 455 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1044 |
+| Members unimplemented-calls | 1046 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -96,9 +96,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 28 |
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
 | NSBox | class | handwritten | 29 | 0 | 2 | 2 |
-| NSBrowser | class | generated | 95 | 1 | 3 |  |
-| NSBrowserCell | class | generated | 12 | 0 | 0 |  |
-| NSBrowserDelegate | protocol | generated | 34 | 0 | 0 |  |
+| NSBrowser | class | handwritten | 95 | 1 | 3 | 1 |
+| NSBrowserCell | class | handwritten | 12 | 0 | 0 | 0 |
+| NSBrowserDelegate | protocol | handwritten | 34 | 0 | 0 | 0 |
 | NSButton | class | handwritten | 77 | 0 | 3 | 15 |
 | NSButtonCell | class | handwritten | 32 | 1 | 0 | 9 |
 | NSButtonTouchBarItem | class | generated | 9 | 1 | 0 |  |
@@ -234,8 +234,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
 | NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
 | NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
-| NSForm | class | generated | 21 | 0 | 0 |  |
-| NSFormCell | class | generated | 13 | 0 | 0 |  |
+| NSForm | class | handwritten | 21 | 0 | 0 | 0 |
+| NSFormCell | class | handwritten | 13 | 0 | 0 | 0 |
 | NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |
 | NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |
 | NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |
@@ -279,7 +279,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLevelIndicatorCell | class | handwritten | 11 | 0 | 0 | 1 |
 | NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |
 | NSMagnificationGestureRecognizer | class | handwritten | 1 | 0 | 0 | 0 |
-| NSMatrix | class | generated | 83 | 0 | 1 |  |
+| NSMatrix | class | handwritten | 83 | 0 | 1 | 1 |
 | NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
 | NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
 | NSMenu | class | handwritten | 72 | 1 | 3 | 14 |

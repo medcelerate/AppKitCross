@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             NSApp.terminate(nil)
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|browser picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "browser"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -640,7 +640,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(DiffableDemoViewController())
         tabs.addChild(PanelsDemoViewController())
         tabs.addChild(PopoverDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 840, height: 300)   // wide enough for the fifteen tabs
+        tabs.addChild(BrowserDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 900, height: 300)   // wide enough for the sixteen tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }

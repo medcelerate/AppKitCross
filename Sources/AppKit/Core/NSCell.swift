@@ -481,7 +481,30 @@ import CoreText
         set { _wraps = newValue }
     }
     // Requirement of NSCopying
-    open func copy(with zone: NSZone? = nil) -> Any { self }
+    //
+    // A copy is a new cell of the same class with the same settings (NSMatrix makes its
+    // cells from a prototype this way). The new cell comes from the required
+    // `init(coder:)`; each class copies its own storage in `_copyCellState(from:)`.
+    open func copy(with zone: NSZone? = nil) -> Any {
+        let c = Swift.type(of: self).init(coder: NSCoder())
+        c._copyCellState(from: self)
+        return c
+    }
+
+    /// Copies the settings of `other` (a cell of the same class) into this new cell.
+    /// Subclasses with their own storage override it and call super.
+    @MainActor internal func _copyCellState(from other: NSCell) {
+        _objectValue = other._objectValue; _image = other._image; _state = other._state; _isEnabled = other._isEnabled
+        _isHighlighted = other._isHighlighted; _font = other._font; _alignment = other._alignment; _type = other._type
+        _controlSize = other._controlSize; _isBordered = other._isBordered; _isBezeled = other._isBezeled
+        _isEditable = other._isEditable; _isSelectable = other._isSelectable; _isScrollable = other._isScrollable
+        _isContinuous = other._isContinuous; _wraps = other._wraps; _tag = other._tag; _lineBreakMode = other._lineBreakMode
+        _representedObject = other._representedObject; _formatter = other._formatter; _allowsMixedState = other._allowsMixedState
+        _backgroundStyle = other._backgroundStyle; _truncatesLastVisibleLine = other._truncatesLastVisibleLine
+        _usesSingleLineMode = other._usesSingleLineMode; _focusRingType = other._focusRingType
+        _refusesFirstResponder = other._refusesFirstResponder; _showsFirstResponder = other._showsFirstResponder
+        _baseWritingDirection = other._baseWritingDirection; _menu = other._menu; _sendActionMask = other._sendActionMask
+    }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
     // Requirement of NSAccessibilityElementProtocol
