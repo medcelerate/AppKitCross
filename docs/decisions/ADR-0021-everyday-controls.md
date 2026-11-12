@@ -76,7 +76,19 @@ AXDateTimeArea, AXGroup of AXButton children or AXPopUpButton for the path contr
   `completionDelay`. All four run on the frame clock (`_NSFrameTimer`, a `CADisplayLink`
   that counts down), not on a Foundation `Timer`: every backend schedules frames for a
   running display link, whereas RunLoop timers are serviced only between frames and did
-  not fire on Win32 during a held press. The progress indicator's indeterminate
+  not fire on Win32 during a held press. A repeat fires at most once per frame, as a
+  `Timer` fires once however many of its periods passed: a late frame (the Win32 pump
+  held up by a slow layout pass) fires the repeat that is due, and the next is the next
+  scheduled time after it, rather than every interval the frame covered at once (the
+  bursts of four steps the Windows probe showed). A repeat re-lays its window ten times a
+  second, which the Windows probe showed costing about 0.35 s a pass: the engine was
+  resolving the application's layout direction (a copy of the process environment and a
+  defaults read) for every leading/trailing anchor, measuring every label's text again,
+  and solving every stack view's fitting size again. The direction is now resolved once,
+  measured text is cached by string, font and wrap width (`_NSTextMeasureCache`), and a
+  view's `fittingSize` is kept until something in its subtree changes, so a pass after a
+  text change gathers only the changed subtree; `APPKITWIN_TRACE_FRAMES=1` shows the
+  cost of each pass. The progress indicator's indeterminate
   animations (the bar's sweep, the spinner's spokes) advance on a `CADisplayLink` too,
   so the platform schedules frames only while something animates; `observedProgress`
   is read each frame (KVO is not available on every platform).

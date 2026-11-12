@@ -15,9 +15,14 @@ enum _CoreAnimationHost {
         installed = true
         CARuntime.frameRequester = {
             if NSView._traceInvalidation { NSView._trace("frame requested: \(CARuntime._pendingWorkDescription)") }
+            let requested = NSView._traceFrames ? NSView._traceClock() : 0
             Platform.backend.scheduleFrame {
+                let t0 = NSView._traceFrames ? NSView._traceClock() : 0
                 CARuntime.tick()
                 for w in NSApplication.shared.windows { w._commitLayerSceneIfNeeded() }
+                if NSView._traceFrames {
+                    NSView._trace(String(format: "frames tick %.1f ms after the request, %.1f ms", t0 - requested, NSView._traceClock() - t0))
+                }
             }
         }
         CALayer._sceneExtraChildren = { layer in (layer.delegate as? NSView)?._hostedChildLayers ?? [] }

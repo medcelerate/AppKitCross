@@ -7,6 +7,10 @@
 // bar turns on Windows), while RunLoop timers are serviced only between frames and were
 // not firing on Win32 during a held press. Tests drive it through `CARuntime.tick()`
 // with `CARuntime.now` overridden, or call `_fire()` directly.
+//
+// Like a run-loop timer, a repeat fires once per frame at most: a frame that arrives late
+// (the Win32 pump was busy) fires the one repeat that is due and the next one is the next
+// scheduled time after it, so a slow stretch is skipped rather than made up in a burst.
 
 import Foundation
 #if canImport(QuartzCore)
@@ -43,31 +47,22 @@ internal final class _NSFrameTimer {
 
     var isValid: Bool { link != nil }
 
-    /// At most this many repeats are made up for in one late frame.
-    static let maxCatchUp = 10
-
     /// Advances the timer's clock by `seconds` (one frame's worth from the display link).
-    /// The timing is by elapsed time, not by frames: a frame that arrives late fires every
-    /// interval it covered (up to `maxCatchUp`), so a repeat runs at its rate whatever
-    /// the frame rate.
+    /// The timing is by elapsed time, not by frames; a frame fires at most one repeat.
     func _advance(by seconds: TimeInterval) {
         guard link != nil else { return }
         remaining -= max(0, seconds)
-        var fired = 0
-        while remaining <= 0, link != nil, fired < _NSFrameTimer.maxCatchUp {
-            _fire()
-            fired += 1
-        }
-        if remaining <= 0, let interval { remaining = interval }      // past the cap: resume from the next interval
+        if remaining <= 0 { _fire() }
     }
 
-    /// Fires now: the action runs, and a repeating timer rearms for its interval (from
-    /// the moment it was due, so late frames do not stretch the rate).
+    /// Fires now: the action runs, and a repeating timer rearms for the next scheduled
+    /// time after now (from the moment it was due, so frames a little late do not stretch
+    /// the rate; intervals a very late frame covered are skipped, as `Timer` skips them).
     func _fire() {
         guard link != nil else { return }
         if let interval {
             remaining += interval
-            if remaining < -interval * CGFloat(_NSFrameTimer.maxCatchUp) { remaining = interval }
+            if remaining <= 0 { remaining = interval + remaining.truncatingRemainder(dividingBy: interval) }
             action()
         } else {
             invalidate()

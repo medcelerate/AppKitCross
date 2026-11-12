@@ -179,18 +179,23 @@ final class StepperTests: XCTestCase, @unchecked Sendable {
             mouse(w, .leftMouseUp, at(s, 7, 20))
             advance(1.0, frames: 60)
             XCTAssertEqual(s.doubleValue, held, "nothing after the mouse is up")
-            // A slow frame clock (five frames a second) still repeats ten times a second.
+            // A slow frame clock (five frames a second) repeats once per frame, like a
+            // run-loop timer: the intervals a late frame covered are skipped, not made up
+            // in a burst.
             s.doubleValue = 0
             mouse(w, .leftMouseDown, at(s, 7, 20))
             advance(0.5, frames: 1)
             XCTAssertEqual(s.doubleValue, 2, "the first repeat is due exactly at the delay")
             advance(1.0, frames: 5)
-            XCTAssertEqual(s.doubleValue, 12, "late frames catch up on the intervals they covered")
+            XCTAssertEqual(s.doubleValue, 7, "one repeat per late frame")
+            // Back at full rate the repeats keep their 0.1 s schedule from the last fire.
+            advance(0.35, frames: 21)
+            XCTAssertEqual(s.doubleValue, 10, "then ten a second again")
             mouse(w, .leftMouseUp, at(s, 7, 20))
             s.autorepeat = false
             mouse(w, .leftMouseDown, at(s, 7, 20))
             advance(2.0, frames: 120)
-            XCTAssertEqual(s.doubleValue, 13, "no repeat without autorepeat")
+            XCTAssertEqual(s.doubleValue, 11, "no repeat without autorepeat")
             mouse(w, .leftMouseUp, at(s, 7, 20))
             // The search field's delay runs on the same clock.
             let f = NSSearchField(frame: NSRect(x: 20, y: 60, width: 200, height: 22))

@@ -11,6 +11,9 @@ import Foundation
 
 @MainActor
 final class LayoutEngine {
+    /// Constraints already logged as unsatisfiable (each is dropped silently after that).
+    static var reportedConflicts = Set<ObjectIdentifier>()
+
     /// Variables for one item (a view or a layout guide): engine-space frame.
     final class ItemVariables {
         let x = LayoutVariable("x"), y = LayoutVariable("y"), width = LayoutVariable("width"), height = LayoutVariable("height")
@@ -123,18 +126,33 @@ final class LayoutEngine {
     /// root's size free (used by `fittingSize`); returns the root's engine size.
     @discardableResult
     func solve(root: NSView, fittingRoot: Bool = false, apply: Bool = true) -> NSSize {
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        var tBuilt = t0
+        var intrinsicMs = 0.0, views = 0, convertMs = 0.0
+        let misses0 = _NSTextMeasureCache.misses, hits0 = _NSTextMeasureCache.hits
+        defer {
+            if NSView._traceFrames {
+                NSView._trace(String(format: "frames solve %@%@ %d constraints %.1f ms (gather %.1f ms, intrinsic sizes of %d views %.1f ms, constraints %.1f ms; text measured %d, cached %d)", "\(type(of: root))", fittingRoot ? " (fitting)" : "", solver.constraintCount, NSView._traceClock() - t0, tBuilt - t0, views, intrinsicMs, convertMs, _NSTextMeasureCache.misses - misses0, _NSTextMeasureCache.hits - hits0))
+            }
+        }
         solver = LayoutSolver()
         items = [:]
         var constrainedViews: [NSView] = []
         var guides: [NSLayoutGuide] = []
-        var solverConstraints: [LayoutSolverConstraint] = []
+        var solverConstraints: [(NSLayoutConstraint?, LayoutSolverConstraint)] = []
 
         func add(_ e: LayoutExpression, _ rel: LayoutRelation, _ strength: Double) {
-            solverConstraints.append(LayoutSolverConstraint(e, rel, strength: strength))
+            solverConstraints.append((nil, LayoutSolverConstraint(e, rel, strength: strength)))
         }
 
         func addIntrinsic(_ view: NSView, _ v: ItemVariables) {
+            let ti = NSView._traceFrames ? NSView._traceClock() : 0
             let intrinsic = view.intrinsicContentSize
+            if NSView._traceFrames {
+                let ms = NSView._traceClock() - ti
+                intrinsicMs += ms; views += 1
+                if ms > 0.5 { NSView._trace(String(format: "frames   intrinsic size of %@ %.1f ms", "\(type(of: view))", ms)) }
+            }
             if intrinsic.width != NSView.noIntrinsicMetric {
                 let w = Double(intrinsic.width)
                 add(LayoutExpression(v.width) - w, .lessOrEqual, LayoutEngine.strength(for: view.contentHuggingPriority(for: .horizontal)))
@@ -188,17 +206,27 @@ final class LayoutEngine {
                 add(LayoutExpression(gv.width), .greaterOrEqual, LayoutStrength.required)
                 add(LayoutExpression(gv.height), .greaterOrEqual, LayoutStrength.required)
             }
+            let tc = NSView._traceFrames ? NSView._traceClock() : 0
             for c in view._allConstraints {
-                if let sc = solverConstraint(for: c) { solverConstraints.append(sc) }
+                if let sc = solverConstraint(for: c) { solverConstraints.append((c, sc)) }
             }
+            if NSView._traceFrames { convertMs += NSView._traceClock() - tc }
             for s in view.subviews { visit(s) }
         }
         visit(root)
+        if NSView._traceFrames { tBuilt = NSView._traceClock() }
 
-        for sc in solverConstraints {
+        for (c, sc) in solverConstraints {
             do { try solver.addConstraint(sc) } catch {
-                // Unsatisfiable or duplicate: AppKit logs and drops one; do the same.
-                NSLog("Unable to simultaneously satisfy constraints; dropping \(sc.expression) \(sc.relation)")
+                // Unsatisfiable or duplicate: AppKit logs and drops one; do the same. The
+                // engine is rebuilt every pass, so the log is once per constraint (AppKit's
+                // engine keeps its constraints and logs when one is added): logging every
+                // pass is a cost, and on Windows a large one (NSLog there is slow enough
+                // to hold the frame clock up for a stepper's whole autorepeat interval).
+                let id = c.map(ObjectIdentifier.init)
+                if let id, LayoutEngine.reportedConflicts.contains(id) { continue }
+                if let id { LayoutEngine.reportedConflicts.insert(id) }
+                NSLog("Unable to simultaneously satisfy constraints; dropping \(c.map { "\($0) " } ?? "")\(sc.expression) \(sc.relation)")
             }
         }
         solver.updateVariables()
