@@ -924,8 +924,13 @@ import CoreText
             context.setFillColor(_backgroundColor.cgColor)
             context.fill(dirtyRect)
         }
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?.layoutSubtreeIfNeeded()
+        let t1 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        if NSView._traceFrames {
+            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height))
+        }
         if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
             t.layoutSubtreeIfNeeded()
             t._displayHierarchy(in: context, dirtyRect: dirtyRect)

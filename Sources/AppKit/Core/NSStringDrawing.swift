@@ -6,6 +6,32 @@
 
 import Foundation
 
+/// Measured sizes by string, font and wrap width. A layout pass asks every label for its
+/// intrinsic size, and each backend measures by building a text layout (a DirectWrite
+/// layout on Windows, Core Text lines, Pango), so a label whose text has not changed is
+/// measured once rather than on every pass; a stepper's held repeat re-lays its window
+/// ten times a second, and on Windows the measuring was most of each frame.
+@MainActor
+internal enum _NSTextMeasureCache {
+    private struct Key: Hashable { let text: String; let font: NSFont._Identity; let maxWidth: CGFloat? }
+    private static var sizes: [Key: NSSize] = [:]
+    /// Entries kept before the cache starts over (a bound on memory, not a working set).
+    static let limit = 4096
+    static var hits = 0, misses = 0
+
+    static func measure(_ text: String, font: NSFont, maxWidth: CGFloat?) -> NSSize {
+        let key = Key(text: text, font: font._identity, maxWidth: maxWidth)
+        if let s = sizes[key] { hits += 1; return s }
+        misses += 1
+        let s = Platform.backend.text.measure(text, font: font.handle, maxWidth: maxWidth)
+        if sizes.count >= limit { sizes.removeAll(keepingCapacity: true) }
+        sizes[key] = s
+        return s
+    }
+
+    static func removeAll() { sizes.removeAll() }
+}
+
 @MainActor
 private func _resolve(_ attrs: [NSAttributedString.Key: Any]?) -> (NSFont, NSColor) {
     let font = (attrs?[.font] as? NSFont) ?? NSGraphicsContext.current?._font ?? NSFont.userFont(ofSize: 12) ?? NSFont.systemFont(ofSize: 12)
@@ -21,7 +47,7 @@ private func _draw(_ string: String, font: NSFont, color: NSColor, at point: NSP
     // draw(at:) puts the box's origin at `point`: bottom-left in y-up contexts, top-left in flipped ones.
     var topLeft = point
     if !flipped && !inRectTop {
-        let size = backend.measure(string, font: font.handle, maxWidth: maxWidth)
+        let size = _NSTextMeasureCache.measure(string, font: font, maxWidth: maxWidth)
         topLeft.y += size.height
     }
     backend.draw(string, font: font.handle, color: color.cgColor, topLeft: topLeft, maxWidth: maxWidth, flipped: flipped, in: gc.cgContext)
@@ -45,7 +71,7 @@ extension NSString {
 
     @MainActor public func size(withAttributes attrs: [NSAttributedString.Key: Any]? = nil) -> NSSize {
         let (font, _) = _resolve(attrs)
-        return Platform.backend.text.measure(self as String, font: font.handle, maxWidth: nil)
+        return _NSTextMeasureCache.measure(self as String, font: font, maxWidth: nil)
     }
 }
 

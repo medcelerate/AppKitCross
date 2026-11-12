@@ -190,6 +190,8 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | (gestures) | No switch: on Windows, Ctrl+wheel is delivered as a magnify gesture (a precision touchpad's pinch arrives that way) and touch screens send WM_GESTURE; on X11 gestures need XInput 2.4 (libinput); on Wayland the compositor must offer `zwp_pointer_gestures_v1`. |
 | `APPKITWIN_LAYOUT_DIRECTION=rtl\|ltr` | Forces the application's layout direction; otherwise the macOS defaults keys (`AppleTextDirection`, `NSForceRightToLeftWritingDirection`) and then the locale's language decide. |
 | `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |
+| `APPKITWIN_TRACE_FRAMES=1` | Logs what each frame costs, in ms: every constraint solve (`frames solve <root> N constraints`, with the gather and the intrinsic-size share and the text-measure cache hits), each window's layout and draw (`frames paint`), and how late each frame tick ran (`frames tick`). For a held stepper or an animation that stutters on one platform. |
+| `APPKITWIN_STEPPER_PROBE=1` | With `APPKITWIN_LAYOUT_TAB=controls`: prints the stepper's upper half in screen pixels (`stepper at X Y`) a second after the window is up, then each step of a hold with its offset since the first (`stepper value 5 +0.512s`). `APPKITWIN_STEPPER_HOLD=<seconds>` makes the demo hold its own stepper for that long (through the window's event path), lay out after each step, print `stepper hold done` and quit, so the offsets and the frame trace come from a script, no mouse needed. |
 
 ## Audio backends and the offline render switch
 

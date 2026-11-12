@@ -638,6 +638,16 @@ import CoreText
     nonisolated(unsafe) internal static var _layoutDirectionOverride: NSUserInterfaceLayoutDirection?
     internal static var _resolvedLayoutDirection: NSUserInterfaceLayoutDirection {
         if let o = _layoutDirectionOverride { return o }
+        if let d = _defaultLayoutDirection { return d }
+        let d = _resolveDefaultLayoutDirection()
+        _defaultLayoutDirection = d
+        return d
+    }
+    /// The environment, defaults and locale answer, kept: every leading/trailing anchor
+    /// asks on each layout pass, and reading the environment (a copy of the whole block)
+    /// and the defaults each time was most of a pass on Windows.
+    nonisolated(unsafe) private static var _defaultLayoutDirection: NSUserInterfaceLayoutDirection?
+    private static func _resolveDefaultLayoutDirection() -> NSUserInterfaceLayoutDirection {
         if let env = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_DIRECTION"]?.lowercased() {
             if env == "rtl" || env == "righttoleft" { return .rightToLeft }
             if env == "ltr" || env == "lefttoright" { return .leftToRight }
