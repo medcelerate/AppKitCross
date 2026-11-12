@@ -88,6 +88,9 @@ final class HostBackend: PlatformBackend {
     /// The in-process status area (StatusItem.swift): tests click its items.
     let hostStatusItems = HostStatusItems()
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
+    /// Printing (Printing.swift): PDF through the platform writer, jobs kept for tests.
+    let hostPrinting = HostPrintBackend()
+    var printing: (any PlatformPrintBackend)? { hostPrinting }
 
     /// Test hook: what the "native" colour dialog answers; nil cancels.
     var nextColorDialogResult: (CGFloat, CGFloat, CGFloat)? = nil

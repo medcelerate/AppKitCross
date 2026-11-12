@@ -61,6 +61,8 @@ open class NSAppearance: NSObject, NSSecureCoding, NSCoding {
 
     /// True while a dark appearance is current (read by NSColor on every resolution).
     static var currentIsDark: Bool { _current?.isDark ?? false }
+    /// The appearance pages are printed under (aqua), see `NSView._drawingAppearance`.
+    nonisolated(unsafe) static let _printing: NSAppearance = NSAppearance(named: .aqua)!
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsappearance/performascurrentdrawingappearance(_:)
     open func performAsCurrentDrawingAppearance(_ block: () -> Void) {

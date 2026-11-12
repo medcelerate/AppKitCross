@@ -7,7 +7,8 @@
 //
 // Headless modes for CI: `--roundtrip out.rtf` makes a document through the document
 // controller, writes it as RTF, reads it back and checks the attributes;
-// `--show-save-panel` opens an untitled document with the save panel up (screenshots).
+// `--show-save-panel` opens an untitled document with the save panel up (screenshots);
+// `--print-pdf out.pdf` prints a ninety-line document to a PDF and checks its page count.
 
 import AppKit
 import Foundation
@@ -132,6 +133,25 @@ final class TextDocument: NSDocument {
         updateChangeCount(.changeDone)
     }
 
+    // MARK: Printing (ADR-0022)
+
+    /// File > Print…, Page Setup… and Export as PDF… end here: the text view is the printed
+    /// view, paginated by `NSPrintOperation` with the document's print info and the panel's
+    /// settings (one copy of the info with the settings merged, as AppKit's idiom goes).
+    override func printOperation(withSettings printSettings: [NSPrintInfo.AttributeKey: Any]) throws -> NSPrintOperation {
+        guard let tv = textView else { return try super.printOperation(withSettings: printSettings) }
+        var attributes: [NSPrintInfo.AttributeKey: Any] = [:]
+        for (key, value) in printInfo.dictionary() { if let k = key as? String { attributes[NSPrintInfo.AttributeKey(rawValue: k)] = value } }
+        for (key, value) in printSettings { attributes[key] = value }
+        tv.sizeToFit()   // the whole text, not the part the scroll view shows
+        let info = NSPrintInfo(dictionary: attributes)
+        info.verticalPagination = .automatic
+        info.horizontalPagination = .fit
+        let op = NSPrintOperation(view: tv, printInfo: info)
+        op.jobTitle = displayName
+        return op
+    }
+
     override func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         if NSStringFromSelector(action) == "toggleRichText:" { toggleRichText(); return true }
         return super.performSelectorAction(action, with: sender)
@@ -167,6 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let saveAs = file.addItem(withTitle: "Save As\u{2026}", action: Selector(("saveDocumentAs:")), keyEquivalent: "s")
         saveAs.keyEquivalentModifierMask = [.command, .shift]
         file.addItem(withTitle: "Revert to Saved", action: Selector(("revertDocumentToSaved:")), keyEquivalent: "")
+        file.addItem(NSMenuItem.separator())
+        file.addItem(withTitle: "Export as PDF\u{2026}", action: Selector(("saveDocumentToPDF:")), keyEquivalent: "")
+        let pageSetup = file.addItem(withTitle: "Page Setup\u{2026}", action: Selector(("runPageLayout:")), keyEquivalent: "p")
+        pageSetup.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "Print\u{2026}", action: Selector(("printDocument:")), keyEquivalent: "p")
         file.addItem(NSMenuItem.separator())
         file.addItem(withTitle: "Quit TextEdit", action: Selector(("terminate:")), keyEquivalent: "q")
         fileItem.submenu = file
@@ -235,9 +260,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// `--print-pdf out.pdf`: a document with ninety lines of text, its window made (not
+/// shown), printed to a PDF through the document's own print operation without the
+/// panels (ADR-0022); the page count must be more than one. Runs on every CI job: the
+/// platform's PDF writer and the pagination end to end.
+@MainActor func printToPDF(_ path: String) -> Int32 {
+    let doc = TextDocument()
+    doc.fileType = "public.plain-text"
+    doc.contents = NSAttributedString(string: (1...90).map { "Line \($0): the quick brown fox jumps over the lazy dog." }.joined(separator: "\n"),
+                                      attributes: [.font: NSFont.userFont(ofSize: 13) ?? NSFont.systemFont(ofSize: 13)])
+    doc.makeWindowControllers()
+    doc.windowControllers.first?.window?.layoutIfNeeded()
+    let url = URL(fileURLWithPath: path)
+    do {
+        let op = try doc.printOperation(withSettings: [.jobDisposition: NSPrintInfo.JobDisposition.save.rawValue, .jobSavingURL: url])
+        op.showsPrintPanel = false
+        op.showsProgressPanel = false
+        let pages = op.pageRange.length
+        guard op.run() else { print("FAIL: the print operation did not run"); return 1 }
+        let data = try Data(contentsOf: url)
+        let counted = _PDFInspector.pageCount(data)
+        guard _PDFInspector.isPDF(data), counted == pages, pages > 1 else {
+            print("FAIL: \(data.count) bytes, \(counted) page objects for \(pages) paginated pages"); return 1
+        }
+        print("printed \(pages) pages (\(data.count) bytes of PDF) to \(url.path); media box \(_PDFInspector.mediaBox(data).map { "\(Int($0.width))x\(Int($0.height))" } ?? "?")")
+        return 0
+    } catch {
+        print("FAIL: \(error)")
+        return 1
+    }
+}
+
 let arguments = CommandLine.arguments.dropFirst()
 if let i = arguments.firstIndex(of: "--roundtrip"), i + 1 <= arguments.endIndex - 1 {
     exit(roundTrip(to: arguments[i + 1]))
+}
+if let i = arguments.firstIndex(of: "--print-pdf"), i + 1 <= arguments.endIndex - 1 {
+    exit(printToPDF(arguments[i + 1]))
 }
 
 let delegate = AppDelegate()

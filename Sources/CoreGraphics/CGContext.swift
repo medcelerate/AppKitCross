@@ -9,7 +9,28 @@ import Foundation
 #if os(Windows)
 import CD2D
 
+/// Receives what a context is asked to draw, in user space, so a PDF can be written
+/// from the same calls that paint the Direct2D target (ADR-0022). Text reaches a recorder
+/// as glyph outlines (CoreText) or rasterised layouts (`drawTextLayout`).
+public protocol CGContextRecorder: AnyObject {
+    func recordSave()
+    func recordRestore()
+    func recordConcatenate(_ t: CGAffineTransform)
+    func recordFill(_ path: CGPath, rule: CGPathFillRule, color: CGColor, alpha: CGFloat)
+    func recordStroke(_ path: CGPath, color: CGColor, alpha: CGFloat, width: CGFloat, cap: CGLineCap, join: CGLineJoin, miterLimit: CGFloat, dashPhase: CGFloat, dashLengths: [CGFloat])
+    func recordClip(_ path: CGPath, rule: CGPathFillRule)
+    func recordClip(rect: CGRect)
+    /// `flippedRows`: the image's first row belongs at the rect's minimum y (a y-down space).
+    func recordImage(_ image: CGImage, in rect: CGRect, alpha: CGFloat, flippedRows: Bool)
+}
+
 public final class CGContext {
+    /// When set, every drawing call is also reported here (see CGContextRecorder).
+    public weak var _recorder: CGContextRecorder? = nil
+    /// Whether text should be drawn as outlines so a recorder sees it (DirectWrite's
+    /// glyph runs bypass the context otherwise).
+    public var _recordsVectorOutput: Bool { _recorder != nil }
+
     // MARK: Graphics state
     private struct State {
         var ctm = CGAffineTransform.identity
@@ -122,6 +143,7 @@ public final class CGContext {
     public func saveGState() {
         stack.append(state)
         state.clipPushes = 0
+        _recorder?.recordSave()
     }
 
     public func restoreGState() {
@@ -130,13 +152,14 @@ public final class CGContext {
         state = saved
         applyTransform()
         cd2d_target_set_antialias(target, state.antialias)
+        _recorder?.recordRestore()
     }
 
     public var ctm: CGAffineTransform { state.ctm }
-    public func translateBy(x: CGFloat, y: CGFloat) { state.ctm = CGAffineTransform(translationX: x, y: y).concatenating(state.ctm); applyTransform() }
-    public func scaleBy(x: CGFloat, y: CGFloat) { state.ctm = CGAffineTransform(scaleX: x, y: y).concatenating(state.ctm); applyTransform() }
-    public func rotate(by angle: CGFloat) { state.ctm = CGAffineTransform(rotationAngle: angle).concatenating(state.ctm); applyTransform() }
-    public func concatenate(_ t: CGAffineTransform) { state.ctm = t.concatenating(state.ctm); applyTransform() }
+    public func translateBy(x: CGFloat, y: CGFloat) { concatenate(CGAffineTransform(translationX: x, y: y)) }
+    public func scaleBy(x: CGFloat, y: CGFloat) { concatenate(CGAffineTransform(scaleX: x, y: y)) }
+    public func rotate(by angle: CGFloat) { concatenate(CGAffineTransform(rotationAngle: angle)) }
+    public func concatenate(_ t: CGAffineTransform) { state.ctm = t.concatenating(state.ctm); applyTransform(); _recorder?.recordConcatenate(t) }
 
     private func applyTransform() {
         let t = state.ctm.concatenating(baseTransform)
@@ -205,6 +228,7 @@ public final class CGContext {
 
     public func fillPath(using rule: CGPathFillRule = .winding) {
         defer { currentPath = CGMutablePath() }
+        _recorder?.recordFill(currentPath, rule: rule, color: state.fill, alpha: state.alpha)
         guard let geometry = makeGeometry(currentPath, rule: rule) else { return }
         defer { cd2d_path_release(geometry) }
         cd2d_target_fill_path(target, geometry, configure(fillBrush, color: state.fill))
@@ -212,6 +236,8 @@ public final class CGContext {
 
     public func strokePath() {
         defer { currentPath = CGMutablePath() }
+        _recorder?.recordStroke(currentPath, color: state.stroke, alpha: state.alpha, width: state.lineWidth, cap: state.lineCap, join: state.lineJoin,
+                                miterLimit: state.miterLimit, dashPhase: state.dashPhase, dashLengths: state.dashLengths)
         guard let geometry = makeGeometry(currentPath, rule: .winding) else { return }
         defer { cd2d_path_release(geometry) }
         let style = makeStrokeStyle()
@@ -234,12 +260,18 @@ public final class CGContext {
 
     public func fill(_ rect: CGRect) {
         let r = rect.standardized
+        if let rec = _recorder { let p = CGMutablePath(); p.addRect(r); rec.recordFill(p, rule: .winding, color: state.fill, alpha: state.alpha) }
         cd2d_target_fill_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY), configure(fillBrush, color: state.fill))
     }
     public func fill(_ rects: [CGRect]) { for r in rects { fill(r) } }
 
     public func stroke(_ rect: CGRect) {
         let r = rect.standardized
+        if let rec = _recorder {
+            let p = CGMutablePath(); p.addRect(r)
+            rec.recordStroke(p, color: state.stroke, alpha: state.alpha, width: state.lineWidth, cap: state.lineCap, join: state.lineJoin,
+                             miterLimit: state.miterLimit, dashPhase: state.dashPhase, dashLengths: state.dashLengths)
+        }
         let style = makeStrokeStyle()
         defer { cd2d_stroke_style_release(style) }
         cd2d_target_stroke_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY),
@@ -272,6 +304,7 @@ public final class CGContext {
 
     public func clip(to rect: CGRect) {
         let r = rect.standardized
+        _recorder?.recordClip(rect: r)
         cd2d_target_push_clip_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY), state.antialias)
         clipKinds.append(.rect)
         state.clipPushes += 1
@@ -284,6 +317,7 @@ public final class CGContext {
 
     public func clip(using rule: CGPathFillRule = .winding) {
         defer { currentPath = CGMutablePath() }
+        _recorder?.recordClip(currentPath, rule: rule)
         guard let geometry = makeGeometry(currentPath, rule: rule) else { return }
         cd2d_target_push_clip_path(target, geometry)
         cd2d_path_release(geometry)      // the layer keeps the geometry alive
@@ -322,6 +356,7 @@ public final class CGContext {
     public func draw(_ image: CGImage, in rect: CGRect, byTiling: Bool = false) {
         guard let bm = bitmap(for: image) else { return }
         let r = rect.standardized
+        _recorder?.recordImage(image, in: r, alpha: state.alpha, flippedRows: false)
         saveGState()
         translateBy(x: r.minX, y: r.maxY)
         scaleBy(x: 1, y: -1)
@@ -345,6 +380,22 @@ public final class CGContext {
         translateBy(x: topLeft.x, y: topLeft.y)
         if !flipped { scaleBy(x: 1, y: -1) }
         cd2d_target_draw_text_layout(target, layout, 0, 0, configure(fillBrush, color: color))
+        if let rec = _recorder {
+            // A recorder cannot see DirectWrite's glyph run: hand it the layout rasterised
+            // at 4x (the local space here is y-down with the layout's top-left at the origin).
+            var w: Float = 0, h: Float = 0, baseline: Float = 0
+            cd2d_text_layout_metrics(layout, &w, &h, &baseline)
+            let scale: CGFloat = 4
+            let pw = max(1, Int((CGFloat(w) * scale).rounded(.up))), ph = max(1, Int((CGFloat(h) * scale).rounded(.up)))
+            if let off = CGContext(data: nil, width: pw, height: ph, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: 0) {
+                off.translateBy(x: 0, y: CGFloat(ph))
+                off.scaleBy(x: scale, y: -scale)
+                cd2d_target_draw_text_layout(off.target, layout, 0, 0, off.configure(off.fillBrush, color: color))
+                if let image = off.makeImage() {
+                    rec.recordImage(image, in: CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h)), alpha: state.alpha, flippedRows: true)
+                }
+            }
+        }
         restoreGState()
     }
 

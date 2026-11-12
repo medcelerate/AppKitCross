@@ -154,6 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             canvas.circleColor = names[(sender as? NSPopUpButton)?.titleOfSelectedItem ?? ""] ?? .systemBlue
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("exportPDF:")):
+            guard let content = NSApp.keyWindow?.contentView else { return true }
+            let save = NSSavePanel()
+            save.allowedFileTypes = ["pdf"]
+            save.nameFieldStringValue = (NSApp.keyWindow?.title ?? "HelloWindow") + ".pdf"
+            if save.runModal() == .OK, let url = save.url {
+                let data = content.dataWithPDF(inside: content.bounds)
+                try? data.write(to: url)
+                print("exported \(data.count) bytes of PDF to \(url.path)")
+            }
+            return true
         case Selector(("closeGlass:")):
             glassWindow?.close()
             glassWindow = nil
@@ -209,6 +220,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let file = NSMenu(title: "File")
         file.addItem(withTitle: "Open\u{2026}", action: Selector(("openFile:")), keyEquivalent: "o")
         file.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "k")
+        file.addItem(NSMenuItem.separator())
+        // Printing (ADR-0022): both reach the key window through the responder chain; Print…
+        // paginates its content view (the Layout Demo's tabs, the canvas) with the print panel
+        // as a sheet. Export PDF writes the key window's content with dataWithPDF(inside:).
+        // AppKit's shared print info clips a view wider than the printable area (its default
+        // horizontal pagination); the demo windows are wider than a portrait page, so they
+        // shrink to the page width instead, as a document app would set up its own info.
+        NSPrintInfo.shared.horizontalPagination = .fit
+        let pageSetup = file.addItem(withTitle: "Page Setup\u{2026}", action: Selector(("runPageLayout:")), keyEquivalent: "p")
+        pageSetup.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "Print\u{2026}", action: Selector(("print:")), keyEquivalent: "p")
+        file.addItem(withTitle: "Export as PDF\u{2026}", action: Selector(("exportPDF:")), keyEquivalent: "")
         file.addItem(NSMenuItem.separator())
         file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
         fileItem.submenu = file
@@ -409,6 +432,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         // it) and exits. Used for docs/comparisons.md.
         if let i = CommandLine.arguments.firstIndex(of: "--screenshot"), i + 1 < CommandLine.arguments.count {
             writeScreenshots(to: CommandLine.arguments[i + 1])
+        }
+        // `HelloWindow --print-pdf <file>` prints the Layout Demo's content view to a PDF
+        // without the panels (ADR-0022: pagination through NSPrintOperation, the platform's
+        // PDF writer) and exits; the container run checks the page count.
+        if let i = CommandLine.arguments.firstIndex(of: "--print-pdf"), i + 1 < CommandLine.arguments.count {
+            showLayoutDemo()
+            if let content = layoutWindowController?.window?.contentView {
+                let info = NSPrintInfo(dictionary: [.jobSavingURL: URL(fileURLWithPath: CommandLine.arguments[i + 1]),
+                                                    .jobDisposition: NSPrintInfo.JobDisposition.save.rawValue])
+                info.verticalPagination = .automatic
+                info.horizontalPagination = .fit
+                let op = NSPrintOperation(view: content, printInfo: info)
+                op.showsPrintPanel = false
+                op.showsProgressPanel = false
+                let ok = op.run()
+                print("print-pdf: \(ok ? "wrote" : "failed") \(CommandLine.arguments[i + 1]) (\(op.pageRange.length) page(s))")
+            }
+            NSApp.terminate(nil)
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
         // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover picks a tab the same way.
