@@ -401,15 +401,8 @@ extension NSAttributedString {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/boundingrect(with:options:context:)
     @available(macOS 10.11, *)
     public func boundingRect(with size: CGSize, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) -> CGRect { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/containsattachments
-    public var containsAttachments: Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/containsattachments(in:)
-    @available(macOS 10.11, *)
-    public func containsAttachments(in range: NSRange) -> Bool { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/docformat(from:documentattributes:)
     public func docFormat(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> Data? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/doubleclick(at:)
-    public func doubleClick(at location: Int) -> NSRange { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(with:options:context:)
     @available(macOS 10.11, *)
     public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) { unimplemented() }
@@ -425,10 +418,6 @@ extension NSAttributedString {
     public convenience init?(HTML data: Data, options: [NSAttributedString.DocumentReadingOptionKey : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(rtf:documentattributes:)
     public convenience init?(RTF data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(rtfd:documentattributes:)
-    public convenience init?(RTFD data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(rtfdfilewrapper:documentattributes:)
-    public convenience init?(RTFDFileWrapper wrapper: FileWrapper, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(url:documentattributes:)
     public convenience init?(URL url: URL, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(url:options:documentattributes:)
@@ -436,36 +425,14 @@ extension NSAttributedString {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(adaptiveimageglyph:attributes:)
     @available(macOS 15.0, *)
     public convenience init(adaptiveImageGlyph: NSAdaptiveImageGlyph, attributes: [NSAttributedString.Key : Any] = [:]) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(attachment:)
-    public convenience init(attachment: NSTextAttachment) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(attachment:attributes:)
-    @available(macOS 15.0, *)
-    public convenience init(attachment: NSTextAttachment, attributes: [NSAttributedString.Key : Any] = [:]) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(docformat:documentattributes:)
     public convenience init?(docFormat data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(path:documentattributes:)
     public convenience init?(path: String, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/itemnumber(in:at:)
-    public func itemNumber(in list: NSTextList, at location: Int) -> Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/linebreak(before:within:)
     public func lineBreak(before location: Int, within aRange: NSRange) -> Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/linebreakbyhyphenating(before:within:)
     public func lineBreakByHyphenating(before location: Int, within aRange: NSRange) -> Int { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/nextword(from:forward:)
-    public func nextWord(from location: Int, forward isForward: Bool) -> Int { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/prefersrtfd(in:)
-    @available(macOS 15.0, *)
-    public func prefersRTFD(in range: NSRange) -> Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/range(of:at:)
-    public func range(of block: NSTextBlock, at location: Int) -> NSRange { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/range(of:at:)
-    public func range(of table: NSTextTable, at location: Int) -> NSRange { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/range(of:at:)
-    public func range(of list: NSTextList, at location: Int) -> NSRange { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rtfd(from:documentattributes:)
-    public func rtfd(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> Data? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rtfdfilewrapper(from:documentattributes:)
-    public func rtfdFileWrapper(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> FileWrapper? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rulerattributes(in:)
     public func rulerAttributes(in range: NSRange) -> [NSAttributedString.Key : Any] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/texttypes
@@ -702,8 +669,6 @@ extension NSIndexPath {
 extension NSMutableAttributedString {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/applyfonttraits(_:range:)
     public func applyFontTraits(_ traitMask: NSFontTraitMask, range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixattachmentattribute(in:)
-    public func fixAttachmentAttribute(in range: NSRange) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixattributes(in:)
     public func fixAttributes(in range: NSRange) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixfontattribute(in:)

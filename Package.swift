@@ -79,6 +79,9 @@ targets += [
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
+// The spell checker seam (ADR-0030): the Windows Spell Checking API over COM.
+targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("ole32")])]
+appKitDependencies += ["CSpellCheck"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -144,6 +147,9 @@ targets += [
 ]
 let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO", "UniformTypeIdentifiers"]
+// The spell checker seam (ADR-0030): hunspell, loaded at run time.
+targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("dl")])]
+appKitDependencies += ["CSpellCheck"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
