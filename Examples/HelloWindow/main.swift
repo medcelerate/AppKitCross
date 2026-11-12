@@ -154,6 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             canvas.circleColor = names[(sender as? NSPopUpButton)?.titleOfSelectedItem ?? ""] ?? .systemBlue
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("exportPDF:")):
+            guard let content = NSApp.keyWindow?.contentView else { return true }
+            let save = NSSavePanel()
+            save.allowedFileTypes = ["pdf"]
+            save.nameFieldStringValue = (NSApp.keyWindow?.title ?? "HelloWindow") + ".pdf"
+            if save.runModal() == .OK, let url = save.url {
+                let data = content.dataWithPDF(inside: content.bounds)
+                try? data.write(to: url)
+                print("exported \(data.count) bytes of PDF to \(url.path)")
+            }
+            return true
         case Selector(("closeGlass:")):
             glassWindow?.close()
             glassWindow = nil
@@ -209,6 +220,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let file = NSMenu(title: "File")
         file.addItem(withTitle: "Open\u{2026}", action: Selector(("openFile:")), keyEquivalent: "o")
         file.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "k")
+        file.addItem(NSMenuItem.separator())
+        // Printing (ADR-0022): both reach the key window through the responder chain; Print…
+        // paginates its content view (the Layout Demo's tabs, the canvas) with the print panel
+        // as a sheet. Export PDF writes the key window's content with dataWithPDF(inside:).
+        // AppKit's shared print info clips a view wider than the printable area (its default
+        // horizontal pagination); the demo windows are wider than a portrait page, so they
+        // shrink to the page width instead, as a document app would set up its own info.
+        NSPrintInfo.shared.horizontalPagination = .fit
+        let pageSetup = file.addItem(withTitle: "Page Setup\u{2026}", action: Selector(("runPageLayout:")), keyEquivalent: "p")
+        pageSetup.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "Print\u{2026}", action: Selector(("print:")), keyEquivalent: "p")
+        file.addItem(withTitle: "Export as PDF\u{2026}", action: Selector(("exportPDF:")), keyEquivalent: "")
         file.addItem(NSMenuItem.separator())
         file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
         fileItem.submenu = file
@@ -410,8 +433,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         if let i = CommandLine.arguments.firstIndex(of: "--screenshot"), i + 1 < CommandLine.arguments.count {
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
+        // `HelloWindow --print-pdf <file>` prints the Layout Demo's content view to a PDF
+        // without the panels (ADR-0022: pagination through NSPrintOperation, the platform's
+        // PDF writer) and exits; the container run checks the page count.
+        if let i = CommandLine.arguments.firstIndex(of: "--print-pdf"), i + 1 < CommandLine.arguments.count {
+            showLayoutDemo()
+            if let content = layoutWindowController?.window?.contentView {
+                let info = NSPrintInfo(dictionary: [.jobSavingURL: URL(fileURLWithPath: CommandLine.arguments[i + 1]),
+                                                    .jobDisposition: NSPrintInfo.JobDisposition.save.rawValue])
+                info.verticalPagination = .automatic
+                info.horizontalPagination = .fit
+                let op = NSPrintOperation(view: content, printInfo: info)
+                op.showsPrintPanel = false
+                op.showsProgressPanel = false
+                let ok = op.run()
+                print("print-pdf: \(ok ? "wrote" : "failed") \(CommandLine.arguments[i + 1]) (\(op.pageRange.length) page(s))")
+            }
+            NSApp.terminate(nil)
+        }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|diffable|panels|popover picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -435,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "diffable", "panels", "popover"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -594,10 +635,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(CollectionDemoViewController())
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
+        tabs.addChild(ControlsDemoViewController())
+        tabs.addChild(DateDemoViewController())
         tabs.addChild(DiffableDemoViewController())
         tabs.addChild(PanelsDemoViewController())
         tabs.addChild(PopoverDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 760, height: 300)   // wide enough for the thirteen tabs
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 840, height: 300)   // wide enough for the fifteen tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -902,6 +945,266 @@ final class FormViewController: NSViewController, NSSelectorHandling {
         case Selector(("reset:")): status.stringValue = "Fill in the form."; return true
         default: return false
         }
+    }
+}
+
+/// The everyday controls (search field, token field, path control, stepper, level
+/// indicators, progress indicators) on one tab, each wired to the status line.
+final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NSTokenFieldDelegate {
+    let status = NSTextField(labelWithString: "Type in the search field; tokens split on commas.")
+    let search = NSSearchField(frame: .zero)
+    let tokens = NSTokenField(frame: .zero)
+    let path = NSPathControl(frame: .zero)
+    let popUpPath = NSPathControl(frame: .zero)
+    let stepper = NSStepper(frame: .zero)
+    let stepperValue = NSTextField(frame: .zero)
+    let capacity = NSLevelIndicator(frame: .zero)
+    let rating = NSLevelIndicator(frame: .zero)
+    let relevancy = NSLevelIndicator(frame: .zero)
+    let bar = NSProgressIndicator(frame: .zero)
+    let busy = NSProgressIndicator(frame: .zero)
+    let spinner = NSProgressIndicator(frame: .zero)
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Controls"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        func row(_ label: String, _ views: [NSView]) -> NSStackView {
+            let r = NSStackView()
+            r.orientation = .horizontal
+            r.spacing = 8
+            let l = NSTextField(labelWithString: label)
+            l.setContentHuggingPriority(.required, for: .horizontal)
+            l.widthAnchor.constraint(equalToConstant: 84).isActive = true
+            r.addArrangedSubview(l)
+            for v in views { r.addArrangedSubview(v) }
+            return r
+        }
+
+        search.placeholderString = "Search planets"
+        search.target = self
+        search.action = Selector(("searched:"))
+        search.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let menu = NSMenu(title: "Recents")
+        let recentsTitle = NSMenuItem(title: "Recent Searches", action: nil, keyEquivalent: ""); recentsTitle.tag = NSSearchField.recentsTitleMenuItemTag
+        let recents = NSMenuItem(title: "%@", action: nil, keyEquivalent: ""); recents.tag = NSSearchField.recentsMenuItemTag
+        let none = NSMenuItem(title: "No Recent Searches", action: nil, keyEquivalent: ""); none.tag = NSSearchField.noRecentsMenuItemTag
+        let clear = NSMenuItem(title: "Clear Recents", action: nil, keyEquivalent: ""); clear.tag = NSSearchField.clearRecentsMenuItemTag
+        for m in [recentsTitle, recents, none, clear] { menu.addItem(m) }
+        search.searchMenuTemplate = menu
+        stack.addArrangedSubview(row("Search:", [search]))
+
+        tokens.delegate = self
+        tokens.objectValue = ["Mercury", "Venus"]
+        tokens.placeholderString = "Planets, comma separated"
+        tokens.target = self
+        tokens.action = Selector(("tokensChanged:"))
+        tokens.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        stack.addArrangedSubview(row("Tokens:", [tokens]))
+
+        path.url = URL(fileURLWithPath: "/Users/jane/Documents/Planets/Mars.txt")
+        path.target = self
+        path.action = Selector(("pathClicked:"))
+        path.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        stack.addArrangedSubview(row("Path:", [path]))
+        popUpPath.pathStyle = .popUp
+        popUpPath.url = URL(fileURLWithPath: "/Users/jane/Documents")
+        popUpPath.isEditable = true
+        popUpPath.target = self
+        popUpPath.action = Selector(("pathClicked:"))
+        popUpPath.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        stack.addArrangedSubview(row("Pop-up:", [popUpPath]))
+
+        stepper.minValue = 0; stepper.maxValue = 10; stepper.integerValue = 3
+        stepper.target = self
+        stepper.action = Selector(("stepped:"))
+        stepperValue.integerValue = 3
+        stepperValue.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        stepperValue.target = self
+        stepperValue.action = Selector(("stepperTyped:"))
+        capacity.levelIndicatorStyle = .discreteCapacity
+        capacity.minValue = 0; capacity.maxValue = 10; capacity.warningValue = 6; capacity.criticalValue = 8
+        capacity.integerValue = 3
+        capacity.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        capacity.numberOfTickMarks = 11
+        stack.addArrangedSubview(row("Stepper:", [stepper, stepperValue, capacity]))
+
+        rating.levelIndicatorStyle = .rating
+        rating.minValue = 0; rating.maxValue = 5; rating.integerValue = 4
+        rating.isEditable = true
+        rating.target = self
+        rating.action = Selector(("rated:"))
+        relevancy.levelIndicatorStyle = .relevancy
+        relevancy.minValue = 0; relevancy.maxValue = 100; relevancy.doubleValue = 65
+        relevancy.widthAnchor.constraint(equalToConstant: 100).isActive = true
+        stack.addArrangedSubview(row("Levels:", [rating, relevancy]))
+
+        bar.isIndeterminate = false
+        bar.minValue = 0; bar.maxValue = 100; bar.doubleValue = 30
+        bar.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        busy.isIndeterminate = true
+        busy.widthAnchor.constraint(equalToConstant: 100).isActive = true
+        busy.startAnimation(nil)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        stack.addArrangedSubview(row("Progress:", [bar, busy, spinner]))
+
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+    }
+
+    /// `APPKITWIN_STEPPER_PROBE=1` prints the stepper's upper half in X screen pixels once
+    /// the window is up, and each stepped value with its offset since the first step of the hold
+    /// (tools/linux/stepper-hold.sh; on Windows, read stdout while holding the upper half).
+    let probing = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_PROBE"] != nil
+    /// The time of the first step of a hold, for the probe's offsets (reset a second after the last step).
+    private var probeStart: CFTimeInterval = 0
+    private var probeLast: CFTimeInterval = 0
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard probing else { return }
+        // A second later the window is placed and laid out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.printStepperProbe() }
+    }
+    private func printStepperProbe() {
+        guard let w = view.window, let screen = w.screen ?? NSScreen.main else { return }
+        let r = stepper.convert(stepper.bounds, to: nil)
+        let s = w.convertToScreen(r)
+        // X screen coordinates: origin top-left, points to pixels at the backing scale.
+        let scale = w.backingScaleFactor
+        let x = Int((s.midX * scale).rounded())
+        let y = Int(((screen.frame.maxY - (s.minY + s.height * 0.75)) * scale).rounded())
+        print("stepper at \(x) \(y)"); fflush(nil)
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action {
+        case Selector(("searched:")): status.stringValue = search.stringValue.isEmpty ? "Search cleared." : "Searching for \"\(search.stringValue)\""; return true
+        case Selector(("tokensChanged:")): status.stringValue = "Tokens: \((tokens.objectValue as? [Any] ?? []).map { "\($0)" }.joined(separator: " | "))"; return true
+        case Selector(("pathClicked:")):
+            let p = sender as? NSPathControl
+            status.stringValue = "Clicked \(p?.clickedPathItem?.title ?? "?") → \(p?.clickedPathItem?.url?.path ?? p?.url?.path ?? "")"
+            return true
+        case Selector(("stepped:")):
+            stepperValue.integerValue = stepper.integerValue
+            capacity.integerValue = stepper.integerValue
+            bar.doubleValue = Double(stepper.integerValue) * 10
+            status.stringValue = "Stepper: \(stepper.integerValue)"
+            if probing {
+                // "stepper value N +0.512s": the offset since the first step of this hold, so a
+                // log shows the autorepeat delay (0.5 s) and rate (10 per second) exactly.
+                let now = CACurrentMediaTime()
+                if now - probeLast > 1 { probeStart = now }
+                probeLast = now
+                print(String(format: "stepper value %d +%.3fs", stepper.integerValue, now - probeStart)); fflush(nil)
+            }
+            return true
+        case Selector(("stepperTyped:")):
+            stepper.integerValue = stepperValue.integerValue
+            capacity.integerValue = stepper.integerValue
+            return true
+        case Selector(("rated:")): status.stringValue = "Rating: \(rating.integerValue) of 5"; return true
+        default: return false
+        }
+    }
+
+    static let planets = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
+    func tokenField(_ tokenField: NSTokenField, completionsForSubstring substring: String, indexOfToken tokenIndex: Int, indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?) -> [Any]? {
+        let matches = ControlsDemoViewController.planets.filter { $0.lowercased().hasPrefix(substring.lowercased()) }
+        return matches.isEmpty ? nil : matches
+    }
+    func tokenField(_ tokenField: NSTokenField, hasMenuForRepresentedObject representedObject: Any) -> Bool { (representedObject as? String) == "Earth" }
+    func tokenField(_ tokenField: NSTokenField, menuForRepresentedObject representedObject: Any) -> NSMenu? {
+        let m = NSMenu(title: "")
+        m.addItem(NSMenuItem(title: "Home planet", action: nil, keyEquivalent: ""))
+        return m
+    }
+}
+
+/// The date picker's styles: textual with a stepper, plain textual (time only), and the
+/// graphical calendar and clock, all on one date.
+final class DateDemoViewController: NSViewController, NSSelectorHandling {
+    let status = NSTextField(labelWithString: "Pick a date.")
+    let textual = NSDatePicker(frame: .zero)
+    let timeOnly = NSDatePicker(frame: .zero)
+    let graphical = NSDatePicker(frame: .zero)
+    /// A fixed date so the renders compare across platforms.
+    static let demoDate: Date = {
+        var c = DateComponents(); c.year = 2026; c.month = 11; c.day = 10; c.hour = 14; c.minute = 30
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal.date(from: c)!
+    }()
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Date"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
+        let posix = Locale(identifier: "en_US_POSIX")
+        let utc = TimeZone(identifier: "UTC")
+        for p in [textual, timeOnly, graphical] {
+            p.locale = posix
+            p.timeZone = utc
+            p.dateValue = DateDemoViewController.demoDate
+            p.target = self
+            p.action = Selector(("dateChanged:"))
+            p.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(p)
+        }
+        timeOnly.datePickerStyle = .textField
+        timeOnly.datePickerElements = .hourMinute
+        graphical.datePickerStyle = .clockAndCalendar
+        graphical.minDate = DateDemoViewController.demoDate.addingTimeInterval(-20 * 86400)
+        let l1 = NSTextField(labelWithString: "Stepper:"), l2 = NSTextField(labelWithString: "Time:")
+        for l in [l1, l2] { l.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(l) }
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            l1.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            l1.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            textual.leadingAnchor.constraint(equalTo: l1.trailingAnchor, constant: 8),
+            textual.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            l2.leadingAnchor.constraint(equalTo: textual.trailingAnchor, constant: 16),
+            l2.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            timeOnly.leadingAnchor.constraint(equalTo: l2.trailingAnchor, constant: 8),
+            timeOnly.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            graphical.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            graphical.topAnchor.constraint(equalTo: textual.bottomAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action == Selector(("dateChanged:")), let p = sender as? NSDatePicker else { return false }
+        for other in [textual, timeOnly, graphical] where other !== p { other.dateValue = p.dateValue }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        status.stringValue = "Date: \(f.string(from: p.dateValue)) UTC"
+        return true
     }
 }
 

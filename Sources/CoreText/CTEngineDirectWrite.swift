@@ -198,7 +198,7 @@ final class CTDirectWriteFont: CTEngineFont {
         var xy: [Float] = []
         xy.reserveCapacity(glyphs.count * 2)
         for p in positions.prefix(glyphs.count) { xy.append(Float(p.x)); xy.append(Float(p.y)) }
-        if cdw_draw_glyphs(ctx._d2dTarget, handle, glyphs, xy, UInt32(glyphs.count), r, g, b, a) { return }
+        if !ctx._recordsVectorOutput, cdw_draw_glyphs(ctx._d2dTarget, handle, glyphs, xy, UInt32(glyphs.count), r, g, b, a) { return }
         ctx.saveGState()
         ctx.setFillColor(color)
         for (i, g) in glyphs.enumerated() {

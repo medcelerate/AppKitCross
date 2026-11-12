@@ -87,6 +87,10 @@ public protocol PlatformBackend: AnyObject {
     var dragDrop: (any PlatformDragDrop)? { get }
     /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
     var statusItems: (any PlatformStatusItemHost)? { get }
+    /// Printers, PDF documents and device jobs (see Printing.swift, ADR-0022); nil when the
+    /// platform cannot print.
+    var printing: (any PlatformPrintBackend)? { get }
+
     /// How the package draws the standard window buttons it supplies itself (content that
     /// covers the title bar, client-side decorations): macOS traffic lights at the left, or
     /// the platform's caption buttons at the right (ADR-0022). Default: traffic lights.

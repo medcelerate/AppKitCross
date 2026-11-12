@@ -32,7 +32,7 @@ public protocol NSTokenFieldCellDelegate: NSObjectProtocol {
 // Optional requirements (ObjC `@optional`), modelled as defaulted requirements.
 extension NSTokenFieldCellDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:completionsforsubstring:indexoftoken:indexofselecteditem:)
-    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, completionsForSubstring substring: String, indexOfToken tokenIndex: Int, indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>) -> [Any] { unimplementedOptionalRequirement() }
+    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, completionsForSubstring substring: String, indexOfToken tokenIndex: Int, indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>) -> [Any] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:displaystringforrepresentedobject:)
     @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, displayStringForRepresentedObject representedObject: Any) -> String? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:editingstringforrepresentedobject:)
@@ -46,9 +46,9 @@ extension NSTokenFieldCellDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:representedobjectforediting:)
     @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, representedObjectForEditing editingString: String) -> Any? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:shouldadd:at:)
-    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, shouldAdd tokens: [Any], at index: Int) -> [Any] { unimplementedOptionalRequirement() }
+    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, shouldAdd tokens: [Any], at index: Int) -> [Any] { return tokens }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:styleforrepresentedobject:)
-    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, styleForRepresentedObject representedObject: Any) -> NSTokenField.TokenStyle { unimplementedOptionalRequirement() }
+    @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, styleForRepresentedObject representedObject: Any) -> NSTokenField.TokenStyle { return .default }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfieldcelldelegate/tokenfieldcell(_:writerepresentedobjects:to:)
     @MainActor public func tokenFieldCell(_ tokenFieldCell: NSTokenFieldCell, writeRepresentedObjects objects: [Any], to pboard: NSPasteboard) -> Bool { return false }
 }

@@ -274,6 +274,46 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, con
                       const uint16_t *labels, const uint16_t *defaultExtension, uint16_t **paths, uint32_t *length);
 void cd2d_file_dialog_free(uint16_t *paths);
 
+// Printing (ADR-0022): printer names, the PrintDlgEx dialog and print jobs through
+// Direct2D's print control (ID2D1PrintControl over an IPrintDocumentPackageTarget: each
+// page is a command list drawn through a CD2DTarget and added to the job as XPS).
+/// NUL-separated, double-NUL-terminated UTF-16 printer names, the default printer first;
+/// `length` is the number of code units. Free with cd2d_file_dialog_free. False when
+/// there are none.
+bool cd2d_printer_names(uint16_t **names, uint32_t *length);
+typedef struct CD2DPrintDialogSettings {
+    uint32_t copies;            // in and out
+    bool collate;
+    uint32_t fromPage, toPage;  // 1-based, 0 = all pages (in and out)
+    uint32_t pageCount;         // in: the document's page count
+    bool landscape;             // in and out
+    float paperWidth, paperHeight;   // points, portrait; out when the driver reports a size
+    bool printToFile;           // out
+    void *driverSettings;       // out: the DEVMODE the dialog returned (free with cd2d_print_free), NULL when none
+    uint32_t driverSettingsSize;
+} CD2DPrintDialogSettings;
+/// Frees a buffer cd2d_print_dialog handed out.
+void cd2d_print_free(void *buffer);
+/// Shows the system print dialog. `printerName` (in) preselects a printer; on return the
+/// chosen printer's name is in `chosenName` (free with cd2d_file_dialog_free). Returns
+/// true when the user chose Print, false when cancelled or on failure.
+bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDialogSettings *settings, uint16_t **chosenName, uint32_t *chosenLength);
+typedef struct CD2DPrintJob CD2DPrintJob;
+/// Starts a job named `jobName` on `printerName` (NUL-terminated UTF-16; NULL = default printer).
+/// `driverSettings` (a DEVMODE from cd2d_print_dialog, or NULL) becomes the job's print
+/// ticket, so the paper, orientation and copies chosen in the dialog reach the driver.
+CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName, const void *driverSettings, uint32_t driverSettingsSize);
+/// Begins a page of the given size in DIPs: a command list the returned target draws into
+/// (release it with cd2d_target_release before cd2d_print_job_end_page). The size is in
+/// DIPs (1/96 inch; a caller drawing in points scales by 96/72). NULL on failure.
+CD2DTarget *cd2d_print_job_begin_page(CD2DPrintJob *job, float widthDips, float heightDips);
+/// Closes the page's command list and adds it to the job.
+bool cd2d_print_job_end_page(CD2DPrintJob *job);
+/// Closes the job (spools it) and frees it. False when the print control refused.
+bool cd2d_print_job_close(CD2DPrintJob *job);
+/// Abandons the job and frees it.
+void cd2d_print_job_abort(CD2DPrintJob *job);
+
 // The common colour dialog (ChooseColorW). `rgb` is COLORREF (0x00BBGGRR) in and out, with
 // the 16 custom colours kept for the process. Returns false when cancelled.
 bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb);
