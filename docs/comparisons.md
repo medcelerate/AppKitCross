@@ -9,6 +9,8 @@ by a capture of the live window.
 |---|---|---|---|
 | HelloWindow main window: paths, text, controls, scroll view, the Core Animation badge | ![macOS](images/compare/hellowindow-macos.png) | ![Linux](images/compare/hellowindow-linux.png) | ![Windows](images/compare/hellowindow-windows.png) |
 | Layout Demo, Form tab: Auto Layout, labels, text fields, buttons | ![macOS](images/compare/layout-demo-macos.png) | ![Linux](images/compare/layout-demo-linux.png) | ![Windows](images/compare/layout-demo-windows.png) |
+| Layout Demo, Controls tab: search field, token field, path controls, stepper, level and progress indicators (ADR-0021) | ![macOS](images/compare/layout-controls-macos.png) | ![Linux](images/compare/layout-controls-linux.png) | (Windows capture pending) |
+| Layout Demo, Date tab: the date picker's textual, stepper and graphical styles | ![macOS](images/compare/layout-date-macos.png) | ![Linux](images/compare/layout-date-linux.png) | (Windows capture pending) |
 | SwiftUI demo, Controls tab: stacks, text, controls, shapes, list | ![macOS](images/compare/swiftui-demo-macos.png) | ![Linux](images/compare/swiftui-demo-linux.png) | ![Windows](images/compare/swiftui-demo-windows.png) |
 | SwiftUI demo, Data tab: a sortable Table with selection | ![macOS](images/compare/swiftui-data-macos.png) | ![Linux](images/compare/swiftui-data-linux.png) | ![Windows](images/compare/swiftui-data-windows.png) |
 | Layout Demo, Collection tab: `NSCollectionView` with a flow layout, section headers and a selection (ADR-0020) | ![macOS](images/compare/layout-collection-macos.png) | ![Linux](images/compare/layout-collection-linux.png) | ![Windows](images/compare/layout-collection-windows.png) |
@@ -45,6 +47,8 @@ Regenerate the macOS and Linux columns with:
 swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # macOS, headless
 APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
 APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
+APPKITWIN_LAYOUT_TAB=controls swift run HelloWindow --layout --screenshot docs/images/compare   # the Controls tab
+APPKITWIN_LAYOUT_TAB=date swift run HelloWindow --layout --screenshot docs/images/compare       # the Date tab
 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color swift run HelloWindow --layout --screenshot docs/images/compare   # the Panels tab with the Colors panel (font: APPKITWIN_PANELS_OPEN=font)
 APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 swift run HelloWindow --layout --screenshot docs/images/compare   # the Popover tab and the popover's window
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb

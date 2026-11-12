@@ -36,7 +36,7 @@ extension NSPathControlDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcontroldelegate/pathcontrol(_:shoulddrag:with:)
     @MainActor public func pathControl(_ pathControl: NSPathControl, shouldDrag pathComponentCell: NSPathComponentCell, with pasteboard: NSPasteboard) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcontroldelegate/pathcontrol(_:validatedrop:)
-    @MainActor public func pathControl(_ pathControl: NSPathControl, validateDrop info: any NSDraggingInfo) -> NSDragOperation { unimplementedOptionalRequirement() }
+    @MainActor public func pathControl(_ pathControl: NSPathControl, validateDrop info: any NSDraggingInfo) -> NSDragOperation { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcontroldelegate/pathcontrol(_:willdisplay:)
     @MainActor public func pathControl(_ pathControl: NSPathControl, willDisplay openPanel: NSOpenPanel) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspathcontroldelegate/pathcontrol(_:willpopup:)

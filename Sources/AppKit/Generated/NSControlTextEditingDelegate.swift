@@ -39,13 +39,13 @@ extension NSControlTextEditingDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:didfailtovalidatepartialstring:errordescription:)
     @MainActor public func control(_ control: NSControl, didFailToValidatePartialString string: String, errorDescription error: String?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:isvalidobject:)
-    @MainActor public func control(_ control: NSControl, isValidObject obj: Any?) -> Bool { return false }
+    @MainActor public func control(_ control: NSControl, isValidObject obj: Any?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:textshouldbeginediting:)
-    @MainActor public func control(_ control: NSControl, textShouldBeginEditing fieldEditor: NSText) -> Bool { return false }
+    @MainActor public func control(_ control: NSControl, textShouldBeginEditing fieldEditor: NSText) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:textshouldendediting:)
-    @MainActor public func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool { return false }
+    @MainActor public func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:textview:completions:forpartialwordrange:indexofselecteditem:)
-    @MainActor public func control(_ control: NSControl, textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String] { unimplementedOptionalRequirement() }
+    @MainActor public func control(_ control: NSControl, textView: NSTextView, completions words: [String], forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String] { return words }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/control(_:textview:docommandby:)
     @MainActor public func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroltexteditingdelegate/controltextdidbeginediting(_:)

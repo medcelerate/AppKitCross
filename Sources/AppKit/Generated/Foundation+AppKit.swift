@@ -443,8 +443,6 @@ extension NSAttributedString {
     public convenience init(attachment: NSTextAttachment, attributes: [NSAttributedString.Key : Any] = [:]) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(docformat:documentattributes:)
     public convenience init?(docFormat data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(pasteboardpropertylist:oftype:)
-    public convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(path:documentattributes:)
     public convenience init?(path: String, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/itemnumber(in:at:)
@@ -795,6 +793,8 @@ extension NSString {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(with:options:attributes:context:)
     @available(macOS 10.11, *)
     public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil, context: NSStringDrawingContext?) { unimplemented() }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/init(pasteboardpropertylist:oftype:)
+    public convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
 }
 
 extension NSURL {
