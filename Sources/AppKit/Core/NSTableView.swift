@@ -16,6 +16,17 @@ import CoreGraphics
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview
 @MainActor open class NSTableView: NSControl, NSUserInterfaceValidations, NSTextViewDelegate, NSTextDelegate, NSDraggingSource, NSAccessibilityTable, NSAccessibilityGroup, NSSelectorHandling {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal var _applyingSelectionBinding = false
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.content, .selectionIndexes, .sortDescriptors] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyTableBinding(b) || super._applyViewBinding(b) }
+    /// The sort descriptors from a binding: no write-back, no data-source callback.
+    internal func _setSortDescriptorsFromBinding(_ descriptors: [NSSortDescriptor]) {
+        _sortDescriptors = descriptors
+        _headerView?.needsDisplay = true
+    }
+
     // MARK: Storage
     private var _tableColumns: [NSTableColumn] = []
     private weak var _dataSource: (any NSTableViewDataSource)?
@@ -118,6 +129,7 @@ import CoreGraphics
         tableColumn._tableView = self
         _tableColumns.append(tableColumn)
         _columnsDidChange()
+        if let b = _NSBindings.binding(tableColumn, .value) { _adoptColumnBinding(b) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/removetablecolumn(_:)
     @MainActor open func removeTableColumn(_ tableColumn: NSTableColumn) {
@@ -283,13 +295,19 @@ import CoreGraphics
     // delegate call that depends on the row model goes through one, so the outline view can
     // answer from its flattened rows and its own protocols without forking the table.
 
-    internal func _rowCountFromDataSource() -> Int { max(0, _dataSource?.numberOfRows(in: self) ?? 0) }
+    internal func _rowCountFromDataSource() -> Int {
+        if _dataSource == nil, let bound = _boundContent() { return bound.count }
+        return max(0, _dataSource?.numberOfRows(in: self) ?? 0)
+    }
     internal func _delegateHeightOfRow(_ row: Int) -> CGFloat { _delegate?.tableView(self, heightOfRow: row) ?? _rowHeight }
     internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? {
         if let p = _contentProvider { return p._tableView(self, viewFor: column, row: row) }
         return _delegate?.tableView(self, viewFor: column, row: row)
     }
-    internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? { _dataSource?.tableView(self, objectValueFor: column, row: row) }
+    internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? {
+        if _dataSource == nil, let bound = _boundObjectValue(for: column, row: row) { return bound }
+        return _dataSource?.tableView(self, objectValueFor: column, row: row)
+    }
     internal func _delegateRowView(forRow row: Int) -> NSTableRowView? {
         _contentProvider?._tableView(self, rowViewForRow: row) ?? _delegate?.tableView(self, rowViewForRow: row)
     }
@@ -982,6 +1000,7 @@ import CoreGraphics
         _selectedRows = rows
         for (row, v) in _rowViews { _applyRowState(v, row: row) }
         needsDisplay = true
+        _pushSelectionBinding()
         guard notify else { return }
         let n = Notification(name: type(of: self).selectionDidChangeNotification, object: self)
         NotificationCenter.default.post(n)
@@ -1161,6 +1180,7 @@ import CoreGraphics
             _sortDescriptors = newValue
             _headerView?.needsDisplay = true
             _dataSourceSortDescriptorsDidChange(old)
+            if let b = _NSBindings.binding(self, .sortDescriptors) { b.push(newValue) }
         }
     }
 

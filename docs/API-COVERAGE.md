@@ -9,11 +9,11 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 164 |
-| Types generated | 375 |
+| Types handwritten | 172 |
+| Types generated | 367 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10212 |
+| Members emitted | 10214 |
 | Members blocked | 175 |
 | Members unavailable | 0 |
 | Members synthesized | 1495 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 455 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1044 |
+| Members unimplemented-calls | 1058 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -86,13 +86,13 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
 | NSApplication | class | handwritten | 183 | 1 | 17 | 34 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
-| NSArrayController | class | generated | 38 | 1 | 0 |  |
+| NSArrayController | class | handwritten | 38 | 1 | 0 | 0 |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
 | NSBezierPath | class | handwritten | 75 | 2 | 4 | 10 |
 | NSBindingInfoKey | struct | generated | 3 | 0 | 0 |  |
 | NSBindingName | struct | generated | 79 | 0 | 0 |  |
 | NSBindingOption | struct | generated | 26 | 0 | 0 |  |
-| NSBindingSelectionMarker | class | generated | 5 | 0 | 0 |  |
+| NSBindingSelectionMarker | class | handwritten | 5 | 0 | 0 | 0 |
 | NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 28 |
 | NSBorderType | enum | generated | 4 | 0 | 0 |  |
 | NSBox | class | handwritten | 29 | 0 | 2 | 2 |
@@ -177,7 +177,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSControl | class | handwritten | 80 | 0 | 4 | 12 |
 | NSControlTextEditingDelegate | protocol | generated | 10 | 0 | 0 |  |
 | NSControlTint | enum | generated | 4 | 0 | 0 |  |
-| NSController | class | generated | 8 | 0 | 0 |  |
+| NSController | class | handwritten | 8 | 0 | 0 | 3 |
 | NSCursor | class | handwritten | 76 | 0 | 9 | 2 |
 | NSCustomImageRep | class | generated | 5 | 0 | 0 |  |
 | NSCustomTouchBarItem | class | generated | 1 | 2 | 0 |  |
@@ -293,7 +293,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |
 | NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |
 | NSNib | class | generated | 4 | 0 | 1 |  |
-| NSObjectController | class | generated | 21 | 3 | 0 |  |
+| NSObjectController | class | handwritten | 21 | 3 | 0 | 3 |
 | NSOpenGLContext | class | generated | 24 | 6 | 1 |  |
 | NSOpenGLGlobalOption | enum | generated | 4 | 1 | 0 |  |
 | NSOpenGLLayer | class | generated | 5 | 2 | 0 |  |
@@ -349,7 +349,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
 | NSResponder | class | handwritten | 69 | 2 | 0 | 16 |
 | NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
-| NSRuleEditor | class | generated | 44 | 0 | 3 |  |
+| NSRuleEditor | class | handwritten | 44 | 0 | 3 | 4 |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSRulerMarker | class | generated | 14 | 0 | 0 |  |
 | NSRulerView | class | generated | 29 | 0 | 2 |  |
@@ -535,13 +535,13 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTouchBarProvider | protocol | generated | 1 | 0 | 0 |  |
 | NSTrackingArea | class | handwritten | 15 | 0 | 1 | 3 |
 | NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |
-| NSTreeController | class | generated | 34 | 0 | 0 |  |
-| NSTreeNode | class | generated | 9 | 0 | 0 |  |
+| NSTreeController | class | handwritten | 36 | 0 | 0 | 0 |
+| NSTreeNode | class | handwritten | 9 | 0 | 0 | 3 |
 | NSTypesetter | class | generated | 53 | 2 | 0 |  |
 | NSTypesetterControlCharacterAction | struct | generated | 6 | 0 | 0 |  |
 | NSUnderlineStyle | struct | generated | 8 | 0 | 0 |  |
 | NSUserActivityRestoring | protocol | generated | 0 | 1 | 0 |  |
-| NSUserDefaultsController | class | generated | 11 | 0 | 0 |  |
+| NSUserDefaultsController | class | handwritten | 11 | 0 | 0 | 1 |
 | NSUserInterfaceCompression | protocol | generated | 3 | 0 | 0 |  |
 | NSUserInterfaceCompressionOptions | class | generated | 14 | 0 | 0 |  |
 | NSUserInterfaceItemIdentification | protocol | generated | 1 | 0 | 0 |  |

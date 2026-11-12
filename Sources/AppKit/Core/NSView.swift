@@ -16,6 +16,13 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview
 @MainActor open class NSView: NSResponder, NSAnimatablePropertyContainer, NSUserInterfaceItemIdentification, NSDraggingDestination, NSAppearanceCustomization, NSAccessibilityElementProtocol, NSAccessibilityProtocol {
+    // MARK: Bindings (ADR-0032; overridden by controls, see NSKeyValueBinding+Views.swift)
+
+    internal class var _definedViewBindings: [NSBindingName] { [.hidden, .toolTip] }
+    internal func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyBaseViewBinding(b) }
+    internal func _viewBindingDidAttach(_ b: _NSBinding) { }
+    internal func _viewBindingDidDetach(_ b: _NSBinding) { }
+
     // MARK: Storage
     private var _frame: NSRect
     private var _boundsOrigin = NSPoint.zero
