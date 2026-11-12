@@ -1503,6 +1503,7 @@ struct CD2DCompTree {
     void *lastSurface = nullptr;                   // the last surface drawn and its atlas offset (trace aid)
     int32_t lastOffsetX = 0, lastOffsetY = 0;
     bool lastSurfaceCreated = false;
+    int32_t lastSurfaceRefs = 0;                   // the surface's reference count after the draw began
 };
 
 static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
@@ -1764,6 +1765,8 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
     }
     tree->drawing = id;
     tree->lastSurface = v->surface;
+    v->surface->AddRef();
+    tree->lastSurfaceRefs = (int32_t)v->surface->Release();
     tree->lastOffsetX = offset.x; tree->lastOffsetY = offset.y;
     tree->dc->SetTarget(tree->surfaceBitmap);
     tree->dc->SetDpi(dpi, dpi);
@@ -1889,6 +1892,8 @@ void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *
     if (offsetY) *offsetY = tree ? tree->lastOffsetY : 0;
     if (created) *created = tree ? tree->lastSurfaceCreated : false;
 }
+
+int32_t cd2d_comp_tree_last_surface_refs(CD2DCompTree *tree) { return tree ? tree->lastSurfaceRefs : 0; }
 
 void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr) {
     if (stage) *stage = tree ? tree->lastDrawStage : 0;

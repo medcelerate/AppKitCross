@@ -795,7 +795,7 @@ final class Win32Window: PlatformWindow {
             }
             let t = node.transform
             if NSView._traceInvalidation, Win32Window.traceScene {
-                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) content \(node.content != nil) native \(node.nativeContent != nil) \(node.name ?? "")")
+                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) opacity \(node.opacity) content \(node.content != nil) native \(node.nativeContent != nil) \(node.name ?? "")")
             }
             if let m = node.transform3D {
                 // The whole placement goes through the 3D effect; the 2D transform stays identity.
@@ -868,7 +868,7 @@ final class Win32Window: PlatformWindow {
                 var ox: Int32 = 0, oy: Int32 = 0
                 var created = false
                 cd2d_comp_tree_last_draw_info(tree, &surfacePtr, &ox, &oy, &created)
-                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) surface \(surfacePtr.map { String(UInt(bitPattern: $0), radix: 16) } ?? "nil") offset \(ox),\(oy)\(created ? " new" : "") \(node.name ?? "")")
+                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) surface \(surfacePtr.map { String(UInt(bitPattern: $0), radix: 16) } ?? "nil") offset \(ox),\(oy) refs \(cd2d_comp_tree_last_surface_refs(tree))\(created ? " new" : "") \(node.name ?? "")")
             }
         }
         cd2d_comp_tree_end_update(tree)

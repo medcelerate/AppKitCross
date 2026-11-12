@@ -263,6 +263,8 @@ void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t 
 /// The surface the last successful surface_begin_draw drew into (IDCompositionSurface*), the
 /// atlas offset BeginDraw returned (pixels), and whether the surface was created for it (debug aid).
 void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *offsetX, int32_t *offsetY, bool *created);
+/// The reference count of the last surface drawn, while its draw was open (debug aid).
+int32_t cd2d_comp_tree_last_surface_refs(CD2DCompTree *tree);
 
 // File dialogs (IFileDialog)
 typedef struct CD2DFileDialogOptions {

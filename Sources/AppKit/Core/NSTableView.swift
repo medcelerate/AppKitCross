@@ -854,7 +854,7 @@ import CoreGraphics
                     let l = (c as? NSTableCellView)?.textField?.layer
                     return "'\(text)' \(c.frame) node \(l.map { String($0._sceneSerial * 4) } ?? "-") v\(l?._rasterVersion ?? -1)"
                 }
-                NSView._trace("table row \(row) frame \(v.frame) in table \(v.superview === self) node \(v.layer.map { String($0._sceneSerial * 4) } ?? "-") v\(v.layer?._rasterVersion ?? -1) layer pos \(v.layer.map { "\($0.position) parent \($0.superlayer.map { String($0._sceneSerial * 4) } ?? "none") anims \($0.animationKeys() ?? [])" } ?? "-") cells \(cells)")
+                NSView._trace("table row \(row) frame \(v.frame) in table \(v.superview === self) alpha \(v.alphaValue) hidden \(v.isHidden) layer opacity \(v.layer?.opacity ?? -1) node \(v.layer.map { String($0._sceneSerial * 4) } ?? "-") v\(v.layer?._rasterVersion ?? -1) layer pos \(v.layer.map { "\($0.position) parent \($0.superlayer.map { String($0._sceneSerial * 4) } ?? "none") anims \($0.animationKeys() ?? [])" } ?? "-") cells \(cells)")
             }
         }
         _updatingVisibleRows = false
