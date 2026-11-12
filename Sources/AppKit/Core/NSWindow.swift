@@ -2082,6 +2082,14 @@ import CoreText
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
         defer { _currentEvent = nil }
+        // A child window that is key (a popover) takes the keyboard: on Wayland its keys
+        // arrive here, focus staying with the toplevel (ADR-0025).
+        if let child = _childWindows.last(where: { $0._isKey && $0.isVisible && $0 !== self }) {
+            switch event.type {
+            case .keyDown, .keyUp, .flagsChanged: child.sendEvent(event); return
+            default: break
+            }
+        }
         // Blocked by a sheet: the keyboard goes to the sheet (on Wayland the key events
         // arrive here, focus staying with the toplevel), the content takes no mouse.
         if let sheet = attachedSheet, sheet.isVisible {

@@ -161,6 +161,10 @@ public protocol PlatformWindow: AnyObject {
     /// and minimised with it, and listed nowhere (taskbar, window list). The core sets the
     /// frame after attaching and moves the sheet when the parent moves.
     func attachSheet(to parent: PlatformWindow?)
+    /// Whether the window system composites the window's alpha (a transparent window
+    /// shows what is behind it): DirectComposition and Wayland do, a plain X11 window
+    /// does not. A popover draws an opaque backing around its body where it does not.
+    var supportsTransparency: Bool { get }
 }
 
 /// A native surface within a window's content area that a swap chain presents into
@@ -208,6 +212,7 @@ extension PlatformWindow {
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
     public func attachSheet(to parent: PlatformWindow?) { }
+    public var supportsTransparency: Bool { true }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }

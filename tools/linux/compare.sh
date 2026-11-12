@@ -15,8 +15,8 @@ APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=grid "${BIN:-./.build/debug/Hel
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=box "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 # The Layout Demo's Diffable tab after a shuffle, an insert, a delete and a reload (ADR-0029).
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=diffable APPKITWIN_DIFFABLE_STEPS=shuffle,insert,delete,reload "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
-# The Layout Demo's Combo, Outline, Pages and Panels tabs, and the Outline tab mirrored right to left.
-for tab in combo outline pages panels; do
+# The Layout Demo's Combo, Outline, Pages, Panels and Popover tabs, and the Outline tab mirrored right to left.
+for tab in combo outline pages panels popover; do
     APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=$tab "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
 done
 # The Colors and Fonts panels (ADR-0031), rendered headless like the other windows.
@@ -34,10 +34,12 @@ sleep 3
 xwd -root -silent | convert xwd:- -trim "$OUT/layout-combo-open-linux.png"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true
-# The Colors panel open beside the Layout Demo: a capture of the X screen.
-APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color "${BIN:-./.build/debug/HelloWindow}" --layout &
+# The popover tab with the transient popover open: its own window rendered by the demo
+# (layout-popover-open-linux.png) and a capture of the X screen showing it in place.
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT"
+APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 "${BIN:-./.build/debug/HelloWindow}" --layout &
 APP=$!
 sleep 3
-xwd -root -silent | convert xwd:- -trim "$OUT/color-panel-open-linux.png"
+xwd -root -silent | convert xwd:- -trim "$OUT/layout-popover-screen-linux.png"
 kill $APP 2>/dev/null || true
 wait $APP 2>/dev/null || true

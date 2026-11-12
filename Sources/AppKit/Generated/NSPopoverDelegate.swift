@@ -47,7 +47,7 @@ extension NSPopoverDelegate {
     @available(macOS 10.10, *)
     @MainActor public func popoverDidShow(_ notification: Notification) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopoverdelegate/popovershouldclose(_:)
-    @MainActor public func popoverShouldClose(_ popover: NSPopover) -> Bool { return false }
+    @MainActor public func popoverShouldClose(_ popover: NSPopover) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopoverdelegate/popovershoulddetach(_:)
     @available(macOS 10.10, *)
     @MainActor public func popoverShouldDetach(_ popover: NSPopover) -> Bool { return false }
