@@ -11,6 +11,9 @@ import Foundation
 
 @MainActor
 final class LayoutEngine {
+    /// Constraints already logged as unsatisfiable (each is dropped silently after that).
+    static var reportedConflicts = Set<ObjectIdentifier>()
+
     /// Variables for one item (a view or a layout guide): engine-space frame.
     final class ItemVariables {
         let x = LayoutVariable("x"), y = LayoutVariable("y"), width = LayoutVariable("width"), height = LayoutVariable("height")
@@ -127,10 +130,10 @@ final class LayoutEngine {
         items = [:]
         var constrainedViews: [NSView] = []
         var guides: [NSLayoutGuide] = []
-        var solverConstraints: [LayoutSolverConstraint] = []
+        var solverConstraints: [(NSLayoutConstraint?, LayoutSolverConstraint)] = []
 
         func add(_ e: LayoutExpression, _ rel: LayoutRelation, _ strength: Double) {
-            solverConstraints.append(LayoutSolverConstraint(e, rel, strength: strength))
+            solverConstraints.append((nil, LayoutSolverConstraint(e, rel, strength: strength)))
         }
 
         func addIntrinsic(_ view: NSView, _ v: ItemVariables) {
@@ -189,16 +192,23 @@ final class LayoutEngine {
                 add(LayoutExpression(gv.height), .greaterOrEqual, LayoutStrength.required)
             }
             for c in view._allConstraints {
-                if let sc = solverConstraint(for: c) { solverConstraints.append(sc) }
+                if let sc = solverConstraint(for: c) { solverConstraints.append((c, sc)) }
             }
             for s in view.subviews { visit(s) }
         }
         visit(root)
 
-        for sc in solverConstraints {
+        for (c, sc) in solverConstraints {
             do { try solver.addConstraint(sc) } catch {
-                // Unsatisfiable or duplicate: AppKit logs and drops one; do the same.
-                NSLog("Unable to simultaneously satisfy constraints; dropping \(sc.expression) \(sc.relation)")
+                // Unsatisfiable or duplicate: AppKit logs and drops one; do the same. The
+                // engine is rebuilt every pass, so the log is once per constraint (AppKit's
+                // engine keeps its constraints and logs when one is added): logging every
+                // pass is a cost, and on Windows a large one (NSLog there is slow enough
+                // to hold the frame clock up for a stepper's whole autorepeat interval).
+                let id = c.map(ObjectIdentifier.init)
+                if let id, LayoutEngine.reportedConflicts.contains(id) { continue }
+                if let id { LayoutEngine.reportedConflicts.insert(id) }
+                NSLog("Unable to simultaneously satisfy constraints; dropping \(c.map { "\($0) " } ?? "")\(sc.expression) \(sc.relation)")
             }
         }
         solver.updateVariables()

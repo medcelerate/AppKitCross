@@ -986,7 +986,6 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
             r.spacing = 8
             let l = NSTextField(labelWithString: label)
             l.setContentHuggingPriority(.required, for: .horizontal)
-            l.widthAnchor.constraint(equalToConstant: 84).isActive = true
             r.addArrangedSubview(l)
             for v in views { r.addArrangedSubview(v) }
             return r
