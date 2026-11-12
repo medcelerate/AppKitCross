@@ -412,6 +412,80 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The PC case: a 1400x1000 32-bit BI_BITFIELDS bitmap pasted (CF_DIB of a PNG), a
+    /// PNG file dropped before it and the same file dropped after it, then saved as RTFD and
+    /// reopened. The large attachment keeps its size and line and is drawn at every step.
+    func testLargePastedBitmapBetweenTwoDrops() throws {
+        try MainActor.assumeIsolated {
+            let (win, _, tv) = window(text: "")
+            TextDocument_configure(tv)
+            let W = 1400, H = 1000
+            var dib = Data()
+            func le(_ v: Int, _ n: Int) { for k in 0..<n { dib.append(UInt8((v >> (8 * k)) & 0xFF)) } }
+            le(40, 4); le(W, 4); le(H, 4); le(1, 2); le(32, 2); le(3, 4); le(W * H * 4, 4); le(0, 4); le(0, 4); le(0, 4); le(0, 4)
+            le(0x00FF0000, 4); le(0x0000FF00, 4); le(0x000000FF, 4)
+            dib.append(contentsOf: [UInt8](repeating: 0, count: W * H * 4).enumerated().map { i, _ in [0x20, 0xC0, 0x40, 0xFF][i & 3] })
+            let bmp = try XCTUnwrap(PlatformClipboardImage.bmpFile(fromDIB: dib))
+            XCTAssertEqual(bmp.count, 5_600_066, "the size the PC saved")
+            let pb = NSPasteboard(name: NSPasteboard.Name("large-bitmap-\(UUID().uuidString)"))
+            _ = pb.clearContents()
+            _ = pb.setData(bmp, forType: NSTextView._bmpType)
+            tv._insertPasted(try XCTUnwrap(tv._readContent(from: pb)))
+            pb.releaseGlobally()
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pr56-drop-\(UUID().uuidString).png")
+            try pngImage(NSSize(width: 320, height: 240)).write(to: url)
+            defer { try? FileManager.default.removeItem(at: url) }
+            @MainActor func drop(at i: Int) throws {
+                let dpb = NSPasteboard(name: NSPasteboard.Name("large-drop-\(UUID().uuidString)"))
+                _ = dpb.clearContents()
+                _ = dpb.setString(url.absoluteString, forType: .fileURL)
+                tv.setSelectedRange(NSRange(location: i, length: 0))
+                tv._insertPasted(try XCTUnwrap(tv._readContent(from: dpb)))
+                dpb.releaseGlobally()
+            }
+            @MainActor func check(_ step: String, large: Int, count: Int) throws {
+                win.display()
+                let lm = try XCTUnwrap(tv.layoutManager)
+                lm.ensureLayout(for: tv.textContainer!)
+                XCTAssertEqual(lm._attachments.count, count, step)
+                for (i, e) in lm._attachments.sorted(by: { $0.key < $1.key }) {
+                    let expected = i == large ? NSSize(width: W, height: H) : NSSize(width: 320, height: 240)
+                    let line = lm.lineFragmentRect(forGlyphAt: i, effectiveRange: nil)
+                    let rect = lm._attachmentRect(at: i)
+                    let detail = "\(step), attachment \(i): size \(e.size) line \(line) rect \(rect.map { "\($0)" } ?? "nil") cell \(e.attachment.attachmentCell.map { "\($0.cellSize())" } ?? "nil")"
+                    print("large bitmap: \(detail)")
+                    XCTAssertEqual(e.size, expected, detail)
+                    XCTAssertGreaterThanOrEqual(line.height, expected.height, detail)
+                }
+                // The large bitmap is drawn: a column through the view crosses it (rows are
+                // sampled without assuming the bitmap's row order).
+                let rep = try XCTUnwrap(tv.bitmapImageRepForCachingDisplay(in: tv.bounds))
+                tv.cacheDisplay(in: tv.bounds, to: rep)
+                let scale = max(1, rep.pixelsWide / max(1, Int(rep.size.width)))
+                let column = stride(from: 0, to: Int(tv.bounds.height), by: 10).map { y -> Character in
+                    guard let k = rep.colorAt(x: 50 * scale, y: y * scale) else { return "?" }
+                    return k.greenComponent > 0.6 && k.redComponent < 0.4 && k.blueComponent < 0.3 ? "G" : k.blueComponent > 0.9 && k.redComponent < 0.2 ? "B" : "."
+                }
+                print("large bitmap: \(step): frame \(tv.frame), column \(String(column))")
+                XCTAssertGreaterThanOrEqual(column.filter { $0 == "G" }.count, 8, "\(step): the bitmap is drawn: \(String(column))")
+            }
+            try check("pasted", large: 0, count: 1)
+            try drop(at: 0)
+            try check("dropped before", large: 1, count: 2)
+            try drop(at: 2)
+            try check("dropped after", large: 1, count: 3)
+            let text = try XCTUnwrap(tv.textStorage?.copy() as? NSAttributedString)
+            let wrapper = try XCTUnwrap(text._rtfdDirectory(from: NSRange(location: 0, length: text.length)))
+            let saved = FileManager.default.temporaryDirectory.appendingPathComponent("pr56-\(UUID().uuidString).rtfd")
+            defer { try? FileManager.default.removeItem(at: saved) }
+            try wrapper.write(to: saved, options: .atomic, originalContentsURL: nil)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: saved.path).count, 4, "TXT.rtf and three files")
+            let back = try XCTUnwrap(_RTFReader.readRTFD(try FileWrapper(url: saved, options: .immediate)))
+            tv.textStorage?.setAttributedString(back)
+            try check("reopened", large: 1, count: 3)
+        }
+    }
+
     /// Distinct attribute values in adjacent runs: on Windows and Linux Foundation reads a
     /// Swift object's CF type from its first stored word and halted on these (CFBridgeLayout).
     func testDistinctAttributeValuesInAdjacentRuns() {

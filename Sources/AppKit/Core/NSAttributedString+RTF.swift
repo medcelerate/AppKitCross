@@ -109,11 +109,26 @@ extension NSAttributedString {
     /// A directory: TXT.rtf and one file per attachment.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rtfdfilewrapper(from:documentattributes:)
     public func rtfdFileWrapper(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> FileWrapper? {
+        _rtfdDirectory(from: range)
+    }
+    /// The RTFD directory (TXT.rtf and the attachments' files) for `range`.
+    internal func _rtfdDirectory(from range: NSRange) -> FileWrapper? {
         var writer = _RTFWriter(attributedString: self, range: range)
         writer.writesAttachments = true
         guard let rtf = writer.write() else { return nil }
         var children: [String: FileWrapper] = ["TXT.rtf": FileWrapper(regularFileWithContents: rtf)]
-        for (name, file) in writer.attachmentFiles { children[name] = file }
+        for (name, file) in writer.attachmentFiles {
+            // The same file dropped twice: both wrappers prefer one name and the writer
+            // numbered the second; a directory wrapper renames a child whose preferred name
+            // differs from its key, so the reference to it would no longer resolve.
+            if file.preferredFilename != name, let data = file.regularFileContents {
+                let renamed = FileWrapper(regularFileWithContents: data)
+                renamed.preferredFilename = name
+                children[name] = renamed
+            } else {
+                children[name] = file
+            }
+        }
         return FileWrapper(directoryWithFileWrappers: children)
     }
     /// Whether the range has attachments, which only RTFD keeps.
