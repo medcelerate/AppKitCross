@@ -145,8 +145,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(row.frame.minY, 300)
             XCTAssertFalse(row.isHidden)
             // Band points: buttons are content (they take the click), the rest drags the window.
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 314)), .client, "the close button")
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 58, y: 314)), .client, "the zoom button")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 314)), .closeButton, "the close button")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 58, y: 314)), .zoomButton, "the zoom button")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 4, y: 314)), .caption, "the gap before the buttons")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 314)), .caption, "the title")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 290)), .client, "content just below the band")

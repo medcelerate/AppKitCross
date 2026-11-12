@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 144 |
-| Types generated | 394 |
+| Types handwritten | 146 |
+| Types generated | 392 |
 | Types pending | 3 |
 | Types skipped | 0 |
 | Members emitted | 10223 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 456 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1167 |
+| Members unimplemented-calls | 1170 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -331,7 +331,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPickerTouchBarItem | class | generated | 24 | 1 | 2 |  |
 | NSPopUpButton | class | handwritten | 42 | 0 | 1 | 1 |
 | NSPopUpButtonCell | class | handwritten | 40 | 0 | 0 | 1 |
-| NSPopover | class | generated | 29 | 0 | 3 |  |
+| NSPopover | class | handwritten | 29 | 0 | 3 | 2 |
 | NSPopoverDelegate | protocol | generated | 8 | 0 | 0 |  |
 | NSPopoverTouchBarItem | class | generated | 9 | 1 | 0 |  |
 | NSPredicateEditor | class | generated | 1 | 0 | 0 |  |
@@ -431,7 +431,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSSuggestionItem | struct | generated | 9 | 0 | 0 |  |
 | NSSuggestionItemResponse | struct | generated | 18 | 0 | 4 |  |
 | NSSuggestionItemSection | struct | generated | 5 | 0 | 1 |  |
-| NSSwitch | class | generated | 1 | 0 | 0 |  |
+| NSSwitch | class | handwritten | 1 | 0 | 0 | 1 |
 | NSTabView | class | handwritten | 44 | 0 | 3 | 2 |
 | NSTabViewController | class | handwritten | 22 | 0 | 1 | 3 |
 | NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |

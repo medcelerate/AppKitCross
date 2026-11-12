@@ -737,7 +737,7 @@ extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textfieldstyle(_:)
     public func textFieldStyle<S: TextFieldStyle>(_ style: S) -> some View { environment(\.textFieldStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/togglestyle(_:)
-    public func toggleStyle<S: ToggleStyle>(_ style: S) -> some View { self }
+    public func toggleStyle<S: ToggleStyle>(_ style: S) -> some View { environment(\.toggleStyle, style._kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/progressviewstyle(_:)
     public func progressViewStyle<S: ProgressViewStyle>(_ style: S) -> some View { environment(\.progressViewStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/datepickerstyle(_:)
@@ -864,10 +864,20 @@ extension TextFieldStyle where Self == PlainTextFieldStyle { public static var p
 extension TextFieldStyle where Self == SquareBorderTextFieldStyle { public static var squareBorder: SquareBorderTextFieldStyle { SquareBorderTextFieldStyle() } }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/togglestyle
-public protocol ToggleStyle {}
+public protocol ToggleStyle {
+    /// Which control the toggle is (a requirement so the built-in styles dispatch dynamically).
+    var _kind: _ToggleStyleKind { get }
+}
+/// Which control a `Toggle` is: a check box (`NSButton`) or a switch (`NSSwitch`).
+public enum _ToggleStyleKind: Sendable { case automatic, `switch`, checkbox }
+extension ToggleStyle { public var _kind: _ToggleStyleKind { .automatic } }
 public struct DefaultToggleStyle: ToggleStyle { public init() {} }
-public struct SwitchToggleStyle: ToggleStyle { public init() {} }
-public struct CheckboxToggleStyle: ToggleStyle { public init() {} }
+public struct SwitchToggleStyle: ToggleStyle { public init() {}; public var _kind: _ToggleStyleKind { .switch } }
+public struct CheckboxToggleStyle: ToggleStyle { public init() {}; public var _kind: _ToggleStyleKind { .checkbox } }
+extension EnvironmentValues {
+    private struct ToggleStyleKey: EnvironmentKey { static let defaultValue: _ToggleStyleKind = .automatic }
+    var toggleStyle: _ToggleStyleKind { get { self[ToggleStyleKey.self] } set { self[ToggleStyleKey.self] = newValue } }
+}
 extension ToggleStyle where Self == DefaultToggleStyle { public static var automatic: DefaultToggleStyle { DefaultToggleStyle() } }
 extension ToggleStyle where Self == SwitchToggleStyle { public static var `switch`: SwitchToggleStyle { SwitchToggleStyle() } }
 extension ToggleStyle where Self == CheckboxToggleStyle { public static var checkbox: CheckboxToggleStyle { CheckboxToggleStyle() } }
