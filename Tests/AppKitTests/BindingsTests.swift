@@ -4,6 +4,7 @@
 
 import XCTest
 @testable import AppKit
+@testable import QuartzCore
 
 // MARK: - Model
 
@@ -1160,3 +1161,28 @@ final class RuleEditorTests: XCTestCase, @unchecked Sendable {
     }
     #endif
 }
+
+// MARK: - Layer scene identity
+
+final class LayerSceneIdentityTests: XCTestCase, @unchecked Sendable {
+    /// A native compositor caches each node's raster by node id and version. Rows recreated by
+    /// a table reload free their layers and allocate new ones, often at the same addresses: a
+    /// node id taken from the address let a new layer inherit a freed layer's cached surface
+    /// (blank rows after a sort on Windows). Every layer instance gets its own id.
+    func testNodeIDsAreNotReusedAcrossLayerLifetimes() {
+        MainActor.assumeIsolated {
+            var ids = Set<Int>()
+            var count = 0
+            for _ in 0..<200 {
+                do {
+                    let layer = CALayer()
+                    layer.bounds = CGRect(x: 0, y: 0, width: 10, height: 10)
+                    let scene = layer._buildScene(parentFlipped: false, parentBounds: CGRect(x: 0, y: 0, width: 10, height: 10), scale: 1, frame: 0)
+                    for n in scene.nodes { ids.insert(n.id); count += 1 }
+                }
+            }
+            XCTAssertEqual(ids.count, count, "a node id was reused by a later layer")
+        }
+    }
+}
+

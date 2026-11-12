@@ -844,6 +844,16 @@ import CoreGraphics
         let wanted = range.length > 0 ? Set(range.location..<(range.location + range.length)) : Set<Int>()
         for (row, v) in _rowViews where !wanted.contains(row) || row >= _numberOfRows { _recycle(v, row: row) }
         for row in wanted.sorted() where _rowViews[row] == nil && _rowHeights[row] > 0 { _ = _makeRowView(row) }
+        if NSView._traceInvalidation {
+            for (row, v) in _rowViews.sorted(by: { $0.key < $1.key }) {
+                let cells = v._cellViews.map { c -> String in
+                    let text = (c as? NSTableCellView)?.textField?.stringValue ?? "-"
+                    let l = (c as? NSTableCellView)?.textField?.layer
+                    return "'\(text)' \(c.frame) node \(l.map { String($0._sceneSerial) } ?? "-") v\(l?._rasterVersion ?? -1)"
+                }
+                NSView._trace("table row \(row) frame \(v.frame) in table \(v.superview === self) node \(v.layer.map { String($0._sceneSerial) } ?? "-") v\(v.layer?._rasterVersion ?? -1) cells \(cells)")
+            }
+        }
         _updatingVisibleRows = false
         if _reloadRequestedWhileUpdating {
             _reloadRequestedWhileUpdating = false
