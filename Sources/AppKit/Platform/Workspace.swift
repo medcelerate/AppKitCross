@@ -62,6 +62,10 @@ public struct PlatformAccessibilityDisplayOptions: Sendable, Equatable {
 public enum PlatformWorkspaceEvent: Sendable {
     case applicationDidActivate(processIdentifier: Int32)
     case applicationDidLaunch(PlatformRunningApplication)
+    /// A process this workspace launched handed its work to another one (a packaged
+    /// application's launcher stub on Windows): the launched `NSRunningApplication` now
+    /// stands for the new process, with no launch or termination notification.
+    case applicationDidHandOff(fromProcessIdentifier: Int32, to: PlatformRunningApplication)
     case applicationDidTerminate(processIdentifier: Int32)
     case applicationDidHide(processIdentifier: Int32)
     case applicationDidUnhide(processIdentifier: Int32)

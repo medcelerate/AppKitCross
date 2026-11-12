@@ -23,7 +23,13 @@ What it demonstrates:
   activating, hiding and terminating that instance only, matched by the process identifier
   `openApplication` returned, never by name: an instance already running before Launch,
   perhaps with unsaved work, is never touched. Press Launch first; a test of Activate,
-  Hide or Terminate uses the fresh instance the demo started.
+  Hide or Terminate uses the fresh instance the demo started. On Windows 11 `notepad`
+  (like `calc` and `mspaint`) is a packaged application: System32 holds a launcher stub
+  that hands off to the Store package and exits, and the workspace follows the hand-off,
+  so the launched application is the real Notepad (activated through its app execution
+  alias when the alias is enabled, else matched by executable name when its window
+  appears). An unpackaged application with a window, for a test that must not involve a
+  package, is `charmap` or `msinfo32`.
 - The log lists the workspace notifications as they arrive: application activation and
   lifetime, sleep and wake, screens, the session, accessibility settings.
 

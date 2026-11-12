@@ -281,6 +281,38 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     /// frontmost application, which refreshes the list mid-notification. The change must
     /// already be recorded, or the refresh posts it again without end (a stack overflow on
     /// Windows, inside the foreground hook's callback).
+    func testHandOffKeepsTheLaunchedApplicationObject() {
+        MainActor.assumeIsolated {
+            _ = NSWorkspace.shared.runningApplications
+            let stub = PlatformRunningApplication(processIdentifier: 5151, localizedName: "notepad", bundleIdentifier: "notepad", executableURL: URL(fileURLWithPath: "/w/System32/notepad.exe"))
+            host.otherApplications.append(stub)
+            host.postEvent(.applicationDidLaunch(stub))
+            guard let launched = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == 5151 }) else { return XCTFail("the stub is not listed") }
+            let seen = _NotificationLog()
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { note in
+                    seen.add("\(name.rawValue):\((note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier ?? -1)")
+                })
+            }
+            // The stub exits; the package's Notepad.exe takes over.
+            let real = PlatformRunningApplication(processIdentifier: 5152, localizedName: "Notepad", bundleIdentifier: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+                                                  executableURL: URL(fileURLWithPath: "/w/WindowsApps/Notepad/Notepad.exe"), launchDate: Date())
+            host.otherApplications = host.otherApplications.filter { $0.processIdentifier != 5151 } + [real]
+            host.postEvent(.applicationDidHandOff(fromProcessIdentifier: 5151, to: real))
+            XCTAssertEqual(launched.processIdentifier, 5152)
+            XCTAssertEqual(launched.localizedName, "Notepad")
+            XCTAssertFalse(launched.isTerminated)
+            XCTAssertTrue(NSWorkspace.shared.runningApplications.first { $0.processIdentifier == 5152 } === launched, "the same object stands for the real process")
+            XCTAssertNil(NSWorkspace.shared.runningApplications.first { $0.processIdentifier == 5151 })
+            XCTAssertEqual(seen.entries, [], "a hand-off is neither a launch nor a termination")
+            // Terminating the real process ends the object the caller held.
+            host.otherApplications = host.otherApplications.filter { $0.processIdentifier != 5152 }
+            host.postEvent(.applicationDidTerminate(processIdentifier: 5152))
+            XCTAssertTrue(launched.isTerminated)
+            XCTAssertEqual(seen.entries, ["NSWorkspaceDidTerminateApplicationNotification:5152"])
+        }
+    }
+
     func testObserverAskingForTheFrontmostApplicationDoesNotRecurse() {
         MainActor.assumeIsolated {
             NSApplication.shared.activate(ignoringOtherApps: true)

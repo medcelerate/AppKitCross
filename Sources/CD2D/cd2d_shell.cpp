@@ -14,6 +14,7 @@
 #include <commoncontrols.h>
 #include <wtsapi32.h>
 #include <appmodel.h>
+#include <winioctl.h>
 #include <string>
 #include <vector>
 #include <cstring>
@@ -145,26 +146,83 @@ bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count) {
     if (!paths || count == 0) return false;
     ensureCom();
     std::vector<PIDLIST_ABSOLUTE> items;
+    std::vector<std::wstring> names;
     const wchar_t *p = reinterpret_cast<const wchar_t *>(paths);
     for (uint32_t i = 0; i < count; i++) {
         size_t len = wcslen(p);
-        if (PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(p)) items.push_back(pidl);
+        // The shell parser wants backslashes; a forward-slash path parses into something
+        // that is not the file-system item and Explorer then opens nothing.
+        std::wstring path(p, len);
+        for (wchar_t &ch : path) if (ch == L'/') ch = L'\\';
+        names.push_back(path);
+        if (PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(path.c_str())) items.push_back(pidl);
         p += len + 1;
     }
-    if (items.empty()) return false;
     bool ok = false;
-    // All items share the first one's folder; the folder's own PIDL is the parent.
-    PIDLIST_ABSOLUTE folder = ILClone(items[0]);
-    if (folder && ILRemoveLastID(folder)) {
-        std::vector<PCUITEMID_CHILD> children;
-        for (PIDLIST_ABSOLUTE item : items) {
-            if (ILIsParent(folder, item, TRUE)) children.push_back(ILFindLastID(item));
+    if (!items.empty()) {
+        // All items share the first one's folder; the folder's own PIDL is the parent.
+        PIDLIST_ABSOLUTE folder = ILClone(items[0]);
+        if (folder && ILRemoveLastID(folder)) {
+            std::vector<PCUITEMID_CHILD> children;
+            for (PIDLIST_ABSOLUTE item : items) {
+                if (ILIsParent(folder, item, TRUE)) children.push_back(ILFindLastID(item));
+            }
+            ok = SUCCEEDED(SHOpenFolderAndSelectItems(folder, UINT(children.size()), children.empty() ? nullptr : children.data(), 0));
         }
-        ok = SUCCEEDED(SHOpenFolderAndSelectItems(folder, UINT(children.size()), children.empty() ? nullptr : children.data(), 0));
+        if (folder) ILFree(folder);
+        for (PIDLIST_ABSOLUTE item : items) ILFree(item);
     }
-    if (folder) ILFree(folder);
-    for (PIDLIST_ABSOLUTE item : items) ILFree(item);
+    if (!ok && !names.empty()) {
+        // Explorer's own command line selects one item; the shell refused the request
+        // (no PIDL, or an error from a shell that has no folder window to show it in).
+        std::wstring args = L"/select,\"" + names[0] + L"\"";
+        HINSTANCE r = ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+        ok = reinterpret_cast<intptr_t>(r) > 32;
+    }
     return ok;
+}
+
+bool cd2d_shell_app_exec_link(const uint16_t *path, uint16_t *aumid, uint32_t capacity) {
+    if (!path || !aumid || capacity == 0) return false;
+    // An app execution alias is a reparse point (IO_REPARSE_TAG_APPEXECLINK) whose data
+    // is a version followed by NUL-separated strings: package id, application user model
+    // id, the real executable, the application type.
+    HANDLE h = CreateFileW(reinterpret_cast<LPCWSTR>(path), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                           FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    std::vector<uint8_t> buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+    DWORD got = 0;
+    bool ok = DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, nullptr, 0, buffer.data(), DWORD(buffer.size()), &got, nullptr) != 0;
+    CloseHandle(h);
+    if (!ok || got < 8) return false;
+    const ULONG tag = *reinterpret_cast<const ULONG *>(buffer.data());
+    const USHORT length = *reinterpret_cast<const USHORT *>(buffer.data() + 4);
+    if (tag != 0x8000001BUL /* IO_REPARSE_TAG_APPEXECLINK */ || length < 4) return false;
+    // Generic reparse buffer: tag (4), length (2), reserved (2), then the data.
+    const uint8_t *data = buffer.data() + 8;
+    const wchar_t *strings = reinterpret_cast<const wchar_t *>(data + 4);   // skip the version
+    size_t chars = (length - 4) / sizeof(wchar_t);
+    const wchar_t *end = strings + chars;
+    const wchar_t *packageID = strings;
+    const wchar_t *entry = packageID + wcsnlen(packageID, size_t(end - packageID)) + 1;
+    if (entry >= end) return false;
+    size_t entryLength = wcsnlen(entry, size_t(end - entry));
+    if (entryLength == 0 || entryLength + 1 > capacity) return false;
+    memcpy(aumid, entry, (entryLength + 1) * sizeof(wchar_t));
+    return true;
+}
+
+bool cd2d_shell_activate_application(const uint16_t *aumid, const uint16_t *arguments, uint32_t *pid) {
+    if (!aumid || !pid) return false;
+    ensureCom();
+    IApplicationActivationManager *manager = nullptr;
+    if (FAILED(CoCreateInstance(__uuidof(ApplicationActivationManager), nullptr, CLSCTX_LOCAL_SERVER, __uuidof(IApplicationActivationManager), reinterpret_cast<void **>(&manager))) || !manager) return false;
+    DWORD processID = 0;
+    HRESULT hr = manager->ActivateApplication(reinterpret_cast<LPCWSTR>(aumid), arguments ? reinterpret_cast<LPCWSTR>(arguments) : L"", AO_NONE, &processID);
+    manager->Release();
+    if (FAILED(hr)) return false;
+    *pid = processID;
+    return true;
 }
 
 bool cd2d_shell_recycle(const uint16_t *path) {

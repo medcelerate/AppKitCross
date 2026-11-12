@@ -120,7 +120,7 @@ open class NSRunningApplication: NSObject, @unchecked Sendable {
         _main {
             if let app = _app, let image = app._applicationIconImageIfSet { return image }
             let target: PlatformIconTarget = _info.applicationURL.map { .application($0) } ?? .process(_info.processIdentifier)
-            return NSWorkspace.shared._icon(for: target, size: 128)
+            return NSWorkspace.shared._icon(for: target)   // 32 points, as AppKit's
         }
     }
 

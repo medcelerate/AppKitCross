@@ -139,6 +139,19 @@ answer), launch date, active, hidden, whether it shows windows.
   answer false.
 - Desktop picture: `SPI_GETDESKWALLPAPER`/`SPI_SETDESKWALLPAPER` (one picture for every
   display; the screen argument is ignored).
+- Launching a packaged application (Windows 11's Notepad, Calculator, Paint): an app
+  execution alias under `%LOCALAPPDATA%\Microsoft\WindowsApps` is a reparse point naming
+  the Application User Model ID, and the System32 executable of the same name is a stub
+  that hands off to the package and exits at once. The alias (or a Windows-directory stub
+  with an alias of its name) is launched through `IApplicationActivationManager`, which
+  answers the application's own process id. Without an alias, a process launched here
+  that exits without ever owning a window becomes a hand-off candidate for three seconds:
+  a new windowed process with the same executable name, or failing that one already
+  running, takes its place through `PlatformWorkspaceEvent.applicationDidHandOff`, and the
+  `NSRunningApplication` the caller holds keeps its identity and now describes the real
+  process (no launch or termination notification for the stub).
+- Reveal: `SHOpenFolderAndSelectItems` on backslash paths (the shell parser does not take
+  forward slashes), with `explorer.exe /select,` when the shell refuses.
 - Dock tile: `ITaskbarList3::SetOverlayIcon` with the badge on every titled window (the
   taskbar shows the active window's overlay for the group), `WM_SETICON` with the
   composed icon when the tile has a content view or the application an icon image, and

@@ -561,6 +561,20 @@ open class NSWorkspace: NSObject {
         return app
     }
 
+    /// The object for the stub keeps its identity (callers hold it) and now describes the
+    /// real process; a stub nobody knew is a plain launch.
+    @MainActor private func _applicationDidHandOff(from fromPID: Int32, to info: PlatformRunningApplication) {
+        guard let app = _applications[fromPID], !app.isTerminated else { _ = _application(for: info, isNew: true); return }
+        _applications[fromPID] = nil
+        if let other = _applications[info.processIdentifier], other !== app { other._markTerminated() }
+        var info = info
+        info.launchDate = info.launchDate ?? app._info.launchDate
+        app._update(info, workspace: self, posting: false)
+        _applications[info.processIdentifier] = app
+        if _lastActivePID == fromPID { _lastActivePID = info.processIdentifier }
+        if info.isActive, _lastActivePID != info.processIdentifier { _activeApplicationDidChange(to: app) }
+    }
+
     @MainActor private func _applicationDidTerminate(_ app: NSRunningApplication, posting: Bool) {
         app._markTerminated()
         _applications[app.processIdentifier] = nil
@@ -723,6 +737,8 @@ extension NSWorkspace: PlatformWorkspaceObserver {
             }
         case .applicationDidLaunch(let info):
             _ = _application(for: info, isNew: true)
+        case .applicationDidHandOff(let fromPID, let info):
+            _applicationDidHandOff(from: fromPID, to: info)
         case .applicationDidTerminate(let pid):
             if let app = _applications[pid] { _applicationDidTerminate(app, posting: true) }
         case .applicationDidHide(let pid):

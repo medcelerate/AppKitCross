@@ -188,9 +188,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSSelectorHandling {
             guard let url = URL(string: urlField.stringValue) else { report("not a URL"); return true }
             report("open \(url): \(ws.open(url))")
         case 2:
-            let exe = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            let exe = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).standardizedFileURL
             ws.activateFileViewerSelecting([exe])
-            report("revealed \(exe.path)")
+            // The same reveal through the API that answers, so the log says whether the
+            // shell took it (activateFileViewerSelecting returns nothing, as AppKit's).
+            report("revealed \(exe.path): \(ws.selectFile(exe.path, inFileViewerRootedAtPath: exe.deletingLastPathComponent().path))")
         case 3:
             report("open folder: \(ws.selectFile(nil, inFileViewerRootedAtPath: FileManager.default.temporaryDirectory.path))")
         case 4:

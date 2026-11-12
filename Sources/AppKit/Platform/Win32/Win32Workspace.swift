@@ -38,6 +38,13 @@ final class Win32Workspace: PlatformWorkspace {
     private static let pollTimer: UINT_PTR = 7
     /// Processes launched here (their pid), listed until they exit even without windows.
     private var launched: [DWORD: PlatformRunningApplication] = [:]
+    /// Launcher stubs: processes launched here that exited without ever owning a window
+    /// (a packaged application's System32 stub hands off to the real process and exits at
+    /// once), by executable name, kept a few seconds for the real process to show up.
+    private var handOffCandidates: [DWORD: (app: PlatformRunningApplication, until: Date)] = [:]
+    private static let handOffGrace: TimeInterval = 3
+    /// Launched processes that owned a window at some poll: not stubs when they exit.
+    private var everWindowed: Set<DWORD> = []
     private var lastPIDs: Set<DWORD> = []
     private var lastActivePID: DWORD? = nil
     private var hiddenPIDs: Set<DWORD> = []
@@ -181,18 +188,63 @@ final class Win32Workspace: PlatformWorkspace {
     private func pollWindowList() {
         let snapshot = windowedProcesses()
         let pids = Set(snapshot.keys)
+        let now = Date()
+        for pid in pids where launched[pid] != nil { everWindowed.insert(pid) }
         for pid in pids.subtracting(lastPIDs) where pid != GetCurrentProcessId() {
-            if let app = runningApplication(withProcessIdentifier: Int32(bitPattern: pid)) { observer?.platformWorkspaceDidObserve(.applicationDidLaunch(app)) }
+            guard let app = runningApplication(withProcessIdentifier: Int32(bitPattern: pid)) else { continue }
+            if let stub = handOffStub(for: app) {
+                observer?.platformWorkspaceDidObserve(.applicationDidHandOff(fromProcessIdentifier: Int32(bitPattern: stub), to: app))
+            } else {
+                observer?.platformWorkspaceDidObserve(.applicationDidLaunch(app))
+            }
         }
         for pid in lastPIDs.subtracting(pids) where launched[pid] == nil {
             observer?.platformWorkspaceDidObserve(.applicationDidTerminate(processIdentifier: Int32(bitPattern: pid)))
         }
+        retireWindowlessLaunches(now: now)
         for (pid, _) in launched where !processExists(pid) {
             launched[pid] = nil
+            everWindowed.remove(pid)
             if !pids.contains(pid) { observer?.platformWorkspaceDidObserve(.applicationDidTerminate(processIdentifier: Int32(bitPattern: pid))) }
+        }
+        for (stub, candidate) in handOffCandidates where candidate.until <= now {
+            handOffCandidates[stub] = nil
+            // The work may have gone to an instance that was already running (single-instance
+            // applications): that one stands in; otherwise the stub simply exited.
+            let name = Win32Workspace.executableName(of: candidate.app)
+            if let existing = pids.first(where: { $0 != stub && Win32Workspace.executableName(ofProcess: $0, self) == name }),
+               let app = application(pid: existing, windows: snapshot[existing]) {
+                observer?.platformWorkspaceDidObserve(.applicationDidHandOff(fromProcessIdentifier: Int32(bitPattern: stub), to: app))
+            } else {
+                observer?.platformWorkspaceDidObserve(.applicationDidTerminate(processIdentifier: Int32(bitPattern: stub)))
+            }
         }
         lastPIDs = pids
         if let fg = foregroundPID(), fg != lastActivePID { foregroundDidChange(to: fg) }
+    }
+
+    /// The launcher stub a newly windowed process stands in for: an exited candidate, or a
+    /// process launched here that is still running without a window, with the same
+    /// executable name (notepad.exe in System32 hands off to the package's Notepad.exe).
+    private func handOffStub(for app: PlatformRunningApplication) -> DWORD? {
+        let name = Win32Workspace.executableName(of: app)
+        let pid = DWORD(bitPattern: app.processIdentifier)
+        if let stub = handOffCandidates.first(where: { $0.key != pid && Win32Workspace.executableName(of: $0.value.app) == name })?.key {
+            handOffCandidates[stub] = nil
+            return stub
+        }
+        if let stub = launched.first(where: { $0.key != pid && !everWindowed.contains($0.key) && Win32Workspace.executableName(of: $0.value) == name })?.key {
+            launched[stub] = nil
+            return stub
+        }
+        return nil
+    }
+
+    private static func executableName(of app: PlatformRunningApplication) -> String {
+        (app.executableURL?.lastPathComponent ?? (app.localizedName ?? "") + ".exe").lowercased()
+    }
+    private static func executableName(ofProcess pid: DWORD, _ ws: Win32Workspace) -> String? {
+        ws.executablePath(pid).map { URL(fileURLWithPath: $0).lastPathComponent.lowercased() }
     }
 
     // MARK: Windows and processes
@@ -298,8 +350,22 @@ final class Win32Workspace: PlatformWorkspace {
         for (pid, windows) in windowed where pid != me {
             if let app = application(pid: pid, windows: windows) { result.append(app) }
         }
+        retireWindowlessLaunches(now: Date())
         for (pid, app) in launched where windowed[pid] == nil && pid != me && processExists(pid) { result.append(app) }
+        // A stub in its grace period is still "running": the core must not retire the
+        // object the caller holds before the real process takes it over.
+        for (pid, candidate) in handOffCandidates where windowed[pid] == nil { result.append(candidate.app) }
         return result.sorted { $0.processIdentifier < $1.processIdentifier }
+    }
+
+    /// Launched processes that exited without ever owning a window become hand-off
+    /// candidates for the grace period (called from the list as well as the poll, so a
+    /// refresh between polls does not report the stub gone).
+    private func retireWindowlessLaunches(now: Date) {
+        for (pid, app) in launched where !everWindowed.contains(pid) && !processExists(pid) {
+            launched[pid] = nil
+            handOffCandidates[pid] = (app, now + Win32Workspace.handOffGrace)
+        }
     }
 
     var frontmostProcessIdentifier: Int32? { foregroundPID().map { Int32(bitPattern: $0) } }
@@ -400,8 +466,33 @@ final class Win32Workspace: PlatformWorkspace {
             parameters = (options.arguments + documents).map(Win32Workspace.quote).joined(separator: " ")
         }
         if !options.environment.isEmpty, trace { NSView._trace("win32 workspace: launch environment is not applied through ShellExecute") }
+        let fallbackName = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        if let pid = activatePackaged(file, parameters: parameters) { return remember(pid: pid, fallbackName: fallbackName) }
         guard let pid = execute(file, parameters: parameters, show: show) else { throw PlatformWorkspaceError.launchFailed(file) }
-        return remember(pid: pid, fallbackName: URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent)
+        return remember(pid: pid, fallbackName: fallbackName)
+    }
+
+    /// A packaged application behind an app execution alias (the alias itself, or a stub
+    /// in the Windows directory with an alias of the same name: System32\notepad.exe): the
+    /// package activation manager launches it and answers the application's own process
+    /// id, where ShellExecute answers the stub's, which exits as soon as it has handed off.
+    private func activatePackaged(_ file: String, parameters: String) -> DWORD? {
+        let path = file.replacingOccurrences(of: "/", with: "\\")
+        var candidates = [path]
+        if let windir = ProcessInfo.processInfo.environment["SystemRoot"] ?? ProcessInfo.processInfo.environment["windir"],
+           path.lowercased().hasPrefix(windir.lowercased()),
+           let local = ProcessInfo.processInfo.environment["LOCALAPPDATA"] {
+            candidates.append(local + "\\Microsoft\\WindowsApps\\" + URL(fileURLWithPath: file).lastPathComponent)
+        }
+        var aumid = [WCHAR](repeating: 0, count: 512)
+        for candidate in candidates {
+            guard candidate.withCString(encodedAs: UTF16.self, { cd2d_shell_app_exec_link($0, &aumid, UInt32(aumid.count)) }) else { continue }
+            var pid: UInt32 = 0
+            let ok = shellCall { parameters.withCString(encodedAs: UTF16.self) { p in cd2d_shell_activate_application(aumid, p, &pid) } }
+            if trace { NSView._trace("win32 workspace: activate '\(String(decoding: aumid.prefix { $0 != 0 }, as: UTF16.self))' for '\(file)' -> \(ok ? "pid \(pid)" : "failed")") }
+            if ok, pid != 0 { return pid }
+        }
+        return nil
     }
 
     private func remember(pid: DWORD, fallbackName: String) -> PlatformRunningApplication {

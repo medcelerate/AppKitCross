@@ -281,9 +281,15 @@ void cd2d_file_dialog_free(uint16_t *paths);
 /// BGRA top-down pixels. Returns false when the shell has none.
 bool cd2d_shell_icon(const uint16_t *path, bool useFileAttributes, bool isDirectory, uint32_t sizePx,
                      uint8_t **bgra, uint32_t *width, uint32_t *height);
-/// Opens Explorer on the items' folder with the items selected (SHOpenFolderAndSelectItems).
-/// `paths` holds `count` NUL-terminated paths back to back.
+/// Opens Explorer on the items' folder with the items selected (SHOpenFolderAndSelectItems,
+/// else `explorer /select`). `paths` holds `count` NUL-terminated paths back to back.
 bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count);
+/// The Application User Model ID an app execution alias (a reparse point under
+/// %LOCALAPPDATA%\\Microsoft\\WindowsApps) activates; false for an ordinary file.
+bool cd2d_shell_app_exec_link(const uint16_t *path, uint16_t *aumid, uint32_t capacity);
+/// Launches a packaged application by Application User Model ID
+/// (IApplicationActivationManager) and answers the real process id, not a launcher stub's.
+bool cd2d_shell_activate_application(const uint16_t *aumid, const uint16_t *arguments, uint32_t *pid);
 /// Moves the item to the Recycle Bin (SHFileOperation, FO_DELETE with FOF_ALLOWUNDO).
 bool cd2d_shell_recycle(const uint16_t *path);
 /// The default handler's executable for a file extension (".txt") or a URL scheme
