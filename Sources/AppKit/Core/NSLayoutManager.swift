@@ -376,6 +376,9 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             }
         }
         for c in _textContainers { delegate?.layoutManager(self, didCompleteLayoutFor: c, atEnd: true) }
+        MainActor.assumeIsolated {
+            for c in _textContainers { c._textView?._layoutManagerDidLayout() }
+        }
     }
 
     /// The end of the paragraph starting at `index` (after its newline).

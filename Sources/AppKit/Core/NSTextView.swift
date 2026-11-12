@@ -577,6 +577,9 @@ import CoreText
             _storage = NSTextStorage()
         }
         super.init(frame: frameRect)
+        // AppKit's defaults: no smaller than the initial frame, as tall as the text needs.
+        minSize = frameRect.size
+        maxSize = NSSize(width: frameRect.width, height: 10_000_000)
         _wireTextSystem()
     }
 
@@ -642,11 +645,27 @@ import CoreText
 
     internal override func _invalidateLayout() {
         _syncContainerSize()
+        // Fitting the frame to the text just laid out changes no line: keep that layout.
+        if _fittingFrame { return }
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
     }
 
     /// The layout manager laid the text out again (an edit, a geometry change).
     internal func _layoutManagerDidChange() { needsDisplay = true }
+
+    /// Layout finished: a resizable text view fits its frame to the laid-out text, between
+    /// `minSize` and `maxSize`, as AppKit's does (a scroll view's document view grows so the
+    /// text scrolls, and shrinks back to `minSize`). Field editors keep their frame.
+    internal func _layoutManagerDidLayout() {
+        guard !isFieldEditor, isVerticallyResizable || isHorizontallyResizable, !_fittingFrame else { return }
+        _fittingFrame = true
+        defer { _fittingFrame = false }
+        let content = _contentSize
+        let size = NSSize(width: isHorizontallyResizable ? max(minSize.width, min(maxSize.width, content.width)) : frame.width,
+                          height: isVerticallyResizable ? max(minSize.height, min(maxSize.height, content.height)) : frame.height)
+        if size != frame.size { setFrameSize(size) }
+    }
+    private var _fittingFrame = false
 
     internal override func _layoutLines() -> [_Line] {
         let origin = _drawOrigin

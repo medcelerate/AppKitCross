@@ -467,6 +467,9 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
                     return k.greenComponent > 0.6 && k.redComponent < 0.4 && k.blueComponent < 0.3 ? "G" : k.blueComponent > 0.9 && k.redComponent < 0.2 ? "B" : "."
                 }
                 print("large bitmap: \(step): frame \(tv.frame), column \(String(column))")
+                // The document view grows to its text so the scroll view can reach every line.
+                let bottom = lm._attachments.keys.compactMap { lm._attachmentRect(at: $0)?.maxY }.max() ?? 0
+                XCTAssertGreaterThanOrEqual(tv.frame.height, bottom, "\(step): the text view holds its text")
                 XCTAssertGreaterThanOrEqual(column.filter { $0 == "G" }.count, 8, "\(step): the bitmap is drawn: \(String(column))")
             }
             try check("pasted", large: 0, count: 1)
@@ -483,6 +486,10 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
             let back = try XCTUnwrap(_RTFReader.readRTFD(try FileWrapper(url: saved, options: .immediate)))
             tv.textStorage?.setAttributedString(back)
             try check("reopened", large: 1, count: 3)
+            // And shrinks back to its minimum size when the text goes.
+            tv.textStorage?.setAttributedString(NSAttributedString(string: "x"))
+            tv.layoutManager?.ensureLayout(for: tv.textContainer!)
+            XCTAssertEqual(tv.frame.height, tv.minSize.height, "emptied: back to the minimum size")
         }
     }
 
