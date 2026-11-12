@@ -8,6 +8,9 @@ import XCTest
 
 // MARK: - Helpers
 
+/// A counter notification observers can bump (their closures are @Sendable).
+private final class Counter: @unchecked Sendable { var n = 0 }
+
 @MainActor
 private final class ActionSink: NSObject, NSSelectorHandling {
     var count = 0
@@ -394,9 +397,9 @@ final class BrowserMatrixTests: XCTestCase, @unchecked Sendable {
             let sink = ActionSink()
             form.target = sink
             form.action = Selector(("act:"))
-            var began = 0, ended = 0
-            let o1 = NotificationCenter.default.addObserver(forName: NSControl.textDidBeginEditingNotification, object: form, queue: nil) { _ in began += 1 }
-            let o2 = NotificationCenter.default.addObserver(forName: NSControl.textDidEndEditingNotification, object: form, queue: nil) { _ in ended += 1 }
+            let began = Counter(), ended = Counter()
+            let o1 = NotificationCenter.default.addObserver(forName: NSControl.textDidBeginEditingNotification, object: form, queue: nil) { _ in began.n += 1 }
+            let o2 = NotificationCenter.default.addObserver(forName: NSControl.textDidEndEditingNotification, object: form, queue: nil) { _ in ended.n += 1 }
             defer { NotificationCenter.default.removeObserver(o1); NotificationCenter.default.removeObserver(o2) }
 
             form.selectText(at: 0)
@@ -409,7 +412,7 @@ final class BrowserMatrixTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(editor?.frame, entry, "the editor sits over the entry, right of the title")
             for ch in "Ada" { key(w, String(ch)) }
             XCTAssertEqual(first.stringValue, "Ada", "the cell follows the editor")
-            XCTAssertEqual(began, 1)
+            XCTAssertEqual(began.n, 1)
             key(w, "\t")
             XCTAssertEqual(first.stringValue, "Ada")
             XCTAssertFalse(first._hidesEntryText)
@@ -420,7 +423,7 @@ final class BrowserMatrixTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(second.stringValue, "Lovelace")
             XCTAssertEqual(sink.count, 1, "Return sends the form's action")
             XCTAssertNotNil(form.currentEditor(), "and keeps editing, as a text field does")
-            XCTAssertEqual(ended, 2)
+            XCTAssertEqual(ended.n, 2)
             // Clicking the first entry moves editing there.
             click(w, at(form, entry.midX, entry.midY))
             XCTAssertEqual(form.indexOfSelectedItem(), 0)
@@ -610,8 +613,8 @@ final class BrowserMatrixTests: XCTestCase, @unchecked Sendable {
             b.columnResizingType = .userColumnResizing
             b.setDefaultColumnWidth(120)
             XCTAssertEqual(b.width(ofColumn: 0), 120)
-            var notified = 0
-            let o = NotificationCenter.default.addObserver(forName: NSBrowser.columnConfigurationDidChangeNotification, object: b, queue: nil) { _ in notified += 1 }
+            let notified = Counter()
+            let o = NotificationCenter.default.addObserver(forName: NSBrowser.columnConfigurationDidChangeNotification, object: b, queue: nil) { _ in notified.n += 1 }
             defer { NotificationCenter.default.removeObserver(o) }
             let edge = b.frame(ofColumn: 0).maxX
             mouse(w, .leftMouseDown, at(b, edge, 60))
@@ -619,7 +622,7 @@ final class BrowserMatrixTests: XCTestCase, @unchecked Sendable {
             mouse(w, .leftMouseUp, at(b, edge + 30, 60))
             XCTAssertEqual(b.width(ofColumn: 0), 150)
             XCTAssertEqual(b.width(ofColumn: 1), 120)
-            XCTAssertEqual(notified, 1)
+            XCTAssertEqual(notified.n, 1)
             b.setWidth(10, ofColumn: 1)
             XCTAssertEqual(b.width(ofColumn: 1), b.minColumnWidth, "no narrower than minColumnWidth")
             XCTAssertEqual(b.columnContentWidth(forColumnWidth: 150) + NSScroller.scrollerWidth(for: .regular, scrollerStyle: NSScroller.preferredScrollerStyle), 150)
