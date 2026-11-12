@@ -19,145 +19,128 @@ import CoreText
 extension Bundle {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/contexthelp(forkey:)
     public func contextHelp(forKey key: NSHelpManager.ContextHelpKey) -> NSAttributedString? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/image(forresource:)
-    public func image(forResource name: NSImage.Name) -> NSImage? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/loadnibnamed(_:owner:toplevelobjects:)
     public func loadNibNamed(_ nibName: NSNib.Name, owner: Any?, topLevelObjects: AutoreleasingUnsafeMutablePointer<NSArray?>?) -> Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/path(forsoundresource:)
-    public func path(forSoundResource name: NSSound.Name) -> String? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/pathforimageresource(_:)
-    public func pathForImageResource(_ name: NSImage.Name) -> String? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/bundle/urlforimageresource(_:)
-    public func urlForImageResource(_ name: NSImage.Name) -> URL? { unimplemented() }
 }
 
 extension CocoaError {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationlaunchfailederror
-    static public var ServiceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    static public var ServiceApplicationLaunchFailedError: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationnotfounderror
-    static public var ServiceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    static public var ServiceApplicationNotFoundError: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceinvalidpasteboarddataerror
-    static public var ServiceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    static public var ServiceInvalidPasteboardDataError: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemalformedservicedictionaryerror
-    static public var ServiceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    static public var ServiceMalformedServiceDictionaryError: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemiscellaneouserror
-    static public var ServiceMiscellaneousError: CocoaError.Code { unimplemented() }
+    static public var ServiceMiscellaneousError: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicerequesttimedouterror
-    static public var ServiceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    static public var ServiceRequestTimedOutError: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/sharingservicenotconfigurederror
-    static public var SharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    static public var SharingServiceNotConfiguredError: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textreadinapplicabledocumenttypeerror
-    static public var TextReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var TextReadInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textwriteinapplicabledocumenttypeerror
-    static public var TextWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var TextWriteInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/fontassetdownloaderror
     @available(macOS 10.13, *)
-    static public var fontAssetDownloadError: CocoaError.Code { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/isfonterror
-    @available(macOS 10.13, *)
-    public var isFontError: Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/isserviceerror
-    public var isServiceError: Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/issharingserviceerror
-    public var isSharingServiceError: Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/istextreadwriteerror
-    public var isTextReadWriteError: Bool { unimplemented() }
+    static public var fontAssetDownloadError: CocoaError.Code { CocoaError.Code(rawValue: 66304) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationlaunchfailed
-    static public var serviceApplicationLaunchFailed: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationLaunchFailed: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationlaunchfailederror
-    static public var serviceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationLaunchFailedError: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationnotfound
-    static public var serviceApplicationNotFound: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationNotFound: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceapplicationnotfounderror
-    static public var serviceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationNotFoundError: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceinvalidpasteboarddata
-    static public var serviceInvalidPasteboardData: CocoaError.Code { unimplemented() }
+    static public var serviceInvalidPasteboardData: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/serviceinvalidpasteboarddataerror
-    static public var serviceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    static public var serviceInvalidPasteboardDataError: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemalformedservicedictionary
-    static public var serviceMalformedServiceDictionary: CocoaError.Code { unimplemented() }
+    static public var serviceMalformedServiceDictionary: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemalformedservicedictionaryerror
-    static public var serviceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    static public var serviceMalformedServiceDictionaryError: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemiscellaneous
-    static public var serviceMiscellaneous: CocoaError.Code { unimplemented() }
+    static public var serviceMiscellaneous: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicemiscellaneouserror
-    static public var serviceMiscellaneousError: CocoaError.Code { unimplemented() }
+    static public var serviceMiscellaneousError: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicerequesttimedout
-    static public var serviceRequestTimedOut: CocoaError.Code { unimplemented() }
+    static public var serviceRequestTimedOut: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/servicerequesttimedouterror
-    static public var serviceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    static public var serviceRequestTimedOutError: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/sharingservicenotconfigured
-    static public var sharingServiceNotConfigured: CocoaError.Code { unimplemented() }
+    static public var sharingServiceNotConfigured: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/sharingservicenotconfigurederror
-    static public var sharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    static public var sharingServiceNotConfiguredError: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textreadinapplicabledocumenttype
-    static public var textReadInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    static public var textReadInapplicableDocumentType: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textreadinapplicabledocumenttypeerror
-    static public var textReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var textReadInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textwriteinapplicabledocumenttype
-    static public var textWriteInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    static public var textWriteInapplicableDocumentType: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/textwriteinapplicabledocumenttypeerror
-    static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
 }
 
 extension CocoaError.Code {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailederror
-    static public var ServiceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    static public var ServiceApplicationLaunchFailedError: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfounderror
-    static public var ServiceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    static public var ServiceApplicationNotFoundError: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddataerror
-    static public var ServiceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    static public var ServiceInvalidPasteboardDataError: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionaryerror
-    static public var ServiceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    static public var ServiceMalformedServiceDictionaryError: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneouserror
-    static public var ServiceMiscellaneousError: CocoaError.Code { unimplemented() }
+    static public var ServiceMiscellaneousError: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedouterror
-    static public var ServiceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    static public var ServiceRequestTimedOutError: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigurederror
-    static public var SharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    static public var SharingServiceNotConfiguredError: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttypeerror
-    static public var TextReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var TextReadInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttypeerror
-    static public var TextWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var TextWriteInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/fontassetdownloaderror
     @available(macOS 10.13, *)
-    static public var fontAssetDownloadError: CocoaError.Code { unimplemented() }
+    static public var fontAssetDownloadError: CocoaError.Code { CocoaError.Code(rawValue: 66304) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailed
-    static public var serviceApplicationLaunchFailed: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationLaunchFailed: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationlaunchfailederror
-    static public var serviceApplicationLaunchFailedError: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationLaunchFailedError: CocoaError.Code { CocoaError.Code(rawValue: 66561) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfound
-    static public var serviceApplicationNotFound: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationNotFound: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceapplicationnotfounderror
-    static public var serviceApplicationNotFoundError: CocoaError.Code { unimplemented() }
+    static public var serviceApplicationNotFoundError: CocoaError.Code { CocoaError.Code(rawValue: 66560) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddata
-    static public var serviceInvalidPasteboardData: CocoaError.Code { unimplemented() }
+    static public var serviceInvalidPasteboardData: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/serviceinvalidpasteboarddataerror
-    static public var serviceInvalidPasteboardDataError: CocoaError.Code { unimplemented() }
+    static public var serviceInvalidPasteboardDataError: CocoaError.Code { CocoaError.Code(rawValue: 66563) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionary
-    static public var serviceMalformedServiceDictionary: CocoaError.Code { unimplemented() }
+    static public var serviceMalformedServiceDictionary: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemalformedservicedictionaryerror
-    static public var serviceMalformedServiceDictionaryError: CocoaError.Code { unimplemented() }
+    static public var serviceMalformedServiceDictionaryError: CocoaError.Code { CocoaError.Code(rawValue: 66564) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneous
-    static public var serviceMiscellaneous: CocoaError.Code { unimplemented() }
+    static public var serviceMiscellaneous: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicemiscellaneouserror
-    static public var serviceMiscellaneousError: CocoaError.Code { unimplemented() }
+    static public var serviceMiscellaneousError: CocoaError.Code { CocoaError.Code(rawValue: 66800) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedout
-    static public var serviceRequestTimedOut: CocoaError.Code { unimplemented() }
+    static public var serviceRequestTimedOut: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/servicerequesttimedouterror
-    static public var serviceRequestTimedOutError: CocoaError.Code { unimplemented() }
+    static public var serviceRequestTimedOutError: CocoaError.Code { CocoaError.Code(rawValue: 66562) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigured
-    static public var sharingServiceNotConfigured: CocoaError.Code { unimplemented() }
+    static public var sharingServiceNotConfigured: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/sharingservicenotconfigurederror
-    static public var sharingServiceNotConfiguredError: CocoaError.Code { unimplemented() }
+    static public var sharingServiceNotConfiguredError: CocoaError.Code { CocoaError.Code(rawValue: 67072) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttype
-    static public var textReadInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    static public var textReadInapplicableDocumentType: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textreadinapplicabledocumenttypeerror
-    static public var textReadInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var textReadInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 65806) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttype
-    static public var textWriteInapplicableDocumentType: CocoaError.Code { unimplemented() }
+    static public var textWriteInapplicableDocumentType: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/cocoaerror/code/textwriteinapplicabledocumenttypeerror
-    static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { unimplemented() }
+    static public var textWriteInapplicableDocumentTypeError: CocoaError.Code { CocoaError.Code(rawValue: 66062) }
 }
 
 extension FileManager {
@@ -167,23 +150,12 @@ extension FileManager {
 }
 
 extension FileWrapper {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/filewrapper/icon
-    public var icon: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
-    }
 }
 
 extension IndexPath {
 }
 
 extension NSAffineTransform {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaffinetransform/concat()
-    public func concat() { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaffinetransform/set()
-    public func set() { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaffinetransform/transform(_:)
-    public func transform(_ path: NSBezierPath) -> NSBezierPath { unimplemented() }
 }
 
 extension NSAttributedString {
@@ -398,49 +370,18 @@ extension NSAttributedString {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/textlayoutsectionkey/range
         static public var range: NSAttributedString.TextLayoutSectionKey { NSAttributedString.TextLayoutSectionKey(rawValue: "NSTextLayoutSectionRange") }
     }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/boundingrect(with:options:context:)
-    @available(macOS 10.11, *)
-    public func boundingRect(with size: CGSize, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) -> CGRect { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/docformat(from:documentattributes:)
     public func docFormat(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) -> Data? { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/draw(with:options:context:)
-    @available(macOS 10.11, *)
-    public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], context: NSStringDrawingContext?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/filewrapper(from:documentattributes:)
-    public func fileWrapper(from range: NSRange, documentAttributes dict: [NSAttributedString.DocumentAttributeKey : Any] = [:]) throws -> FileWrapper { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/fontattributes(in:)
-    public func fontAttributes(in range: NSRange) -> [NSAttributedString.Key : Any] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(html:baseurl:documentattributes:)
     public convenience init?(HTML data: Data, baseURL base: URL, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(html:documentattributes:)
     public convenience init?(HTML data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(html:options:documentattributes:)
     public convenience init?(HTML data: Data, options: [NSAttributedString.DocumentReadingOptionKey : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(rtf:documentattributes:)
-    public convenience init?(RTF data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(url:documentattributes:)
-    public convenience init?(URL url: URL, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(url:options:documentattributes:)
-    public convenience init(URL url: URL, options: [NSAttributedString.DocumentReadingOptionKey : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) throws { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(adaptiveimageglyph:attributes:)
-    @available(macOS 15.0, *)
-    public convenience init(adaptiveImageGlyph: NSAdaptiveImageGlyph, attributes: [NSAttributedString.Key : Any] = [:]) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(docformat:documentattributes:)
     public convenience init?(docFormat data: Data, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/init(path:documentattributes:)
-    public convenience init?(path: String, documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/linebreak(before:within:)
-    public func lineBreak(before location: Int, within aRange: NSRange) -> Int { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/linebreakbyhyphenating(before:within:)
     public func lineBreakByHyphenating(before location: Int, within aRange: NSRange) -> Int { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/rulerattributes(in:)
-    public func rulerAttributes(in range: NSRange) -> [NSAttributedString.Key : Any] { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/texttypes
-    class public var textTypes: [String] { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/textunfilteredtypes
-    class public var textUnfilteredTypes: [String] { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsattributedstring/url(at:effectiverange:)
-    public func url(at location: Int, effectiveRange: NSRangePointer) -> URL? { unimplemented() }
 }
 
 extension NSAttributedString.Key {
@@ -655,46 +596,13 @@ extension NSExceptionName {
 }
 
 extension NSIndexPath {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsindexpath/init(foritem:insection:)
-    @available(macOS 10.11, *)
-    public convenience init(forItem item: Int, inSection section: Int) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsindexpath/item
-    @available(macOS 10.11, *)
-    public var item: Int { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsindexpath/section
-    @available(macOS 10.11, *)
-    public var section: Int { unimplemented() }
 }
 
 extension NSMutableAttributedString {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/applyfonttraits(_:range:)
-    public func applyFontTraits(_ traitMask: NSFontTraitMask, range: NSRange) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixattributes(in:)
     public func fixAttributes(in range: NSRange) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixfontattribute(in:)
     public func fixFontAttribute(in range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/fixparagraphstyleattribute(in:)
-    public func fixParagraphStyleAttribute(in range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/read(from:options:documentattributes:)
-    public func read(from url: URL, options: [AnyHashable : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) -> Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/read(from:options:documentattributes:)
-    public func read(from data: Data, options: [AnyHashable : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?) -> Bool { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/read(from:options:documentattributes:error:)
-    public func read(from url: URL, options opts: [NSAttributedString.DocumentReadingOptionKey : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?, error: ()) throws { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/read(from:options:documentattributes:error:)
-    public func read(from data: Data, options opts: [NSAttributedString.DocumentReadingOptionKey : Any] = [:], documentAttributes dict: AutoreleasingUnsafeMutablePointer<NSDictionary?>?, error: ()) throws { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/setalignment(_:range:)
-    public func setAlignment(_ alignment: NSTextAlignment, range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/setbasewritingdirection(_:range:)
-    public func setBaseWritingDirection(_ writingDirection: NSWritingDirection, range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/subscriptrange(_:)
-    public func subscriptRange(_ range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/superscriptrange(_:)
-    public func superscriptRange(_ range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/unscriptrange(_:)
-    public func unscriptRange(_ range: NSRange) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmutableattributedstring/updateattachments(frompath:)
-    public func updateAttachments(fromPath path: String) { unimplemented() }
 }
 
 extension NSNotification.Name {
@@ -719,15 +627,6 @@ extension NSNotification.Name {
 }
 
 extension NSSet {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsset/enumerateindexpaths(options:using:)
-    @available(macOS 10.11, *)
-    public func enumerateIndexPaths(options opts: NSEnumerationOptions = [], using block: (IndexPath, UnsafeMutablePointer<ObjCBool>) -> Void) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsset/init(collectionviewindexpath:)
-    @available(macOS 10.11, *)
-    public convenience init(collectionViewIndexPath indexPath: IndexPath) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsset/init(collectionviewindexpaths:)
-    @available(macOS 10.11, *)
-    public convenience init(collectionViewIndexPaths indexPaths: [IndexPath]) { unimplemented() }
 }
 
 extension NSString {
@@ -737,36 +636,21 @@ extension NSString {
         public init(rawValue: Int) { self.rawValue = rawValue }
 
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/disablescreenfontsubstitution
-        static public var disableScreenFontSubstitution: NSString.DrawingOptions { unimplemented() }
+        static public var disableScreenFontSubstitution: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 4) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/oneshot
-        static public var oneShot: NSString.DrawingOptions { unimplemented() }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/optionsresolvesnaturalalignmentwithbasewritingdirection
-        @available(macOS 26.0, *)
-        static public var optionsResolvesNaturalAlignmentWithBaseWritingDirection: NSString.DrawingOptions { unimplemented() }
+        static public var oneShot: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 16) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/truncateslastvisibleline
-        static public var truncatesLastVisibleLine: NSString.DrawingOptions { unimplemented() }
+        static public var truncatesLastVisibleLine: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 32) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/usesdevicemetrics
-        static public var usesDeviceMetrics: NSString.DrawingOptions { unimplemented() }
+        static public var usesDeviceMetrics: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 8) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/usesfontleading
-        static public var usesFontLeading: NSString.DrawingOptions { unimplemented() }
+        static public var usesFontLeading: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 2) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/drawingoptions/useslinefragmentorigin
-        static public var usesLineFragmentOrigin: NSString.DrawingOptions { unimplemented() }
+        static public var usesLineFragmentOrigin: NSString.DrawingOptions { NSString.DrawingOptions(rawValue: 1) }
     }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/boundingrect(with:options:attributes:context:)
-    @available(macOS 10.11, *)
-    public func boundingRect(with size: CGSize, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil, context: NSStringDrawingContext?) -> CGRect { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/draw(with:options:attributes:context:)
-    @available(macOS 10.11, *)
-    public func draw(with rect: CGRect, options: NSString.DrawingOptions = [], attributes: [NSAttributedString.Key : Any]? = nil, context: NSStringDrawingContext?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstring/init(pasteboardpropertylist:oftype:)
-    public convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
 }
 
 extension NSURL {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsurl/init(frompasteboard:)
-    public convenience init?(fromPasteboard pasteBoard: NSPasteboard) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsurl/write(to:)
-    public func write(to pasteBoard: NSPasteboard) { unimplemented() }
 }
 
 extension RunLoop.Mode {

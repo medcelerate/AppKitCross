@@ -9,16 +9,16 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 164 |
-| Types generated | 375 |
+| Types handwritten | 165 |
+| Types generated | 374 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10212 |
+| Members emitted | 10095 |
 | Members blocked | 175 |
 | Members unavailable | 0 |
-| Members synthesized | 1495 |
+| Members synthesized | 1435 |
 | Members duplicate | 51 |
-| Members nested | 455 |
+| Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
 | Members unimplemented-calls | 1044 |
@@ -27,6 +27,13 @@ Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
 **generated** compiles as a stub; **pending** is generated but excluded from the
 build (see reason); **blocked** members reference a type not yet available on Windows.
+
+## Globals and Foundation extensions
+
+| Group | Hand-written in Core | Still stubbed (unimplemented) |
+| --- | ---: | ---: |
+| Free functions and variables (`_Globals.swift`) | 24 | 8 |
+| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | 48 | 19 |
 
 ## Types
 
@@ -190,7 +197,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |
 | NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |
 | NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |
-| NSDirectionalEdgeInsets | struct | generated | 6 | 0 | 0 |  |
+| NSDirectionalEdgeInsets | struct | handwritten | 6 | 0 | 0 | 0 |
 | NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
 | NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |
 | NSDockTile | class | handwritten | 6 | 0 | 0 | 0 |
@@ -567,7 +574,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |
 | NSWindowTab | class | generated | 4 | 0 | 0 |  |
 | NSWindowTabGroup | class | generated | 8 | 0 | 0 |  |
-| NSWorkspace | class | handwritten | 244 | 7 | 47 | 14 |
+| NSWorkspace | class | handwritten | 127 | 7 | 7 | 14 |
 | NSWritingDirection | enum | generated | 3 | 0 | 0 |  |
 | NSWritingDirectionFormatType | enum | generated | 2 | 0 | 0 |  |
 | NSWritingToolsBehavior | enum | generated | 4 | 0 | 0 |  |
