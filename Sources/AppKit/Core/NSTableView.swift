@@ -411,6 +411,12 @@ import CoreGraphics
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/reloaddata()
     @MainActor open func reloadData() {
+        // Asked while the visible rows are being made (a binding or a main-queue block that runs
+        // during the draw pass): finish making them, then reload (see _updateVisibleRows).
+        if _updatingVisibleRows {
+            _reloadRequestedWhileUpdating = true
+            return
+        }
         _rowMap = nil
         _needsReload = true
         _dropAllRowViews()
@@ -823,14 +829,26 @@ import CoreGraphics
         // still carry the old row numbers then; the commit asks for display afterwards.
         guard !_updatingVisibleRows, _refilingRows == 0, _updateDepth == 0 else { return }
         _updatingVisibleRows = true
-        defer { _updatingVisibleRows = false }
         _reloadIfNeeded()
+        // Repair before drawing: a filed row view that left the table or carries another row
+        // number is replaced, and a row view the table no longer files is removed, so every
+        // visible row has exactly one row view in its slot.
+        for (row, v) in _rowViews where v.superview !== self || v._row != row { _recycle(v, row: row) }
+        let filed = Set(_rowViews.values.map { ObjectIdentifier($0) })
+        for case let stray as NSTableRowView in subviews where !filed.contains(ObjectIdentifier(stray)) { stray.removeFromSuperview() }
         let visible = visibleRect
         let range = rows(in: visible.isEmpty ? bounds : visible)
         let wanted = range.length > 0 ? Set(range.location..<(range.location + range.length)) : Set<Int>()
         for (row, v) in _rowViews where !wanted.contains(row) || row >= _numberOfRows { _recycle(v, row: row) }
         for row in wanted.sorted() where _rowViews[row] == nil && _rowHeights[row] > 0 { _ = _makeRowView(row) }
+        _updatingVisibleRows = false
+        if _reloadRequestedWhileUpdating {
+            _reloadRequestedWhileUpdating = false
+            reloadData()
+            _updateVisibleRows()
+        }
     }
+    private var _reloadRequestedWhileUpdating = false
 
     @MainActor open override func viewWillDraw() {
         super.viewWillDraw()

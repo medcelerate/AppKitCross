@@ -421,6 +421,94 @@ final class BoundViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testSortAfterAddRemoveAndPickKeepsEveryRow() {
+        MainActor.assumeIsolated {
+            let ps = [BindingPerson("Ada", 36), BindingPerson("Grace", 45), BindingPerson("Alan", 41),
+                      BindingPerson("Edsger", 72), BindingPerson("Barbara", 29), BindingPerson("Ken", 58)]
+            let ac = NSArrayController(content: ps)
+            let (window, table) = makeTable(ac)
+            table.allowsMultipleSelection = true
+            table.tableColumns[0].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.name, ascending: true)
+            table.tableColumns[1].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.age, ascending: true)
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 24), pullsDown: false)
+            popup.bind(NSBindingName.content, to: ac, withKeyPath: "arrangedObjects")
+            popup.bind(NSBindingName.contentValues, to: ac, withKeyPath: "arrangedObjects.name")
+            popup.bind(NSBindingName.selectedIndex, to: ac, withKeyPath: "selectionIndex")
+            window.contentView!.addSubview(popup)
+            @MainActor func check(_ label: String) {
+                window.display()
+                let expected = (ac.arrangedObjects as! [BindingPerson]).map { "\($0.name)/\($0.age)" }
+                XCTAssertEqual(table.numberOfRows, expected.count, label)
+                for row in 0..<expected.count {
+                    let rv = table.rowView(atRow: row, makeIfNecessary: false)
+                    XCTAssertNotNil(rv, "\(label): row \(row) has a row view")
+                    XCTAssertTrue(rv?.superview === table, "\(label): row \(row) is in the table")
+                    XCTAssertEqual(rv?.frame.minY, table.rect(ofRow: row).minY, "\(label): row \(row) frame")
+                    let texts = rv?._cellViews.map { ($0 as? NSTableCellView)?.textField?.stringValue ?? "?" }.joined(separator: "/")
+                    XCTAssertEqual(texts, expected[row], "\(label): row \(row)")
+                }
+                XCTAssertEqual(table.subviews.compactMap { $0 as? NSTableRowView }.count, expected.count, "\(label): no stray row views")
+            }
+            check("start")
+            ac.addObject(BindingPerson("New person 1", 21))
+            check("after add")
+            ac.remove(atArrangedObjectIndexes: ac.selectionIndexes)
+            check("after remove")
+            XCTAssertEqual(names(ac.selectedObjects), ["Ken"])
+            popup.selectItem(at: 2)
+            popup._fireAction()
+            check("after pick")
+            table._headerClicked(column: 0)
+            check("name sort")
+            table._headerClicked(column: 1)
+            check("age sort")
+            table.selectRowIndexes([1, 3], byExtendingSelection: false)
+            table._headerClicked(column: 1)
+            check("age sort reversed")
+        }
+    }
+
+    func testReloadDuringRowCreationLeavesEveryRowDrawn() {
+        MainActor.assumeIsolated {
+            /// Reading its name removes the first row from the controller once: a model change
+            /// that lands while the table is making its row views (a main-queue block run mid-paint).
+            final class Tripwire: NSObject, NSKeyValueBindingCoding {
+                let name: String
+                var onRead: (() -> Void)?
+                init(_ name: String) { self.name = name }
+                func bindingValue(forKey key: String) -> Any? {
+                    if key == "name", let f = onRead { onRead = nil; f() }
+                    return key == "name" ? name : nil
+                }
+            }
+            let items = (0..<6).map { Tripwire("Item \($0)") }
+            let ac = NSArrayController(content: items)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+            let table = NSTableView(frame: .zero)
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+            column.width = 200
+            table.addTableColumn(column)
+            column.bind(NSBindingName.value, to: ac, withKeyPath: "arrangedObjects.name")
+            scroll.documentView = table
+            window.contentView!.addSubview(scroll)
+            window.makeKeyAndOrderFront(nil)
+            window.display()
+            items[3].onRead = { ac.remove(atArrangedObjectIndex: 0) }
+            table.reloadData()
+            window.display()
+            window.display()
+            let expected = (ac.arrangedObjects as! [Tripwire]).map(\.name)
+            XCTAssertEqual(expected.count, 5)
+            for row in 0..<5 {
+                let rv = table.rowView(atRow: row, makeIfNecessary: false)
+                XCTAssertTrue(rv?.superview === table, "row \(row) has a row view in the table")
+                XCTAssertEqual((rv?._cellViews.first as? NSTableCellView)?.textField?.stringValue, expected[row], "row \(row)")
+            }
+            XCTAssertEqual(table.subviews.compactMap { $0 as? NSTableRowView }.count, 5, "no stray row views")
+        }
+    }
+
     func testSelectionFollowsBothWays() {
         MainActor.assumeIsolated {
             let ac = NSArrayController(content: people())
