@@ -335,7 +335,17 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     }
 
     private func _ensureLayout() {
-        guard !_layoutValid else { return }
+        // A text view fitting its frame to the new layout can change the wrapping width (a
+        // scroll view shows its scroller and narrows the clip view), which invalidates the
+        // layout again: lay out until it holds, so callers never read an emptied layout.
+        var passes = 0
+        while !_layoutValid, passes < 4 {
+            passes += 1
+            _layoutPass()
+        }
+    }
+
+    private func _layoutPass() {
         _layoutValid = true
         _fragments = []
         _blockFrames = []

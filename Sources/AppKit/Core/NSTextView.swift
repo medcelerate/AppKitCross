@@ -645,8 +645,9 @@ import CoreText
 
     internal override func _invalidateLayout() {
         _syncContainerSize()
-        // Fitting the frame to the text just laid out changes no line: keep that layout.
-        if _fittingFrame { return }
+        // A new frame reaches the layout through the container's size (which invalidates the
+        // layout itself when the wrapping width changes); a height change keeps every line.
+        if _fittingFrame || _resizingFrame { return }
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
     }
 
@@ -804,9 +805,12 @@ import CoreText
     }
 
     open override func setFrameSize(_ newSize: NSSize) {
+        _resizingFrame = true
+        defer { _resizingFrame = false }
         super.setFrameSize(newSize)
         _syncContainerSize()
     }
+    private var _resizingFrame = false
 
     /// Colours were resolved at layout time, so a theme change lays the text out again.
     open override func viewDidChangeEffectiveAppearance() {

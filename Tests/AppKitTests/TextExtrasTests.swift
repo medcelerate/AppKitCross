@@ -493,6 +493,30 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// TextEdit's document view (frame = the scroll view's bounds, width and height
+    /// autoresizing): long text grows it, the scroller appears and narrows the clip view,
+    /// and the first measurement after that still sees the whole text laid out.
+    func testDocumentViewGrowsAndMeasuresInOnePass() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460), styleMask: [.titled], backing: .buffered, defer: false)
+            let scroll = NSScrollView(frame: w.contentView!.bounds)
+            scroll.autoresizingMask = [.width, .height]
+            scroll.hasVerticalScroller = true
+            let tv = NSTextView(frame: scroll.bounds)
+            tv.autoresizingMask = [.width, .height]
+            scroll.documentView = tv
+            w.contentView!.addSubview(scroll)
+            tv.textStorage?.setAttributedString(NSAttributedString(string: (1...90).map { "Line \($0)" }.joined(separator: "\n"),
+                                                                   attributes: [.font: NSFont.systemFont(ofSize: 13)]))
+            let used = tv.layoutManager!.usedRect(for: tv.textContainer!)
+            XCTAssertGreaterThan(used.height, 460, "the first measurement sees all ninety lines")
+            XCTAssertGreaterThanOrEqual(tv.frame.height, used.height, "the view grew to its text")
+            tv.sizeToFit()
+            XCTAssertGreaterThan(tv.frame.height, 460, "sizeToFit keeps the whole text")
+            XCTAssertGreaterThan(scroll.documentView!.frame.height, scroll.contentSize.height, "there is something to scroll")
+        }
+    }
+
     /// Distinct attribute values in adjacent runs: on Windows and Linux Foundation reads a
     /// Swift object's CF type from its first stored word and halted on these (CFBridgeLayout).
     func testDistinctAttributeValuesInAdjacentRuns() {
