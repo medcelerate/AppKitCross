@@ -211,6 +211,9 @@ import CoreText
         NSPrintOperation._current = self
         _lastRunSucceeded = false
         _cancelled = false
+        if NSView._traceInvalidation {
+            NSView._trace("print runModal '\(jobTitle ?? "")' on '\(docWindow.title)' panel \(_showsPrintPanel) native \(_wantsNativePanel) view \(_view.bounds.size) pages \(_paginate().pageCount)")
+        }
         guard _showsPrintPanel && !_isCopying else {
             let ok = _printInfo.jobDisposition != .cancel && _runJob()
             _lastRunSucceeded = ok

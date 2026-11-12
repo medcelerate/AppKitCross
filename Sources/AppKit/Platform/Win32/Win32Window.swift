@@ -42,6 +42,8 @@ final class Win32Window: PlatformWindow {
     private var dpi: UINT = 96
     /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
     var uiaRoot: OpaquePointer? = nil
+    /// Whether the "no provider root yet" trace line has been written for this window (once is enough).
+    var tracedNoUIARoot = false
     var accessibilityOwner: PlatformWindowOwner? { owner }
     var accessibilityBackend: Win32Backend { backend }
     /// Changes waiting for the next turn of the event loop (Win32Accessibility.swift).

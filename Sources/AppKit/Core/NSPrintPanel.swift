@@ -65,6 +65,7 @@ import CoreText
             self._form = nil
             completion(response)
         }
+        if NSView._traceInvalidation { NSView._trace("print panel sheet frame \(form.panel.frame) on '\(docWindow.title)' \(docWindow.frame)") }
         docWindow.beginSheet(form.panel)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintpanel/defaultbuttontitle()
@@ -99,6 +100,7 @@ import CoreText
         let form = _makeForm()
         form.onEnd = { response in NSApplication.shared.stopModal(withCode: response) }
         form.panel.center()
+        if NSView._traceInvalidation { NSView._trace("print panel modal frame \(form.panel.frame)") }
         let response = NSApplication.shared.runModal(for: form.panel)
         form.panel.orderOut(nil)
         _form = nil

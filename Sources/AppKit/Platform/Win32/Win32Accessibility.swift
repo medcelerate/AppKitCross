@@ -93,7 +93,10 @@ extension Win32Window {
             }
         }
         guard let root = uiaRoot else {
-            if NSView._traceInvalidation { NSView._trace("uia change \(change) '\(title)': no provider root yet (no WM_GETOBJECT so far)") }
+            if NSView._traceInvalidation, !tracedNoUIARoot {
+                tracedNoUIARoot = true
+                NSView._trace("uia change \(change) '\(title)': no provider root yet (no WM_GETOBJECT so far; further changes on this window are not logged)")
+            }
             return
         }
         if case .menuClosed(let id) = change {
