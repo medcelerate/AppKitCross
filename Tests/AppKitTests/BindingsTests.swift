@@ -509,6 +509,133 @@ final class BoundViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The Windows PC's checklist sequence on the demo's controls, row by row after each step.
+    func testPCChecklistSequenceKeepsEveryRowDrawn() {
+        MainActor.assumeIsolated {
+            let ps = [BindingPerson("Ada", 36), BindingPerson("Grace", 45), BindingPerson("Alan", 41),
+                      BindingPerson("Edsger", 72), BindingPerson("Barbara", 29), BindingPerson("Ken", 58)]
+            ps[0].isMember = true
+            let ac = NSArrayController(content: ps)
+            let (window, table) = makeTable(ac)
+            table.allowsMultipleSelection = true
+            table.tableColumns[0].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.name, ascending: true)
+            table.tableColumns[1].sortDescriptorPrototype = NSSortDescriptor(keyPath: \BindingPerson.age, ascending: true)
+            let root = window.contentView!
+            let name = NSTextField(frame: NSRect(x: 160, y: 250, width: 120, height: 22))
+            name.bind(NSBindingName.value, to: ac, withKeyPath: "selection.name")
+            let age = NSTextField(frame: NSRect(x: 160, y: 220, width: 60, height: 22))
+            age.bind(NSBindingName.value, to: ac, withKeyPath: "selection.age")
+            let member = NSButton(checkboxWithTitle: "Member", target: nil, action: nil)
+            member.frame = NSRect(x: 160, y: 190, width: 100, height: 22)
+            member.bind(NSBindingName.value, to: ac, withKeyPath: "selection.isMember")
+            let pick = NSPopUpButton(frame: NSRect(x: 160, y: 160, width: 120, height: 24), pullsDown: false)
+            pick.bind(NSBindingName.content, to: ac, withKeyPath: "arrangedObjects")
+            pick.bind(NSBindingName.contentValues, to: ac, withKeyPath: "arrangedObjects.name")
+            pick.bind(NSBindingName.selectedIndex, to: ac, withKeyPath: "selectionIndex")
+            let remove = NSButton(title: "-", target: ac, action: Selector(("remove:")))
+            remove.bind(NSBindingName.enabled, to: ac, withKeyPath: "canRemove")
+            for v in [name, age, member, pick, remove] { root.addSubview(v) }
+            ac.objectClass = NSMutableDictionary.self
+            // Composite through the host's reference native compositor (the model of Win32's
+            // DirectComposition hosting, which the layer-backed Layout Demo uses on Windows).
+            let host = Mirror(reflecting: window).descendant("_platform") as? HostWindow
+            if let host {
+                window.contentView!.wantsLayer = true
+                host.layerHostingEnabled = true
+                window._updateLayerHosting()
+                XCTAssertTrue(window._hostsLayersNatively)
+            }
+            defer { if let host { host.layerHostingEnabled = false; window._updateLayerHosting() } }
+            @MainActor func spin() { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+            /// Dark (text) pixels the compositor put in the name cell of `row`.
+            @MainActor func inkInRow(_ row: Int) -> Int? {
+                guard let host, let image = host.lastImage else { return nil }
+                let data = _pixels(image)
+                let scale = CGFloat(image.width) / window.contentView!.bounds.width
+                let r = table.convert(table.rect(ofRow: row), to: nil)
+                let height = window.contentView!.bounds.height
+                let y0 = Int(((height - r.maxY) * scale).rounded()), y1 = Int(((height - r.minY) * scale).rounded())
+                let x0 = Int((r.minX + 4) * scale), x1 = Int((r.minX + 80) * scale)
+                var ink = 0
+                for y in max(0, y0)..<min(image.height, y1) {
+                    for x in max(0, x0)..<min(image.width, x1) {
+                        let o = y * image.bytesPerRow + x * 4
+                        let px = [data[o], data[o + 1], data[o + 2], data[o + 3]]
+                        if px.filter({ $0 < 110 }).count >= 3 { ink += 1 }
+                    }
+                }
+                return ink
+            }
+            @MainActor func check(_ label: String) {
+                window.display()
+                if let dir = ProcessInfo.processInfo.environment["BINDINGS_PROBE_DIR"], let img = host?.lastImage {
+                    #if canImport(ImageIO) && canImport(ObjectiveC)
+                    let url = URL(fileURLWithPath: dir).appendingPathComponent("\(label).png") as CFURL
+                    if let d = CGImageDestinationCreateWithURL(url, "public.png" as CFString, 1, nil) { CGImageDestinationAddImage(d, img, nil); CGImageDestinationFinalize(d) }
+                    #endif
+                }
+                if host != nil {
+                    for row in 0..<table.numberOfRows {
+                        XCTAssertGreaterThan(inkInRow(row) ?? 1, 0, "\(label): row \(row) is drawn by the compositor")
+                    }
+                }
+                let expected = (ac.arrangedObjects as! [Any]).map { o -> String in
+                    if let p = o as? BindingPerson { return "\(p.name)/\(p.age)" }
+                    return "?"
+                }
+                for row in 0..<expected.count {
+                    let rv = table.rowView(atRow: row, makeIfNecessary: false)
+                    XCTAssertTrue(rv?.superview === table, "\(label): row \(row) has a row view in the table")
+                    XCTAssertEqual(rv?.frame, table.rect(ofRow: row), "\(label): row \(row) frame")
+                    XCTAssertFalse(rv?.isHidden ?? true, "\(label): row \(row) shown")
+                    let texts = rv?._cellViews.map { ($0 as? NSTableCellView)?.textField?.stringValue ?? "?" }.joined(separator: "/")
+                    if expected[row] != "?" { XCTAssertEqual(texts, expected[row], "\(label): row \(row)") }
+                    XCTAssertEqual(rv?._cellViews.count, 2, "\(label): row \(row) cells")
+                    for c in rv?._cellViews ?? [] { XCTAssertTrue(c.superview === rv && !c.isHidden, "\(label): row \(row) cell attached") }
+                }
+                XCTAssertEqual(table.subviews.compactMap { $0 as? NSTableRowView }.count, expected.count, "\(label): row views")
+            }
+            check("launch")
+            // 2: + (deferred add of a person, as the demo's controller makes)
+            ac.addObject(BindingPerson("New person 1", 21))
+            check("+")
+            // 3: − (deferred remove)
+            remove._fireAction()
+            spin()
+            check("-")
+            XCTAssertEqual(names(ac.selectedObjects), ["Ken"])
+            // 4: click Grace, then pick Alan
+            table.selectRowIndexes([1], byExtendingSelection: false)
+            pick.selectItem(at: 2)
+            pick._fireAction()
+            check("pick")
+            // 5: multiple, then none
+            table.selectRowIndexes([1, 3], byExtendingSelection: false)
+            table.selectRowIndexes([2], byExtendingSelection: false)
+            table.deselectAll(nil)
+            check("none")
+            // 6: Barbara, rename to Babs with Return (the field keeps editing), toggle Member
+            table.selectRowIndexes([4], byExtendingSelection: false)
+            XCTAssertTrue(window.makeFirstResponder(name))
+            let editor = name._fieldEditor!
+            editor.selectAll(nil)
+            editor.insertText("Babs", replacementRange: NSRange(location: NSNotFound, length: 0))
+            editor.insertNewline(nil)
+            XCTAssertEqual(ps[4].name, "Babs")
+            member.state = .on
+            member._fireAction()
+            check("rename")
+            // 7: Name ascending, Name descending, Age
+            table._headerClicked(column: 0)
+            check("name asc")
+            table._headerClicked(column: 0)
+            check("name desc")
+            table._headerClicked(column: 1)
+            check("age")
+            XCTAssertEqual((ac.arrangedObjects as! [BindingPerson]).map(\.name), ["Babs", "Ada", "Alan", "Grace", "Ken", "Edsger"])
+        }
+    }
+
     func testSelectionFollowsBothWays() {
         MainActor.assumeIsolated {
             let ac = NSArrayController(content: people())

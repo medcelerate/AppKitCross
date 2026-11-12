@@ -422,6 +422,9 @@ import CoreGraphics
         _dropAllRowViews()
         _reloadIfNeeded()
         needsDisplay = true
+        // The rows are made in layout, before a natively hosted window builds its layer scene
+        // (made only at draw time, their layers would miss that frame's commit).
+        needsLayout = true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/reloaddata(forrowindexes:columnindexes:)
     @MainActor open func reloadData(forRowIndexes rowIndexes: IndexSet, columnIndexes: IndexSet) {
@@ -852,6 +855,12 @@ import CoreGraphics
 
     @MainActor open override func viewWillDraw() {
         super.viewWillDraw()
+        _updateVisibleRows()
+    }
+
+    /// Makes the visible rows' views, as AppKit's table does during layout.
+    @MainActor open override func layout() {
+        super.layout()
         _updateVisibleRows()
     }
 
