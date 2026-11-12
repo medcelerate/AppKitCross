@@ -833,8 +833,14 @@ final class Win32Window: PlatformWindow {
             }
             cd2d_comp_tree_surface_end_draw(tree, id)
             surfaceRasters[node.id] = (content.version, width, height, s)
+            if NSView._traceInvalidation, Win32Window.traceScene {
+                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) \(node.name ?? "")")
+            }
         }
         cd2d_comp_tree_end_update(tree)
+        if NSView._traceInvalidation, Win32Window.traceScene {
+            NSView._trace("win32 scene committed: \(scene.nodes.count) nodes, \(cd2d_comp_tree_visual_count(tree)) visuals")
+        }
         surfaceRasters = surfaceRasters.filter { live.contains($0.key) }
         nativeContents = nativeContents.filter { live.contains($0.key) }
         return true
