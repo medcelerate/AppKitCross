@@ -221,7 +221,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/hashorizontalruler
     @MainActor open var hasHorizontalRuler: Bool {
         get { _hasHorizontalRuler }
-        set { _hasHorizontalRuler = newValue }
+        set {
+            _hasHorizontalRuler = newValue
+            if newValue, _horizontalRuler == nil { _horizontalRuler = _makeRuler(.horizontalRuler) }
+            _installRulers()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/hashorizontalscroller
     @MainActor open var hasHorizontalScroller: Bool {
@@ -235,7 +239,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/hasverticalruler
     @MainActor open var hasVerticalRuler: Bool {
         get { _hasVerticalRuler }
-        set { _hasVerticalRuler = newValue }
+        set {
+            _hasVerticalRuler = newValue
+            if newValue, _verticalRuler == nil { _verticalRuler = _makeRuler(.verticalRuler) }
+            _installRulers()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/hasverticalscroller
     @MainActor open var hasVerticalScroller: Bool {
@@ -258,8 +266,16 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/horizontalrulerview
     @MainActor open var horizontalRulerView: NSRulerView? {
-        get { nil }
-        set { }
+        get {
+            if _hasHorizontalRuler, _horizontalRuler == nil { _horizontalRuler = _makeRuler(.horizontalRuler) }
+            return _horizontalRuler
+        }
+        set {
+            if _horizontalRuler !== newValue { _horizontalRuler?.removeFromSuperview() }
+            _horizontalRuler = newValue
+            newValue?.scrollView = self
+            _installRulers()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/horizontalscrollelasticity
     @MainActor open var horizontalScrollElasticity: NSScrollView.Elasticity {
@@ -307,6 +323,10 @@ import CoreText
         }
         let doc = cView.documentRect
         let b = cView.bounds
+        if _rulersVisible {
+            if _hasHorizontalRuler { _horizontalRuler?.needsDisplay = true }
+            if _hasVerticalRuler { _verticalRuler?.needsDisplay = true }
+        }
         if let v = _verticalScroller {
             let range = max(0, doc.height - b.height)
             v.knobProportion = doc.height > 0 ? min(1, b.height / doc.height) : 1
@@ -329,13 +349,40 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/rulerviewclass
     @MainActor class public var rulerViewClass: AnyClass! {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _rulerViewClass }
+        set { _rulerViewClass = newValue ?? NSRulerView.self }
     }
+    private static var _rulerViewClass: AnyClass = NSRulerView.self
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/rulersvisible
     @MainActor open var rulersVisible: Bool {
         get { _rulersVisible }
-        set { _rulersVisible = newValue }
+        set { _rulersVisible = newValue; _installRulers() }
+    }
+
+    // MARK: Rulers (ADR-0034)
+
+    private var _horizontalRuler: NSRulerView? = nil
+    private var _verticalRuler: NSRulerView? = nil
+
+    /// A ruler of `rulerViewClass`. Swift cannot call a non-required initialiser through a
+    /// metatype, so a subclass set there cannot be instantiated by the scroll view; set the
+    /// ruler with `horizontalRulerView`/`verticalRulerView` instead.
+    private func _makeRuler(_ orientation: NSRulerView.Orientation) -> NSRulerView {
+        guard NSScrollView._rulerViewClass == NSRulerView.self else {
+            unimplemented("NSScrollView.rulerViewClass set to a subclass of NSRulerView")
+        }
+        return NSRulerView(scrollView: self, orientation: orientation)
+    }
+
+    /// The rulers shown are subviews; hidden ones are not.
+    private func _installRulers() {
+        for (ruler, has) in [(_horizontalRuler, _hasHorizontalRuler), (_verticalRuler, _hasVerticalRuler)] {
+            guard let ruler else { continue }
+            let shown = _rulersVisible && has
+            if shown, ruler.superview !== self { addSubview(ruler) }
+            if !shown, ruler.superview === self { ruler.removeFromSuperview() }
+        }
+        tile()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/scrollwheel(with:)
     @MainActor open override func scrollWheel(with event: NSEvent) {
@@ -384,6 +431,20 @@ import CoreText
         // produce the null rect's infinities.
         if content.isNull || content.width < 0 || content.height < 0 {
             content = NSRect(x: bounds.minX + min(inset, bounds.width / 2), y: bounds.minY + min(inset, bounds.height / 2), width: 0, height: 0)
+        }
+        // The horizontal ruler takes the top strip across the whole width (over the vertical
+        // ruler's corner); the vertical ruler the left strip below it.
+        if _rulersVisible, _hasHorizontalRuler, let ruler = _horizontalRuler {
+            let h = ruler.requiredThickness
+            ruler.frame = NSRect(x: content.minX, y: isFlipped ? content.minY : content.maxY - h, width: content.width, height: h)
+            content.size.height = max(0, content.height - h)
+            if isFlipped { content.origin.y += h }
+        }
+        if _rulersVisible, _hasVerticalRuler, let ruler = _verticalRuler {
+            let w = ruler.requiredThickness
+            ruler.frame = NSRect(x: content.minX, y: content.minY, width: w, height: content.height)
+            content.origin.x += w
+            content.size.width = max(0, content.width - w)
         }
         // The find bar takes a strip above (or below) the content.
         if _isFindBarVisible, let bar = _findBarView {
@@ -452,8 +513,16 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/verticalrulerview
     @MainActor open var verticalRulerView: NSRulerView? {
-        get { nil }
-        set { }
+        get {
+            if _hasVerticalRuler, _verticalRuler == nil { _verticalRuler = _makeRuler(.verticalRuler) }
+            return _verticalRuler
+        }
+        set {
+            if _verticalRuler !== newValue { _verticalRuler?.removeFromSuperview() }
+            _verticalRuler = newValue
+            newValue?.scrollView = self
+            _installRulers()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/verticalscrollelasticity
     @MainActor open var verticalScrollElasticity: NSScrollView.Elasticity {

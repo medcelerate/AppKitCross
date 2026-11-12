@@ -1353,5 +1353,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/ruleraccessoryview(for:paragraphstyle:ruler:enabled:)
     open func rulerAccessoryView(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView, enabled isEnabled: Bool) -> NSView? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/rulermarkers(for:paragraphstyle:ruler:)
-    open func rulerMarkers(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView) -> [NSRulerMarker] { unimplemented() }
+    /// The first-line, head and tail indent markers and one marker per tab stop (ADR-0034).
+    open func rulerMarkers(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView) -> [NSRulerMarker] {
+        MainActor.assumeIsolated { _rulerMarkers(for: view, paragraphStyle: style, ruler: ruler) }
+    }
 }

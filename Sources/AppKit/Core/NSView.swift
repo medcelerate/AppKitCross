@@ -1487,30 +1487,33 @@ import CoreText
     @MainActor open var rightAnchor: NSLayoutXAxisAnchor { anchorX(.right) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rotate(bydegrees:)
     @MainActor open func rotate(byDegrees angle: CGFloat) { unimplemented() }
+    // The ruler client methods (AppKit's informal protocol, ADR-0034): a view that does not
+    // override them lets markers be added, moved and removed where they are dragged, and
+    // maps locations to its own x (horizontal ruler) or y (vertical ruler).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didadd:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didmove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didremove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:handlemousedownwith:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:locationfor:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, locationFor point: NSPoint) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, locationFor point: NSPoint) -> CGFloat { ruler.orientation == .horizontalRuler ? point.x : point.y }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:pointforlocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, pointForLocation point: CGFloat) -> NSPoint { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, pointForLocation point: CGFloat) -> NSPoint { ruler.orientation == .horizontalRuler ? NSPoint(x: point, y: 0) : NSPoint(x: 0, y: point) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldadd:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldmove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldremove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willadd:atlocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { location }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willmove:tolocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { location }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willsetclientview:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willSetClientView newClient: NSView) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willSetClientView newClient: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/safeareainsets
     @available(macOS 11.0, *)
     @MainActor open var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }

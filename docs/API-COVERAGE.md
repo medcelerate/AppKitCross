@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 171 |
-| Types generated | 368 |
+| Types handwritten | 188 |
+| Types generated | 351 |
 | Types pending | 2 |
 | Types skipped | 0 |
 | Members emitted | 10095 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 1046 |
+| Members unimplemented-calls | 1066 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -84,7 +84,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAlignmentFeedbackToken | protocol | generated | 0 | 0 | 0 |  |
 | NSAnimatablePropertyContainer | protocol | generated | 4 | 0 | 0 |  |
 | NSAnimatablePropertyKey | typealias | generated | 1 | 0 | 0 |  |
-| NSAnimation | class | generated | 30 | 0 | 3 |  |
+| NSAnimation | class | handwritten | 30 | 0 | 3 | 3 |
 | NSAnimationContext | class | handwritten | 9 | 0 | 0 | 0 |
 | NSAnimationDelegate | protocol | generated | 5 | 0 | 0 |  |
 | NSAnimationEffect | enum | generated | 3 | 0 | 0 |  |
@@ -214,7 +214,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSDraggingItemEnumerationOptions | struct | generated | 2 | 0 | 0 |  |
 | NSDraggingSession | class | handwritten | 7 | 0 | 0 | 1 |
 | NSDraggingSource | protocol | generated | 5 | 0 | 0 |  |
-| NSDrawer | class | generated | 26 | 0 | 1 |  |
+| NSDrawer | class | handwritten | 26 | 0 | 1 | 3 |
 | NSDrawerDelegate | protocol | generated | 7 | 0 | 0 |  |
 | NSEPSImageRep | class | generated | 4 | 0 | 0 |  |
 | NSEditor | protocol | generated | 4 | 0 | 0 |  |
@@ -251,7 +251,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSGlyphGenerator | class | generated | 2 | 0 | 0 |  |
 | NSGlyphInfo | class | generated | 7 | 2 | 0 |  |
 | NSGlyphStorage | protocol | generated | 4 | 0 | 0 |  |
-| NSGradient | class | generated | 17 | 0 | 1 |  |
+| NSGradient | class | handwritten | 17 | 0 | 1 | 3 |
 | NSGraphicsContext | class | handwritten | 27 | 1 | 2 | 10 |
 | NSGridCell | class | handwritten | 16 | 0 | 1 | 3 |
 | NSGridColumn | class | handwritten | 9 | 0 | 0 | 3 |
@@ -278,7 +278,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |
 | NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |
 | NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |
-| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 20 |
+| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 19 |
 | NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |
 | NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
 | NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
@@ -358,28 +358,28 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
 | NSRuleEditor | class | generated | 44 | 0 | 3 |  |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
-| NSRulerMarker | class | generated | 14 | 0 | 0 |  |
-| NSRulerView | class | generated | 29 | 0 | 2 |  |
+| NSRulerMarker | class | handwritten | 14 | 0 | 0 | 3 |
+| NSRulerView | class | handwritten | 29 | 0 | 2 | 2 |
 | NSRunningApplication | class | handwritten | 22 | 2 | 0 | 2 |
 | NSSavePanel | class | handwritten | 24 | 4 | 0 | 1 |
 | NSScreen | class | handwritten | 30 | 0 | 0 | 15 |
 | NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
-| NSScrollView | class | handwritten | 61 | 0 | 2 | 4 |
+| NSScrollView | class | handwritten | 61 | 0 | 2 | 3 |
 | NSScroller | class | handwritten | 42 | 0 | 6 | 3 |
-| NSScrubber | class | generated | 35 | 0 | 2 |  |
-| NSScrubberArrangedView | class | generated | 3 | 0 | 0 |  |
+| NSScrubber | class | handwritten | 35 | 0 | 2 | 3 |
+| NSScrubberArrangedView | class | handwritten | 3 | 0 | 0 | 1 |
 | NSScrubberDataSource | protocol | generated | 2 | 0 | 0 |  |
 | NSScrubberDelegate | protocol | generated | 6 | 0 | 0 |  |
-| NSScrubberFlowLayout | class | generated | 3 | 0 | 0 |  |
+| NSScrubberFlowLayout | class | handwritten | 3 | 0 | 0 | 1 |
 | NSScrubberFlowLayoutDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSScrubberImageItemView | class | generated | 3 | 0 | 0 |  |
-| NSScrubberItemView | class | generated | 0 | 0 | 0 |  |
-| NSScrubberLayout | class | generated | 14 | 0 | 0 |  |
-| NSScrubberLayoutAttributes | class | generated | 4 | 0 | 0 |  |
-| NSScrubberProportionalLayout | class | generated | 3 | 0 | 0 |  |
-| NSScrubberSelectionStyle | class | generated | 5 | 0 | 0 |  |
-| NSScrubberSelectionView | class | generated | 0 | 0 | 0 |  |
-| NSScrubberTextItemView | class | generated | 2 | 0 | 0 |  |
+| NSScrubberImageItemView | class | handwritten | 3 | 0 | 0 | 1 |
+| NSScrubberItemView | class | handwritten | 0 | 0 | 0 | 1 |
+| NSScrubberLayout | class | handwritten | 14 | 0 | 0 | 3 |
+| NSScrubberLayoutAttributes | class | handwritten | 4 | 0 | 0 | 1 |
+| NSScrubberProportionalLayout | class | handwritten | 3 | 0 | 0 | 2 |
+| NSScrubberSelectionStyle | class | handwritten | 5 | 0 | 0 | 4 |
+| NSScrubberSelectionView | class | handwritten | 0 | 0 | 0 | 1 |
+| NSScrubberTextItemView | class | handwritten | 2 | 0 | 0 | 1 |
 | NSSearchField | class | handwritten | 18 | 1 | 1 | 1 |
 | NSSearchFieldCell | class | handwritten | 15 | 0 | 0 | 1 |
 | NSSearchFieldDelegate | protocol | generated | 2 | 0 | 0 |  |
@@ -517,7 +517,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |
 | NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |
 | NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 43 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 42 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
@@ -559,8 +559,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 114 |
-| NSViewAnimation | class | generated | 8 | 0 | 2 |  |
+| NSView | class | handwritten | 361 | 3 | 19 | 102 |
+| NSViewAnimation | class | handwritten | 8 | 0 | 2 | 2 |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
 | NSViewControllerPresentationAnimator | protocol | generated | 2 | 0 | 0 |  |

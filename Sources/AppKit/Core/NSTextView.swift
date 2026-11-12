@@ -553,6 +553,7 @@ import CoreText
         NotificationCenter.default.post(n)
         _viewDelegate?.textViewDidChangeSelection(n)
         if window?.firstResponder === self { _updateFontManagerSelection() }
+        if usesRuler, !isFieldEditor { _takeRulerIfAvailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(coder:)
     public required init?(coder: NSCoder) {
@@ -1490,7 +1491,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatequicklookpreviewpanel()
     @MainActor open func updateQuickLookPreviewPanel() { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updateruler()
-    @MainActor open func updateRuler() { unimplemented() }
+    @MainActor open func updateRuler() { _updateRulerMarkers() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatetexttouchbaritems()
     @available(macOS 10.12, *)
     @MainActor open func updateTextTouchBarItems() { unimplemented() }
@@ -1530,12 +1531,38 @@ import CoreText
         get { _extras.usesRolloverButtonForSelection }
         set { _extras.usesRolloverButtonForSelection = newValue }
     }
-    /// Stored only: the port has no NSRulerView yet, so no ruler is shown (ADR-0030).
+    /// On by default: the text view takes its scroll view's horizontal ruler when the
+    /// rulers are shown (ADR-0034).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesruler
     @MainActor open var usesRuler: Bool {
         get { _extras.usesRuler }
-        set { _extras.usesRuler = newValue }
+        set {
+            _extras.usesRuler = newValue
+            if !newValue, let ruler = enclosingScrollView?.horizontalRulerView, ruler.clientView === self { ruler.clientView = nil }
+        }
     }
+
+    // MARK: Ruler client (ADR-0034; the work is in NSTextView+Ruler.swift)
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/isrulervisible
+    @MainActor open override var isRulerVisible: Bool { usesRuler && (enclosingScrollView?.rulersVisible ?? false) }
+    /// Shows or hides the scroll view's rulers, taking the horizontal one.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/toggleruler(_:)
+    @MainActor open override func toggleRuler(_ sender: Any?) {
+        guard usesRuler, let sv = enclosingScrollView else { return }
+        if !sv.hasHorizontalRuler { sv.hasHorizontalRuler = true }
+        sv.rulersVisible.toggle()
+        if sv.rulersVisible { _takeRulerIfAvailable() }
+    }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { _rulerDidMove(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { _rulerDidRemove(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { _rulerDidAdd(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { isEditable && isRichText }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { isEditable && isRichText }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { marker.representedObject is NSTextTab }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { _rulerClamp(marker, location) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { _rulerClamp(marker, location) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { _rulerHandleMouseDown(ruler, event) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/willchangenotifyingtextviewnotification
     static public var willChangeNotifyingTextViewNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextViewWillChangeNotifyingTextViewNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/willswitchtonslayoutmanagernotification

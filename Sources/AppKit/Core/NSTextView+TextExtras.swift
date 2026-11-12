@@ -749,7 +749,7 @@ extension NSTextView {
     var isAutomaticTextCompletionEnabled = false
     var isAutomaticLinkDetectionEnabled = false
     var isAutomaticDataDetectionEnabled = false
-    var usesRuler = false
+    var usesRuler = true
     var usesInspectorBar = false
     var linkTextAttributes: [NSAttributedString.Key: Any]? = [.foregroundColor: NSColor.linkColor, .underlineStyle: NSUnderlineStyle.single.rawValue]
     var displaysLinkToolTips = true
