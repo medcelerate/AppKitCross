@@ -33,10 +33,15 @@ open class NSPasteboard: NSObject {
             let pb = Platform.backend.systemPasteboard
             let count = pb.changeCount
             guard count != _lastSyncedPlatformCount else { return }
+            let entries = pb.read()
+            // A clipboard another process held open reads as empty: keep the old contents and
+            // read again next time instead of recording this change as seen.
+            guard !pb.lastReadFailed else { _PasteboardTrace.log("general: read failed at count \(count); will retry"); return }
             _lastSyncedPlatformCount = count
             let item = NSPasteboardItem()
-            for e in pb.read() { item._entries[NSPasteboard.PasteboardType(e.type)] = e.data }
+            for e in entries { item._entries[NSPasteboard.PasteboardType(e.type)] = e.data }
             _items = item._entries.isEmpty ? [] : [item]
+            _PasteboardTrace.log("general: synced count \(count) from \(type(of: pb)); types \(item.types.map(\.rawValue))")
             _localChangeCount += 1
         }
     }

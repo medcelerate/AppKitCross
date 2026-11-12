@@ -40,6 +40,9 @@ public final class CTParagraphStyle: NSObject {
 
     func copy() -> CTParagraphStyle { CTParagraphStyle(copying: self) }
 
+    /// The `tabStops` value as supplied (a CFArray of CTTextTab).
+    var tabStopsObject: AnyObject? { objects[.tabStops] }
+
     func load<T>(_ spec: CTParagraphStyleSpecifier, as type: T.Type) -> T? {
         guard let bytes = values[spec], bytes.count >= MemoryLayout<T>.size else { return nil }
         return bytes.withUnsafeBytes { $0.loadUnaligned(as: T.self) }

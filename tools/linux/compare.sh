@@ -30,6 +30,8 @@ mkdir -p "$OUT/rtl"
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=outline APPKITWIN_LAYOUT_DIRECTION=rtl "${BIN:-./.build/debug/HelloWindow}" --layout --screenshot "$OUT/rtl"
 mv "$OUT/rtl/layout-outline-linux.png" "$OUT/layout-outline-rtl-linux.png"
 rm -rf "$OUT/rtl"
+# TextEdit's text extras sample: a list, a table and an attachment (ADR-0030).
+APPKITWIN_LINUX_BACKEND=x11 "${TEXTEDIT_BIN:-./.build/debug/TextEdit}" --sample-screenshot "$OUT"
 # The combo box's list open (its own window): a capture of the X screen.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_TAB=combo APPKITWIN_COMBO_POPUP=1 "${BIN:-./.build/debug/HelloWindow}" --layout &
 APP=$!

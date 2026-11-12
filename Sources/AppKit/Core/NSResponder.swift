@@ -106,7 +106,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/performkeyequivalent(with:)
     @MainActor open func performKeyEquivalent(with event: NSEvent) -> Bool { nextResponder?.performKeyEquivalent(with: event) ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/performtextfinderaction(_:)
-    @MainActor open func performTextFinderAction(_ sender: Any?) { unimplemented() }
+    @MainActor open func performTextFinderAction(_ sender: Any?) { nextResponder?.performTextFinderAction(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/presenterror(_:)
     @MainActor open func presentError(_ error: any Error) -> Bool { nextResponder?.presentError(error) ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/presenterror(_:modalfor:delegate:didpresent:contextinfo:)

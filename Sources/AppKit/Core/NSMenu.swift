@@ -340,6 +340,9 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
                 } else {
                     item.isEnabled = false
                 }
+                if _PasteboardTrace.enabled, NSStringFromSelector(action).hasPrefix("paste") {
+                    _PasteboardTrace.log("NSMenu.update \"\(item.title)\" (\(NSStringFromSelector(action))): target \(target.map { "\(type(of: $0)) \(ObjectIdentifier($0))" } ?? "none"), validates \(target is NSMenuItemValidation) -> enabled \(item.isEnabled)")
+                }
             }
         }
     }

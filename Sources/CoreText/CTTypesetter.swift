@@ -34,6 +34,7 @@ extension NSAttributedString.Key {
     static let ctBaselineOffset = NSAttributedString.Key(kCTBaselineOffsetAttributeName as String)
     static let ctSuperscript = NSAttributedString.Key(kCTSuperscriptAttributeName as String)
     static let ctLanguage = NSAttributedString.Key(kCTLanguageAttributeName as String)
+    static let ctRunDelegate = NSAttributedString.Key(kCTRunDelegateAttributeName as String)
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/coretext/cttypesetter
@@ -70,11 +71,23 @@ public final class CTTypesetter: NSObject {
             let language = attrs[.ctLanguage] as? String
             let kern = _ctNumber(attrs[.ctKern]).map { CGFloat($0) } ?? 0
             let tracking = _ctNumber(attrs[.ctTracking]).map { CGFloat($0) } ?? 0
+            if let delegate = attrs[.ctRunDelegate] as? CTRunDelegate {
+                // Reserved space: one empty glyph per unit, each as wide as the delegate says.
+                let w = delegate.width
+                let n = range.length
+                let run = CTShapedRun(font: font.engine, glyphs: [CGGlyph](repeating: 0, count: n), advances: [CGFloat](repeating: w, count: n),
+                                      offsets: [CGPoint](repeating: .zero, count: n), clusters: Array(range.location..<(range.location + n)),
+                                      range: range, isRightToLeft: false)
+                for i in 0..<n { charAdvance[range.location + i] = w; isClusterStart[range.location + i] = true }
+                segments.append(CTSegment(font: font, attributes: attrs, run: run))
+                return
+            }
             for var run in CTRuntime.engine.shape(units, font: font.engine, language: language) {
                 run.range.location += range.location
                 for i in run.clusters.indices { run.clusters[i] += range.location }
                 for i in run.glyphs.indices {
                     let unit = text.units[run.clusters[i]]
+                    if unit == 0x09 { tabHasGlyph.insert(run.clusters[i]) }
                     if CTText.isNewline(unit) || unit == 0x09 { run.advances[i] = unit == 0x09 ? CTTypesetter.tabInterval : 0; run.glyphs[i] = run.glyphs[i] }
                     else if kern != 0 || tracking != 0 { run.advances[i] += kern + tracking }
                     charAdvance[run.clusters[i]] += run.advances[i]
@@ -91,7 +104,59 @@ public final class CTTypesetter: NSObject {
         canBreakBefore[count] = true
         for i in 1..<count where isClusterStart[i] {
             canBreakBefore[i] = CTTypesetter.breakAllowed(before: i, in: text.units)
+                || text.units[i] == 0xFFFC || text.units[i - 1] == 0xFFFC     // around attachments
         }
+        tabsBefore = [Int](repeating: 0, count: count + 1)
+        for i in 0..<count { tabsBefore[i + 1] = tabsBefore[i] + (text.units[i] == 0x09 ? 1 : 0) }
+    }
+
+    /// Tabs the engine gave a glyph of their own (DirectWrite may give none).
+    private var tabHasGlyph = Set<Int>()
+
+    /// tabsBefore[i] = number of tab characters in 0..<i (a fast "no tabs here" test).
+    private var tabsBefore: [Int] = [0]
+
+    // MARK: Tab stops
+
+    /// The paragraph style's stops at `index`, and its default interval.
+    private func tabStops(at index: Int) -> (stops: [CTTextTab], interval: CGFloat) {
+        guard index < text.count, let style = attributed.attribute(.ctParagraphStyle, at: index, effectiveRange: nil) as? CTParagraphStyle else {
+            return ([], CTTypesetter.tabInterval)
+        }
+        let interval = style.defaultTabInterval > 0 ? style.defaultTabInterval : CTTypesetter.tabInterval
+        return (style.textTabs, interval)
+    }
+
+    /// The advance of the tab at `index` when the pen is at `pen` (line-relative) and the
+    /// line starts `offset` points into the paragraph's coordinate space.
+    func tabAdvance(at index: Int, pen: CGFloat, offset: CGFloat) -> CGFloat {
+        let (stops, interval) = tabStops(at: index)
+        let x = offset + pen
+        if let stop = stops.first(where: { CGFloat($0.location) > x + 0.01 }) {
+            let target = CGFloat(stop.location)
+            switch stop.alignment {
+            case .right, .center:
+                // Right and centred stops align the text up to the next tab or line end.
+                var j = index + 1, w: CGFloat = 0
+                while j < text.count, text.units[j] != 0x09, !CTText.isNewline(text.units[j]) { w += charAdvance[j]; j += 1 }
+                let shift = stop.alignment == .right ? w : w / 2
+                return max(0, target - shift - x)
+            default:
+                return target - x
+            }
+        }
+        let next = (floor((x + 0.01) / interval) + 1) * interval
+        return next - x
+    }
+
+    /// Width of `location..<end` laid out from `offset`, honouring tab stops.
+    private func measuredWidth(_ location: Int, _ end: Int, offset: CGFloat, trimTrailingWhitespace: Bool) -> CGFloat {
+        var e = end
+        if trimTrailingWhitespace { while e > location && CTText.isWhitespace(text.units[e - 1]) { e -= 1 } }
+        guard tabsBefore[e] - tabsBefore[location] > 0 else { return prefix[e] - prefix[location] }
+        var pen: CGFloat = 0
+        for i in location..<e { pen += text.units[i] == 0x09 ? tabAdvance(at: i, pen: pen, offset: offset) : charAdvance[i] }
+        return pen
     }
 
     // MARK: Line breaking (UAX #14 subset)
@@ -143,17 +208,18 @@ public final class CTTypesetter: NSObject {
         let count = text.count
         guard start < count else { return 0 }
         let limit = CGFloat(width) - CGFloat(offset)
+        let pen0 = CGFloat(offset)
         var lastBreak = -1
         var i = start
         while i < count {
             let nl = newlineLength(at: i)
             if nl > 0 { return i + nl - start }          // a hard break ends the line and belongs to it
             if i > start, isClusterStart[i], clusters || canBreakBefore[i] {
-                if self.width(start, i, trimTrailingWhitespace: true) <= limit { lastBreak = i } else { break }
+                if measuredWidth(start, i, offset: pen0, trimTrailingWhitespace: true) <= limit { lastBreak = i } else { break }
             }
             i += 1
         }
-        if i >= count, self.width(start, count, trimTrailingWhitespace: true) <= limit { return count - start }
+        if i >= count, measuredWidth(start, count, offset: pen0, trimTrailingWhitespace: true) <= limit { return count - start }
         if lastBreak > start { return lastBreak - start }
         if !clusters {
             // No word fits: fall back to the longest cluster run, at least one cluster.
@@ -165,7 +231,7 @@ public final class CTTypesetter: NSObject {
     }
 
     /// The segments overlapping `range`, sliced to it, as runs with line-relative positions.
-    func makeLine(range: NSRange) -> CTLine {
+    func makeLine(range: NSRange, offset: CGFloat = 0) -> CTLine {
         let end = range.location + range.length
         var runs: [CTRun] = []
         var pen: CGFloat = 0
@@ -173,11 +239,28 @@ public final class CTTypesetter: NSObject {
             var glyphs: [CGGlyph] = [], advances: [CGSize] = [], positions: [CGPoint] = [], indices: [Int] = [], spaces: [Bool] = []
             let baseline = _ctNumber(seg.attributes[.ctBaselineOffset]).map { CGFloat($0) } ?? 0
                 + (_ctNumber(seg.attributes[.ctSuperscript]).map { CGFloat(Int($0)) * seg.font.engine.size * 0.33 } ?? 0)
+            // A tab the engine shaped without a glyph still takes its advance: a synthetic,
+            // undrawn (whitespace) glyph at its index.
+            let segLo = max(range.location, seg.run.range.location), segHi = min(end, seg.run.range.location + seg.run.range.length)
+            var nextTab = segLo
+            func emitDroppedTabs(upTo limit: Int) {
+                guard tabsBefore[min(limit, text.count)] - tabsBefore[min(nextTab, text.count)] > 0 else { nextTab = max(nextTab, limit); return }
+                while nextTab < limit {
+                    if text.units[nextTab] == 0x09 && !tabHasGlyph.contains(nextTab) {
+                        let adv = tabAdvance(at: nextTab, pen: pen, offset: offset)
+                        glyphs.append(0); positions.append(CGPoint(x: pen, y: baseline)); advances.append(CGSize(width: adv, height: 0))
+                        indices.append(nextTab); spaces.append(true)
+                        pen += adv
+                    }
+                    nextTab += 1
+                }
+            }
             for i in seg.run.glyphs.indices {
                 let c = seg.run.clusters[i]
                 guard c >= range.location, c < end else { continue }
+                if !seg.run.isRightToLeft { emitDroppedTabs(upTo: c); nextTab = max(nextTab, c + 1) }
                 var adv = seg.run.advances[i]
-                if text.units[c] == 0x09 { adv = CTTypesetter.tabInterval - pen.truncatingRemainder(dividingBy: CTTypesetter.tabInterval) }
+                if text.units[c] == 0x09 { adv = tabAdvance(at: c, pen: pen, offset: offset) }
                 glyphs.append(seg.run.glyphs[i])
                 positions.append(CGPoint(x: pen + seg.run.offsets[i].x, y: seg.run.offsets[i].y + baseline))
                 advances.append(CGSize(width: adv, height: 0))
@@ -185,6 +268,7 @@ public final class CTTypesetter: NSObject {
                 spaces.append(CTText.isWhitespace(text.units[c]))
                 pen += adv
             }
+            if !seg.run.isRightToLeft { emitDroppedTabs(upTo: segHi) }
             guard !glyphs.isEmpty else { continue }
             let lo = max(range.location, seg.run.range.location), hi = min(end, seg.run.range.location + seg.run.range.length)
             runs.append(CTRun(font: seg.font, attributes: seg.attributes, glyphs: glyphs, positions: positions, advances: advances,
@@ -222,7 +306,7 @@ public func CTTypesetterCreateLineWithOffset(_ typesetter: CTTypesetter, _ strin
     if r.length == 0 { r.length = typesetter.text.count - r.location }
     r.location = max(0, min(r.location, typesetter.text.count))
     r.length = max(0, min(r.length, typesetter.text.count - r.location))
-    return typesetter.makeLine(range: r.nsRange)
+    return typesetter.makeLine(range: r.nsRange, offset: CGFloat(offset))
 }
 
 public func CTTypesetterSuggestLineBreak(_ typesetter: CTTypesetter, _ startIndex: CFIndex, _ width: Double) -> CFIndex {
