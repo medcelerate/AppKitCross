@@ -32,6 +32,6 @@ PY
 sleep 0.5
 kill $APP 2>/dev/null || true; wait $APP 2>/dev/null || true
 kill $XVFB 2>/dev/null || true
-grep "stepper value" /tmp/stepper-hold.log | tail -3
+grep "stepper value" /tmp/stepper-hold.log | tail -3   # "stepper value N +0.512s": offset since the first step of the hold
 LAST=$(grep "stepper value" /tmp/stepper-hold.log | tail -1 | awk '{print $3}')
 if [ -n "$LAST" ] && [ "$LAST" -ge 8 ]; then echo "autorepeat OK (3 -> $LAST after a 1.5 s hold)"; else echo "autorepeat FAILED (last value: ${LAST:-none})"; exit 1; fi

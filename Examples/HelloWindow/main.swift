@@ -1033,8 +1033,12 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
     }
 
     /// `APPKITWIN_STEPPER_PROBE=1` prints the stepper's upper half in X screen pixels once
-    /// the window is up, and each stepped value (tools/linux/stepper-hold.sh).
+    /// the window is up, and each stepped value with its offset since the first step of the hold
+    /// (tools/linux/stepper-hold.sh; on Windows, read stdout while holding the upper half).
     let probing = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_PROBE"] != nil
+    /// The time of the first step of a hold, for the probe's offsets (reset a second after the last step).
+    private var probeStart: CFTimeInterval = 0
+    private var probeLast: CFTimeInterval = 0
     override func viewDidAppear() {
         super.viewDidAppear()
         guard probing else { return }
@@ -1065,7 +1069,14 @@ final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NS
             capacity.integerValue = stepper.integerValue
             bar.doubleValue = Double(stepper.integerValue) * 10
             status.stringValue = "Stepper: \(stepper.integerValue)"
-            if probing { print("stepper value \(stepper.integerValue)"); fflush(nil) }
+            if probing {
+                // "stepper value N +0.512s": the offset since the first step of this hold, so a
+                // log shows the autorepeat delay (0.5 s) and rate (10 per second) exactly.
+                let now = CACurrentMediaTime()
+                if now - probeLast > 1 { probeStart = now }
+                probeLast = now
+                print(String(format: "stepper value %d +%.3fs", stepper.integerValue, now - probeStart)); fflush(nil)
+            }
             return true
         case Selector(("stepperTyped:")):
             stepper.integerValue = stepperValue.integerValue
