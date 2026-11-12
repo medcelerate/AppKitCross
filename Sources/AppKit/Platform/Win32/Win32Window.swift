@@ -682,6 +682,27 @@ final class Win32Window: PlatformWindow {
     private var hostedScene: PlatformLayerScene?
     /// What each content node's surface holds: redrawn when any of these change.
     private var surfaceRasters: [Int: (version: Int, width: Int, height: Int, scale: CGFloat)] = [:]
+    /// A surface could not be drawn in the last scene update (retried on a later pass).
+    private var surfaceDrawFailed = false
+    private var surfaceRetries = 0
+    private var surfaceRetryScheduled = false
+
+    /// Re-applies the hosted scene after a failed surface draw: only the nodes without a
+    /// raster draw again. Not while painting (the window's own drawing holds the device);
+    /// gives up after a few consecutive failures (the next scene commit tries again).
+    private func scheduleSurfaceRetry() {
+        guard !surfaceRetryScheduled, surfaceRetries < 8 else { return }
+        surfaceRetryScheduled = true
+        surfaceRetries += 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.surfaceRetryScheduled = false
+            guard let scene = self.hostedScene, let rt = self.renderTarget, self.compositionTree != nil, !self.destroying else { return }
+            if self.painting { self.surfaceRetries -= 1; self.scheduleSurfaceRetry(); return }
+            if NSView._traceInvalidation { NSView._trace("win32 surface retry \(self.surfaceRetries)") }
+            _ = self.applyLayerScene(scene, to: rt)   // schedules another retry if a draw fails again
+        }
+    }
     /// Nodes whose visual shows a swap chain instead of a surface (MTKView, M7).
     private var nativeContents: [Int: UnsafeMutableRawPointer] = [:]
     private var painting = false
@@ -759,6 +780,7 @@ final class Win32Window: PlatformWindow {
             nativeContents.removeAll()
         }
         guard let tree = compositionTree else { return false }
+        surfaceDrawFailed = false
         let s = scale
         let dpi = Float(96 * s)
         cd2d_comp_tree_begin_update(tree)
@@ -821,7 +843,15 @@ final class Win32Window: PlatformWindow {
             let height = max(1, Int((node.size.height * s).rounded(.up)))
             if let r = surfaceRasters[node.id], r.version == content.version, r.width == width, r.height == height, r.scale == s { continue }
             guard let surface = cd2d_comp_tree_surface_begin_draw(tree, id, UInt32(width), UInt32(height), dpi) else {
+                // The node shows nothing until it is drawn: try again on a later pass instead
+                // of leaving it blank until something else invalidates it.
                 surfaceRasters[node.id] = nil
+                surfaceDrawFailed = true
+                if NSView._traceInvalidation {
+                    var stage: Int32 = 0, hr: Int32 = 0
+                    cd2d_comp_tree_last_draw_error(tree, &stage, &hr)
+                    NSView._trace("win32 surface draw FAILED node \(node.id) \(width)x\(height) stage \(stage) hr 0x\(String(UInt32(bitPattern: hr), radix: 16)) painting \(painting)")
+                }
                 continue
             }
             do {
@@ -838,6 +868,7 @@ final class Win32Window: PlatformWindow {
             }
         }
         cd2d_comp_tree_end_update(tree)
+        if surfaceDrawFailed { scheduleSurfaceRetry() } else { surfaceRetries = 0 }
         if NSView._traceInvalidation, Win32Window.traceScene {
             var addFailures: UInt32 = 0, contentFailures: UInt32 = 0
             cd2d_comp_tree_failures(tree, &addFailures, &contentFailures)

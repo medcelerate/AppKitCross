@@ -1499,6 +1499,7 @@ struct CD2DCompTree {
     CD2DTarget surfaceTarget;
     int64_t drawing = 0;                           // id of the surface between begin/end draw
     uint32_t addFailures = 0, contentFailures = 0; // failed AddVisual / SetContent calls (trace aid)
+    int32_t lastDrawStage = 0, lastDrawError = 0;  // why the last surface_begin_draw failed
 };
 
 static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
@@ -1720,7 +1721,9 @@ void cd2d_comp_tree_set_clip(CD2DCompTree *tree, int64_t id, bool enabled, float
 
 CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, uint32_t w, uint32_t h, float dpi) {
     CD2DCompVisual *v = compVisual(tree, id);
-    if (!v || !v->visual || !tree->dc || tree->drawing) return nullptr;
+    if (!tree) return nullptr;
+    tree->lastDrawStage = 0; tree->lastDrawError = 0;
+    if (!v || !v->visual || !tree->dc || tree->drawing) { tree->lastDrawStage = 1; return nullptr; }
     if (!w) w = 1;
     if (!h) h = 1;
     if (v->swapChain) {
@@ -1733,21 +1736,26 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
         safeRelease(v->surface);
     }
     if (!v->surface) {
-        if (FAILED(tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface))) return nullptr;
+        HRESULT hr = tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface);
+        if (FAILED(hr)) { v->surface = nullptr; tree->lastDrawStage = 2; tree->lastDrawError = (int32_t)hr; return nullptr; }
         v->surfaceWidth = w; v->surfaceHeight = h;
         if (FAILED(v->visual->SetContent(v->surface))) tree->contentFailures++;
     }
     POINT offset = {};
-    if (FAILED(v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset))) {
+    HRESULT beginHr = v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset);
+    if (FAILED(beginHr)) {
         tree->surfaceDxgi = nullptr;
+        tree->lastDrawStage = 3; tree->lastDrawError = (int32_t)beginHr;
         return nullptr;
     }
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
-    if (FAILED(tree->dc->CreateBitmapFromDxgiSurface(tree->surfaceDxgi, &props, &tree->surfaceBitmap))) {
+    HRESULT bitmapHr = tree->dc->CreateBitmapFromDxgiSurface(tree->surfaceDxgi, &props, &tree->surfaceBitmap);
+    if (FAILED(bitmapHr)) {
         safeRelease(tree->surfaceDxgi);
         v->surface->EndDraw();
+        tree->lastDrawStage = 4; tree->lastDrawError = (int32_t)bitmapHr;
         return nullptr;
     }
     tree->drawing = id;
@@ -1867,6 +1875,11 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
 
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
     return tree ? (uint32_t)tree->visuals.size() : 0;
+}
+
+void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr) {
+    if (stage) *stage = tree ? tree->lastDrawStage : 0;
+    if (hr) *hr = tree ? tree->lastDrawError : 0;
 }
 
 void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t *contentFailures) {
