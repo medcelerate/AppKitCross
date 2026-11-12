@@ -601,6 +601,9 @@ import CoreText
         let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
         let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         if _container.size != size { _container.size = size }
+        // An unbounded container still flushes right-aligned and centred text against the
+        // visible width; against the unbounded width the line would sit beyond any drawing.
+        _container._alignmentWidth = unbounded ? max(1, bounds.width - 2 * _textContainerInset.width) : nil
         let padding: CGFloat = isFieldEditor ? 0 : 5
         if _container.lineFragmentPadding != padding { _container.lineFragmentPadding = padding }
     }

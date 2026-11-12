@@ -895,11 +895,13 @@ import UniformTypeIdentifiers
     @MainActor open func print(withSettings printSettings: [NSPrintInfo.AttributeKey : Any], showPrintPanel: Bool, delegate: Any?, didPrint didPrintSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
         let op: NSPrintOperation
         do { op = try printOperation(withSettings: printSettings) } catch {
+            if NSView._traceInvalidation { NSView._trace("print document '\(displayName ?? "")' printOperation(withSettings:) threw \(error)") }
             _ = presentError(error)
             if let delegate = delegate as AnyObject?, let sel = didPrintSelector { _ = ActionRegistry.perform(sel, on: delegate, with: self) }
             return
         }
         op.showsPrintPanel = showPrintPanel
+        if NSView._traceInvalidation { NSView._trace("print document '\(displayName ?? "")' panel \(showPrintPanel) sheet window \(windowForSheet.map { "'\($0.title)' visible \($0.isVisible)" } ?? "none")") }
         runModalPrintOperation(op, delegate: delegate, didRun: didPrintSelector, contextInfo: contextInfo)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/printdocument(_:)

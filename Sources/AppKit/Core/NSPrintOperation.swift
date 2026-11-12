@@ -211,6 +211,9 @@ import CoreText
         NSPrintOperation._current = self
         _lastRunSucceeded = false
         _cancelled = false
+        if NSView._traceInvalidation {
+            NSView._trace("print runModal '\(jobTitle ?? "")' on '\(docWindow.title)' panel \(_showsPrintPanel) native \(_wantsNativePanel) view \(_view.bounds.size) pages \(_paginate().pageCount)")
+        }
         guard _showsPrintPanel && !_isCopying else {
             let ok = _printInfo.jobDisposition != .cancel && _runJob()
             _lastRunSucceeded = ok
@@ -364,15 +367,21 @@ import CoreText
     /// A rendering of page `page` for the print panel's preview, `scale` pixels per point.
     internal func _previewImage(page: Int, scale: CGFloat) -> CGImage? {
         let pagination = _paginate()
-        guard pagination.rect(forPage: page) != nil,
-              let surface = Platform.backend.image.makeOffscreen(size: pagination.paperSize, scale: scale) else { return nil }
+        guard pagination.rect(forPage: page) != nil else { return nil }
+        if NSView._traceInvalidation { NSView._trace("print preview page \(page) of \(pagination.pageCount) scale \(scale) paper \(pagination.paperSize)") }
+        guard let surface = Platform.backend.image.makeOffscreen(size: pagination.paperSize, scale: scale) else {
+            if NSView._traceInvalidation { NSView._trace("print preview: no offscreen surface") }
+            return nil
+        }
         let cg = surface.context
         cg.saveGState()
         cg.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
         cg.fill(NSRect(origin: .zero, size: pagination.paperSize))
         cg.restoreGState()
         _drawPage(page, into: cg)
-        return surface.makeImage()
+        let image = surface.makeImage()
+        if NSView._traceInvalidation { NSView._trace("print preview page \(page) drawn, image \(image == nil ? "nil" : "ok")") }
+        return image
     }
 
     // MARK: The job

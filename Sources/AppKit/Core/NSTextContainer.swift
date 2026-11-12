@@ -36,6 +36,13 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
 
     private func _geometryChanged() { _layoutManager?.textContainerChangedGeometry(self) }
 
+    /// The width right-aligned and centred lines flush against when `size.width` is
+    /// unbounded (a field editor's or a horizontally resizable view's container, which
+    /// never wraps): the view's visible width. Nil flushes against the container width.
+    internal var _alignmentWidth: CGFloat? {
+        didSet { if _alignmentWidth != oldValue { _geometryChanged() } }
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/size
     open var size: CGSize {
         get { _size }

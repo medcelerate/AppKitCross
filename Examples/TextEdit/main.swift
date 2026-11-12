@@ -201,11 +201,23 @@ final class TextDocument: NSDocument {
         var attributes: [NSPrintInfo.AttributeKey: Any] = [:]
         for (key, value) in printInfo.dictionary() { if let k = key as? String { attributes[NSPrintInfo.AttributeKey(rawValue: k)] = value } }
         for (key, value) in printSettings { attributes[key] = value }
-        tv.sizeToFit()   // the whole text, not the part the scroll view shows
         let info = NSPrintInfo(dictionary: attributes)
         info.verticalPagination = .automatic
         info.horizontalPagination = .fit
-        let op = NSPrintOperation(view: tv, printInfo: info)
+        // Printed through its own text view, wrapped to the page width over the scale, as
+        // Apple's TextEdit does: with fit pagination the page scale is the smaller of the
+        // scaling factor and what fits, so the window's wider text would print at the fit
+        // scale whatever Page Setup says. Sized this way, the fit is exactly the scale.
+        let scale = max(info.scalingFactor, 0.01)
+        let printView = NSTextView(frame: NSRect(x: 0, y: 0, width: (info.imageablePageBounds.width / scale).rounded(.down), height: 10))
+        TextDocument.configure(printView, rich: isRichText)
+        // Nobody edits the printed copy: no spell checking over the whole text, no find bar.
+        printView.isContinuousSpellCheckingEnabled = false
+        printView.usesFindBar = false
+        printView.font = tv.font
+        if let text = tv.textStorage?.copy() as? NSAttributedString { printView.textStorage?.setAttributedString(text) }
+        printView.sizeToFit()   // the whole text, not the part the scroll view shows
+        let op = NSPrintOperation(view: printView, printInfo: info)
         op.jobTitle = displayName
         return op
     }
@@ -500,6 +512,15 @@ extension NSTextView {
             print("FAIL: \(data.count) bytes, \(counted) page objects for \(pages) paginated pages"); return 1
         }
         print("printed \(pages) pages (\(data.count) bytes of PDF) to \(url.path); media box \(_PDFInspector.mediaBox(data).map { "\(Int($0.width))x\(Int($0.height))" } ?? "?")")
+        // Page Setup's scale reaches the job: at 50% the text wraps to twice the width and
+        // draws at half size, so the ninety lines take fewer pages.
+        doc.printInfo.scalingFactor = 0.5
+        let half = try doc.printOperation(withSettings: [.jobDisposition: NSPrintInfo.JobDisposition.save.rawValue, .jobSavingURL: url])
+        half.showsPrintPanel = false
+        half.showsProgressPanel = false
+        let halfPages = half.pageRange.length
+        guard half.run(), halfPages < pages else { print("FAIL: \(halfPages) pages at 50% scale, \(pages) at 100%"); return 1 }
+        print("at 50% scale: \(halfPages) pages")
         return 0
     } catch {
         print("FAIL: \(error)")

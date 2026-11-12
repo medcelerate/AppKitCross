@@ -233,6 +233,9 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
                     if sub.performKeyEquivalent(with: event) { return true }
                 } else if item._matches(event) {
                     update()
+                    if NSView._traceInvalidation {
+                        NSView._trace("key equivalent '\(item.title)' action \(item.action.map(NSStringFromSelector) ?? "none") enabled \(item.isEnabled) target \(item.target.map { String(describing: type(of: $0)) } ?? "nil") first responder \(NSApplication.shared.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")")
+                    }
                     guard item.isEnabled else { return true }
                     performActionForItem(at: i)
                     return true

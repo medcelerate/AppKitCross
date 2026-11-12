@@ -135,6 +135,21 @@ viewer.
   by 96/72), and carries the native dialog's DEVMODE as its print ticket
   (`PTConvertDevModeToPrintTicket`), so the driver gets the paper and orientation chosen
   there; the package panel's choices reach the driver only through the page size.
+- With `.fit` pagination the page scale is the smaller of the scaling factor and what
+  fits, as in AppKit, so a view wider than the printable area prints at the fit scale
+  whatever Page Setup says. TextEdit prints through its own text view wrapped to the page
+  width over the scale (Apple's TextEdit does the same), so its scale is always visible;
+  `TextEdit --print-pdf` checks that 50% takes fewer pages than 100%.
+- The panels' numeric fields are right-aligned. A field editor's text container is
+  unbounded (one line, never wrapping), and a right-aligned line flushed against that
+  width was drawn nowhere, so the field went blank once focused (found on the Windows
+  PC, reproduced on the host). `NSTextContainer._alignmentWidth` gives the layout
+  manager the view's visible width to flush against when the container is unbounded.
+- A panel never becomes the main window (`NSPanel.canBecomeMain` is false, as in AppKit).
+  The print and page-setup sheets are panels; while one was key it was also main, so a
+  nil-target `printDocument:` validated against the sheet's responder chain, found no
+  document, and the key equivalent was consumed with no panel shown (Ctrl+P with Page
+  Setup still up on the Windows PC). Spelling marks are not drawn while printing.
 - Printer-specific papers and hardware margins are not read from the drivers yet
   (`imageablePageBounds` is the paper for the generic and host printers); the paper table
   is the port's.

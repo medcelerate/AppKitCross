@@ -562,6 +562,54 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// Typing into the Page Setup panel's Scale field by keyboard (the PC injects key
+    /// events; it has no hardware keyboard): the field editor takes the digits, the field
+    /// shows them, and OK commits them to the print info.
+    func testTypingAScaleByKeyboardShowsItAndCommitsIt() {
+        MainActor.assumeIsolated {
+            let info = letterInfo()
+            info.scalingFactor = 1
+            let form = _NSPrintPanelForm(printInfo: info, options: [.showsPageSetupAccessory], accessories: [], defaultButtonTitle: "OK", operation: nil)
+            form.panel.makeKeyAndOrderFront(nil)
+            let scale = form.scale!
+            XCTAssertEqual(scale.stringValue, "100")
+            /// Dark pixels inside the field, away from its border: the text.
+            @MainActor func darkPixels(_ v: NSView) -> Int {
+                let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+                v.cacheDisplay(in: v.bounds, to: rep)
+                let k = max(1, rep.pixelsWide / max(1, Int(v.bounds.width)))
+                var n = 0
+                for y in (3 * k)..<(rep.pixelsHigh - 3 * k) { for x in (3 * k)..<(rep.pixelsWide - 3 * k) {
+                    if let c = rep.colorAt(x: x, y: y), c.alphaComponent > 0.5, (c.redComponent + c.greenComponent + c.blueComponent) / 3 < 0.5 { n += 1 }
+                } }
+                return n
+            }
+            let before = darkPixels(scale)
+            XCTAssertGreaterThan(before, 0, "the field draws its value")
+            XCTAssertTrue(form.panel.makeFirstResponder(scale), "Tab focus")
+            XCTAssertTrue(form.panel.firstResponder is NSTextView, "the field editor is up")
+            @MainActor func type(_ c: String) {
+                let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: form.panel.windowNumber,
+                                         context: nil, characters: c, charactersIgnoringModifiers: c, isARepeat: false, keyCode: 0)!
+                form.panel.sendEvent(e)
+            }
+            type("\u{7F}")   // Backspace: the selected 100 goes
+            XCTAssertEqual(scale.stringValue, "")
+            let caretOnly = darkPixels(scale)
+            XCTAssertLessThan(caretOnly, before, "an empty editing field draws its caret and no text")
+            type("8")
+            XCTAssertEqual((form.panel.firstResponder as? NSTextView)?.string, "8", "the editor took the digit")
+            XCTAssertEqual(scale.stringValue, "8", "the field follows the editor")
+            // The editor's container is unbounded (one line, never wrapping); a right-aligned
+            // line flushed against that width was drawn nowhere, so the field showed blank.
+            XCTAssertGreaterThan(darkPixels(scale), caretOnly, "the field draws the typed digit while editing")
+            type("0")
+            XCTAssertEqual(scale.stringValue, "80")
+            form.printButton.performClick(nil)
+            XCTAssertEqual(info.scalingFactor, 0.8, accuracy: 0.0001, "OK commits the scale without Return or Tab")
+        }
+    }
+
     func testPrintPanelAsSheetRunsTheOperationWhenPrintIsPressed() {
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 700))
@@ -615,6 +663,11 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             layout._beginSheet(with: info, modalFor: window) { result = $0 }
             let form = layout._currentForm!
             XCTAssertEqual(form.panel.title, "Page Setup")
+            // The sheet takes the keyboard but not main-window status (NSPanel, as in AppKit):
+            // File > Print… still validates against the document window's responder chain.
+            XCTAssertTrue(form.panel.isKeyWindow)
+            XCTAssertFalse(form.panel.isMainWindow)
+            XCTAssertTrue(NSApplication.shared.mainWindow === window)
             XCTAssertTrue(form.pdfButton.isHidden)
             XCTAssertNil(form.copies)
             form.landscape!.performClick(nil)
@@ -691,6 +744,11 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
             // Page Setup as a sheet changes the document's print info.
             doc.runPageLayout(nil)
             XCTAssertNotNil(window.attachedSheet)
+            // The sheet is key but the document window stays main, so File > Print… still
+            // finds the document (the PC pressed Ctrl+P with Page Setup up and nothing came).
+            XCTAssertTrue(window.attachedSheet!.isKeyWindow)
+            XCTAssertTrue(NSApplication.shared.mainWindow === window)
+            XCTAssertTrue(NSApplication.shared._target(forAction: Selector(("printDocument:"))) === doc)
             let layoutForm = (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "Landscape" }
             layoutForm!.performClick(nil)
             (window.attachedSheet!.contentView!.subviews.compactMap { $0 as? NSButton }).first { $0.title == "OK" }!.performClick(nil)
