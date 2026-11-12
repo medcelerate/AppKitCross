@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             NSApp.terminate(nil)
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|legacy picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "legacy"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -1512,12 +1512,16 @@ final class LegacyDemoViewController: NSViewController, NSScrubberDataSource, NS
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 260))
+        // Everything keeps its distance from the top as the tab grows; the text view and the
+        // scrubber widen with it.
         let swatch = GradientSwatch(frame: NSRect(x: 16, y: 104, width: 160, height: 140))
+        swatch.autoresizingMask = [.minYMargin]
         root.addSubview(swatch)
 
         let scroll = NSTextView.scrollableTextView()
         scroll.frame = NSRect(x: 192, y: 104, width: 412, height: 140)
         scroll.borderType = .lineBorder
+        scroll.autoresizingMask = [.minYMargin, .width]
         let tv = scroll.documentView as! NSTextView
         let ps = NSMutableParagraphStyle()
         ps.tabStops = [NSTextTab(textAlignment: .left, location: 72), NSTextTab(textAlignment: .right, location: 216)]
@@ -1538,14 +1542,17 @@ final class LegacyDemoViewController: NSViewController, NSScrubberDataSource, NS
         scrubber.selectionBackgroundStyle = .roundedBackground
         scrubber.showsArrowButtons = true
         scrubber.showsAdditionalContentIndicators = true
+        scrubber.autoresizingMask = [.minYMargin, .width]
         scrubber.delegate = self
         scrubber.dataSource = self
         root.addSubview(scrubber)
 
         let toggle = NSButton(title: "Toggle Drawer", target: self, action: Selector(("toggleDrawer:")))
         toggle.frame = NSRect(x: 16, y: 16, width: 120, height: 24)
+        toggle.autoresizingMask = [.minYMargin]
         root.addSubview(toggle)
         status.frame = NSRect(x: 148, y: 18, width: 456, height: 20)
+        status.autoresizingMask = [.minYMargin, .width]
         root.addSubview(status)
         view = root
     }
