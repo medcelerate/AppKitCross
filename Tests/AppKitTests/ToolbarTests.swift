@@ -416,7 +416,7 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             // Items start after the standard buttons.
             let first = view.subviews.compactMap { $0 as? _NSToolbarItemButton }.min { $0.frame.minX < $1.frame.minX }!
             XCTAssertGreaterThanOrEqual(first.frame.minX, _NSWindowButtonsView.width)
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: w.contentView!.bounds.height - 14)), .client, "the close button is still on top")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: w.contentView!.bounds.height - 14)), .closeButton, "the close button is still on top")
             w.toolbarStyle = .unifiedCompact
             XCTAssertEqual(w._toolbarMetrics!.height, 38)
             w.toolbarStyle = .expanded
@@ -533,6 +533,37 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             w.display()
             XCTAssertGreaterThan(cv.layouts, mid, "the band moving over the content relayouts it")
             XCTAssertLessThan(w.contentLayoutRect.height, cv.bounds.height, "over the content the rect excludes the band")
+        }
+    }
+
+    /// With Windows caption buttons at the right (ADR-0022) the unified row starts at the
+    /// left and keeps the trailing 138 points (plus a gap) clear, chevron included.
+    func testUnifiedToolbarStartsAtTheLeftUnderCaptionButtons() {
+        MainActor.assumeIsolated {
+            let host = Platform.backend as! HostBackend
+            host.windowButtonStyle = .caption
+            defer { host.windowButtonStyle = .trafficLights }
+            let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView], width: 400)
+            defer { w.close() }
+            let d = Delegate()
+            let tb = NSToolbar(identifier: "test.unified.caption")
+            tb.delegate = d
+            w.toolbar = tb
+            let m = w._toolbarMetrics!
+            XCTAssertEqual(m.leadingInset, 8)
+            XCTAssertEqual(m.trailingInset, _NSWindowButtonsView.captionWidth + 4)
+            w.display()
+            let view = tb._view!
+            let itemButtons = view.subviews.compactMap { $0 as? _NSToolbarItemButton }.filter { !$0.isHidden }
+            let first = itemButtons.min { $0.frame.minX < $1.frame.minX }!
+            XCTAssertLessThan(first.frame.minX, 20, "items start at the left")
+            for b in itemButtons { XCTAssertLessThanOrEqual(b.frame.maxX, 400 - _NSWindowButtonsView.captionWidth - 4, "\(b.frame) overlaps the caption buttons") }
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 390, y: w.contentView!.bounds.height - 14)), .closeButton, "the close button is on top at the right")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: w.contentView!.bounds.height - 14)), .client, "an item sits where the traffic lights were")
+            // Expanded on such a window keeps the title band, with the caption buttons in it.
+            w.toolbarStyle = .expanded
+            XCTAssertEqual(w._toolbarMetrics!.trailingInset, 8)
+            XCTAssertEqual(w._toolbarMetrics!.topInset, NSWindow._titleBarBandHeight)
         }
     }
 

@@ -28,12 +28,15 @@ struct _NSToolbarMetrics: Equatable {
     var showsLabels: Bool
     var showsIcons: Bool
     var labelFontSize: CGFloat
-    /// Space kept free at the leading edge for the window's standard buttons.
+    /// Space kept free at the leading edge for the window's standard buttons when they
+    /// are the traffic lights at the left.
     var leadingInset: CGFloat
+    /// Space kept free at the trailing edge for the caption buttons at the right (Windows).
     var trailingInset: CGFloat
     var itemGap: CGFloat
 
-    static func resolve(style: NSWindow.ToolbarStyle, displayMode: NSToolbar.DisplayMode, sizeMode: NSToolbar.SizeMode, contentCoversTitleBar: Bool) -> _NSToolbarMetrics {
+    static func resolve(style: NSWindow.ToolbarStyle, displayMode: NSToolbar.DisplayMode, sizeMode: NSToolbar.SizeMode, contentCoversTitleBar: Bool,
+                        buttonStyle: PlatformWindowButtonStyle = .trafficLights) -> _NSToolbarMetrics {
         var resolved = style
         if resolved == .automatic { resolved = contentCoversTitleBar ? .unified : .expanded }
         let unified = resolved == .unified || resolved == .unifiedCompact
@@ -59,7 +62,8 @@ struct _NSToolbarMetrics: Equatable {
         }
         return _NSToolbarMetrics(placement: contentCoversTitleBar ? .overContent : .belowTitleBar, height: height + topInset, topInset: topInset,
                                  iconSize: icon, buttonSize: button, showsLabels: labels, showsIcons: icons, labelFontSize: labelSize,
-                                 leadingInset: contentCoversTitleBar && unified ? _NSWindowButtonsView.width + 4 : 8, trailingInset: 8, itemGap: 8)
+                                 leadingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.leadingInset(for: buttonStyle)) : 8,
+                                 trailingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.trailingInset(for: buttonStyle)) : 8, itemGap: 8)
     }
 }
 
@@ -341,7 +345,8 @@ final class _NSToolbarView: NSView {
     /// Room the window keeps free at the row's ends for title bar accessories that share
     /// the band with a unified toolbar (NSTitlebarAccessoryViewController).
     func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool, accessoryInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)) {
-        var m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar)
+        var m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar,
+                                          buttonStyle: window?._windowButtonStyle ?? Platform.backend.windowButtonStyle)
         m.leadingInset += accessoryInsets.leading
         m.trailingInset += accessoryInsets.trailing
         if m != metrics { metrics = m; needsLayout = true; needsDisplay = true }
