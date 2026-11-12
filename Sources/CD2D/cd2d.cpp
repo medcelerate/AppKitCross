@@ -1500,6 +1500,9 @@ struct CD2DCompTree {
     int64_t drawing = 0;                           // id of the surface between begin/end draw
     uint32_t addFailures = 0, contentFailures = 0; // failed AddVisual / SetContent calls (trace aid)
     int32_t lastDrawStage = 0, lastDrawError = 0;  // why the last surface_begin_draw failed
+    void *lastSurface = nullptr;                   // the last surface drawn and its atlas offset (trace aid)
+    int32_t lastOffsetX = 0, lastOffsetY = 0;
+    bool lastSurfaceCreated = false;
 };
 
 static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
@@ -1735,6 +1738,7 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
         v->visual->SetContent(nullptr);
         safeRelease(v->surface);
     }
+    tree->lastSurfaceCreated = !v->surface;
     if (!v->surface) {
         HRESULT hr = tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface);
         if (FAILED(hr)) { v->surface = nullptr; tree->lastDrawStage = 2; tree->lastDrawError = (int32_t)hr; return nullptr; }
@@ -1759,6 +1763,8 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
         return nullptr;
     }
     tree->drawing = id;
+    tree->lastSurface = v->surface;
+    tree->lastOffsetX = offset.x; tree->lastOffsetY = offset.y;
     tree->dc->SetTarget(tree->surfaceBitmap);
     tree->dc->SetDpi(dpi, dpi);
     tree->dc->BeginDraw();
@@ -1875,6 +1881,13 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
 
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
     return tree ? (uint32_t)tree->visuals.size() : 0;
+}
+
+void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *offsetX, int32_t *offsetY, bool *created) {
+    if (surface) *surface = tree ? tree->lastSurface : nullptr;
+    if (offsetX) *offsetX = tree ? tree->lastOffsetX : 0;
+    if (offsetY) *offsetY = tree ? tree->lastOffsetY : 0;
+    if (created) *created = tree ? tree->lastSurfaceCreated : false;
 }
 
 void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr) {

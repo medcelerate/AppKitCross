@@ -260,6 +260,9 @@ void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t
 /// Why the last cd2d_comp_tree_surface_begin_draw returned NULL: stage 1 busy or no visual,
 /// 2 CreateSurface, 3 IDCompositionSurface::BeginDraw, 4 CreateBitmapFromDxgiSurface; and the HRESULT.
 void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr);
+/// The surface the last successful surface_begin_draw drew into (IDCompositionSurface*), the
+/// atlas offset BeginDraw returned (pixels), and whether the surface was created for it (debug aid).
+void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *offsetX, int32_t *offsetY, bool *created);
 
 // File dialogs (IFileDialog)
 typedef struct CD2DFileDialogOptions {

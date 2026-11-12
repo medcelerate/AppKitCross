@@ -864,7 +864,11 @@ final class Win32Window: PlatformWindow {
             cd2d_comp_tree_surface_end_draw(tree, id)
             surfaceRasters[node.id] = (content.version, width, height, s)
             if NSView._traceInvalidation, Win32Window.traceScene {
-                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) \(node.name ?? "")")
+                var surfacePtr: UnsafeMutableRawPointer? = nil
+                var ox: Int32 = 0, oy: Int32 = 0
+                var created = false
+                cd2d_comp_tree_last_draw_info(tree, &surfacePtr, &ox, &oy, &created)
+                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) surface \(surfacePtr.map { String(UInt(bitPattern: $0), radix: 16) } ?? "nil") offset \(ox),\(oy)\(created ? " new" : "") \(node.name ?? "")")
             }
         }
         cd2d_comp_tree_end_update(tree)
