@@ -35,6 +35,17 @@ import CoreText
     private var _periodicDelay: Float = 0.4
     private var _periodicInterval: Float = 0.075
 
+    @MainActor internal override func _copyCellState(from other: NSCell) {
+        super._copyCellState(from: other)
+        guard let o = other as? NSButtonCell else { return }
+        _buttonType = o._buttonType; _alternateTitle = o._alternateTitle; _alternateImage = o._alternateImage
+        _bezelStyle = o._bezelStyle; _isTransparent = o._isTransparent; _highlightsBy = o._highlightsBy; _showsStateBy = o._showsStateBy
+        _imagePosition = o._imagePosition; _imageScaling = o._imageScaling; _backgroundColor = o._backgroundColor
+        _keyEquivalent = o._keyEquivalent; _keyEquivalentModifierMask = o._keyEquivalentModifierMask
+        _imageDimsWhenDisabled = o._imageDimsWhenDisabled; _showsBorderOnlyWhileMouseInside = o._showsBorderOnlyWhileMouseInside
+        _sound = o._sound; _periodicDelay = o._periodicDelay; _periodicInterval = o._periodicInterval
+    }
+
     /// True for checkbox and radio buttons: a state indicator with the title beside it.
     internal var _isSwitchLike: Bool { _buttonType == .switch || _buttonType == .radio }
 

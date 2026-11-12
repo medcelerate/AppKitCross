@@ -8,6 +8,14 @@ Inputs (see tools/apigen/extract.sh and probe.sh):
   api-inventory/Foundation-windows-types.json (top-level types corelibs Foundation provides)
   tools/apigen/config.json                   (handwritten / pending / skip lists)
 
+config.json keys: `handwritten` (types owned by Sources/AppKit/Core), `pending`, `skipTypes`,
+`skipMembers` (dotted paths left out of the generated output, also nested types),
+`handwrittenGlobals` / `handwrittenMembers` (free functions and variables, and members of
+AppKit's extensions on Foundation types, that Core implements: left out of _Globals.swift and
+Foundation+AppKit.swift and reported under "Globals and Foundation extensions").
+The probe records the values of enum cases, typed constants and plain Int/String globals, so
+a constant with a probed value is emitted with that value instead of unimplemented().
+
 Outputs:
   Sources/AppKit/Generated/*.swift   compiled stubs
   Stubs/Pending/AppKit/*.swift       stubs for types listed as pending in config.json
@@ -179,6 +187,13 @@ class Generator:
         self.pending = set(config.get("pending", []))
         self.skip_types = set(config.get("skipTypes", []))
         self.skip_members = set(config.get("skipMembers", []))
+        # Hand-written globals (Core/AppKitGlobals.swift) and members of AppKit's extensions
+        # on Foundation types (Core/Foundation+AppKitExtensions.swift): skipped like
+        # skipMembers, counted separately in the coverage report.
+        self.handwritten_globals = set(config.get("handwrittenGlobals", []))
+        self.handwritten_members = set(config.get("handwrittenMembers", []))
+        self.skip_members |= self.handwritten_globals | self.handwritten_members
+        self.global_stats = collections.Counter()
         self.cg_types = set(config.get("coreGraphicsTypes", []))
         self.qc_types = set(config.get("quartzCoreTypes", []))
         self.ct_types = set(config.get("coreTextTypes", []))
@@ -1264,12 +1279,20 @@ class Generator:
                     entries.append(path)
                 elif is_value_type:
                     entries.append(path)
+            elif k == "swift.var" and len(path) == 1:
+                # Global constants of a plain scalar or string type (NSUpArrowFunctionKey,
+                # NSOKButton, NSFontPanelAllModesMask, ...): imported C macros and enum constants.
+                m = re.search(r":\s*(Int|Int32|UInt32|UInt|String|Double)(?:\s*\{ get(?: set)? \})?$", frag_text(s["declarationFragments"]).strip())
+                if m:
+                    entries.append(path)
         for pid, s in self.inv.foreign_ext.items():
             k = s["kind"]["identifier"]
             if k == "swift.type.property" and not self.unavailable(s):
                 frags = s["declarationFragments"]
                 tids = [f for f in frags if f["kind"] == "typeIdentifier"]
-                if tids and (tids[-1].get("preciseIdentifier", "").startswith("c:@T@")):
+                # Typedef'd string constants, NS_OPTIONS/NS_ENUM members and Swift RawRepresentable
+                # structs (CocoaError.Code, NSString.DrawingOptions); anything else probes as "?".
+                if tids and tids[-1].get("preciseIdentifier", "").startswith(("c:@T@", "c:@E@", "s:")):
                     entries.append(s["pathComponents"])
         # keep the symbol so availability can be emitted
         by_path = {}
@@ -1286,6 +1309,12 @@ class Generator:
                  "import AppKit", "import Foundation", "",
                  "func rv<T: RawRepresentable>(_ v: T) -> String { \"\\(type(of: v.rawValue))|\\(v.rawValue)\" }",
                  "func rv(_ v: Any) -> String { \"?\" }",
+                 "func rv(_ v: Int) -> String { \"Int|\\(v)\" }",
+                 "func rv(_ v: Int32) -> String { \"Int32|\\(v)\" }",
+                 "func rv(_ v: UInt32) -> String { \"UInt32|\\(v)\" }",
+                 "func rv(_ v: UInt) -> String { \"UInt|\\(v)\" }",
+                 "func rv(_ v: Double) -> String { \"Double|\\(v)\" }",
+                 "func rv(_ v: String) -> String { \"String|\\(v)\" }",
                  "nonisolated(unsafe) var results: [String: String] = [:]",
                  ""]
         chunk = 150
@@ -1425,8 +1454,10 @@ class Generator:
                 lines += self.doc_lines(s, "") if status == "emitted" else []
                 lines += out
                 lines.append("")
+        text = "\n".join(lines) + "\n"
+        self.global_stats["globals-stubbed"] = text.count("unimplemented()") - 1  # header comment
         with open(os.path.join(gen_dir, "_Globals.swift"), "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(text)
 
     def write_foreign_extensions(self, gen_dir):
         """AppKit's extensions on Foundation/other-module types (AppKit@Foundation graph)."""
@@ -1486,8 +1517,10 @@ class Generator:
             lines.append("// Extensions not emitted (owner type unavailable on Windows):")
             for mod, owner, n in skipped:
                 lines.append("//   %s.%s (%d members)" % (mod, owner, n))
+        text = "\n".join(lines) + "\n"
+        self.global_stats["foundation-stubbed"] = text.count("unimplemented()") - 1  # header comment
         with open(os.path.join(gen_dir, "Foundation+AppKit.swift"), "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(text)
 
     def write_report(self, report, totals):
         p = os.path.join(ROOT, "docs", "API-COVERAGE.md")
@@ -1508,6 +1541,12 @@ class Generator:
                   "implementation (the `unimplemented-calls` column counts members still stubbed);",
                   "**generated** compiles as a stub; **pending** is generated but excluded from the",
                   "build (see reason); **blocked** members reference a type not yet available on Windows.",
+                  "", "## Globals and Foundation extensions", "",
+                  "| Group | Hand-written in Core | Still stubbed (unimplemented) |", "| --- | ---: | ---: |",
+                  "| Free functions and variables (`_Globals.swift`) | %d | %d |" % (
+                      len(self.handwritten_globals), self.global_stats["globals-stubbed"]),
+                  "| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | %d | %d |" % (
+                      len(self.handwritten_members), self.global_stats["foundation-stubbed"]),
                   "", "## Types", "",
                   "| Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) |",
                   "| --- | --- | --- | ---: | ---: | ---: | ---: |"]

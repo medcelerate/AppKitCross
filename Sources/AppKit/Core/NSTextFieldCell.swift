@@ -25,6 +25,14 @@ import CoreText
     private var _placeholderAttributedString: NSAttributedString? = nil
     private var _allowedInputSourceLocales: [String]? = nil
 
+    @MainActor internal override func _copyCellState(from other: NSCell) {
+        super._copyCellState(from: other)
+        guard let o = other as? NSTextFieldCell else { return }
+        _bezelStyle = o._bezelStyle; _backgroundColor = o._backgroundColor; _drawsBackground = o._drawsBackground
+        _textColorValue = o._textColorValue; _placeholderString = o._placeholderString
+        _placeholderAttributedString = o._placeholderAttributedString; _allowedInputSourceLocales = o._allowedInputSourceLocales
+    }
+
     internal override var _textColor: NSColor {
         // Emphasized (a selected row in a key window): light text over the selection colour.
         if _backgroundStyle == .emphasized, _isEnabled, _textColorValue == nil || _textColorValue == .labelColor || _textColorValue == .textColor || _textColorValue == .controlTextColor { return .alternateSelectedControlTextColor }
