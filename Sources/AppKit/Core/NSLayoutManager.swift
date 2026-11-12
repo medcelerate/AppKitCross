@@ -480,7 +480,10 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
             default: flush = style?.baseWritingDirection == .rightToLeft ? 1 : 0   // natural follows the paragraph's direction
             }
             let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
-            let flushOffset = max(0, width - (lineWidth - trailing)) * flush
+            // An unbounded column (a field editor's, a horizontally resizable view's) flushes
+            // against the view's visible width instead, when the container names one.
+            let flushWidth = columnWidth >= CGFloat.greatestFiniteMagnitude / 2 ? (container._alignmentWidth.map { max(1, $0 - head - 2 * padding) } ?? width) : width
+            let flushOffset = max(0, flushWidth - (lineWidth - trailing)) * flush
             let textX = column.minX + padding + head + flushOffset
             let nl = _newlineLength(at: index + count - 1, in: units) > 0 ? (count >= 2 && units[index + count - 2] == 0x0D && units[index + count - 1] == 0x0A ? 2 : 1) : 0
             let fragment = _NSLineFragment(charRange: NSRange(location: index, length: count), newlineLength: nl,
