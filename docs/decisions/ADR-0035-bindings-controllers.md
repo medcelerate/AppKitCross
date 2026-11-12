@@ -96,6 +96,28 @@ prints Apple's format (`name BEGINSWITH[c] "A" AND age > 30`, nested compounds i
 a compound-predicate subclass that prints its format. `formattingDictionary` and
 `formattingStringsFilename` are stored but not applied.
 
+## Windows findings (PC verification)
+
+- **Blank rows after sorting a bound table** were light (emphasized) text on a white row. A
+  selected row in a key table gives its cells the emphasized style; rows recycle their cell
+  views, and a cell recycled out of a selected row kept that style in a row whose selection had
+  not changed, so the row never re-applied it. The layer raster persisted on the natively hosted
+  (DirectComposition) window. `NSTableView` now re-applies each row's interior style to its cells
+  whenever it sets the row's state, and `NSTableCellView.backgroundStyle` no longer invalidates
+  when nothing changes.
+- Incidental fixes found on the way: the table makes its row views during layout, so a hosted
+  window's layer scene includes them (made only at draw time, they missed that frame's commit),
+  and a reload requested while rows are being made waits for it; layer scene node ids are
+  per-instance serials, not addresses (a freed layer's address reused by a new one inherited its
+  cached raster); the table's built-in text cells are reused per column, so recycled cells keep
+  their width; the DirectComposition shim tracks each visual's parent (detaching a stale one
+  before `AddVisual`) and a failed surface draw is retried instead of leaving the node empty.
+- Controls without a cell dropped their target/action (`NSRuleEditor` now has an action cell),
+  and bound integers are converted without trapping (`NSNotFound` from `selectionIndex`).
+- `APPKITWIN_TRACE` logs each visible table row (frame, layer node and raster version, opacity,
+  cell text); `APPKITWIN_TRACE_SCENE` adds surface draws (pointer, atlas offset, reference
+  count), node opacity, failed `AddVisual`/`SetContent` counts and draw failures.
+
 ## Consequences
 
 - `NSArrayController`, `NSTreeController` and `NSBindingSelectionMarker` have no `unimplemented()`
