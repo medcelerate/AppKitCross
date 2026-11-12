@@ -839,7 +839,9 @@ final class Win32Window: PlatformWindow {
         }
         cd2d_comp_tree_end_update(tree)
         if NSView._traceInvalidation, Win32Window.traceScene {
-            NSView._trace("win32 scene committed: \(scene.nodes.count) nodes, \(cd2d_comp_tree_visual_count(tree)) visuals")
+            var addFailures: UInt32 = 0, contentFailures: UInt32 = 0
+            cd2d_comp_tree_failures(tree, &addFailures, &contentFailures)
+            NSView._trace("win32 scene committed: \(scene.nodes.count) nodes, \(cd2d_comp_tree_visual_count(tree)) visuals, failed AddVisual \(addFailures), failed SetContent \(contentFailures)")
         }
         surfaceRasters = surfaceRasters.filter { live.contains($0.key) }
         nativeContents = nativeContents.filter { live.contains($0.key) }

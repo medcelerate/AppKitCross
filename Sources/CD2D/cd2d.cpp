@@ -1480,6 +1480,7 @@ struct CD2DCompVisual {
     uint32_t surfaceWidth = 0, surfaceHeight = 0;
     IUnknown *swapChain = nullptr;                 // foreign content (cd2d_comp_tree_set_swapchain), retained
     bool seen = false;                             // ensured in the current update
+    int64_t attachedTo = -1;                       // parent id it is added under (0: root, -1: none)
     std::vector<int64_t> children, newChildren;    // ids, back to front
 };
 
@@ -1497,6 +1498,7 @@ struct CD2DCompTree {
     IDXGISurface *surfaceDxgi = nullptr;
     CD2DTarget surfaceTarget;
     int64_t drawing = 0;                           // id of the surface between begin/end draw
+    uint32_t addFailures = 0, contentFailures = 0; // failed AddVisual / SetContent calls (trace aid)
 };
 
 static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
@@ -1505,7 +1507,16 @@ static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
     return it == tree->visuals.end() ? nullptr : it->second;
 }
 
-static void compDestroyVisual(CD2DCompVisual *v) {
+/// The children `ids` are no longer under any visual (their parent was emptied or destroyed).
+static void compDetachedChildren(CD2DCompTree *tree, const std::vector<int64_t> &ids) {
+    for (int64_t id : ids) {
+        auto it = tree->visuals.find(id);
+        if (it != tree->visuals.end()) it->second->attachedTo = -1;
+    }
+}
+
+static void compDestroyVisual(CD2DCompTree *tree, CD2DCompVisual *v) {
+    compDetachedChildren(tree, v->children);
     if (v->visual) {
         v->visual->RemoveAllVisuals();
         v->visual->SetContent(nullptr);
@@ -1522,14 +1533,27 @@ static void compDestroyVisual(CD2DCompVisual *v) {
     delete v;
 }
 
-/// Re-adds `children` under `parent` in order (each above the previous one).
-static void compPlaceChildren(CD2DCompTree *tree, IDCompositionVisual *parent, const std::vector<int64_t> &children) {
+/// Re-adds `children` under `parent` (id `parentId`, 0 for the root) in order, each above the
+/// previous one. A visual still added under another parent is taken off it first: AddVisual
+/// fails for a visual that has a parent, and the child would silently stay out of the tree.
+static void compPlaceChildren(CD2DCompTree *tree, int64_t parentId, IDCompositionVisual *parent, const std::vector<int64_t> &children) {
     IDCompositionVisual *previous = nullptr;
     for (int64_t id : children) {
         CD2DCompVisual *c = compVisual(tree, id);
         if (!c || !c->visual) continue;
-        parent->AddVisual(c->visual, TRUE, previous);
-        previous = c->visual;
+        if (c->attachedTo != -1 && c->attachedTo != parentId) {
+            IDCompositionVisual *old = nullptr;
+            if (c->attachedTo == 0) old = tree->root;
+            else if (CD2DCompVisual *o = compVisual(tree, c->attachedTo)) old = o->visual;
+            if (old) old->RemoveVisual(c->visual);
+            c->attachedTo = -1;
+        }
+        if (SUCCEEDED(parent->AddVisual(c->visual, TRUE, previous))) {
+            c->attachedTo = parentId;
+            previous = c->visual;
+        } else {
+            tree->addFailures++;
+        }
     }
 }
 
@@ -1559,8 +1583,11 @@ CD2DCompTree *cd2d_comp_tree_create(CD2DTarget *target) {
 void cd2d_comp_tree_release(CD2DCompTree *tree) {
     if (!tree) return;
     if (tree->drawing) cd2d_comp_tree_surface_end_draw(tree, tree->drawing);
-    for (auto &entry : tree->visuals) compDestroyVisual(entry.second);
+    // Out of the map first: destroying one visual updates its children's records.
+    std::vector<CD2DCompVisual *> all;
+    for (auto &entry : tree->visuals) all.push_back(entry.second);
     tree->visuals.clear();
+    for (CD2DCompVisual *v : all) compDestroyVisual(tree, v);
     if (tree->root) {
         tree->root->RemoveAllVisuals();
         if (tree->target && tree->target->dcompVisual) tree->target->dcompVisual->RemoveVisual(tree->root);
@@ -1708,7 +1735,7 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
     if (!v->surface) {
         if (FAILED(tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface))) return nullptr;
         v->surfaceWidth = w; v->surfaceHeight = h;
-        v->visual->SetContent(v->surface);
+        if (FAILED(v->visual->SetContent(v->surface))) tree->contentFailures++;
     }
     POINT offset = {};
     if (FAILED(v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset))) {
@@ -1795,7 +1822,7 @@ void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id) {
     auto rit = std::find(tree->rootChildren.begin(), tree->rootChildren.end(), id);
     if (rit != tree->rootChildren.end()) { tree->rootChildren.erase(rit); tree->root->RemoveVisual(v->visual); }
     tree->visuals.erase(id);
-    compDestroyVisual(v);
+    compDestroyVisual(tree, v);
     if (!tree->updating) tree->device->Commit();
 }
 
@@ -1808,20 +1835,31 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
     for (int64_t id : dead) {
         CD2DCompVisual *v = tree->visuals[id];
         tree->visuals.erase(id);
-        compDestroyVisual(v);       // RemoveAllVisuals drops its (possibly reparented) children
+        compDestroyVisual(tree, v); // RemoveAllVisuals drops its (possibly reparented) children
     }
     // 2. Parents whose child list changed detach everything first (a visual cannot be added
     //    under a new parent while the old one still holds it), then re-add in order.
     bool rootDirty = tree->rootChildren != tree->newRootChildren;
-    if (rootDirty) tree->root->RemoveAllVisuals();
+    if (rootDirty) { tree->root->RemoveAllVisuals(); compDetachedChildren(tree, tree->rootChildren); }
     for (auto &entry : tree->visuals) {
         CD2DCompVisual *v = entry.second;
-        if (v->children != v->newChildren) v->visual->RemoveAllVisuals();
+        if (v->children != v->newChildren) { v->visual->RemoveAllVisuals(); compDetachedChildren(tree, v->children); }
     }
-    if (rootDirty) { compPlaceChildren(tree, tree->root, tree->newRootChildren); tree->rootChildren = tree->newRootChildren; }
+    if (rootDirty) { compPlaceChildren(tree, 0, tree->root, tree->newRootChildren); tree->rootChildren = tree->newRootChildren; }
     for (auto &entry : tree->visuals) {
         CD2DCompVisual *v = entry.second;
-        if (v->children != v->newChildren) { compPlaceChildren(tree, v->visual, v->newChildren); v->children = v->newChildren; }
+        if (v->children != v->newChildren) { compPlaceChildren(tree, entry.first, v->visual, v->newChildren); v->children = v->newChildren; }
+    }
+    // A child listed under an unchanged parent but not attached to it (it was taken off a
+    // stale parent above, or an earlier AddVisual failed) is re-added in place.
+    for (auto &entry : tree->visuals) {
+        CD2DCompVisual *v = entry.second;
+        bool missing = false;
+        for (int64_t id : v->children) {
+            CD2DCompVisual *c = compVisual(tree, id);
+            if (c && c->attachedTo != entry.first) { missing = true; break; }
+        }
+        if (missing) { v->visual->RemoveAllVisuals(); compDetachedChildren(tree, v->children); compPlaceChildren(tree, entry.first, v->visual, v->children); }
     }
     tree->updating = false;
     tree->device->Commit();
@@ -1829,6 +1867,11 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
 
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
     return tree ? (uint32_t)tree->visuals.size() : 0;
+}
+
+void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t *contentFailures) {
+    if (addFailures) *addFailures = tree ? tree->addFailures : 0;
+    if (contentFailures) *contentFailures = tree ? tree->contentFailures : 0;
 }
 
 }  // extern "C"

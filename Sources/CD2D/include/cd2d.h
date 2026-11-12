@@ -255,6 +255,8 @@ void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id);
 void cd2d_comp_tree_end_update(CD2DCompTree *tree);
 /// Number of live visuals (debug aid).
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree);
+/// Failed AddVisual and SetContent calls since the tree was created (debug aid).
+void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t *contentFailures);
 
 // File dialogs (IFileDialog)
 typedef struct CD2DFileDialogOptions {
