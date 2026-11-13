@@ -576,11 +576,12 @@ for it off macOS, under Apple's module names: `UserNotifications` (prints the re
   and a pop-up opens with its selected item highlighted; fourth: the keyboard steps from
   the pop-up's selected item, and the sheet repaints whole after its slide (a stale top
   band). Left: the sheet slide resizing the HWND every step on Win32 (2–3 s; clip
-  instead), the first Up after a click in the date field, and a busy core while the
-  sheet is open and idle on Win32: the trace showed the sheet's body re-evaluated a few
-  times a second with a 400-item pop-up rebuilt per pass (the rebuild is gone: the
-  pop-up primitive fills its control only on attach); the trigger is still to be named
-  (greps in the compatibility note).
+  instead) and the first Up after a click in the date field. The busy core while the
+  sheet was open is fixed: the textual date picker's draw invalidated its own control on
+  every paint through its stepper cell's `isEnabled` setter, and each paint on Win32
+  re-laid the content out and re-evaluated the sheet's body with a fresh primitive tree
+  (the 400-item pop-up rebuilt per pass; the pop-up primitive now fills its control only
+  on attach). An idle-sheet test counts measurements, layouts and invalidations per frame.
 
 ## M11: Accessibility
 

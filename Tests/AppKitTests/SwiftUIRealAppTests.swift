@@ -111,6 +111,61 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A presented sheet with a date picker, a pop-up picker and a toolbar left idle performs
+    /// no root measurement, no layout pass and no invalidation per frame once it has settled
+    /// (on Windows a loop of toolbar re-sizing, content layout and repaint kept a core busy).
+    func testIdleSheetPerformsNoWork() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            final class Store: ObservableObject { @Published var day = Date(); @Published var zone = "Zone 3" }
+            struct Settings: View {
+                @EnvironmentObject var store: Store
+                @Environment(\.dismiss) var dismiss
+                var body: some View {
+                    Form {
+                        DatePicker("Workday starts", selection: $store.day, displayedComponents: .hourAndMinute)
+                        Picker("Time zone", selection: $store.zone) { ForEach((0..<400).map { "Zone \($0)" }, id: \.self) { Text($0).tag($0) } }
+                        TextField("Filter", text: .constant(""))
+                        LabeledContent("Next", value: "Tomorrow")
+                    }
+                    .formStyle(.grouped).padding().frame(width: 420, height: 360)
+                    .toolbar { Button("Done") { dismiss() } }
+                }
+            }
+            struct Main: View {
+                @State var showSettings = false
+                var body: some View {
+                    VStack { Button("Settings") { showSettings = true }; Text("main") }
+                        .frame(minWidth: 400, minHeight: 300)
+                        .sheet(isPresented: $showSettings) { Settings() }
+                }
+            }
+            let savedDuration = NSWindow._sheetAnimationDuration
+            NSWindow._sheetAnimationDuration = 0
+            defer { NSWindow._sheetAnimationDuration = savedDuration }
+            let store = Store()
+            let (w, h) = host(Main().environmentObject(store))
+            buttons(h).first { $0.title == "Settings" }?.performClick(nil)
+            let backend = Platform.backend as! HostBackend
+            backend.drain()
+            h.layoutSubtreeIfNeeded()
+            guard let sheet = w.sheets.first else { return XCTFail("no sheet") }
+            // One "frame": paint what needs it, run posted blocks, tick the animation clock.
+            @MainActor func frame() {
+                sheet.displayIfNeeded(); w.displayIfNeeded()
+                backend.drain()
+                CARuntime.tick()
+            }
+            for _ in 0..<4 { frame() }        // settle
+            let layouts = _ViewRoot._layoutPassCount, fits = _ViewRoot._sizeThatFitsCount, invalidations = NSView._invalidationCount
+            for _ in 0..<5 { frame() }
+            XCTAssertEqual(_ViewRoot._layoutPassCount - layouts, 0, "an idle sheet lays nothing out")
+            XCTAssertEqual(_ViewRoot._sizeThatFitsCount - fits, 0, "an idle sheet measures nothing")
+            XCTAssertEqual(NSView._invalidationCount - invalidations, 0, "an idle sheet invalidates nothing")
+            w.close()
+        }
+    }
+
     /// Daily To Do's main window and its settings sheet, built from the same views the app uses.
     func testDailyTodoScreensHostAndTheSettingsSheetOpens() throws {
         try requireHostBackend()

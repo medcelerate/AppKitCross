@@ -397,7 +397,10 @@ import CoreText
             _drawText(f.text, attributes: attrs, in: f.rect, alignment: .center, flipped: flipped)
         }
         if _style == .textFieldAndStepper {
-            _stepper.isEnabled = _isEnabled
+            // Only on a change: the cell's setter marks the control view dirty, and doing
+            // that from every draw scheduled the next paint (a picker with a stepper kept
+            // its window repainting, and the main thread busy, for as long as it showed).
+            if _stepper.isEnabled != _isEnabled { _stepper.isEnabled = _isEnabled }
             _stepper.draw(withFrame: _stepperRect(forBounds: cellFrame), in: _controlView!)
         }
     }

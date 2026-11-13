@@ -716,7 +716,13 @@ public final class _ViewRoot: NSHostingRoot {
         contentChanged = false
     }
 
+    /// Root measurements and layout passes since launch (tests check that an idle tree
+    /// performs none).
+    nonisolated(unsafe) public static var _sizeThatFitsCount = 0
+    nonisolated(unsafe) public static var _layoutPassCount = 0
+
     public func sizeThatFits(_ proposal: NSHostingSizeProposal) -> NSSize {
+        _ViewRoot._sizeThatFitsCount &+= 1
         updateIfNeeded()
         measureGeneration &+= 1
         guard let node = rootNode else { return .zero }
@@ -726,6 +732,7 @@ public final class _ViewRoot: NSHostingRoot {
     }
 
     public func layout(in bounds: NSRect) {
+        _ViewRoot._layoutPassCount &+= 1
         updateIfNeeded()
         measureGeneration &+= 1
         guard let node = rootNode, let host else { return }
