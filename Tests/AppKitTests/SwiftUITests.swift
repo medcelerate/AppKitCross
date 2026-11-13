@@ -184,7 +184,8 @@ final class SwiftUITests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDecorationsDrawAndClip() {
+    func testDecorationsDrawAndClip() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Card: View {
                 var body: some View {
@@ -247,3 +248,4 @@ extension NSWindow {
     /// The host window manager's title bar height, for pixel tests that read the window image.
     @MainActor static var _testTitleBarHeight: CGFloat { HostWindow.titleBarHeight }
 }
+

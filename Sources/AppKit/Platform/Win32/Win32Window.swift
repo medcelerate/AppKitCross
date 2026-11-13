@@ -443,7 +443,15 @@ final class Win32Window: PlatformWindow {
         return NSSize(width: CGFloat(r.right - r.left) / scale, height: CGFloat(r.bottom - r.top) / scale)
     }
 
-    func show() { if let hwnd { ShowWindow(hwnd, _styleMask.contains(.nonactivatingPanel) ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL); UpdateWindow(hwnd) } }
+    /// `orderFront(_:)`: shown and raised, never activated (`makeKey()` does that;
+    /// `Win32WindowPolicy.showCommand`).
+    func show() {
+        guard let hwnd else { return }
+        ShowWindow(hwnd, Win32WindowPolicy.showCommand)
+        // SW_SHOWNA leaves an already visible window where it is in the z-order.
+        SetWindowPos(hwnd, nil /* HWND_TOP */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+        UpdateWindow(hwnd)
+    }
     func hide() { if let hwnd { ShowWindow(hwnd, SW_HIDE) } }
     func makeKey() { if let hwnd { SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd) } }
     func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND(bitPattern: 1) /* HWND_BOTTOM */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }

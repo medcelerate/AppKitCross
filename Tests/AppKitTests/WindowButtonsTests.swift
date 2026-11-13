@@ -10,7 +10,7 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     }
 
     func testButtonsAppearOnlyWhenContentCoversTheTitleBar() {
-        MainActor.assumeIsolated {
+        withTrafficLights {
             let plain = window([.titled, .closable])
             XCTAssertFalse(plain._showsWindowButtons)
             XCTAssertNotNil(plain.standardWindowButton(.closeButton), "the buttons exist for every titled window, as on macOS")
@@ -42,7 +42,7 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     }
 
     func testStyleMaskDisablesButtonsAndTheRowFollowsResizes() {
-        MainActor.assumeIsolated {
+        withTrafficLights {
             let w = window([.titled, .closable, .fullSizeContentView])
             XCTAssertTrue(w.standardWindowButton(.closeButton)!.isEnabled)
             XCTAssertFalse(w.standardWindowButton(.miniaturizeButton)!.isEnabled)
@@ -59,7 +59,7 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     }
 
     func testClickingCloseClosesAndTheOthersReachTheWindow() {
-        MainActor.assumeIsolated {
+        withTrafficLights {
             final class Delegate: NSObject, NSWindowDelegate {
                 var minis = 0, deminis = 0, zoomAsked = 0
                 func windowDidMiniaturize(_ n: Notification) { minis += 1 }
@@ -79,8 +79,9 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             w.standardWindowButton(.zoomButton)!._fireAction()
             XCTAssertEqual(delegate.zoomAsked, 1)
             XCTAssertFalse(w.isMiniaturized, "the test backend has no native minimise")
-            // A press and release on the close circle closes the window.
-            let center = NSPoint(x: 18, y: 186)
+            // A press and release on the close circle closes the window (wherever it is now:
+            // a native zoom, as on Win32, made the window fill the screen).
+            let center = windowCenter(of: w.standardWindowButton(.closeButton)!)
             XCTAssertTrue(w.isVisible)
             w.sendEvent(NSEvent.mouseEvent(with: .leftMouseDown, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
             w.sendEvent(NSEvent.mouseEvent(with: .leftMouseUp, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!)
@@ -124,7 +125,7 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     /// in AppKit's flipped theme frame) keeps it there across the window's relayouts, and
     /// the moved button still takes clicks and reports itself to the backend.
     func testRepositionedButtonsSurviveRelayoutAndStillHitTest() {
-        MainActor.assumeIsolated {
+        withTrafficLights {
             let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
             defer { w.close() }
             let close = w.standardWindowButton(.closeButton)!
@@ -143,21 +144,23 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The traffic-light layout (macOS, Linux, the host backend), pinned so these run on
+    /// the Win32 backend too, whose own look is the caption buttons below.
+    private func withTrafficLights(_ body: @MainActor () -> Void) {
+        MainActor.assumeIsolated { withWindowButtonStyle(.trafficLights, body) }
+    }
+
     // MARK: Windows caption buttons (ADR-0022)
 
     private func withCaptionButtons(_ body: @MainActor () -> Void) {
-        MainActor.assumeIsolated {
-            let host = Platform.backend as! HostBackend
-            host.windowButtonStyle = .caption
-            defer { host.windowButtonStyle = .trafficLights }
-            body()
-        }
+        MainActor.assumeIsolated { withWindowButtonStyle(.caption, body) }
     }
 
     /// With the Windows style the row puts minimise, maximise and close at the top-right,
     /// 46 points each, and the hit test names them so Win32 answers HTMINBUTTON,
     /// HTMAXBUTTON and HTCLOSE; the gaps still drag and disabled buttons are content.
-    func testCaptionButtonsSitAtTheTopRight() {
+    func testCaptionButtonsSitAtTheTopRight() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         withCaptionButtons {
             let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
             defer { w.close() }
@@ -190,7 +193,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
 
     /// Hover lights one caption button at a time and a press-and-release on close closes
     /// the window, the same as a click delivered from the client area.
-    func testCaptionButtonsHoverAndClick() {
+    func testCaptionButtonsHoverAndClick() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         withCaptionButtons {
             let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
             w.makeKeyAndOrderFront(nil)
@@ -216,7 +220,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
 
     /// The caption buttons render: a fill under the hovered close button (red) and glyphs
     /// in the others, and nothing where the traffic lights used to be.
-    func testCaptionButtonsDraw() {
+    func testCaptionButtonsDraw() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         withCaptionButtons {
             let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
             defer { w.close() }
@@ -250,7 +255,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     /// background, non-opaque, clear background) under the caption style is shown, key,
     /// on screen and painted after `makeKeyAndOrderFront`, with the buttons placed in
     /// its band: the overlay must never keep a window from appearing.
-    func testFramelessWindowIsVisibleWithCaptionButtons() {
+    func testFramelessWindowIsVisibleWithCaptionButtons() throws {
+        try requireHostBackend()
         withCaptionButtons {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -287,7 +293,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     /// Under either button style, a plain titled window and a `fullSizeContentView` window
     /// come up with their frames and titles intact after `makeKeyAndOrderFront`: the
     /// buttons overlay never feeds the platform window an empty frame or steals the title.
-    func testWindowsKeepTheirFramesAndTitlesUnderBothStyles() {
+    func testWindowsKeepTheirFramesAndTitlesUnderBothStyles() throws {
+        try requireHostBackend()
         for style in [PlatformWindowButtonStyle.trafficLights, .caption] {
             MainActor.assumeIsolated {
                 let host = Platform.backend as! HostBackend
@@ -320,3 +327,5 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+

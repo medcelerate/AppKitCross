@@ -140,7 +140,8 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSheetAttachesToTheHostWindow() {
+    func testSheetAttachesToTheHostWindow() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Root: View {
                 @State var showing = false
@@ -218,3 +219,4 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
