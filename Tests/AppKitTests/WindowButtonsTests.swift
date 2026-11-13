@@ -9,9 +9,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: mask, backing: .buffered, defer: false)
     }
 
-    func testButtonsAppearOnlyWhenContentCoversTheTitleBar() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
-        MainActor.assumeIsolated {
+    func testButtonsAppearOnlyWhenContentCoversTheTitleBar() {
+        withTrafficLights {
             let plain = window([.titled, .closable])
             XCTAssertFalse(plain._showsWindowButtons)
             XCTAssertNotNil(plain.standardWindowButton(.closeButton), "the buttons exist for every titled window, as on macOS")
@@ -42,9 +41,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testStyleMaskDisablesButtonsAndTheRowFollowsResizes() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
-        MainActor.assumeIsolated {
+    func testStyleMaskDisablesButtonsAndTheRowFollowsResizes() {
+        withTrafficLights {
             let w = window([.titled, .closable, .fullSizeContentView])
             XCTAssertTrue(w.standardWindowButton(.closeButton)!.isEnabled)
             XCTAssertFalse(w.standardWindowButton(.miniaturizeButton)!.isEnabled)
@@ -60,9 +58,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testClickingCloseClosesAndTheOthersReachTheWindow() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
-        MainActor.assumeIsolated {
+    func testClickingCloseClosesAndTheOthersReachTheWindow() {
+        withTrafficLights {
             final class Delegate: NSObject, NSWindowDelegate {
                 var minis = 0, deminis = 0, zoomAsked = 0
                 func windowDidMiniaturize(_ n: Notification) { minis += 1 }
@@ -82,8 +79,9 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
             w.standardWindowButton(.zoomButton)!._fireAction()
             XCTAssertEqual(delegate.zoomAsked, 1)
             XCTAssertFalse(w.isMiniaturized, "the test backend has no native minimise")
-            // A press and release on the close circle closes the window.
-            let center = NSPoint(x: 18, y: 186)
+            // A press and release on the close circle closes the window (wherever it is now:
+            // a native zoom, as on Win32, made the window fill the screen).
+            let center = windowCenter(of: w.standardWindowButton(.closeButton)!)
             XCTAssertTrue(w.isVisible)
             w.sendEvent(NSEvent.mouseEvent(with: .leftMouseDown, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!)
             w.sendEvent(NSEvent.mouseEvent(with: .leftMouseUp, location: center, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!)
@@ -126,9 +124,8 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
     /// An application that moves a standard button (`setFrameOrigin`, y from the top as
     /// in AppKit's flipped theme frame) keeps it there across the window's relayouts, and
     /// the moved button still takes clicks and reports itself to the backend.
-    func testRepositionedButtonsSurviveRelayoutAndStillHitTest() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
-        MainActor.assumeIsolated {
+    func testRepositionedButtonsSurviveRelayoutAndStillHitTest() {
+        withTrafficLights {
             let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
             defer { w.close() }
             let close = w.standardWindowButton(.closeButton)!
@@ -147,15 +144,16 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The traffic-light layout (macOS, Linux, the host backend), pinned so these run on
+    /// the Win32 backend too, whose own look is the caption buttons below.
+    private func withTrafficLights(_ body: @MainActor () -> Void) {
+        MainActor.assumeIsolated { withWindowButtonStyle(.trafficLights, body) }
+    }
+
     // MARK: Windows caption buttons (ADR-0022)
 
     private func withCaptionButtons(_ body: @MainActor () -> Void) {
-        MainActor.assumeIsolated {
-            let host = Platform.backend as! HostBackend
-            host.windowButtonStyle = .caption
-            defer { host.windowButtonStyle = .trafficLights }
-            body()
-        }
+        MainActor.assumeIsolated { withWindowButtonStyle(.caption, body) }
     }
 
     /// With the Windows style the row puts minimise, maximise and close at the top-right,

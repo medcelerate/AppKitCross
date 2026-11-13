@@ -212,7 +212,6 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
     }
 
     func testChangeColorReachesTheTextViewThroughTheResponderChain() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
         MainActor.assumeIsolated {
             let w = makeWindow()
             defer { w.close() }
@@ -595,7 +594,6 @@ final class PanelsTests: XCTestCase, @unchecked Sendable {
     }
 
     func testChangeFontReachesTheTextViewThroughTheResponderChain() throws {
-        try requireHostBackend("known Win32 defect, see PR body")
         try MainActor.assumeIsolated {
             let w = makeWindow()
             defer { w.close() }

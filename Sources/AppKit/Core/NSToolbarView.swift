@@ -346,7 +346,7 @@ final class _NSToolbarView: NSView {
     /// the band with a unified toolbar (NSTitlebarAccessoryViewController).
     func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool, accessoryInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)) {
         var m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar,
-                                          buttonStyle: window?._windowButtonStyle ?? Platform.backend.windowButtonStyle)
+                                          buttonStyle: window?._windowButtonStyle ?? Platform.windowButtonStyle)
         m.leadingInset += accessoryInsets.leading
         m.trailingInset += accessoryInsets.trailing
         if m != metrics { metrics = m; needsLayout = true; needsDisplay = true }
