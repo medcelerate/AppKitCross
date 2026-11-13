@@ -1887,7 +1887,8 @@ final class PagesDemoViewController: NSViewController, NSPageControllerDelegate,
 
 /// An `NSCollectionView` of colour swatches in two sections under a flow layout with
 /// section headers: click, Cmd and Shift select; arrows move; the header's button
-/// collapses its section.
+/// collapses its section. Insert, Delete, Move and Reload change the items (the Windows
+/// checklist for natively hosted windows: every swatch stays drawn after each).
 final class CollectionDemoViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout, NSSelectorHandling {
     final class SwatchItem: NSCollectionViewItem {
         final class SwatchView: NSView {
@@ -1948,12 +1949,13 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         }
     }
     struct Swatch { let name: String; let color: NSColor }
-    let sections: [(String, [Swatch])] = [
+    var sections: [(String, [Swatch])] = [
         ("Warm", [Swatch(name: "Red", color: .systemRed), Swatch(name: "Orange", color: .systemOrange), Swatch(name: "Yellow", color: .systemYellow), Swatch(name: "Pink", color: .systemPink), Swatch(name: "Brown", color: .systemBrown)]),
         ("Cool", [Swatch(name: "Green", color: .systemGreen), Swatch(name: "Teal", color: .systemTeal), Swatch(name: "Blue", color: .systemBlue), Swatch(name: "Indigo", color: .systemIndigo), Swatch(name: "Purple", color: .systemPurple), Swatch(name: "Mint", color: .systemMint)]),
     ]
     let collection = NSCollectionView(frame: .zero)
     let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move.")
+    private var inserted = 0
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -1986,14 +1988,29 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         root.addSubview(scroll)
         status.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(status)
-        NSLayoutConstraint.activate([
+        var buttons: [NSButton] = []
+        for (title, action) in [("Insert", "insertSwatch:"), ("Delete", "deleteSwatch:"), ("Move", "moveSwatch:"), ("Reload", "reloadSwatches:")] {
+            let b = NSButton(title: title, target: self, action: Selector((action)))
+            b.bezelStyle = .rounded
+            b.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(b)
+            buttons.append(b)
+        }
+        var constraints = [
             scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            scroll.bottomAnchor.constraint(equalTo: buttons[0].topAnchor, constant: -8),
+            buttons[0].leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            buttons[0].bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
-        ])
+        ]
+        for (previous, b) in zip(buttons, buttons.dropFirst()) {
+            constraints.append(b.leadingAnchor.constraint(equalTo: previous.trailingAnchor, constant: 8))
+            constraints.append(b.centerYAnchor.constraint(equalTo: previous.centerYAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
         view = root
         // `APPKITWIN_COLLECTION_SELECT=1` selects two swatches on launch (for the screenshots).
         if ProcessInfo.processInfo.environment["APPKITWIN_COLLECTION_SELECT"] != nil {
@@ -2028,6 +2045,40 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         status.stringValue = names.isEmpty ? "Nothing selected." : "Selected: " + names.joined(separator: ", ")
     }
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "insertSwatch:":
+            // A new grey swatch at the front of Warm.
+            inserted += 1
+            let grey = CGFloat(inserted % 4) * 0.2 + 0.2
+            sections[0].1.insert(Swatch(name: "New \(inserted)", color: NSColor(white: grey, alpha: 1)), at: 0)
+            collection.insertItems(at: [IndexPath(item: 0, section: 0)])
+            status.stringValue = "Inserted New \(inserted) at the front of Warm."
+            return true
+        case "deleteSwatch:":
+            // The selected swatches, or the first of Warm.
+            var doomed = collection.selectionIndexPaths
+            if doomed.isEmpty, !sections[0].1.isEmpty { doomed = [IndexPath(item: 0, section: 0)] }
+            guard !doomed.isEmpty else { return true }
+            for ip in doomed.sorted(by: >) { sections[ip.section].1.remove(at: ip.item) }
+            collection.deleteItems(at: doomed)
+            status.stringValue = "Deleted \(doomed.count) swatch\(doomed.count == 1 ? "" : "es")."
+            return true
+        case "moveSwatch:":
+            // The first of Warm to the end of Warm.
+            guard sections[0].1.count > 1 else { return true }
+            sections[0].1.append(sections[0].1.removeFirst())
+            collection.moveItem(at: IndexPath(item: 0, section: 0), to: IndexPath(item: sections[0].1.count - 1, section: 0))
+            status.stringValue = "Moved \(sections[0].1.last!.name) to the end of Warm."
+            return true
+        case "reloadSwatches:":
+            // Rotate Cool and reload everything.
+            if !sections[1].1.isEmpty { sections[1].1.append(sections[1].1.removeFirst()) }
+            collection.reloadData()
+            status.stringValue = "Reloaded (Cool rotated)."
+            return true
+        default:
+            break
+        }
         guard action.description == "toggleSection:", let button = sender as? NSButton else { return false }
         collection.toggleSectionCollapse(button.tag)
         button.title = (collection.collectionViewLayout as? NSCollectionViewFlowLayout)?.section(atIndexIsCollapsed: button.tag) == true ? "Show" : "Hide"
