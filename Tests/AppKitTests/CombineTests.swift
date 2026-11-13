@@ -219,17 +219,25 @@ final class CombineTests: XCTestCase, @unchecked Sendable {
     func testDelayAndReceiveOnDispatchQueue() {
         let expectation = expectation(description: "delivered off the test thread")
         var value = 0
+        var onMainThread = true
+        // A serial queue: on a concurrent one (DispatchQueue.global()) the completion that
+        // `Just` sends right behind the value can overtake it in `receive(on:)`, and the sink
+        // then drops the value. Apple's Combine loses it in about 1 round in 20 in a tight loop,
+        // which made this test time out now and then on CI.
+        let queue = DispatchQueue(label: "CombineTests.delay")
         let c = Just(42)
-            .delay(for: .milliseconds(10), scheduler: DispatchQueue.global())
-            .receive(on: DispatchQueue.global())
+            .delay(for: .milliseconds(10), scheduler: queue)
+            .receive(on: queue)
             .sink { v in
                 value = v
+                onMainThread = Thread.isMainThread
                 expectation.fulfill()
             }
         // 30 s: the Windows CI runner has taken over 5 s to run a global-queue block
         // while the test binary and two compiler jobs shared its four cores.
         wait(for: [expectation], timeout: 30)
         XCTAssertEqual(value, 42)
+        XCTAssertFalse(onMainThread)
         c.cancel()
     }
 
