@@ -16,6 +16,13 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield
 @MainActor open class NSTextField: NSControl, NSTextDelegate, NSUserInterfaceValidations, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.editable, .textColor] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyTextFieldBinding(b) || super._applyViewBinding(b) }
+    internal override func _viewBindingDidAttach(_ b: _NSBinding) { _textFieldBindingDidAttach(b); super._viewBindingDidAttach(b) }
+    internal override func _bindingsWillFireAction() { _pushTextFieldValueBinding() }
+
     // MARK: Storage
     private weak var _delegate: (any NSTextFieldDelegate)?
     private var _maximumNumberOfLines = 1
@@ -78,6 +85,7 @@ import CoreText
         let became = w.makeFirstResponder(editor)
         _handingOffToEditor = false
         guard became else { _detachEditor(); return false }
+        _bindingEditingDidBegin()
         if let e = event { editor.mouseDown(with: e) } else { editor.selectAll(nil) }
         needsDisplay = true
         return true
@@ -88,6 +96,7 @@ import CoreText
         editor.delegate = nil
         editor.removeFromSuperview()
         _editor = nil
+        _bindingEditingDidEnd()
         if let cell = _fieldCell { cell._hidesText = false }
         needsDisplay = true
     }
@@ -118,6 +127,7 @@ import CoreText
     private func _finishEditing(movement: NSTextMovement) {
         guard let editor = _editor else { return }
         _takeEditorValue(editor)
+        if movement != .cancel { _pushTextFieldValueBinding() }
         if movement == .return {
             _fireAction()
             _editedSinceBegin = false
@@ -370,6 +380,7 @@ import CoreText
         if let e = _editor, (notification.object as? NSTextView) === e {
             _editedSinceBegin = true
             _editorTextDidChange(e)
+            _bindingTextDidChange()
             _accessibilityValueChanged()
         }
         NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)

@@ -15,6 +15,14 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbutton
 @MainActor open class NSPopUpButton: NSButton {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal override class var _definedViewBindings: [NSBindingName] {
+        super._definedViewBindings + [.content, .contentObjects, .contentValues, .selectedIndex, .selectedObject, .selectedValue, .selectedTag]
+    }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyPopUpBinding(b) || super._applyViewBinding(b) }
+    internal override func _bindingsWillFireAction() { _pushPopUpBindings() }
+
     internal var _popUpCell: NSPopUpButtonCell { _cell as! NSPopUpButtonCell }
 
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSPopUpButtonCell(textCell: "", pullsDown: false) }

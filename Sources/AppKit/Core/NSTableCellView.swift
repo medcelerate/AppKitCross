@@ -24,6 +24,10 @@ import CoreGraphics
     @MainActor open var backgroundStyle: NSView.BackgroundStyle {
         get { _backgroundStyle }
         set {
+            // Unchanged (and the text field agrees): nothing to redraw. The table re-applies
+            // row styles often; a needless invalidation here would redraw every cell.
+            let fieldStale = _textField.map { $0.cell?.backgroundStyle != newValue } ?? false
+            guard newValue != _backgroundStyle || fieldStale else { return }
             _backgroundStyle = newValue
             // Emphasized rows (selected in a key window) show light text, as AppKit's cells do.
             if let f = _textField { f.cell?.backgroundStyle = newValue; f.needsDisplay = true }

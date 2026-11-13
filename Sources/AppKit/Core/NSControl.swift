@@ -16,6 +16,14 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol
 @MainActor open class NSControl: NSView {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.enabled, .value] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyControlBinding(b) || super._applyViewBinding(b) }
+    internal override func _viewBindingDidAttach(_ b: _NSBinding) { _controlBindingDidAttach(b); super._viewBindingDidAttach(b) }
+    /// The control is about to send its action: bound values go back to the model first.
+    internal func _bindingsWillFireAction() { _pushControlValueBinding() }
+
     // MARK: Storage
     internal var _cell: NSCell?
     private var _ignoresMultiClick = false
@@ -30,7 +38,10 @@ import CoreText
     @MainActor internal var _cellFrame: NSRect { bounds }
 
     /// Delivers the control's action; NSCell.performClick and subclasses use it.
-    @MainActor internal func _fireAction() { _ = sendAction(action, to: target) }
+    @MainActor internal func _fireAction() {
+        _bindingsWillFireAction()
+        _ = sendAction(action, to: target)
+    }
 
     open override var description: String { MainActor.assumeIsolated { "<\(type(of: self)) frame=\(frame) '\(stringValue)'>" } }
 

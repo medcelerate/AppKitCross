@@ -140,7 +140,9 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilitydisclosurelevel()
     open func accessibilityDisclosureLevel() -> Int { 0 }
 
-    private func _updateCellBackgroundStyles() {
+    /// Gives every cell the row's interior style (also for cells just placed in the row: a
+    /// recycled cell still carries the style of the row it came from).
+    internal func _updateCellBackgroundStyles() {
         let style = interiorBackgroundStyle
         for v in _cellViews { (v as? NSTableCellView)?.backgroundStyle = style }
     }

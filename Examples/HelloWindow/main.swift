@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             NSApp.terminate(nil)
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|browser|legacy|bindings picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "browser", "legacy", "bindings"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -640,7 +640,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(DiffableDemoViewController())
         tabs.addChild(PanelsDemoViewController())
         tabs.addChild(PopoverDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 840, height: 300)   // wide enough for the fifteen tabs
+        tabs.addChild(BrowserDemoViewController())
+        tabs.addChild(LegacyDemoViewController())
+        tabs.addChild(BindingsDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 960, height: 300)   // wide enough for the eighteen tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -1471,6 +1474,118 @@ final class PopoverDemoViewController: NSViewController, NSPopoverDelegate, NSSe
         case "switched:": status.stringValue = "Switch is \(toggle.state == .on ? "on" : "off")"; return true
         default: return false
         }
+    }
+}
+
+/// The legacy controls (ADR-0034): an NSGradient swatch (linear and radial), a text view
+/// with its horizontal NSRulerView (drag the tab stop and indent markers; click the rule
+/// to add a tab stop, drag one off to remove it), an NSDrawer on the window's right edge
+/// and an NSScrubber strip of twenty items with arrow buttons and a rounded selection.
+final class LegacyDemoViewController: NSViewController, NSScrubberDataSource, NSScrubberDelegate, NSSelectorHandling {
+    let scrubber = NSScrubber(frame: NSRect(x: 16, y: 56, width: 588, height: 32))
+    let status = NSTextField(labelWithString: "Drag the ruler markers, toggle the drawer, pick a scrubber item.")
+    lazy var drawer: NSDrawer = {
+        let d = NSDrawer(contentSize: NSSize(width: 160, height: 200), preferredEdge: .maxX)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 200))
+        let label = NSTextField(wrappingLabelWithString: "A drawer slides out of the window's edge and follows the window.")
+        label.frame = NSRect(x: 8, y: 120, width: 144, height: 64)
+        label.autoresizingMask = [.minYMargin]
+        content.addSubview(label)
+        let close = NSButton(title: "Close", target: self, action: Selector(("closeDrawer:")))
+        close.frame = NSRect(x: 8, y: 80, width: 80, height: 24)
+        close.autoresizingMask = [.minYMargin]
+        content.addSubview(close)
+        d.contentView = content
+        d.minContentSize = NSSize(width: 100, height: 50)
+        d.maxContentSize = NSSize(width: 320, height: 2000)
+        for (name, text) in [(NSDrawer.didOpenNotification, "Drawer open"), (NSDrawer.didCloseNotification, "Drawer closed")] {
+            NotificationCenter.default.addObserver(forName: name, object: d, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.status.stringValue = text }
+            }
+        }
+        return d
+    }()
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Legacy"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 260))
+        // Everything keeps its distance from the top as the tab grows; the text view and the
+        // scrubber widen with it.
+        let swatch = GradientSwatch(frame: NSRect(x: 16, y: 104, width: 160, height: 140))
+        swatch.autoresizingMask = [.minYMargin]
+        root.addSubview(swatch)
+
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 192, y: 104, width: 412, height: 140)
+        scroll.borderType = .lineBorder
+        scroll.autoresizingMask = [.minYMargin, .width]
+        let tv = scroll.documentView as! NSTextView
+        let ps = NSMutableParagraphStyle()
+        ps.tabStops = [NSTextTab(textAlignment: .left, location: 72), NSTextTab(textAlignment: .right, location: 216)]
+        ps.headIndent = 12
+        tv.textStorage?.setAttributedString(NSAttributedString(string: "Name\tKind\tSize\nRuler\tview\t12\nDrawer\twindow\t160\nScrubber\tstrip\t20\n",
+                                                                attributes: [.paragraphStyle: ps, .font: NSFont.systemFont(ofSize: 12)]))
+        root.addSubview(scroll)
+        scroll.hasHorizontalRuler = true
+        scroll.rulersVisible = true
+        scroll.horizontalRulerView?.measurementUnits = .inches
+        scroll.horizontalRulerView?.clientView = tv
+        tv.setSelectedRange(NSRange(location: 0, length: 0))
+        tv.updateRuler()
+
+        scrubber.register(NSScrubberTextItemView.self, forItemIdentifier: NSUserInterfaceItemIdentifier("item"))
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSize = NSSize(width: 72, height: 28)
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSpacing = 6
+        scrubber.selectionBackgroundStyle = .roundedBackground
+        scrubber.showsArrowButtons = true
+        scrubber.showsAdditionalContentIndicators = true
+        scrubber.autoresizingMask = [.minYMargin, .width]
+        scrubber.delegate = self
+        scrubber.dataSource = self
+        root.addSubview(scrubber)
+
+        let toggle = NSButton(title: "Toggle Drawer", target: self, action: Selector(("toggleDrawer:")))
+        toggle.frame = NSRect(x: 16, y: 16, width: 120, height: 24)
+        toggle.autoresizingMask = [.minYMargin]
+        root.addSubview(toggle)
+        status.frame = NSRect(x: 148, y: 18, width: 456, height: 20)
+        status.autoresizingMask = [.minYMargin, .width]
+        root.addSubview(status)
+        view = root
+    }
+
+    func numberOfItems(for scrubber: NSScrubber) -> Int { 20 }
+    func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
+        let item = scrubber.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("item"), owner: nil) as! NSScrubberTextItemView
+        item.title = "Item \(index + 1)"
+        return item
+    }
+    func scrubber(_ scrubber: NSScrubber, didSelectItemAt selectedIndex: Int) { status.stringValue = "Scrubber: Item \(selectedIndex + 1) selected" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "toggleDrawer:":
+            if drawer.parentWindow == nil { drawer.parentWindow = view.window }
+            drawer.toggle(sender)
+            return true
+        case "closeDrawer:": drawer.close(sender); return true
+        default: return false
+        }
+    }
+}
+
+/// A linear gradient across the top half and a radial one below.
+final class GradientSwatch: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let top = NSRect(x: 0, y: bounds.midY + 2, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(colorsAndLocations: (.systemRed, 0), (.systemYellow, 0.5), (.systemBlue, 1))?.draw(in: NSBezierPath(roundedRect: top, xRadius: 8, yRadius: 8), angle: 0)
+        let bottom = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(starting: .white, ending: .systemTeal)?.draw(in: bottom, relativeCenterPosition: NSPoint(x: -0.4, y: 0.4))
     }
 }
 
@@ -2841,4 +2956,220 @@ final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
         }
     }
     static func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allViews) }
+}
+
+// MARK: - Bindings (ADR-0032)
+
+#if canImport(ObjectiveC)
+/// A model object for the Bindings tab: on macOS Foundation's key-value coding and observing
+/// serve the bindings.
+final class DemoPerson: NSObject {
+    @objc dynamic var name: String
+    @objc dynamic var age: Int
+    @objc dynamic var isMember: Bool
+    init(_ name: String, _ age: Int, member: Bool = false) { self.name = name; self.age = age; self.isMember = member }
+    override var description: String { name }
+}
+#else
+/// Without the Objective-C runtime the model exposes its keys through NSKeyValueBindingCoding.
+final class DemoPerson: NSObject, NSKeyValueBindingCoding {
+    var name: String
+    var age: Int
+    var isMember: Bool
+    init(_ name: String, _ age: Int, member: Bool = false) { self.name = name; self.age = age; self.isMember = member }
+    override var description: String { name }
+    func bindingValue(forKey key: String) -> Any? {
+        switch key {
+        case "name": return name
+        case "age": return age
+        case "isMember": return isMember
+        default: return nil
+        }
+    }
+    func setBindingValue(_ value: Any?, forKey key: String) {
+        switch key {
+        case "name": name = (value as? String) ?? ""
+        case "age": age = (value as? Int) ?? Int((value as? String) ?? "") ?? age
+        case "isMember": isMember = (value as? Bool) ?? false
+        default: break
+        }
+    }
+}
+#endif
+
+/// New rows from the table's + button are people, not dictionaries (corelibs cannot construct
+/// an arbitrary objectClass, so the controller makes them itself, as AppKit apps often do).
+final class PeopleController: NSArrayController {
+    private var made = 0
+    override func newObject() -> Any {
+        made += 1
+        return DemoPerson("New person \(made)", 20 + made)
+    }
+}
+
+/// A rule-editor criterion: what it shows and the predicate parts it contributes.
+final class DemoCriterion: NSObject {
+    let title: String
+    let parts: [NSRuleEditor.PredicatePartKey: Any]
+    let children: [DemoCriterion]
+    let field: Bool
+    let numeric: Bool
+    init(_ title: String, _ parts: [NSRuleEditor.PredicatePartKey: Any] = [:], field: Bool = false, numeric: Bool = false, _ children: [DemoCriterion] = []) {
+        self.title = title; self.parts = parts; self.field = field; self.numeric = numeric; self.children = children
+    }
+    static func op(_ o: NSComparisonPredicate.Operator, _ options: NSComparisonPredicate.Options = []) -> [NSRuleEditor.PredicatePartKey: Any] {
+        [.operatorType: NSNumber(value: o.rawValue), .options: NSNumber(value: options.rawValue)]
+    }
+}
+
+/// The Layout Demo's Bindings tab: a table, detail fields, a pop-up and a checkbox bound to one
+/// NSArrayController, and a rule editor whose predicate filters the controller.
+final class BindingsDemoViewController: NSViewController, NSRuleEditorDelegate, NSSelectorHandling {
+    let people = PeopleController(content: [
+        DemoPerson("Ada", 36, member: true), DemoPerson("Grace", 45), DemoPerson("Alan", 41, member: true),
+        DemoPerson("Edsger", 72), DemoPerson("Barbara", 29), DemoPerson("Ken", 58, member: true),
+    ])
+    let table = NSTableView(frame: .zero)
+    let rules = NSRuleEditor(frame: NSRect(x: 0, y: 0, width: 340, height: 160))
+    let predicateLabel = NSTextField(labelWithString: "")
+    let simple: [DemoCriterion] = [
+        DemoCriterion("Name", [.leftExpression: "name"], [
+            DemoCriterion("begins with", DemoCriterion.op(.beginsWith, .caseInsensitive), [DemoCriterion("text", field: true)]),
+            DemoCriterion("contains", DemoCriterion.op(.contains, .caseInsensitive), [DemoCriterion("text", field: true)]),
+        ]),
+        DemoCriterion("Age", [.leftExpression: "age"], [
+            DemoCriterion("is over", DemoCriterion.op(.greaterThan), [DemoCriterion("number", field: true, numeric: true)]),
+            DemoCriterion("is under", DemoCriterion.op(.lessThan), [DemoCriterion("number", field: true, numeric: true)]),
+        ]),
+    ]
+    let compound: [DemoCriterion] = [
+        DemoCriterion("All", [.compoundType: NSNumber(value: NSCompoundPredicate.LogicalType.and.rawValue)], [DemoCriterion("of these are true")]),
+        DemoCriterion("Any", [.compoundType: NSNumber(value: NSCompoundPredicate.LogicalType.or.rawValue)], [DemoCriterion("of these are true")]),
+    ]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Bindings"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 840, height: 270))
+        people.sortDescriptors = []
+
+        // Table: two columns bound to arrangedObjects; the table binds itself to the controller.
+        let scroll = NSScrollView(frame: NSRect(x: 16, y: 44, width: 250, height: 210))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        name.title = "Name"
+        name.width = 140
+        name.sortDescriptorPrototype = NSSortDescriptor(keyPath: \DemoPerson.name, ascending: true)
+        let age = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("age"))
+        age.title = "Age"
+        age.width = 60
+        age.sortDescriptorPrototype = NSSortDescriptor(keyPath: \DemoPerson.age, ascending: true)
+        table.addTableColumn(name)
+        table.addTableColumn(age)
+        table.allowsMultipleSelection = true
+        name.bind(.value, to: people, withKeyPath: "arrangedObjects.name")
+        age.bind(.value, to: people, withKeyPath: "arrangedObjects.age")
+        scroll.documentView = table
+        root.addSubview(scroll)
+
+        let add = NSButton(title: "+", target: people, action: Selector(("add:")))
+        add.frame = NSRect(x: 16, y: 12, width: 32, height: 24)
+        let remove = NSButton(title: "\u{2212}", target: people, action: Selector(("remove:")))
+        remove.frame = NSRect(x: 52, y: 12, width: 32, height: 24)
+        remove.bind(.enabled, to: people, withKeyPath: "canRemove")
+        let count = NSTextField(labelWithString: "")
+        count.frame = NSRect(x: 92, y: 15, width: 174, height: 18)
+        count.bind(.value, to: people, withKeyPath: "arrangedObjects.@count")
+        for v in [add, remove, count] { root.addSubview(v) }
+
+        // Detail: fields bound to the selection (placeholders for none or several).
+        var y: CGFloat = 228
+        func row(_ label: String, _ control: NSView, width: CGFloat = 150) {
+            let l = NSTextField(labelWithString: label)
+            l.alignment = .right
+            l.frame = NSRect(x: 276, y: y + 3, width: 56, height: 18)
+            control.frame = NSRect(x: 338, y: y, width: width, height: 24)
+            root.addSubview(l)
+            root.addSubview(control)
+            y -= 34
+        }
+        let nameField = NSTextField(frame: .zero)
+        nameField.bind(.value, to: people, withKeyPath: "selection.name")
+        row("Name", nameField)
+        let ageField = NSTextField(frame: .zero)
+        ageField.bind(.value, to: people, withKeyPath: "selection.age")
+        row("Age", ageField, width: 60)
+        let member = NSButton(checkboxWithTitle: "Member", target: nil, action: nil)
+        member.bind(.value, to: people, withKeyPath: "selection.isMember")
+        row("", member)
+        let pick = NSPopUpButton(frame: .zero, pullsDown: false)
+        pick.bind(.content, to: people, withKeyPath: "arrangedObjects")
+        pick.bind(.contentValues, to: people, withKeyPath: "arrangedObjects.name")
+        pick.bind(.selectedIndex, to: people, withKeyPath: "selectionIndex")
+        row("Pick", pick)
+
+        // Rule editor: its predicate becomes the controller's filter.
+        let rulesTitle = NSTextField(labelWithString: "Filter")
+        rulesTitle.frame = NSRect(x: 500, y: 236, width: 200, height: 18)
+        rules.frame = NSRect(x: 500, y: 60, width: 324, height: 172)
+        rules.nestingMode = .compound
+        rules.delegate = self
+        rules.target = self
+        rules.action = Selector(("rulesChanged:"))
+        rules.addRow(nil)
+        predicateLabel.frame = NSRect(x: 500, y: 12, width: 324, height: 40)
+        predicateLabel.lineBreakMode = .byWordWrapping
+        predicateLabel.font = NSFont.systemFont(ofSize: 11)
+        for v in [rulesTitle, rules, predicateLabel] { root.addSubview(v) }
+        applyRules()
+        view = root
+    }
+
+    func applyRules() {
+        let p = rules.predicate
+        // An empty text field matches everything rather than nothing.
+        people.filterPredicate = p.flatMap { _ in rulesHaveText ? p : nil }
+        predicateLabel.stringValue = "predicate: " + (p?.predicateFormat ?? "none")
+    }
+
+    private var rulesHaveText: Bool {
+        (0..<rules.numberOfRows).contains { row in
+            rules.displayValues(forRow: row).contains { ($0 as? NSTextField).map { !$0.stringValue.isEmpty } ?? false }
+        }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action.description == "rulesChanged:" else { return false }
+        applyRules()
+        return true
+    }
+
+    // MARK: NSRuleEditorDelegate
+
+    private func children(_ criterion: Any?, _ type: NSRuleEditor.RowType) -> [DemoCriterion] {
+        if let c = criterion as? DemoCriterion { return c.children }
+        return type == .compound ? compound : simple
+    }
+    func ruleEditor(_ editor: NSRuleEditor, numberOfChildrenForCriterion criterion: Any?, with rowType: NSRuleEditor.RowType) -> Int { children(criterion, rowType).count }
+    func ruleEditor(_ editor: NSRuleEditor, child index: Int, forCriterion criterion: Any?, with rowType: NSRuleEditor.RowType) -> Any { children(criterion, rowType)[index] }
+    func ruleEditor(_ editor: NSRuleEditor, displayValueForCriterion criterion: Any, inRow row: Int) -> Any {
+        let c = criterion as! DemoCriterion
+        guard c.field else { return c.title }
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: c.numeric ? 50 : 90, height: 22))
+        f.placeholderString = c.numeric ? "0" : "text"
+        return f
+    }
+    func ruleEditor(_ editor: NSRuleEditor, predicatePartsForCriterion criterion: Any, withDisplayValue value: Any, inRow row: Int) -> [NSRuleEditor.PredicatePartKey: Any]? {
+        let c = criterion as! DemoCriterion
+        if c.field, let f = value as? NSTextField {
+            return [.rightExpression: c.numeric ? (Int(f.stringValue) ?? 0) as Any : f.stringValue as Any]
+        }
+        return c.parts
+    }
+    func ruleEditorRowsDidChange(_ notification: Notification) { if isViewLoaded { applyRules() } }
 }

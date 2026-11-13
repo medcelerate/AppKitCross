@@ -16,6 +16,12 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton
 @MainActor open class NSButton: NSControl, NSUserInterfaceValidations, NSAccessibilityButton, NSUserInterfaceCompression {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.title] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyButtonBinding(b) || super._applyViewBinding(b) }
+    internal override func _bindingsWillFireAction() { _pushButtonValueBinding() }
+
     // MARK: Storage
     private var _tracking = false
     private var _trackingInside = false
