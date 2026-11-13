@@ -540,6 +540,23 @@ private final class DrawerRecorder: NSObject, NSDrawerDelegate, @unchecked Senda
 }
 
 final class DrawerTests: XCTestCase, @unchecked Sendable {
+    private var savedDuration: TimeInterval = 0
+
+    // The slide is off on the host backend but on (0.2 s) on a real one; the state and
+    // frame checks want the drawer open at once, and the slide has its own test.
+    override func setUp() {
+        super.setUp()
+        MainActor.assumeIsolated {
+            savedDuration = NSDrawer._animationDuration
+            NSDrawer._animationDuration = 0
+        }
+    }
+
+    override func tearDown() {
+        MainActor.assumeIsolated { NSDrawer._animationDuration = savedDuration }
+        super.tearDown()
+    }
+
     func testOpenCloseStateAndFrames() {
         MainActor.assumeIsolated {
             let w = makeWindow()
@@ -559,6 +576,7 @@ final class DrawerTests: XCTestCase, @unchecked Sendable {
             let dw = d._drawerWindow!
             XCTAssertTrue(dw.isVisible)
             XCTAssertTrue(dw.parent === w, "a child window of the parent")
+            XCTAssertFalse(dw.hasShadow, "no shadow frame: Win32 would keep a thick-frame window at least its border wide")
             let parentContent = w.contentRect(forFrameRect: w.frame)
             XCTAssertEqual(dw.frame, NSRect(x: w.frame.maxX, y: parentContent.minY, width: 162, height: parentContent.height))
             XCTAssertEqual(d.contentSize, NSSize(width: 150, height: parentContent.height - 12), "the height follows the parent")
