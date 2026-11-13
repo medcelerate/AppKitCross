@@ -296,6 +296,31 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(store.reminder)
             XCTAssertTrue(texts(sheet.contentView!).contains("Disabled"), "the read-only row follows the model")
             (Platform.backend as! HostBackend).drain()
+            // Settings edits reach the model (the app saves on each change): the time
+            // picker's stepper and the time zone pop-up write their bindings.
+            if let picker = allViews(sheet.contentView!).compactMap({ $0 as? NSDatePicker }).first, let cell = picker._dateCell {
+                let dayBefore = store.day
+                XCTAssertTrue(sheet.makeFirstResponder(picker))
+                let stepper = cell._stepperRect(forBounds: picker._cellFrame)
+                let upHalf = NSPoint(x: stepper.midX, y: picker.isFlipped ? stepper.minY + stepper.height * 0.25 : stepper.maxY - stepper.height * 0.25)
+                let inWindow = picker.convert(upHalf, to: nil)
+                for (type, n) in [(NSEvent.EventType.leftMouseDown, 1), (.leftMouseUp, 2)] {
+                    sheet.sendEvent(NSEvent.mouseEvent(with: type, location: inWindow, modifierFlags: [], timestamp: 0, windowNumber: sheet.windowNumber, context: nil, eventNumber: n, clickCount: 1, pressure: 1)!)
+                }
+                (Platform.backend as! HostBackend).drain()
+                XCTAssertNotEqual(store.day, dayBefore, "a stepper click steps the workday start into the model")
+            } else { XCTFail("no time picker in the sheet") }
+            if let popup = allViews(sheet.contentView!).compactMap({ $0 as? NSPopUpButton }).first {
+                XCTAssertEqual(store.zone, "Europe/London")
+                popup.performClick(nil)                       // opens the menu over the button
+                XCTAssertTrue(_NSMenuTracker.isTracking, "the pop-up's menu is tracking")
+                for code in [UInt16(125), 36] {               // down, return: the next zone
+                    NSApplication.shared.sendEvent(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: sheet.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code)!)
+                }
+                (Platform.backend as! HostBackend).drain()
+                XCTAssertFalse(_NSMenuTracker.isTracking)
+                XCTAssertEqual(store.zone, "Asia/Kolkata", "choosing in the pop-up writes the binding")
+            } else { XCTFail("no time zone pop-up in the sheet") }
             let sheetButtons = buttons(sheet.contentView!) + (sheet.toolbar?.items.compactMap(\.view).flatMap(allViews).compactMap { $0 as? NSButton } ?? [])
             guard let done = sheetButtons.first(where: { $0.title == "Done" }) else { return XCTFail("no Done button in the sheet or its toolbar") }
             done.performClick(nil)

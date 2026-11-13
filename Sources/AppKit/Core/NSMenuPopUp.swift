@@ -126,7 +126,11 @@ final class _NSMenuView: NSView {
         NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
         border.lineWidth = 1
         border.stroke()
-        for (i, row) in layout.rows.enumerated() {
+        // Only the rows in view are drawn: a scrolled menu lists hundreds of rows, and
+        // laying every title out on each repaint kept the main thread busy for the whole
+        // frame (on Windows the menu froze and the process spun a core while it was open).
+        let visible = dirtyRect.intersection(visibleRect.isEmpty ? bounds : visibleRect)
+        for (i, row) in layout.rows.enumerated() where row.frame.intersects(visible) {
             let item = row.item
             let f = row.frame
             if item.isSeparatorItem {
@@ -472,6 +476,13 @@ final class _NSMenuTracker {
         levels.append(Level(menu: menu, window: window, parentRow: parentRow))
         window.orderFront(nil)
         window._accessibilityNotify(.menuOpened(window._accessibilityElementID))
+        // A pop-up opens with its selected item highlighted, as AppKit's does, so Down
+        // moves to the next item rather than back to the first (and Return re-chose the
+        // current one: the binding never changed).
+        if case .overAnchor(let itemIndex, _) = placement, let r = layout.rows.firstIndex(where: { $0.index == itemIndex }),
+           !layout.rows[r].item.isSeparatorItem, layout.rows[r].item.isEnabled {
+            setHighlight(r, in: levels.count - 1, openSubmenus: false)
+        }
         if parentRow != nil, levels.count >= 2 {
             // The parent item now shows its submenu open (UIA ExpandCollapse).
             let parent = levels[levels.count - 2]
@@ -562,6 +573,10 @@ final class _NSMenuTracker {
         let step = { [weak self] in
             guard let self, let i = self.scrollingLevel, i < self.levels.count else { return }
             let w = self.levels[i].window
+            // The pointer left the band (no mouse-moved event reports a pointer outside every
+            // window): stop rather than scroll to the end.
+            let pointer = Platform.backend.mouseLocation
+            guard w.frame.contains(pointer), w.scrollDirection(at: w.convertPoint(fromScreen: pointer)) == self.scrollingDirection else { self.stopArrowScrolling(); return }
             w.scroll(by: CGFloat(self.scrollingDirection) * _NSMenuLayout.itemHeight)
             if (self.scrollingDirection < 0 && w.scrollOffset <= 0) || (self.scrollingDirection > 0 && w.scrollOffset >= w.maxScrollOffset) { self.stopArrowScrolling() }
         }

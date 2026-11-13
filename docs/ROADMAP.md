@@ -571,9 +571,11 @@ for it off macOS, under Apple's module names: `UserNotifications` (prints the re
   re-check's round: menus taller than the screen scroll (arrow bands, wheel, keyboard), a
   sheet with a toolbar keeps its frame across parent layouts, scroll views lay rows out
   against the new size, a bare executable takes its window's navigation title as its app
-  name, and the NavigationStack draws no title row at the root. Left: the sheet slide
-  resizing the HWND every step on Win32 (2–3 s; clip instead), the first Up after a
-  click in the date field.
+  name, and the NavigationStack draws no title row at the root. Third round: the menu view
+  draws only its visible rows (a 400-row menu repainting whole starved the Win32 pump)
+  and a pop-up opens with its selected item highlighted. Left: the sheet slide resizing
+  the HWND every step on Win32 (2–3 s; clip instead), the first Up after a click in the
+  date field, an intermittent strip of the parent through the sheet's top band.
 
 ## M11: Accessibility
 
