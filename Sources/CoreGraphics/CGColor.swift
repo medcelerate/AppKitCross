@@ -33,7 +33,15 @@ extension CGColorSpace: Hashable {
 
 /// A color in sRGB, premultiplication deferred to the rasterizer. Other color spaces are
 /// converted on creation; Direct2D composites in sRGB.
-public final class CGColor: Equatable, @unchecked Sendable {
+/// An NSObject on Windows and Linux so swift-corelibs-foundation stores it in attributed
+/// strings as itself, not boxed (a box's first word is this colour's address; see
+/// `_cfinfo`). Equality and hashing are by component values, as with CoreGraphics' colours.
+public final class CGColor: NSObject, @unchecked Sendable {
+    /// First stored word: a non-zero CF type ID for swift-corelibs-foundation, which reads a
+    /// Swift object's type from it when the object is an attributed-string attribute value
+    /// (see AppKit's Support/CFBridgeLayout.swift). A pointer here gave a type ID from the
+    /// heap address, and CFEqual halted whenever that came out 0.
+    private let _cfinfo: UInt64 = 0x3FF << 8
     public let colorSpace: CGColorSpace?
     public let components: [CGFloat]      // r, g, b, a  (or w, a for monochrome)
 
@@ -73,12 +81,14 @@ public final class CGColor: Equatable, @unchecked Sendable {
     public static let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
     public static let clear = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0)
 
-    public static func == (l: CGColor, r: CGColor) -> Bool { l.rgba == r.rgba }
-}
-
-extension CGColor: Hashable {
-    public func hash(into hasher: inout Hasher) {
+    public override func isEqual(_ object: Any?) -> Bool {
+        guard let o = object as? CGColor else { return false }
+        return o.rgba == rgba
+    }
+    public override var hash: Int {
+        var hasher = Hasher()
         let (r, g, b, a) = rgba
         hasher.combine(r); hasher.combine(g); hasher.combine(b); hasher.combine(a)
+        return hasher.finalize()
     }
 }

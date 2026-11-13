@@ -74,6 +74,11 @@ public func CTRunDelegateGetRefCon(_ runDelegate: CTRunDelegate) -> UnsafeMutabl
 
 /// - SeeAlso: https://developer.apple.com/documentation/coretext/cttexttab
 public final class CTTextTab: NSObject {
+    /// First stored word: a non-zero CF type ID for swift-corelibs-foundation, which reads a
+    /// Swift object's type from it when the object is an attributed-string attribute value
+    /// (see AppKit's Support/CFBridgeLayout.swift). A pointer here gave a type ID from the
+    /// heap address, and CFEqual halted whenever that came out 0.
+    private let _cfinfo: UInt64 = 0x3FF << 8
     let alignment: CTTextAlignment
     let location: Double
     let options: CFDictionary?
