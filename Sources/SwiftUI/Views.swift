@@ -1443,7 +1443,19 @@ extension Section where Parent == EmptyView, Footer == EmptyView {
 public struct Form<Content: View>: View {
     let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
-    public var body: some View { VStack(alignment: .leading, spacing: 10) { content }.padding() }
+    @Environment(\._formStyle) private var style
+    public var body: some View {
+        switch style {
+        case .grouped:
+            // The grouped style boxes the rows on the window's background, as macOS's does.
+            VStack(alignment: .leading, spacing: 12) { content }
+                .padding(14)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .padding()
+        case .automatic, .columns:
+            VStack(alignment: .leading, spacing: 10) { content }.padding()
+        }
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressview

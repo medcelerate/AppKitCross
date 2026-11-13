@@ -27,9 +27,11 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace DailyTodo DailyTodoChecks; do swift build --product $p; done
       - name: Drawing example headless PNG export
         run: .build/debug/Drawing --export drawing-macos.png
+      - name: Daily To Do (a vendored third-party SwiftUI app) runs its own self-checks
+        run: .build/debug/DailyTodoChecks
       - name: TextEdit example headless document round trip (NSDocumentController, RTF)
         run: .build/debug/TextEdit --roundtrip textedit-macos.rtf
       - name: TextEdit example RTFD round trip (a list, a table and an attachment)
@@ -69,7 +71,7 @@ jobs:
         run: swift build -c debug -j 1
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build -j 1 --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace DailyTodo DailyTodoChecks; do swift build -j 1 --product $p; done
       # The Win32 backend, not the host one: a URL opened through a stub scheme handler
       # (Notepad), then the window, the WinEvent hooks and the poll timer run for five
       # seconds while the handler launches and comes to the front (ADR-0026). A crash in a
@@ -129,9 +131,11 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace DailyTodo DailyTodoChecks; do swift build --product $p; done
       - name: Drawing example headless PNG export on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/Drawing --export drawing-linux.png
+      - name: Daily To Do (a vendored third-party SwiftUI app) runs its own self-checks
+        run: .build/debug/DailyTodoChecks
       - name: TextEdit example headless document round trip on the host backend
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/TextEdit --roundtrip textedit-linux.rtf
       - name: TextEdit example RTFD round trip (a list, a table and an attachment)
@@ -158,7 +162,7 @@ jobs:
       - run: swift build
       - name: Build every example
         shell: bash
-        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace; do swift build --product $p; done
+        run: for p in HelloWindow Calculator FramelessWindow Animation Drawing Observable AudioPlayer TextEdit Toolbar Sheets Workspace DailyTodo DailyTodoChecks; do swift build --product $p; done
       - name: Tests on the host backend with the validation layer
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device
