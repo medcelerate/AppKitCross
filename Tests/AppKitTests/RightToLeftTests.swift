@@ -87,7 +87,7 @@ final class RightToLeftTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSwiftUIStacksAlignmentPaddingAndTextMirror() {
+    func testSwiftUIStacksAlignmentPaddingAndTextMirror() throws {
         MainActor.assumeIsolated {
             struct Content: View {
                 var body: some View {
@@ -136,8 +136,16 @@ final class RightToLeftTests: XCTestCase, @unchecked Sendable {
             let textView = h.subviews.flatMap { all($0) }.compactMap { $0 as? _TextView }.first!
             let textFrame = frame(Text.self)
             XCTAssertEqual(textFrame.maxX, 300, accuracy: 0.5)
+            // Drawn (Win32 paints on show, the host only when asked), the text view is the
+            // text's fitted width and its line ends at the right edge of the window.
+            w.display()
+            let drawn = textView.layoutManager.lineFragmentUsedRect(forGlyphAt: 0, effectiveRange: nil)
+            XCTAssertEqual(textView.convert(drawn, to: nil).maxX, 300, accuracy: 1, "the drawn line ends at the right edge")
+            // Laid out wider than the text, natural (leading) alignment is flush right.
+            _ = textView.size(for: 100)
             let line = textView.layoutManager.lineFragmentUsedRect(forGlyphAt: 0, effectiveRange: nil)
             XCTAssertGreaterThan(line.minX, 20, "natural text is flush right in the text view")
+            XCTAssertEqual(line.maxX, 100, accuracy: 0.5)
             w.close()
         }
     }
@@ -223,3 +231,4 @@ final class RightToLeftSizingTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

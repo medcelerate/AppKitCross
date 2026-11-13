@@ -133,7 +133,8 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testInputMethodCompositionThroughTheSeam() {
+    func testInputMethodCompositionThroughTheSeam() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
             let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
@@ -183,3 +184,4 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

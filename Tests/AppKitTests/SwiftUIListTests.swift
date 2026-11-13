@@ -40,7 +40,8 @@ private func key(_ code: UInt16, _ chars: String = "", flags: NSEvent.ModifierFl
 
 final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
     /// Text measured before its window turned dark draws with colours resolved for dark.
-    func testTextColourFollowsTheDrawingAppearance() {
+    func testTextColourFollowsTheDrawingAppearance() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let (w, h) = host(Text("hello"), width: 120, height: 40)
             let platform = w._platformWindow as! HostWindow
@@ -216,3 +217,4 @@ final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

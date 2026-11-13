@@ -81,7 +81,8 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
         return maxX < 0 ? nil : (minX, maxX, minY, maxY)
     }
 
-    func testMoveToDoubleScaleKeepsPointSizeAndDoublesPixels() {
+    func testMoveToDoubleScaleKeepsPointSizeAndDoublesPixels() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             w.backgroundColor = .white
@@ -137,7 +138,8 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testTextRerendersAtTheNewPixelSize() {
+    func testTextRerendersAtTheNewPixelSize() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 120, height: 80), styleMask: [.titled], backing: .buffered, defer: false)
             w.backgroundColor = .white
@@ -164,7 +166,8 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testLayerBackedViewsRerasteriseAtTheNewScale() {
+    func testLayerBackedViewsRerasteriseAtTheNewScale() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             w.backgroundColor = .white
@@ -200,7 +203,8 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
     }
     #endif
 
-    func testViewDidChangeBackingPropertiesReachesTheWholeTree() {
+    func testViewDidChangeBackingPropertiesReachesTheWholeTree() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let a = RecordingView(frame: NSRect(x: 0, y: 0, width: 80, height: 80))
@@ -223,7 +227,8 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testScreenReportsTheMonitorTheWindowMovedTo() {
+    func testScreenReportsTheMonitorTheWindowMovedTo() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let backend = Platform.backend as! HostBackend
             let saved = backend.displays
@@ -283,3 +288,4 @@ final class WaylandScaleTests: XCTestCase, @unchecked Sendable {
     }
 }
 #endif
+

@@ -6,6 +6,12 @@ import Foundation
 public enum Platform {
     public static let backend: any PlatformBackend = makeBackend()
 
+    /// The look of the standard window buttons (ADR-0022): the backend's unless a test
+    /// pins one, so the traffic-light and caption layouts are each checked on every
+    /// backend (the Win32 PC run included), not only on the one that draws them.
+    static var windowButtonStyleOverride: PlatformWindowButtonStyle?
+    static var windowButtonStyle: PlatformWindowButtonStyle { windowButtonStyleOverride ?? backend.windowButtonStyle }
+
     private static func makeBackend() -> any PlatformBackend {
         #if os(Windows)
         // APPKITWIN_HOST_BACKEND=1 runs the headless host backend (unit tests), as on Linux.

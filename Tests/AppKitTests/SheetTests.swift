@@ -62,7 +62,8 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
 
     @MainActor private func hostWindow(_ w: NSWindow) -> HostWindow { w._platformWindow as! HostWindow }
 
-    func testBeginSheetAttachesUnderTheTitleBarAndMakesItKey() {
+    func testBeginSheetAttachesUnderTheTitleBarAndMakesItKey() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = parentWindow()
             let s = sheetWindow()
@@ -118,21 +119,30 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSheetFollowsTheParent() {
+    func testSheetFollowsTheParent() throws {
         MainActor.assumeIsolated {
             let w = parentWindow()
             let s = sheetWindow()
             w.beginSheet(s)
+            // Centred on the top of the parent's content, which sits inside the frame by what
+            // the backend draws around it (the host's title bar; Win32's caption and borders).
+            @MainActor func expected() -> NSPoint {
+                let c = w.contentRect(forFrameRect: w.frame)
+                return NSPoint(x: c.minX + ((c.width - 200) / 2).rounded(), y: c.maxY - 100)
+            }
             w.setFrameOrigin(NSPoint(x: 300, y: 50))
-            XCTAssertEqual(s.frame.origin, NSPoint(x: 400, y: 250))
+            XCTAssertEqual(s.frame.origin, expected())
+            if Platform.backend is HostBackend { XCTAssertEqual(s.frame.origin, NSPoint(x: 400, y: 250)) }
             w.setFrame(NSRect(x: 300, y: 50, width: 600, height: 400), display: false)
-            XCTAssertEqual(s.frame.origin, NSPoint(x: 500, y: 322), "re-centred under the taller window's title bar")
+            XCTAssertEqual(s.frame.origin, expected(), "re-centred under the taller window's title bar")
+            if Platform.backend is HostBackend { XCTAssertEqual(s.frame.origin, NSPoint(x: 500, y: 322)) }
             w.endSheet(s)
             s.close(); w.close()
         }
     }
 
-    func testParentContentIsBlockedAndKeysReachTheSheet() {
+    func testParentContentIsBlockedAndKeysReachTheSheet() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = parentWindow()
             let parentView = EventRecorder(frame: w.contentView!.bounds)
@@ -230,7 +240,8 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testEscapeCancelsASheetThatOptedIn() {
+    func testEscapeCancelsASheetThatOptedIn() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = parentWindow()
             let s = sheetWindow()
@@ -283,7 +294,8 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testRunModalOverASheet() {
+    func testRunModalOverASheet() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = parentWindow()
             let s = sheetWindow()
@@ -305,7 +317,8 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testAlertSheetEndsFromItsButtons() {
+    func testAlertSheetEndsFromItsButtons() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = parentWindow()
             let alert = NSAlert()
@@ -339,7 +352,7 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSheetSlidesInAndOutOnTheFrameClock() {
+    func testSheetSlidesInAndOutOnTheFrameClock() throws {
         MainActor.assumeIsolated {
             NSWindow._sheetAnimationDuration = 0.25
             var clock: CFTimeInterval = 10
@@ -348,8 +361,14 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
             defer { CARuntime.now = saved }
             let w = parentWindow()
             let s = sheetWindow()
+            let detached = s.frame.size
+            // The attachment line is the top of the parent's content (100...400 high, x from 100).
+            let top = w.contentRect(forFrameRect: w.frame).maxY
+            XCTAssertEqual(top, 400)
             w.beginSheet(s)
             XCTAssertTrue(s.isVisible)
+            XCTAssertFalse(s._platformWindow!.chrome.hasShadow, "no shadow frame while sliding (Win32 keeps a thick-frame window at least its border wide)")
+            XCTAssertTrue(s.hasShadow, "the window's own setting is untouched")
             XCTAssertEqual(s.frame, NSRect(x: 200, y: 399, width: 200, height: 1), "starts rolled up at the attachment line")
             XCTAssertEqual(s.contentView!.frame.size, NSSize(width: 200, height: 100), "the content keeps its size")
             XCTAssertEqual(s.contentView!.frame.origin.y, -99, "pinned to the top")
@@ -363,6 +382,7 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
             CARuntime.tick()
             XCTAssertEqual(s.frame, NSRect(x: 200, y: 300, width: 200, height: 100))
             XCTAssertEqual(s.contentView!.frame.origin, .zero)
+            XCTAssertTrue(s._platformWindow!.chrome.hasShadow, "the shadow is back once the sheet is down")
             w.endSheet(s)
             XCTAssertTrue(s.isVisible, "rolls up before it goes")
             XCTAssertNil(w.attachedSheet)
@@ -372,7 +392,7 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
             clock = 10.6
             CARuntime.tick()
             XCTAssertFalse(s.isVisible)
-            XCTAssertEqual(s.frame.height, 128, "detached again")
+            XCTAssertEqual(s.frame.size, detached, "detached again: the frame of a titled window (the host's 28pt title bar, Win32's caption)")
             // Ending a sheet mid-slide completes the slide first.
             w.beginSheet(s)
             clock = 10.7
@@ -385,3 +405,4 @@ final class SheetTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

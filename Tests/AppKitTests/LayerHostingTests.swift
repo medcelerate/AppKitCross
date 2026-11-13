@@ -70,7 +70,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         return (w, panel, child)
     }
 
-    func testHostedCompositeMatchesSoftware() {
+    func testHostedCompositeMatchesSoftware() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, panel, child) = makeWindow()
             let host = hostWindow(w)
@@ -108,7 +109,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCommitsAndRastersOnlyWhenNeeded() {
+    func testCommitsAndRastersOnlyWhenNeeded() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, panel, child) = makeWindow()
             let host = hostWindow(w)
@@ -148,7 +150,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testAnimationsCommitPresentationValues() {
+    func testAnimationsCommitPresentationValues() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             var clock: CFTimeInterval = 100
             let savedNow = CARuntime.now
@@ -190,7 +193,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testLayerBackedScrollViewClipsItsDocument() {
+    func testLayerBackedScrollViewClipsItsDocument() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
             w.backgroundColor = .white
@@ -223,7 +227,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testUnsupportedFeaturesFlattenTheirSubtree() {
+    func testUnsupportedFeaturesFlattenTheirSubtree() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, panel, _) = makeWindow()
             let host = hostWindow(w)
@@ -254,7 +259,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
 
     /// The same for a layer in a flipped (view-backed) hierarchy, where the extent's top
     /// is its minimum y.
-    func testShadowsSurviveFlatteningInFlippedLayers() {
+    func testShadowsSurviveFlatteningInFlippedLayers() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             final class FlippedView: NSView { override var isFlipped: Bool { true } }
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
@@ -295,7 +301,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
     /// cover it, placed so the layer itself stays where it was.
     /// A view taken out of a hosted window, changed while off-window (as a reused table cell
     /// or collection item is) and put back must not show the raster it had before.
-    func testViewChangedOffWindowRedrawsWhenReadded() {
+    func testViewChangedOffWindowRedrawsWhenReadded() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, _, _) = makeWindow()
             let swatch = SwatchView(frame: NSRect(x: 20, y: 20, width: 50, height: 50))
@@ -322,7 +329,8 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testShadowsSurviveFlattening() {
+    func testShadowsSurviveFlattening() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, panel, _) = makeWindow()
             panel.masksToBounds = false
@@ -411,7 +419,8 @@ final class LayerAnimationLifetimeTests: XCTestCase, @unchecked Sendable {
 
 final class HostedSwiftUIShadowTests: XCTestCase, @unchecked Sendable {
     /// A SwiftUI card with a blurred shadow, hosted natively, composites like the software path.
-    func testHostedCardMatchesSoftware() {
+    func testHostedCardMatchesSoftware() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Card: View {
                 @State var name = ""
@@ -454,3 +463,4 @@ final class HostedSwiftUIShadowTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
