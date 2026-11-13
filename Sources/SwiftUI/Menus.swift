@@ -36,13 +36,19 @@ final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         super.update(from: other)
         guard let o = other as? _PopUpPrimitive else { return }
         onSelect = o.onSelect
+        var changed = false
         if o.titles != titles {
             titles = o.titles
             control.removeAllItems()
             control.addItems(withTitles: titles)
+            changed = true
         }
-        control.selectItem(at: o.control.indexOfSelectedItem)
-        control.sizeToFit()
+        if control.indexOfSelectedItem != o.control.indexOfSelectedItem {
+            control.selectItem(at: o.control.indexOfSelectedItem)
+            changed = true
+        }
+        // Resizing on every update invalidated the control (and so the frame) each pass.
+        if changed { control.sizeToFit() }
     }
 }
 

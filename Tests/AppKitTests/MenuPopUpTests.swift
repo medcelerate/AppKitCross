@@ -362,6 +362,21 @@ final class MenuPopUpTests: XCTestCase, @unchecked Sendable {
             send(.leftMouseUp, screen: rowCenter(0), in: w)
             XCTAssertEqual(b.titleOfSelectedItem, "Small")
             XCTAssertEqual(r.chosen, ["Medium", "Small"])
+            // Opened from the keyboard, the selected item is highlighted and the arrows step
+            // from it, even after the pointer leaves the menu and clears the highlight.
+            b.selectItem(withTitle: "Large")
+            b.performClick(nil)
+            XCTAssertTrue(_NSMenuTracker.isTracking)
+            XCTAssertEqual(b.menu?.highlightedItem?.title, "Large", "opens with the selected item highlighted")
+            send(.mouseMoved, screen: NSPoint(x: -5000, y: -5000))
+            XCTAssertNil(b.menu?.highlightedItem, "the pointer left: nothing highlighted")
+            sendKey(125, window: w)                       // down: the item after Large
+            XCTAssertEqual(b.menu?.highlightedItem?.title, "Medium")
+            sendKey(126, window: w); sendKey(126, window: w)   // up twice: back past Large to Small
+            XCTAssertEqual(b.menu?.highlightedItem?.title, "Small")
+            sendKey(53, window: w)                        // escape
+            XCTAssertFalse(_NSMenuTracker.isTracking)
+            XCTAssertEqual(b.titleOfSelectedItem, "Large", "escape keeps the selection")
             w.close()
         }
     }

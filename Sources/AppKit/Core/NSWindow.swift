@@ -1196,6 +1196,18 @@ import CoreText
         p.setNeedsDisplay(nil)
     }
 
+    /// After the slide's last step: the window's final size lands with that step, and on
+    /// Windows the top rows of the sheet kept whatever the resized surface held (the
+    /// parent's content showed through until the next repaint), so the whole sheet is
+    /// invalidated again once the step has been processed.
+    fileprivate func _repaintAfterSheetSlide() {
+        Platform.backend.post { [weak self] in
+            guard let self, let p = self._platform else { return }
+            self._contentView?.needsDisplay = true
+            p.setNeedsDisplay(nil)
+        }
+    }
+
     /// Ends the sheet session on this sheet's parent with `.cancel` (a sheet closed or
     /// ordered out by other means than `endSheet`).
     private func _cancelSheetIfAttached() {
@@ -2713,6 +2725,7 @@ extension NSWindow: PlatformAccessibilityProvider {
         link?.invalidate()
         link = nil
         apply(1)
+        if direction == .in { sheet._repaintAfterSheetSlide() }
         completion()
     }
 }

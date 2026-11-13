@@ -368,6 +368,9 @@ final class _NSMenuTracker {
         let menu: NSMenu
         let window: _NSMenuWindow
         let parentRow: Int?         // row in the parent level that opened this submenu
+        /// A pop-up's selected row: where keyboard navigation starts when nothing is
+        /// highlighted (the pointer left the menu), as AppKit's pop-ups do.
+        var anchorRow: Int? = nil
     }
     private(set) var levels: [Level] = []
     private let completion: @MainActor (NSMenuItem?) -> Void
@@ -473,16 +476,19 @@ final class _NSMenuTracker {
         }
         window.setFrame(NSRect(origin: origin, size: frameSize), display: false)
         window.scrollOffset = scrollOffset
-        levels.append(Level(menu: menu, window: window, parentRow: parentRow))
-        window.orderFront(nil)
-        window._accessibilityNotify(.menuOpened(window._accessibilityElementID))
+        var level = Level(menu: menu, window: window, parentRow: parentRow)
         // A pop-up opens with its selected item highlighted, as AppKit's does, so Down
         // moves to the next item rather than back to the first (and Return re-chose the
-        // current one: the binding never changed).
+        // current one: the binding never changed). The row stays the keyboard's starting
+        // point after the pointer leaves the menu and clears the highlight.
         if case .overAnchor(let itemIndex, _) = placement, let r = layout.rows.firstIndex(where: { $0.index == itemIndex }),
            !layout.rows[r].item.isSeparatorItem, layout.rows[r].item.isEnabled {
-            setHighlight(r, in: levels.count - 1, openSubmenus: false)
+            level.anchorRow = r
         }
+        levels.append(level)
+        window.orderFront(nil)
+        window._accessibilityNotify(.menuOpened(window._accessibilityElementID))
+        if let r = level.anchorRow { setHighlight(r, in: levels.count - 1, openSubmenus: false) }
         if parentRow != nil, levels.count >= 2 {
             // The parent item now shows its submenu open (UIA ExpandCollapse).
             let parent = levels[levels.count - 2]
@@ -676,7 +682,7 @@ final class _NSMenuTracker {
         func selectable(_ i: Int) -> Bool { let it = rows[i].item; return !it.isSeparatorItem && it.isEnabled }
         func move(_ delta: Int) {
             guard !rows.isEmpty else { return }
-            var i = view.highlightedRow ?? (delta > 0 ? -1 : rows.count)
+            var i = view.highlightedRow ?? levels[last].anchorRow ?? (delta > 0 ? -1 : rows.count)
             for _ in 0..<rows.count {
                 i = (i + delta + rows.count) % rows.count
                 if selectable(i) { setHighlight(i, in: last, openSubmenus: false); return }

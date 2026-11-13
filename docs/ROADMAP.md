@@ -573,9 +573,11 @@ for it off macOS, under Apple's module names: `UserNotifications` (prints the re
   against the new size, a bare executable takes its window's navigation title as its app
   name, and the NavigationStack draws no title row at the root. Third round: the menu view
   draws only its visible rows (a 400-row menu repainting whole starved the Win32 pump)
-  and a pop-up opens with its selected item highlighted. Left: the sheet slide resizing
-  the HWND every step on Win32 (2–3 s; clip instead), the first Up after a click in the
-  date field, an intermittent strip of the parent through the sheet's top band.
+  and a pop-up opens with its selected item highlighted; fourth: the keyboard steps from
+  the pop-up's selected item, and the sheet repaints whole after its slide (a stale top
+  band). Left: the sheet slide resizing the HWND every step on Win32 (2–3 s; clip
+  instead), the first Up after a click in the date field, and a busy core while the
+  sheet is open and idle on Win32 (trace instructions in the compatibility note).
 
 ## M11: Accessibility
 

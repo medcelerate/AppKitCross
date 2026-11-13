@@ -1768,8 +1768,10 @@ final class _DatePickerPrimitive: _ControlPrimitive<NSDatePicker> {
         if control.datePickerElements != flags { control.datePickerElements = flags }
         let style: NSDatePicker.Style = node?.environment.datePickerStyle == .graphical ? .clockAndCalendar : (node?.environment.datePickerStyle == .field ? .textField : .textFieldAndStepper)
         if control.datePickerStyle != style { control.datePickerStyle = style }
-        control.minDate = view.minimum
-        control.maxDate = view.maximum
+        // Only on a change: each setter redraws the picker, and an update that always
+        // invalidates feeds the next frame.
+        if control.minDate != view.minimum { control.minDate = view.minimum }
+        if control.maxDate != view.maximum { control.maxDate = view.maximum }
         if control.dateValue != view.selection.wrappedValue { control.dateValue = view.selection.wrappedValue }
         // Only on a change: setting the locale resets the picker's selected field, and every
         // body update would otherwise drop the field the user is stepping or typing into.
