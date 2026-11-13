@@ -52,7 +52,7 @@ final class TurnedLabelView: NSView {
     override func mouseDown(with event: NSEvent) { clicks += 1; needsDisplay = true }
 }
 
-final class CoreDepthDemoViewController: NSViewController {
+final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
     let nineSlice = NineSliceDemoView(frame: NSRect(x: 16, y: 16, width: 344, height: 176))
     let status = NSTextField(labelWithString: "")
     var autosaveWindow: NSWindow?
@@ -72,8 +72,8 @@ final class CoreDepthDemoViewController: NSViewController {
         turned.toolTip = "frameRotation = 20"
         root.addSubview(turned)
         let buttons: [(String, Selector)] = [
-            ("Export PNG…", #selector(exportPNG(_:))), ("Export TIFF…", #selector(exportTIFF(_:))), ("Export BMP…", #selector(exportBMP(_:))),
-            ("Open Autosaved Window", #selector(openAutosaveWindow(_:))),
+            ("Export PNG…", Selector(("exportPNG:"))), ("Export TIFF…", Selector(("exportTIFF:"))), ("Export BMP…", Selector(("exportBMP:"))),
+            ("Open Autosaved Window", Selector(("openAutosaveWindow:"))),
         ]
         for (i, (title, action)) in buttons.enumerated() {
             let b = NSButton(title: title, target: self, action: action)
@@ -111,12 +111,20 @@ final class CoreDepthDemoViewController: NSViewController {
         }
     }
 
-    @objc func exportPNG(_ sender: Any?) { export(.png, name: "nine-slice.png") }
-    @objc func exportTIFF(_ sender: Any?) { export(.tiff, name: "nine-slice.tiff") }
-    @objc func exportBMP(_ sender: Any?) { export(.bmp, name: "nine-slice.bmp") }
+    // Actions arrive by selector name (no Objective-C runtime on Windows and Linux).
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action {
+        case Selector(("exportPNG:")): export(.png, name: "nine-slice.png")
+        case Selector(("exportTIFF:")): export(.tiff, name: "nine-slice.tiff")
+        case Selector(("exportBMP:")): export(.bmp, name: "nine-slice.bmp")
+        case Selector(("openAutosaveWindow:")): openAutosaveWindow(sender)
+        default: return false
+        }
+        return true
+    }
 
     /// A window that comes back where it was left (across relaunches) and keeps 4:3 content.
-    @objc func openAutosaveWindow(_ sender: Any?) {
+    func openAutosaveWindow(_ sender: Any?) {
         if let w = autosaveWindow { w.makeKeyAndOrderFront(nil); return }
         let w = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 320, height: 240), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
