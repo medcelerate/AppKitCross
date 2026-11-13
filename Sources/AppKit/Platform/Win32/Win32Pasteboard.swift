@@ -45,14 +45,32 @@ final class Win32Pasteboard: PlatformPasteboard {
         }
     }
 
+    /// The clipboard owner, a message-only window. With `OpenClipboard(nil)` the clipboard
+    /// has no owner after `EmptyClipboard`, and Win32 documents that `SetClipboardData`
+    /// then fails (in practice what was set may not survive); the owner is also where
+    /// WM_RENDERFORMAT and WM_DESTROYCLIPBOARD would go (the STATIC class ignores them:
+    /// nothing is rendered late).
+    private lazy var ownerWindow: HWND? = "STATIC".withCString(encodedAs: UTF16.self) { cls in
+        CreateWindowExW(0, cls, nil, 0, 0, 0, 0, 0, HWND(bitPattern: -3) /* HWND_MESSAGE */, nil, GetModuleHandleW(nil), nil)
+    }
+
     /// Another process (a clipboard manager, Windows clipboard history, the application
     /// that just copied) often holds the clipboard open for a moment after a change.
     private func openClipboard() -> Bool {
+        let owner = ownerWindow
         for attempt in 0..<20 {
-            if OpenClipboard(nil) { return true }
+            if OpenClipboard(owner) { return true }
             Sleep(DWORD(attempt < 5 ? 2 : 10))
         }
         return false
+    }
+
+    /// Runs `body` with the clipboard open under this pasteboard's owner window (tests
+    /// place raw formats with it as another application would); nil when it cannot open.
+    func withOpenClipboard<T>(_ body: () -> T) -> T? {
+        guard openClipboard() else { return nil }
+        defer { CloseClipboard() }
+        return body()
     }
 
     /// Whether the last read could not open the clipboard; NSPasteboard reads again then.

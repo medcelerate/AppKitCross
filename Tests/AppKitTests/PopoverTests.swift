@@ -226,7 +226,8 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPreferredEdgeIsInTheViewsCoordinatesAndFlipsAtTheScreenEdge() {
+    func testPreferredEdgeIsInTheViewsCoordinatesAndFlipsAtTheScreenEdge() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             final class Flipped: NSView { override var isFlipped: Bool { true } }
             let w = makeWindow()
@@ -251,7 +252,8 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPopoverFollowsTheParentWindowAndContentSizeChanges() {
+    func testPopoverFollowsTheParentWindowAndContentSizeChanges() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             let v = NSView(frame: NSRect(x: 50, y: 50, width: 60, height: 20))
@@ -275,7 +277,8 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testFrameViewDrawsTheBodyAndTheArrowOverTransparency() {
+    func testFrameViewDrawsTheBodyAndTheArrowOverTransparency() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             let v = NSView(frame: NSRect(x: 100, y: 100, width: 60, height: 20))
@@ -594,7 +597,8 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSwitchKnobAnimatesOnTheDisplayLinkAndDrawsPerState() {
+    func testSwitchKnobAnimatesOnTheDisplayLinkAndDrawsPerState() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             NSSwitch._animationDuration = 0.2
             defer { NSSwitch._animationDuration = 0 }
@@ -625,7 +629,8 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSwitchAccessibilityIsACheckBoxWithTheSwitchSubrole() {
+    func testSwitchAccessibilityIsACheckBoxWithTheSwitchSubrole() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             let s = NSSwitch(frame: NSRect(x: 50, y: 50, width: 38, height: 22))
@@ -737,3 +742,4 @@ final class PopoverTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

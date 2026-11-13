@@ -46,4 +46,11 @@ final class Win32WindowPolicyTests: XCTestCase {
         XCTAssertFalse(Win32WindowPolicy.isCaptionButton(hitCode: 2))
         XCTAssertFalse(Win32WindowPolicy.isCaptionButton(hitCode: 12))    // HTTOP: the resize band over the buttons
     }
+
+    /// `orderFront(_:)` shows without activating (SW_SHOWNA): a panel ordered front leaves
+    /// the document window key, as in AppKit; `makeKey()` is what activates.
+    func testOrderFrontShowsWithoutActivating() {
+        XCTAssertEqual(Win32WindowPolicy.showCommand, 8)                  // SW_SHOWNA
+        XCTAssertNotEqual(Win32WindowPolicy.showCommand, 1)               // not SW_SHOWNORMAL, which activates
+    }
 }

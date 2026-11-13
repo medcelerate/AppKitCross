@@ -109,7 +109,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Print info
 
-    func testPaperNamesSizesAndOrientation() {
+    func testPaperNamesSizesAndOrientation() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = NSPrintInfo()
             info.paperName = NSPrinter.PaperName("iso-a4")
@@ -133,7 +134,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDictionaryRoundTrip() {
+    func testDictionaryRoundTrip() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = letterInfo()
             info.orientation = .landscape
@@ -174,6 +176,7 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
     }
 
     func testCoding() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             let info = letterInfo()
             info.orientation = .landscape
@@ -193,7 +196,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Pagination
 
-    func testAutomaticVerticalPaginationSplitsTheBoundsFromTheTop() {
+    func testAutomaticVerticalPaginationSplitsTheBoundsFromTheTop() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 2000))
             let info = letterInfo()
@@ -223,7 +227,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testFitAndScalingAndAcrossThenDown() {
+    func testFitAndScalingAndAcrossThenDown() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 936, height: 1224))
             let info = letterInfo()
@@ -251,7 +256,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testFlippedViewAndPageBreakAdjustment() {
+    func testFlippedViewAndPageBreakAdjustment() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 1000))
             view.flipped = true
@@ -276,7 +282,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testViewThatKnowsItsPages() {
+    func testViewThatKnowsItsPages() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = ThreePageView(frame: NSRect(x: 0, y: 0, width: 200, height: 300))
             let p = _NSPrintPagination(view: view, info: letterInfo())
@@ -313,6 +320,7 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
     }
 
     func testSaveJobWritesAMultiPagePDF() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 2000))
             let info = letterInfo()
@@ -340,7 +348,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSpoolJobReachesThePrinterWithCopiesAndRange() {
+    func testSpoolJobReachesThePrinterWithCopiesAndRange() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 2000))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
@@ -381,7 +390,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHeaderAndFooterAndCancelDisposition() {
+    func testHeaderAndFooterAndCancelDisposition() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 700))
             let info = letterInfo()
@@ -401,6 +411,7 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
     }
 
     func testTextViewPrintsItsTextAcrossPages() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 1600))
             text.string = (1...90).map { "Line \($0): the quick brown fox jumps over the lazy dog." }.joined(separator: "\n")
@@ -459,7 +470,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Panels
 
-    func testPrintPanelOptionsDecideWhatIsShown() {
+    func testPrintPanelOptionsDecideWhatIsShown() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = letterInfo()
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 1300))
@@ -500,7 +512,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPrintPanelAppliesEditsAndCancelRestores() {
+    func testPrintPanelAppliesEditsAndCancelRestores() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = letterInfo()
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 1300))
@@ -538,7 +551,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testTypingAPageNumberChoosesTheRangeAndTheFieldsAreNamed() {
+    func testTypingAPageNumberChoosesTheRangeAndTheFieldsAreNamed() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = letterInfo()
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 400, height: 1300))
@@ -565,7 +579,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
     /// Typing into the Page Setup panel's Scale field by keyboard (the PC injects key
     /// events; it has no hardware keyboard): the field editor takes the digits, the field
     /// shows them, and OK commits them to the print info.
-    func testTypingAScaleByKeyboardShowsItAndCommitsIt() {
+    func testTypingAScaleByKeyboardShowsItAndCommitsIt() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let info = letterInfo()
             info.scalingFactor = 1
@@ -610,7 +625,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPrintPanelAsSheetRunsTheOperationWhenPrintIsPressed() {
+    func testPrintPanelAsSheetRunsTheOperationWhenPrintIsPressed() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let view = BarsView(frame: NSRect(x: 0, y: 0, width: 500, height: 700))
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: 400), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -653,7 +669,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPageLayoutSheetChangesTheSharedInfo() {
+    func testPageLayoutSheetChangesTheSharedInfo() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
             window.makeKeyAndOrderFront(nil)
@@ -689,7 +706,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testNativePanelIsAskedForWhenTheEnvironmentSaysSo() {
+    func testNativePanelIsAskedForWhenTheEnvironmentSaysSo() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             _setTestEnvironment("APPKITWIN_PRINT_PANEL", "native")
             defer { _setTestEnvironment("APPKITWIN_PRINT_PANEL", nil) }
@@ -711,6 +729,7 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
     }
 
     func testDocumentPrintsItsTextViewToPDFAndAsASheet() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             let doc = PrintableDocument()
             doc.makeWindowControllers()
@@ -759,7 +778,8 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPagesPrintUnderTheAquaAppearanceEvenFromADarkWindow() {
+    func testPagesPrintUnderTheAquaAppearanceEvenFromADarkWindow() throws {
+        try requireHostBackend("needs the host stub printer (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
             window.appearance = NSAppearance(named: .darkAqua)
@@ -800,3 +820,5 @@ final class PrintTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+

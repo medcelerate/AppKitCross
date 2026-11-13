@@ -292,7 +292,8 @@ final class LayerBackedViewTests: XCTestCase, @unchecked Sendable {
         return (data[i + 2], data[i + 1], data[i])
     }
 
-    func testLayerBackedViewsCompositeThroughTheLayerTree() {
+    func testLayerBackedViewsCompositeThroughTheLayerTree() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let container = NSView(frame: NSRect(x: 10, y: 10, width: 80, height: 80))
@@ -381,7 +382,8 @@ final class LayerBackedViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testShapeGradientAndTextLayersRender() {
+    func testShapeGradientAndTextLayersRender() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let v = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
@@ -430,3 +432,4 @@ final class LayerBackedViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

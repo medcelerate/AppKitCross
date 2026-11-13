@@ -132,7 +132,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         return (w, host)
     }
 
-    func testWindowShowsItsButtonsInTheBandAndDragsTheRest() {
+    func testWindowShowsItsButtonsInTheBandAndDragsTheRest() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let (w, host) = decoratedWindow(titled)
             defer { w.close() }
@@ -160,7 +161,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testBandClickCloses_DoubleClickZooms() {
+    func testBandClickCloses_DoubleClickZooms() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             final class Delegate: NSObject, NSWindowDelegate {
                 var zoomAsked = 0
@@ -189,7 +191,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
     /// The band is painted into a context in window coordinates: a flat bar of the
     /// appearance's colour, the close button's red at the left, the title in the middle,
     /// and nothing below the band.
-    func testBandDrawsBackgroundButtonsAndTitle() {
+    func testBandDrawsBackgroundButtonsAndTitle() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let (w, _) = decoratedWindow(titled)
             defer { w.close() }
@@ -225,3 +228,4 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

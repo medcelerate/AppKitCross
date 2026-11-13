@@ -37,7 +37,8 @@ final class SwiftUIToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testItemsBecomeToolbarItemsInPlacementOrder() {
+    func testItemsBecomeToolbarItemsInPlacementOrder() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let model = Model()
             let (w, h) = host(Content(model: model))
@@ -78,7 +79,8 @@ final class SwiftUIToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHiddenToolbarAndWindowToolbarStyle() {
+    func testHiddenToolbarAndWindowToolbarStyle() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, _) = host(Text("x").toolbar { ToolbarItem { Text("One") } }.toolbar(.hidden, for: .windowToolbar))
             defer { w.close() }
@@ -91,3 +93,4 @@ final class SwiftUIToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

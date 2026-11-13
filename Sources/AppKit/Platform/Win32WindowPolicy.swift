@@ -70,4 +70,16 @@ public enum Win32WindowPolicy {
     public static func isCaptionButton(hitCode: Int32) -> Bool {
         hitCode == HTCLOSE || hitCode == HTMINBUTTON || hitCode == HTMAXBUTTON
     }
+
+    // MARK: Showing (orderFront)
+
+    public static let SW_SHOWNA: Int32 = 8
+
+    /// The `ShowWindow` command behind `PlatformWindow.show()`, which `orderFront(_:)`
+    /// calls. AppKit orders a window front without making it key (`makeKey()` activates
+    /// it separately), so the window is shown in its current state without activation;
+    /// the window is raised separately (`SWP_NOACTIVATE`). `SW_SHOWNORMAL`, used before,
+    /// activated it: ordering the colour or font panel front took key from the document
+    /// window, so the panel's `changeColor:` / `changeFont:` no longer reached the text view.
+    public static let showCommand: Int32 = SW_SHOWNA
 }

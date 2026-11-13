@@ -20,8 +20,10 @@ final class MetalD3D12ParityTests: XCTestCase, @unchecked Sendable {
     }
 
     func testMTKViewFrameMatchesReferenceDevice() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         let d3d12 = try MetalD3D12DeviceTests.d3d12Device()
         let reference = try MetalVulkanParityTests.presentedMTKViewFrame(on: MTLReferenceDevice())
         MetalVulkanParityTests.compareFrames(reference, try MetalVulkanParityTests.presentedMTKViewFrame(on: d3d12), backend: "Direct3D 12")
     }
 }
+
