@@ -91,7 +91,8 @@ final class MTKViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testMTKViewPresentsClearedDrawable() {
+    func testMTKViewPresentsClearedDrawable() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let view = MTKView(frame: NSRect(x: 10, y: 10, width: 50, height: 50), device: nil)
@@ -117,3 +118,4 @@ final class MTKViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

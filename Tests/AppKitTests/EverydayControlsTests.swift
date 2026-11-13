@@ -237,7 +237,8 @@ final class StepperTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCellDrawsTheBezelAndThePressedHalf() {
+    func testCellDrawsTheBezelAndThePressedHalf() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let s = NSStepper(frame: NSRect(x: 100, y: 60, width: 15, height: 24))
@@ -304,7 +305,8 @@ final class ProgressIndicatorTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testBarAndSpinnerDrawing() {
+    func testBarAndSpinnerDrawing() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let bar = NSProgressIndicator(frame: NSRect(x: 20, y: 100, width: 200, height: 20))
@@ -407,7 +409,8 @@ final class LevelIndicatorTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCapacityColoursFollowWarningAndCriticalLevels() {
+    func testCapacityColoursFollowWarningAndCriticalLevels() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let l = NSLevelIndicator(frame: NSRect(x: 20, y: 80, width: 200, height: 20))
@@ -511,7 +514,8 @@ final class SearchFieldTests: XCTestCase, @unchecked Sendable {
         return (f, sink)
     }
 
-    func testGeometryAndDefaults() {
+    func testGeometryAndDefaults() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let (f, _) = makeField(w)
@@ -778,7 +782,8 @@ final class TokenFieldTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testMouseSelectsEditsAndMenusTokens() {
+    func testMouseSelectsEditsAndMenusTokens() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let (f, _) = makeField(w)
@@ -955,7 +960,8 @@ final class DatePickerTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testGraphicalStyleCalendarAndClock() {
+    func testGraphicalStyleCalendarAndClock() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window(NSSize(width: 320, height: 200))
             let (p, sink) = makePicker(w, style: .clockAndCalendar)
@@ -1059,7 +1065,8 @@ final class PathControlTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testClicksReportTheItemAndTheStandardLayoutShrinks() {
+    func testClicksReportTheItemAndTheStandardLayoutShrinks() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let p = NSPathControl(frame: NSRect(x: 10, y: 60, width: 300, height: 22))
@@ -1109,7 +1116,8 @@ final class PathControlTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPopUpStyleBuildsAMenuOfAncestors() {
+    func testPopUpStyleBuildsAMenuOfAncestors() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = window()
             let p = NSPathControl(frame: NSRect(x: 10, y: 60, width: 160, height: 22))
@@ -1231,3 +1239,4 @@ final class SwiftUIEverydayControlsTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

@@ -227,7 +227,8 @@ final class MenuPopUpTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPopUpPositioningRunsUntilTheMenuCloses() {
+    func testPopUpPositioningRunsUntilTheMenuCloses() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             let r = Receiver()
@@ -429,3 +430,4 @@ final class MenuResponderChainTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

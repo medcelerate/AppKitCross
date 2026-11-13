@@ -8,7 +8,8 @@ import XCTest
 final class SwiftUIAppTests: XCTestCase, @unchecked Sendable {
     @MainActor private func items(_ menu: NSMenu?) -> [String] { (menu?.items ?? []).map { $0.isSeparatorItem ? "-" : $0.title } }
 
-    func testWindowResizabilityContentSize() {
+    func testWindowResizabilityContentSize() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Fixed: View { var body: some View { Text("Fixed").frame(width: 240, height: 120) } }
             let runner = _AppRunner(name: "Fixed")
