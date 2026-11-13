@@ -5,7 +5,8 @@ import XCTest
 @testable import AppKit
 
 final class ScreenDynamicRangeTests: XCTestCase, @unchecked Sendable {
-    func testHostDisplayIsSDR() {
+    func testHostDisplayIsSDR() throws {
+        try requireHostBackend("asserts the host backend's SDR screen")
         MainActor.assumeIsolated {
             guard let s = NSScreen.screens.first else { return XCTFail("no screen") }
             XCTAssertEqual(s.maximumExtendedDynamicRangeColorComponentValue, 1)
@@ -35,4 +36,5 @@ final class ScreenDynamicRangeTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
 

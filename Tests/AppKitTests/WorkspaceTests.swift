@@ -23,8 +23,14 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     private var observers: [NSObjectProtocol] = []
     private let temp = FileManager.default.temporaryDirectory.appendingPathComponent("WorkspaceTests-\(UUID().uuidString)", isDirectory: true)
 
+    override func setUpWithError() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
+    }
+
     override func setUp() {
         super.setUp()
+        // Skipped tests reach setUp too: touch NSApplication and the shared workspace only on the host backend.
+        guard ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == "1" else { return }
         try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         MainActor.assumeIsolated {
             _ = NSApplication.shared
@@ -36,7 +42,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         for o in observers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
         observers.removeAll()
         try? FileManager.default.removeItem(at: temp)
-        MainActor.assumeIsolated { host.reset() }
+        if ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == "1" { MainActor.assumeIsolated { host.reset() } }
         super.tearDown()
     }
 
