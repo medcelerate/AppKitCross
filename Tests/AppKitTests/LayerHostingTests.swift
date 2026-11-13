@@ -333,11 +333,19 @@ final class LayerHostingTests: XCTestCase, @unchecked Sendable {
         try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, panel, _) = makeWindow()
+            // The panel has been drawn (the window is on screen), so these changes would
+            // start implicit 0.25 s animations, and the two captures below would sample them
+            // at different wall-clock times: a slow run saw the hosted shadow further along
+            // than the software one (3110 and 9801 pixels apart). Compare the final state.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             panel.masksToBounds = false
             panel.shadowColor = CGColor(gray: 0, alpha: 1)
             panel.shadowOpacity = 0.8
             panel.shadowRadius = 4
             panel.shadowOffset = CGSize(width: 0, height: -6)
+            CATransaction.commit()
+            XCTAssertNil(panel.animationKeys(), "the shadow is set without animating")
             let host = hostWindow(w)
             w.display()
             let software = _pixels(host.lastImage!)
