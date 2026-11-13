@@ -95,21 +95,31 @@ public final class UNUserNotificationCenter: NSObject, @unchecked Sendable {
     public static func current() -> UNUserNotificationCenter { shared }
 
     public weak var delegate: (any UNUserNotificationCenterDelegate)?
+    private struct State {
+        var authorized = false
+        var pending: [UNNotificationRequest] = []
+        var delivered: [UNNotificationRequest] = []
+    }
     private let lock = NSLock()
-    private var authorized = false
-    private var pending: [UNNotificationRequest] = []
+    private var state = State()
+    /// Locked access to the state from a synchronous context: corelibs' toolchains reject
+    /// `NSLock.lock()` inside an async function, so the async methods go through this.
+    private func withState<T>(_ body: (inout State) -> T) -> T {
+        lock.lock(); defer { lock.unlock() }
+        return body(&state)
+    }
     /// Every request delivered so far, oldest first.
-    public private(set) var delivered: [UNNotificationRequest] = []
+    public var delivered: [UNNotificationRequest] { withState { $0.delivered } }
 
     override private init() { super.init() }
 
     public func requestAuthorization(options: UNAuthorizationOptions = [], completionHandler: @escaping (Bool, (any Error)?) -> Void) {
-        lock.lock(); authorized = true; lock.unlock()
+        withState { $0.authorized = true }
         completionHandler(true, nil)
     }
 
     public func requestAuthorization(options: UNAuthorizationOptions = []) async throws -> Bool {
-        lock.lock(); authorized = true; lock.unlock()
+        withState { $0.authorized = true }
         return true
     }
 
@@ -120,13 +130,13 @@ public final class UNUserNotificationCenter: NSObject, @unchecked Sendable {
 
     public func add(_ request: UNNotificationRequest) async throws {
         if let trigger = request.trigger as? UNTimeIntervalNotificationTrigger {
-            lock.lock(); pending.append(request); lock.unlock()
+            withState { $0.pending.append(request) }
             try? await Task.sleep(nanoseconds: UInt64(max(0, trigger.timeInterval) * 1_000_000_000))
-            lock.lock(); pending.removeAll { $0 === request }; lock.unlock()
+            withState { $0.pending.removeAll { $0 === request } }
         }
         let notification = UNNotification(date: Date(), request: request)
         let options = await delegate?.userNotificationCenter(self, willPresent: notification) ?? [.banner]
-        lock.lock(); delivered.append(request); lock.unlock()
+        withState { $0.delivered.append(request) }
         guard !options.isEmpty else { return }
         let content = request.content
         let line = "[notification] \(content.title)\(content.body.isEmpty ? "" : ": \(content.body)")\n"
@@ -134,14 +144,14 @@ public final class UNUserNotificationCenter: NSObject, @unchecked Sendable {
     }
 
     public func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
-        lock.lock(); pending.removeAll { identifiers.contains($0.identifier) }; lock.unlock()
+        withState { $0.pending.removeAll { identifiers.contains($0.identifier) } }
     }
 
     public func removeAllPendingNotificationRequests() {
-        lock.lock(); pending.removeAll(); lock.unlock()
+        withState { $0.pending.removeAll() }
     }
 
     public func removeDeliveredNotifications(withIdentifiers identifiers: [String]) {
-        lock.lock(); delivered.removeAll { identifiers.contains($0.identifier) }; lock.unlock()
+        withState { $0.delivered.removeAll { identifiers.contains($0.identifier) } }
     }
 }
