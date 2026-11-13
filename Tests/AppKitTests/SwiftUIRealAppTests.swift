@@ -88,7 +88,8 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
     }
 
     /// Daily To Do's main window and its settings sheet, built from the same views the app uses.
-    func testDailyTodoScreensHostAndTheSettingsSheetOpens() {
+    func testDailyTodoScreensHostAndTheSettingsSheetOpens() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Item: Identifiable { let id = UUID(); var title: String; var done = false }
             final class Store: ObservableObject {
