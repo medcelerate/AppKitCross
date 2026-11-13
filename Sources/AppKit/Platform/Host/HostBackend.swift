@@ -233,6 +233,18 @@ final class HostWindow: PlatformWindow {
             owner?.platformWindowDidChangeFrame(f)
         }
     }
+    /// What `NSWindow` asked live resizes to keep to (ADR-0036).
+    private(set) var resizeConstraints = PlatformResizeConstraints()
+    func setResizeConstraints(_ constraints: PlatformResizeConstraints) { resizeConstraints = constraints }
+    /// Test hook: the user drags the bottom-right corner (or, `heightEdgeOnly`, the
+    /// bottom edge) until the content would be `size`; the top-left corner stays.
+    func _userResize(toContentSize size: NSSize, heightEdgeOnly: Bool = false) {
+        let content = contentRect(forFrameRect: _frame)
+        let extra = NSSize(width: _frame.width - content.width, height: _frame.height - content.height)
+        let c = resizeConstraints.constrain(contentSize: size, frameExtra: extra, heightEdgeOnly: heightEdgeOnly)
+        let w = c.width + extra.width, h = c.height + extra.height
+        frame = NSRect(x: _frame.minX, y: _frame.maxY - h, width: w, height: h)
+    }
 
     /// The window this one is attached to as a sheet (ADR-0019); a sheet has no title bar.
     private(set) weak var sheetParent: HostWindow?

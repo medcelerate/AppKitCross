@@ -65,6 +65,12 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
         let e = NSEvent(type: type, location: location, modifierFlags: modifierFlags, timestamp: timestamp, windowNumber: windowNumber)
         e._trackingArea = trackingArea
         e._trackingNumber = Int(bitPattern: UInt(bitPattern: ObjectIdentifier(trackingArea).hashValue))
+        MainActor.assumeIsolated {
+            if let tag = trackingArea._legacyTag {
+                e._trackingNumber = tag
+                e._userData = trackingArea._legacyUserData
+            }
+        }
         return e
     }
 

@@ -153,12 +153,12 @@ final class LayoutEngine {
                 intrinsicMs += ms; views += 1
                 if ms > 0.5 { NSView._trace(String(format: "frames   intrinsic size of %@ %.1f ms", "\(type(of: view))", ms)) }
             }
-            if intrinsic.width != NSView.noIntrinsicMetric {
+            if intrinsic.width != NSView.noIntrinsicMetric && view.isHorizontalContentSizeConstraintActive {
                 let w = Double(intrinsic.width)
                 add(LayoutExpression(v.width) - w, .lessOrEqual, LayoutEngine.strength(for: view.contentHuggingPriority(for: .horizontal)))
                 add(LayoutExpression(v.width) - w, .greaterOrEqual, LayoutEngine.strength(for: view.contentCompressionResistancePriority(for: .horizontal)))
             }
-            if intrinsic.height != NSView.noIntrinsicMetric {
+            if intrinsic.height != NSView.noIntrinsicMetric && view.isVerticalContentSizeConstraintActive {
                 let h = Double(intrinsic.height)
                 add(LayoutExpression(v.height) - h, .lessOrEqual, LayoutEngine.strength(for: view.contentHuggingPriority(for: .vertical)))
                 add(LayoutExpression(v.height) - h, .greaterOrEqual, LayoutEngine.strength(for: view.contentCompressionResistancePriority(for: .vertical)))

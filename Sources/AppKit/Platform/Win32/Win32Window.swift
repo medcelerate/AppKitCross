@@ -51,6 +51,8 @@ final class Win32Window: PlatformWindow {
     var accessibilityFlushScheduled = false
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
+    /// NSWindow aspect ratios and increments for user resizes (WM_SIZING, ADR-0036).
+    var resizeConstraints = PlatformResizeConstraints()
 
     init(backend: Win32Backend, owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) {
         self.backend = backend
@@ -1170,6 +1172,8 @@ final class Win32Window: PlatformWindow {
             }
         }
         switch Int32(msg) {
+        case WM_SIZING:
+            return handleSizing(edge: Int32(truncatingIfNeeded: wParam), rect: UnsafeMutablePointer<RECT>(bitPattern: Int(lParam)))
         case WM_ENTERSIZEMOVE:
             // DefWindowProc runs its own message loop while the user drags or resizes the
             // window, so the backend's pump (which fires animation frames) is not reached:

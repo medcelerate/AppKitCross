@@ -165,7 +165,7 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         set { _accessibilityDescription = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/actiontemplatename
-    static public var actionTemplateName: String { unimplemented() }
+    static public var actionTemplateName: String { "NSActionTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/addrepresentation(_:)
     open func addRepresentation(_ imageRep: NSImageRep) {
         _representations.append(imageRep)
@@ -174,16 +174,16 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/addrepresentations(_:)
     open func addRepresentations(_ imageReps: [NSImageRep]) { for r in imageReps { addRepresentation(r) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/addtemplatename
-    static public var addTemplateName: String { unimplemented() }
+    static public var addTemplateName: String { "NSAddTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/advancedname
-    static public var advancedName: String { unimplemented() }
+    static public var advancedName: String { "NSAdvanced" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/alignmentrect
     open var alignmentRect: NSRect {
         get { _alignmentRect ?? NSRect(origin: .zero, size: _size) }
         set { _alignmentRect = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/applicationiconname
-    static public var applicationIconName: String { unimplemented() }
+    static public var applicationIconName: String { "NSApplicationIcon" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/backgroundcolor
     open var backgroundColor: NSColor {
         get { _backgroundColor }
@@ -194,11 +194,11 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         _representations.max { ($0.pixelsWide * $0.pixelsHigh) < ($1.pixelsWide * $1.pixelsHigh) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/bluetoothtemplatename
-    static public var bluetoothTemplateName: String { unimplemented() }
+    static public var bluetoothTemplateName: String { "NSBluetoothTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/bonjourname
-    static public var bonjourName: String { unimplemented() }
+    static public var bonjourName: String { "NSBonjour" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/bookmarkstemplatename
-    static public var bookmarksTemplateName: String { unimplemented() }
+    static public var bookmarksTemplateName: String { "NSBookmarksTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/cachemode
     open var cacheMode: NSImage.CacheMode {
         get { _cacheMode }
@@ -213,7 +213,7 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         set { _capInsets = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/cautionname
-    static public var cautionName: String { unimplemented() }
+    static public var cautionName: String { "NSCaution" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/cgimage(forproposedrect:context:hints:)
     open func cgImage(forProposedRect proposedDestRect: UnsafeMutablePointer<NSRect>?, context referenceContext: NSGraphicsContext?, hints: [NSImageRep.HintKey : Any]?) -> CGImage? {
         if !Thread.isMainThread {
@@ -228,11 +228,11 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         return MainActor.assumeIsolated { _cgImage() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/colorpanelname
-    static public var colorPanelName: String { unimplemented() }
+    static public var colorPanelName: String { "NSColorPanel" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/columnviewtemplatename
-    static public var columnViewTemplateName: String { unimplemented() }
+    static public var columnViewTemplateName: String { "NSColumnViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/computername
-    static public var computerName: String { unimplemented() }
+    static public var computerName: String { "NSComputer" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/delegate
     open var delegate: (any NSImageDelegate)? {
         get { unimplemented() }
@@ -276,41 +276,41 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/drawrepresentation(_:in:)
     open func drawRepresentation(_ imageRep: NSImageRep, in rect: NSRect) -> Bool { imageRep.draw(in: rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/enterfullscreentemplatename
-    static public var enterFullScreenTemplateName: String { unimplemented() }
+    static public var enterFullScreenTemplateName: String { "NSEnterFullScreenTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/everyonename
-    static public var everyoneName: String { unimplemented() }
+    static public var everyoneName: String { "NSEveryone" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/exitfullscreentemplatename
-    static public var exitFullScreenTemplateName: String { unimplemented() }
+    static public var exitFullScreenTemplateName: String { "NSExitFullScreenTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/flowviewtemplatename
-    static public var flowViewTemplateName: String { unimplemented() }
+    static public var flowViewTemplateName: String { "NSFlowViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/folderburnablename
-    static public var folderBurnableName: String { unimplemented() }
+    static public var folderBurnableName: String { "NSFolderBurnable" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/foldername
-    static public var folderName: String { unimplemented() }
+    static public var folderName: String { "NSFolder" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/foldersmartname
-    static public var folderSmartName: String { unimplemented() }
+    static public var folderSmartName: String { "NSFolderSmart" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/followlinkfreestandingtemplatename
-    static public var followLinkFreestandingTemplateName: String { unimplemented() }
+    static public var followLinkFreestandingTemplateName: String { "NSFollowLinkFreestandingTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/fontpanelname
-    static public var fontPanelName: String { unimplemented() }
+    static public var fontPanelName: String { "NSFontPanel" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/gobacktemplatename
     @available(macOS 10.12, *)
-    static public var goBackTemplateName: String { unimplemented() }
+    static public var goBackTemplateName: String { "NSGoBackTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/goforwardtemplatename
     @available(macOS 10.12, *)
-    static public var goForwardTemplateName: String { unimplemented() }
+    static public var goForwardTemplateName: String { "NSGoForwardTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/golefttemplatename
-    static public var goLeftTemplateName: String { unimplemented() }
+    static public var goLeftTemplateName: String { "NSGoLeftTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/gorighttemplatename
-    static public var goRightTemplateName: String { unimplemented() }
+    static public var goRightTemplateName: String { "NSGoRightTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/hittest(_:withdestinationrect:context:hints:flipped:)
     open func hitTest(_ testRectDestSpace: NSRect, withDestinationRect imageRectDestSpace: NSRect, context: NSGraphicsContext?, hints: [NSImageRep.HintKey : Any]?, flipped: Bool) -> Bool { testRectDestSpace.intersects(imageRectDestSpace) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/hometemplatename
-    static public var homeTemplateName: String { unimplemented() }
+    static public var homeTemplateName: String { "NSHomeTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/ichattheatertemplatename
-    static public var iChatTheaterTemplateName: String { unimplemented() }
+    static public var iChatTheaterTemplateName: String { "NSIChatTheaterTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/iconviewtemplatename
-    static public var iconViewTemplateName: String { unimplemented() }
+    static public var iconViewTemplateName: String { "NSIconViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/imagefiletypes()
     public class func imageFileTypes() -> [String] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/imagepasteboardtypes()
@@ -324,9 +324,9 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/imageunfilteredtypes
     class public var imageUnfilteredTypes: [String] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/infoname
-    static public var infoName: String { unimplemented() }
+    static public var infoName: String { "NSInfo" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/invaliddatafreestandingtemplatename
-    static public var invalidDataFreestandingTemplateName: String { unimplemented() }
+    static public var invalidDataFreestandingTemplateName: String { "NSInvalidDataFreestandingTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/istemplate
     open var isTemplate: Bool {
         get { _isTemplate }
@@ -337,9 +337,9 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/layercontents(forcontentsscale:)
     open func layerContents(forContentsScale layerContentsScale: CGFloat) -> Any { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/leftfacingtriangletemplatename
-    static public var leftFacingTriangleTemplateName: String { unimplemented() }
+    static public var leftFacingTriangleTemplateName: String { "NSLeftFacingTriangleTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/listviewtemplatename
-    static public var listViewTemplateName: String { unimplemented() }
+    static public var listViewTemplateName: String { "NSListViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/locale
     @available(macOS 14.0, *)
     open var locale: Locale? { unimplemented() }
@@ -360,9 +360,9 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/locklockedtemplatename
-    static public var lockLockedTemplateName: String { unimplemented() }
+    static public var lockLockedTemplateName: String { "NSLockLockedTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/lockunlockedtemplatename
-    static public var lockUnlockedTemplateName: String { unimplemented() }
+    static public var lockUnlockedTemplateName: String { "NSLockUnlockedTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/matchesonmultipleresolution
     open var matchesOnMultipleResolution: Bool {
         get { _matchesOnMultipleResolution }
@@ -374,40 +374,40 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/menumixedstatetemplatename
-    static public var menuMixedStateTemplateName: String { unimplemented() }
+    static public var menuMixedStateTemplateName: String { "NSMenuMixedStateTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/menuonstatetemplatename
-    static public var menuOnStateTemplateName: String { unimplemented() }
+    static public var menuOnStateTemplateName: String { "NSMenuOnStateTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/mobilemename
-    static public var mobileMeName: String { unimplemented() }
+    static public var mobileMeName: String { "NSMobileMe" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/multipledocumentsname
-    static public var multipleDocumentsName: String { unimplemented() }
+    static public var multipleDocumentsName: String { "NSMultipleDocuments" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/name()
     open func name() -> NSImage.Name? { _name }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/networkname
-    static public var networkName: String { unimplemented() }
+    static public var networkName: String { "NSNetwork" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/pathtemplatename
-    static public var pathTemplateName: String { unimplemented() }
+    static public var pathTemplateName: String { "NSPathTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/preferencesgeneralname
-    static public var preferencesGeneralName: String { unimplemented() }
+    static public var preferencesGeneralName: String { "NSPreferencesGeneral" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/preferscolormatch
     open var prefersColorMatch: Bool {
         get { _prefersColorMatch }
         set { _prefersColorMatch = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/quicklooktemplatename
-    static public var quickLookTemplateName: String { unimplemented() }
+    static public var quickLookTemplateName: String { "NSQuickLookTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/recache()
     open func recache() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/recommendedlayercontentsscale(_:)
     open func recommendedLayerContentsScale(_ preferredContentsScale: CGFloat) -> CGFloat { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/refreshfreestandingtemplatename
-    static public var refreshFreestandingTemplateName: String { unimplemented() }
+    static public var refreshFreestandingTemplateName: String { "NSRefreshFreestandingTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/refreshtemplatename
-    static public var refreshTemplateName: String { unimplemented() }
+    static public var refreshTemplateName: String { "NSRefreshTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/removerepresentation(_:)
     open func removeRepresentation(_ imageRep: NSImageRep) { _representations.removeAll { $0 === imageRep } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/removetemplatename
-    static public var removeTemplateName: String { unimplemented() }
+    static public var removeTemplateName: String { "NSRemoveTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/representations
     open var representations: [NSImageRep] { _representations }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/resizingmode
@@ -417,9 +417,9 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         set { _resizingMode = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/revealfreestandingtemplatename
-    static public var revealFreestandingTemplateName: String { unimplemented() }
+    static public var revealFreestandingTemplateName: String { "NSRevealFreestandingTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/rightfacingtriangletemplatename
-    static public var rightFacingTriangleTemplateName: String { unimplemented() }
+    static public var rightFacingTriangleTemplateName: String { "NSRightFacingTriangleTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/setname(_:)
     open func setName(_ string: NSImage.Name?) -> Bool {
         if let old = _name { NSImage._named[old] = nil }
@@ -428,28 +428,28 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/sharetemplatename
-    static public var shareTemplateName: String { unimplemented() }
+    static public var shareTemplateName: String { "NSShareTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/size
     open var size: NSSize {
         get { _size }
         set { _size = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/slideshowtemplatename
-    static public var slideshowTemplateName: String { unimplemented() }
+    static public var slideshowTemplateName: String { "NSSlideshowTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/smartbadgetemplatename
-    static public var smartBadgeTemplateName: String { unimplemented() }
+    static public var smartBadgeTemplateName: String { "NSSmartBadgeTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/statusavailablename
-    static public var statusAvailableName: String { unimplemented() }
+    static public var statusAvailableName: String { "NSStatusAvailable" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/statusnonename
-    static public var statusNoneName: String { unimplemented() }
+    static public var statusNoneName: String { "NSStatusNone" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/statuspartiallyavailablename
-    static public var statusPartiallyAvailableName: String { unimplemented() }
+    static public var statusPartiallyAvailableName: String { "NSStatusPartiallyAvailable" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/statusunavailablename
-    static public var statusUnavailableName: String { unimplemented() }
+    static public var statusUnavailableName: String { "NSStatusUnavailable" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/stopprogressfreestandingtemplatename
-    static public var stopProgressFreestandingTemplateName: String { unimplemented() }
+    static public var stopProgressFreestandingTemplateName: String { "NSStopProgressFreestandingTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/stopprogresstemplatename
-    static public var stopProgressTemplateName: String { unimplemented() }
+    static public var stopProgressTemplateName: String { "NSStopProgressTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/symbolconfiguration
     @available(macOS 12.0, *)
     open var symbolConfiguration: NSImage.SymbolConfiguration { unimplemented() }
@@ -461,240 +461,240 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     open func tiffRepresentation(using comp: NSBitmapImageRep.TIFFCompression, factor: Float) -> Data? { tiffRepresentation }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaradddetailtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAddDetailTemplateName: String { unimplemented() }
+    static public var touchBarAddDetailTemplateName: String { "NSTouchBarAddDetailTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraddtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAddTemplateName: String { unimplemented() }
+    static public var touchBarAddTemplateName: String { "NSTouchBarAddTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaralarmtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAlarmTemplateName: String { unimplemented() }
+    static public var touchBarAlarmTemplateName: String { "NSTouchBarAlarmTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudioinputmutetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioInputMuteTemplateName: String { unimplemented() }
+    static public var touchBarAudioInputMuteTemplateName: String { "NSTouchBarAudioInputMuteTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudioinputtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioInputTemplateName: String { unimplemented() }
+    static public var touchBarAudioInputTemplateName: String { "NSTouchBarAudioInputTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudiooutputmutetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioOutputMuteTemplateName: String { unimplemented() }
+    static public var touchBarAudioOutputMuteTemplateName: String { "NSTouchBarAudioOutputMuteTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudiooutputvolumehightemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioOutputVolumeHighTemplateName: String { unimplemented() }
+    static public var touchBarAudioOutputVolumeHighTemplateName: String { "NSTouchBarAudioOutputVolumeHighTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudiooutputvolumelowtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioOutputVolumeLowTemplateName: String { unimplemented() }
+    static public var touchBarAudioOutputVolumeLowTemplateName: String { "NSTouchBarAudioOutputVolumeLowTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudiooutputvolumemediumtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioOutputVolumeMediumTemplateName: String { unimplemented() }
+    static public var touchBarAudioOutputVolumeMediumTemplateName: String { "NSTouchBarAudioOutputVolumeMediumTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaraudiooutputvolumeofftemplatename
     @available(macOS 10.12, *)
-    static public var touchBarAudioOutputVolumeOffTemplateName: String { unimplemented() }
+    static public var touchBarAudioOutputVolumeOffTemplateName: String { "NSTouchBarAudioOutputVolumeOffTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarbookmarkstemplatename
     @available(macOS 10.12, *)
-    static public var touchBarBookmarksTemplateName: String { unimplemented() }
+    static public var touchBarBookmarksTemplateName: String { "NSTouchBarBookmarksTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcolorpickerfillname
     @available(macOS 10.12, *)
-    static public var touchBarColorPickerFillName: String { unimplemented() }
+    static public var touchBarColorPickerFillName: String { "NSTouchBarColorPickerFill" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcolorpickerfontname
     @available(macOS 10.12, *)
-    static public var touchBarColorPickerFontName: String { unimplemented() }
+    static public var touchBarColorPickerFontName: String { "NSTouchBarColorPickerFont" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcolorpickerstrokename
     @available(macOS 10.12, *)
-    static public var touchBarColorPickerStrokeName: String { unimplemented() }
+    static public var touchBarColorPickerStrokeName: String { "NSTouchBarColorPickerStroke" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcommunicationaudiotemplatename
     @available(macOS 10.12, *)
-    static public var touchBarCommunicationAudioTemplateName: String { unimplemented() }
+    static public var touchBarCommunicationAudioTemplateName: String { "NSTouchBarCommunicationAudioTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcommunicationvideotemplatename
     @available(macOS 10.12, *)
-    static public var touchBarCommunicationVideoTemplateName: String { unimplemented() }
+    static public var touchBarCommunicationVideoTemplateName: String { "NSTouchBarCommunicationVideoTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarcomposetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarComposeTemplateName: String { unimplemented() }
+    static public var touchBarComposeTemplateName: String { "NSTouchBarComposeTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbardeletetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarDeleteTemplateName: String { unimplemented() }
+    static public var touchBarDeleteTemplateName: String { "NSTouchBarDeleteTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbardownloadtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarDownloadTemplateName: String { unimplemented() }
+    static public var touchBarDownloadTemplateName: String { "NSTouchBarDownloadTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarenterfullscreentemplatename
     @available(macOS 10.12, *)
-    static public var touchBarEnterFullScreenTemplateName: String { unimplemented() }
+    static public var touchBarEnterFullScreenTemplateName: String { "NSTouchBarEnterFullScreenTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarexitfullscreentemplatename
     @available(macOS 10.12, *)
-    static public var touchBarExitFullScreenTemplateName: String { unimplemented() }
+    static public var touchBarExitFullScreenTemplateName: String { "NSTouchBarExitFullScreenTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarfastforwardtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarFastForwardTemplateName: String { unimplemented() }
+    static public var touchBarFastForwardTemplateName: String { "NSTouchBarFastForwardTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarfoldercopytotemplatename
     @available(macOS 10.12, *)
-    static public var touchBarFolderCopyToTemplateName: String { unimplemented() }
+    static public var touchBarFolderCopyToTemplateName: String { "NSTouchBarFolderCopyToTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarfoldermovetotemplatename
     @available(macOS 10.12, *)
-    static public var touchBarFolderMoveToTemplateName: String { unimplemented() }
+    static public var touchBarFolderMoveToTemplateName: String { "NSTouchBarFolderMoveToTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarfoldertemplatename
     @available(macOS 10.12, *)
-    static public var touchBarFolderTemplateName: String { unimplemented() }
+    static public var touchBarFolderTemplateName: String { "NSTouchBarFolderTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbargetinfotemplatename
     @available(macOS 10.12, *)
-    static public var touchBarGetInfoTemplateName: String { unimplemented() }
+    static public var touchBarGetInfoTemplateName: String { "NSTouchBarGetInfoTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbargobacktemplatename
     @available(macOS 10.12, *)
-    static public var touchBarGoBackTemplateName: String { unimplemented() }
+    static public var touchBarGoBackTemplateName: String { "NSTouchBarGoBackTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbargodowntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarGoDownTemplateName: String { unimplemented() }
+    static public var touchBarGoDownTemplateName: String { "NSTouchBarGoDownTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbargoforwardtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarGoForwardTemplateName: String { unimplemented() }
+    static public var touchBarGoForwardTemplateName: String { "NSTouchBarGoForwardTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbargouptemplatename
     @available(macOS 10.12, *)
-    static public var touchBarGoUpTemplateName: String { unimplemented() }
+    static public var touchBarGoUpTemplateName: String { "NSTouchBarGoUpTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarhistorytemplatename
     @available(macOS 10.12, *)
-    static public var touchBarHistoryTemplateName: String { unimplemented() }
+    static public var touchBarHistoryTemplateName: String { "NSTouchBarHistoryTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbariconviewtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarIconViewTemplateName: String { unimplemented() }
+    static public var touchBarIconViewTemplateName: String { "NSTouchBarIconViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarlistviewtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarListViewTemplateName: String { unimplemented() }
+    static public var touchBarListViewTemplateName: String { "NSTouchBarListViewTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarmailtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarMailTemplateName: String { unimplemented() }
+    static public var touchBarMailTemplateName: String { "NSTouchBarMailTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarnewfoldertemplatename
     @available(macOS 10.12, *)
-    static public var touchBarNewFolderTemplateName: String { unimplemented() }
+    static public var touchBarNewFolderTemplateName: String { "NSTouchBarNewFolderTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarnewmessagetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarNewMessageTemplateName: String { unimplemented() }
+    static public var touchBarNewMessageTemplateName: String { "NSTouchBarNewMessageTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaropeninbrowsertemplatename
     @available(macOS 10.12, *)
-    static public var touchBarOpenInBrowserTemplateName: String { unimplemented() }
+    static public var touchBarOpenInBrowserTemplateName: String { "NSTouchBarOpenInBrowserTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarpausetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarPauseTemplateName: String { unimplemented() }
+    static public var touchBarPauseTemplateName: String { "NSTouchBarPauseTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarplaypausetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarPlayPauseTemplateName: String { unimplemented() }
+    static public var touchBarPlayPauseTemplateName: String { "NSTouchBarPlayPauseTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarplaytemplatename
     @available(macOS 10.12, *)
-    static public var touchBarPlayTemplateName: String { unimplemented() }
+    static public var touchBarPlayTemplateName: String { "NSTouchBarPlayTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarplayheadtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarPlayheadTemplateName: String { unimplemented() }
+    static public var touchBarPlayheadTemplateName: String { "NSTouchBarPlayheadTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarquicklooktemplatename
     @available(macOS 10.12, *)
-    static public var touchBarQuickLookTemplateName: String { unimplemented() }
+    static public var touchBarQuickLookTemplateName: String { "NSTouchBarQuickLookTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrecordstarttemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRecordStartTemplateName: String { unimplemented() }
+    static public var touchBarRecordStartTemplateName: String { "NSTouchBarRecordStartTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrecordstoptemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRecordStopTemplateName: String { unimplemented() }
+    static public var touchBarRecordStopTemplateName: String { "NSTouchBarRecordStopTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrefreshtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRefreshTemplateName: String { unimplemented() }
+    static public var touchBarRefreshTemplateName: String { "NSTouchBarRefreshTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarremovetemplatename
     @available(macOS 10.13, *)
-    static public var touchBarRemoveTemplateName: String { unimplemented() }
+    static public var touchBarRemoveTemplateName: String { "NSTouchBarRemoveTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrewindtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRewindTemplateName: String { unimplemented() }
+    static public var touchBarRewindTemplateName: String { "NSTouchBarRewindTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrotatelefttemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRotateLeftTemplateName: String { unimplemented() }
+    static public var touchBarRotateLeftTemplateName: String { "NSTouchBarRotateLeftTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarrotaterighttemplatename
     @available(macOS 10.12, *)
-    static public var touchBarRotateRightTemplateName: String { unimplemented() }
+    static public var touchBarRotateRightTemplateName: String { "NSTouchBarRotateRightTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarsearchtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSearchTemplateName: String { unimplemented() }
+    static public var touchBarSearchTemplateName: String { "NSTouchBarSearchTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarsharetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarShareTemplateName: String { unimplemented() }
+    static public var touchBarShareTemplateName: String { "NSTouchBarShareTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarsidebartemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSidebarTemplateName: String { unimplemented() }
+    static public var touchBarSidebarTemplateName: String { "NSTouchBarSidebarTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipahead15secondstemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipAhead15SecondsTemplateName: String { unimplemented() }
+    static public var touchBarSkipAhead15SecondsTemplateName: String { "NSTouchBarSkipAhead15SecondsTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipahead30secondstemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipAhead30SecondsTemplateName: String { unimplemented() }
+    static public var touchBarSkipAhead30SecondsTemplateName: String { "NSTouchBarSkipAhead30SecondsTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipaheadtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipAheadTemplateName: String { unimplemented() }
+    static public var touchBarSkipAheadTemplateName: String { "NSTouchBarSkipAheadTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipback15secondstemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipBack15SecondsTemplateName: String { unimplemented() }
+    static public var touchBarSkipBack15SecondsTemplateName: String { "NSTouchBarSkipBack15SecondsTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipback30secondstemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipBack30SecondsTemplateName: String { unimplemented() }
+    static public var touchBarSkipBack30SecondsTemplateName: String { "NSTouchBarSkipBack30SecondsTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskipbacktemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipBackTemplateName: String { unimplemented() }
+    static public var touchBarSkipBackTemplateName: String { "NSTouchBarSkipBackTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskiptoendtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipToEndTemplateName: String { unimplemented() }
+    static public var touchBarSkipToEndTemplateName: String { "NSTouchBarSkipToEndTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarskiptostarttemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSkipToStartTemplateName: String { unimplemented() }
+    static public var touchBarSkipToStartTemplateName: String { "NSTouchBarSkipToStartTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarslideshowtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarSlideshowTemplateName: String { unimplemented() }
+    static public var touchBarSlideshowTemplateName: String { "NSTouchBarSlideshowTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartagicontemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTagIconTemplateName: String { unimplemented() }
+    static public var touchBarTagIconTemplateName: String { "NSTouchBarTagIconTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextboldtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextBoldTemplateName: String { unimplemented() }
+    static public var touchBarTextBoldTemplateName: String { "NSTouchBarTextBoldTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextboxtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextBoxTemplateName: String { unimplemented() }
+    static public var touchBarTextBoxTemplateName: String { "NSTouchBarTextBoxTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextcenteraligntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextCenterAlignTemplateName: String { unimplemented() }
+    static public var touchBarTextCenterAlignTemplateName: String { "NSTouchBarTextCenterAlignTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextitalictemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextItalicTemplateName: String { unimplemented() }
+    static public var touchBarTextItalicTemplateName: String { "NSTouchBarTextItalicTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextjustifiedaligntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextJustifiedAlignTemplateName: String { unimplemented() }
+    static public var touchBarTextJustifiedAlignTemplateName: String { "NSTouchBarTextJustifiedAlignTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextleftaligntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextLeftAlignTemplateName: String { unimplemented() }
+    static public var touchBarTextLeftAlignTemplateName: String { "NSTouchBarTextLeftAlignTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextlisttemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextListTemplateName: String { unimplemented() }
+    static public var touchBarTextListTemplateName: String { "NSTouchBarTextListTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextrightaligntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextRightAlignTemplateName: String { unimplemented() }
+    static public var touchBarTextRightAlignTemplateName: String { "NSTouchBarTextRightAlignTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextstrikethroughtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextStrikethroughTemplateName: String { unimplemented() }
+    static public var touchBarTextStrikethroughTemplateName: String { "NSTouchBarTextStrikethroughTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbartextunderlinetemplatename
     @available(macOS 10.12, *)
-    static public var touchBarTextUnderlineTemplateName: String { unimplemented() }
+    static public var touchBarTextUnderlineTemplateName: String { "NSTouchBarTextUnderlineTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbaruseraddtemplatename
     @available(macOS 10.12, *)
-    static public var touchBarUserAddTemplateName: String { unimplemented() }
+    static public var touchBarUserAddTemplateName: String { "NSTouchBarUserAddTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarusergrouptemplatename
     @available(macOS 10.12, *)
-    static public var touchBarUserGroupTemplateName: String { unimplemented() }
+    static public var touchBarUserGroupTemplateName: String { "NSTouchBarUserGroupTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarusertemplatename
     @available(macOS 10.12, *)
-    static public var touchBarUserTemplateName: String { unimplemented() }
+    static public var touchBarUserTemplateName: String { "NSTouchBarUserTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarvolumedowntemplatename
     @available(macOS 10.12, *)
-    static public var touchBarVolumeDownTemplateName: String { unimplemented() }
+    static public var touchBarVolumeDownTemplateName: String { "NSTouchBarVolumeDownTemplate" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/touchbarvolumeuptemplatename
     @available(macOS 10.12, *)
-    static public var touchBarVolumeUpTemplateName: String { unimplemented() }
+    static public var touchBarVolumeUpTemplateName: String { "NSTouchBarVolumeUpTemplate" }
     // SKIPPED (CoreTransferable.TransferRepresentation): static var transferRepresentation: some TransferRepresentation { get }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/trashemptyname
-    static public var trashEmptyName: String { unimplemented() }
+    static public var trashEmptyName: String { "NSTrashEmpty" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/trashfullname
-    static public var trashFullName: String { unimplemented() }
+    static public var trashFullName: String { "NSTrashFull" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/unlockfocus()
     open func unlockFocus() {
         MainActor.assumeIsolated {
@@ -710,13 +710,13 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/useraccountsname
-    static public var userAccountsName: String { unimplemented() }
+    static public var userAccountsName: String { "NSUserAccounts" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/usergroupname
-    static public var userGroupName: String { unimplemented() }
+    static public var userGroupName: String { "NSUserGroup" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/userguestname
-    static public var userGuestName: String { unimplemented() }
+    static public var userGuestName: String { "NSUserGuest" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/username
-    static public var userName: String { unimplemented() }
+    static public var userName: String { "NSUser" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/usesepsonresolutionmismatch
     open var usesEPSOnResolutionMismatch: Bool {
         get { _usesEPSOnResolutionMismatch }

@@ -31,6 +31,9 @@ open class NSTrackingArea: NSObject, NSCopying, NSCoding {
     @MainActor internal weak var _view: NSView?
     /// Whether the pointer was inside at the last evaluation; `assumeInside` starts it true.
     @MainActor internal var _isInside = false
+    /// Set for an area `NSView.addTrackingRect` made: its events carry the tag and data.
+    @MainActor internal var _legacyTag: Int? = nil
+    @MainActor internal var _legacyUserData: UnsafeMutableRawPointer? = nil
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstrackingarea/init(rect:options:owner:userinfo:)
     public init(rect: NSRect, options: NSTrackingArea.Options = [], owner: Any?, userInfo: [AnyHashable : Any]? = nil) {
