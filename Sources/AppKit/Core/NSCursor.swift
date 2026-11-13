@@ -16,6 +16,11 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor
 open class NSCursor: NSObject, NSSecureCoding, NSCoding {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift (a cursor
+    /// is the value of the `.cursor` attribute).
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     // MARK: Storage
     internal let _kind: PlatformCursor
     private let _image: NSImage
