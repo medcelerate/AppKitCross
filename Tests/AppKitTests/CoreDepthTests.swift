@@ -827,6 +827,24 @@ final class CoreDepthBitmapTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(back.colorAt(x: 0, y: 0)!.alphaComponent, 0, accuracy: 0.01)
     }
 
+    /// The platform codec (ImageIO, cairo, WIC) keeps a half-transparent pixel's colour:
+    /// premultiplied pixels in, straight alpha in the PNG, premultiplied pixels out.
+    func testPlatformPNGCodecKeepsHalfAlphaColour() throws {
+        // One pixel, premultiplied BGRA: red at 50% alpha is (B 0, G 0, R 128, A 128).
+        let image = try XCTUnwrap(NSBitmapImageRep._makeBGRAImage(width: 2, height: 1, bytes: [0, 0, 128, 128, 255, 0, 0, 255]))
+        let png = try XCTUnwrap(Platform.imageCodec.encode(image, format: "public.png", quality: 1))
+        let back = try XCTUnwrap(Platform.imageCodec.decode(png))
+        let px = NSBitmapImageRep._rgbaPixels(of: back)
+        XCTAssertEqual(Int(px.bytes[0]), 255, accuracy: 3, "straight red of the half-alpha pixel")
+        XCTAssertEqual(Int(px.bytes[3]), 128, accuracy: 2)
+        XCTAssertEqual(Array(px.bytes[4..<8]), [0, 0, 255, 255], "the opaque blue pixel")
+        // The PNG itself stores straight alpha: another decoder (our own TIFF path aside)
+        // reads the same colour through NSBitmapImageRep.
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: png))
+        XCTAssertEqual(rep.colorAt(x: 0, y: 0)!.redComponent, 1, accuracy: 0.02)
+        XCTAssertEqual(rep.colorAt(x: 0, y: 0)!.alphaComponent, 0.5, accuracy: 0.02)
+    }
+
     func testTIFFAndBMPWriters() throws {
         let r = rgbaRep(3, 2)
         r.setColor(.red, atX: 0, y: 0); r.setColor(NSColor(deviceRed: 0, green: 1, blue: 0, alpha: 0.5), atX: 2, y: 1)
