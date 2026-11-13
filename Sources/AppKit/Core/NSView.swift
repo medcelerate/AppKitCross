@@ -433,7 +433,10 @@ import CoreText
     /// Milliseconds on a monotonic clock, for `_traceFrames` lines.
     public static func _traceClock() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
 
+    /// Every invalidation since launch (tests measure what an update costs).
+    nonisolated(unsafe) public static var _invalidationCount = 0
     private func _invalidate(_ rect: NSRect) {
+        NSView._invalidationCount &+= 1
         if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {

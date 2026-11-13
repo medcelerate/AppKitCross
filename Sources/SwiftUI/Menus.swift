@@ -16,21 +16,34 @@ struct _PopUp: View, _PrimitiveView {
 @MainActor
 final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
     var titles: [String]
+    var selected: Int
     var onSelect: (Int) -> Void
+    /// Every body evaluation makes a fresh primitive whose control is thrown away once
+    /// `update(from:)` has copied its values into the attached one, so the items are
+    /// added only when the primitive attaches: a 400-item picker (every time zone) built
+    /// into a throwaway button on each pass cost hundreds of invalidations a second.
     init(titles: [String], selected: Int, onSelect: @escaping (Int) -> Void) {
         self.titles = titles
+        self.selected = selected
         self.onSelect = onSelect
         let b = NSPopUpButton(frame: .zero, pullsDown: false)
-        b.addItems(withTitles: titles)
-        b.selectItem(at: selected)
         super.init(control: b)
         b.target = b
         b.action = Selector(("swiftUIPopUpAction:"))
         b.setActionHandler(for: Selector(("swiftUIPopUpAction:"))) { [weak self] _ in
             guard let self else { return }
+            self.selected = self.control.indexOfSelectedItem
             self.onSelect(self.control.indexOfSelectedItem)
         }
-        b.sizeToFit()
+    }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        if control.numberOfItems != titles.count {
+            control.removeAllItems()
+            control.addItems(withTitles: titles)
+            control.selectItem(at: selected)
+            control.sizeToFit()
+        }
     }
     override func update(from other: _Primitive) {
         super.update(from: other)
@@ -43,8 +56,9 @@ final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
             control.addItems(withTitles: titles)
             changed = true
         }
-        if control.indexOfSelectedItem != o.control.indexOfSelectedItem {
-            control.selectItem(at: o.control.indexOfSelectedItem)
+        if o.selected != selected || control.indexOfSelectedItem != o.selected {
+            selected = o.selected
+            control.selectItem(at: o.selected)
             changed = true
         }
         // Resizing on every update invalidated the control (and so the frame) each pass.
