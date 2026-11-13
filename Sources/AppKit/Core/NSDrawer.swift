@@ -258,6 +258,11 @@ import CoreText
         if let w = _window { return w }
         let w = _NSDrawerWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1), styleMask: [.borderless], backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
+        // No shadow of its own: the drawer reads as part of its parent, and on Win32 a
+        // borderless window's shadow is a WS_THICKFRAME frame (ADR-0016), which Windows
+        // never sizes below its border width (about 14 px), so the slide could not start
+        // at the parent's edge.
+        w.hasShadow = false
         w.drawer = self
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
         w.contentView = root
