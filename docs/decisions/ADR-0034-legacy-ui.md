@@ -120,7 +120,10 @@ plus a 6-point border. `open()` uses the preferred edge unless the drawer would 
 screen there and fits on the opposite edge. The parent's moves and resizes carry the drawer;
 the parent closing closes it. Dragging the outer border resizes the content through
 `drawerWillResizeContents(_:to:)` and the size limits. Delegate and notifications follow
-AppKit's order (should, will, did); reopening while closing reverses the slide.
+AppKit's order (should, will, did); reopening while closing reverses the slide. The drawer
+window has no shadow of its own: on Win32 a borderless window's shadow is a `WS_THICKFRAME`
+frame (ADR-0016), and Windows keeps such a window at least its border width (about 14 px),
+which stopped the slide from starting at the parent's edge.
 
 ### NSScrubber
 
