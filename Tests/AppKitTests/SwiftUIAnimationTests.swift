@@ -177,7 +177,8 @@ final class SwiftUIHostedAnimationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testOpacityAndTransitionReachTheHostedScene() {
+    func testOpacityAndTransitionReachTheHostedScene() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             var clock: CFTimeInterval = 50
             let saved = CARuntime.now
@@ -252,7 +253,8 @@ final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
 
     /// A displayed window stays displayed: no pass re-invalidates it, so the platform is
     /// not asked to repaint forever (which on Windows starves the frame timer).
-    func testDisplayAndAnimationsSettle() {
+    func testDisplayAndAnimationsSettle() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             var clock: CFTimeInterval = 10
             let saved = CARuntime.now
@@ -321,3 +323,4 @@ final class SwiftUIDisplaySettlesTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

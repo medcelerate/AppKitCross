@@ -460,7 +460,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testTableShufflesWithHeadersAndRowsOutOfViewMatchTheSnapshot() {
+    func testTableShufflesWithHeadersAndRowsOutOfViewMatchTheSnapshot() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         // The Layout Demo's Shuffle, after the table has drawn: two sections with header
         // rows, more rows than the view shows, items moving across the header.
         MainActor.assumeIsolated {
@@ -528,7 +529,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testTableRowsStayRightWhenTheTableIsQueriedDuringAnUpdate() {
+    func testTableRowsStayRightWhenTheTableIsQueriedDuringAnUpdate() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let f = TableFixture(height: 150)
             f.source.sectionHeaderViewProvider = { _, _, section in
@@ -556,7 +558,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Collection
 
-    func testCollectionApplyBatchesSectionsAndItems() {
+    func testCollectionApplyBatchesSectionsAndItems() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let f = CollectionFixture()
             XCTAssertTrue(f.cv.dataSource === f.source)
@@ -578,7 +581,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCollectionApplyMovesItemsAcrossSectionsAndKeepsTheirItems() {
+    func testCollectionApplyMovesItemsAcrossSectionsAndKeepsTheirItems() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let f = CollectionFixture()
             f.source.apply(snapshot([("one", ["a", "b", "c"]), ("two", ["d", "e"])]), animatingDifferences: false)
@@ -599,7 +603,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCollectionApplyMovesSectionsWithItemChangesInside() {
+    func testCollectionApplyMovesSectionsWithItemChangesInside() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let f = CollectionFixture(headers: true)
             var headerRequests: [IndexPath] = []
@@ -640,6 +645,7 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
     /// A reload re-requests every cell; the reused cell views are relabelled while detached,
     /// and a natively hosted window (Win32's DirectComposition) must re-rasterise them.
     func testReloadRedrawsReusedViewsUnderNativeHosting() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             guard Platform.backend is HostBackend else { throw XCTSkip("uses the host's reference compositor") }
             let t = TableFixture()
@@ -674,7 +680,8 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCollectionRandomizedAppliesMatchTheSnapshot() {
+    func testCollectionRandomizedAppliesMatchTheSnapshot() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let f = CollectionFixture()
             var rng = LCG(state: 99)
@@ -701,3 +708,4 @@ final class DiffableTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

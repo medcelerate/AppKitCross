@@ -9,7 +9,8 @@ import QuartzCore
 #endif
 
 final class RepaintLoopTests: XCTestCase {
-    func testControlsRowsSettleAfterEachFrame() {
+    func testControlsRowsSettleAfterEachFrame() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             var clock: CFTimeInterval = 100
             let savedNow = CARuntime.now
@@ -86,3 +87,4 @@ final class RepaintLoopTests: XCTestCase {
         }
     }
 }
+

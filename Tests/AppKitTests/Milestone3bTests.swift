@@ -7,7 +7,8 @@ import XCTest
 final class WindowChromeTests: XCTestCase, @unchecked Sendable {
     @MainActor private func host(_ w: NSWindow) -> HostWindow { Mirror(reflecting: w).descendant("_platform") as! HostWindow }
 
-    func testChromeFollowsWindowProperties() {
+    func testChromeFollowsWindowProperties() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             var c = host(w).chrome
@@ -31,14 +32,16 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDragRegions() {
+    func testDragRegions() throws {
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
             let button = NSButton(title: "Close", target: nil, action: nil)
             button.frame = NSRect(x: 10, y: 160, width: 80, height: 28)
             w.contentView!.addSubview(button)
-            // Top band drags the window; a button there does not; the body is content.
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 190)), .caption)
+            // Top band drags the window; a button there does not; the body is content. The
+            // point is clear of the standard buttons in either style (traffic lights at the
+            // left, Windows caption buttons over the trailing 138 points; ADR-0022).
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 120, y: 190)), .caption)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 20, y: 170)), .client)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 150, y: 100)), .client)
             w.isMovableByWindowBackground = true
@@ -48,7 +51,8 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testVisualEffectViewRequestsBackdropAndDrawsTint() {
+    func testVisualEffectViewRequestsBackdropAndDrawsTint() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
@@ -80,7 +84,8 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
 }
 
 final class AppearanceTests: XCTestCase, @unchecked Sendable {
-    func testWindowBackgroundFollowsTheWindowAppearance() {
+    func testWindowBackgroundFollowsTheWindowAppearance() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 60, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
             w.makeKeyAndOrderFront(nil)
@@ -121,7 +126,8 @@ final class AppearanceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHUDEffectViewDrawsFieldsDark() {
+    func testHUDEffectViewDrawsFieldsDark() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -159,3 +165,5 @@ final class AppearanceTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+
