@@ -62,11 +62,18 @@ final class Milestone1Tests: XCTestCase, @unchecked Sendable {
             let w = makeWindow()
             XCTAssertEqual(w.contentView?.frame, NSRect(x: 0, y: 0, width: 400, height: 300))
             XCTAssertEqual(w.contentRect(forFrameRect: w.frame).size, NSSize(width: 400, height: 300))
-            XCTAssertEqual(w.frame.height, 300 + HostWindow.titleBarHeight)
-            XCTAssertEqual(w.frame.origin, NSPoint(x: 100, y: 100))
+            // The frame is the content plus what the backend draws around it: the host's
+            // 28pt title bar; on Win32 the system caption and the invisible resize borders.
+            XCTAssertEqual(w.frame, w.frameRect(forContentRect: NSRect(x: 100, y: 100, width: 400, height: 300)))
+            XCTAssertEqual(w.contentRect(forFrameRect: w.frame).origin, NSPoint(x: 100, y: 100))
+            if Platform.backend is HostBackend {
+                XCTAssertEqual(w.frame.height, 300 + HostWindow.titleBarHeight)
+                XCTAssertEqual(w.frame.origin, NSPoint(x: 100, y: 100))
+            }
             XCTAssertEqual(w.convertToScreen(NSRect(x: 1, y: 2, width: 3, height: 4)), NSRect(x: 101, y: 102, width: 3, height: 4))
             XCTAssertEqual(w.convertPoint(fromScreen: NSPoint(x: 101, y: 102)), NSPoint(x: 1, y: 2))
-            XCTAssertEqual(w.backingScaleFactor, 2)
+            // The host backend simulates a 2x display; a platform window takes its monitor's scale.
+            XCTAssertEqual(w.backingScaleFactor, Platform.backend is HostBackend ? 2 : w.screen?.backingScaleFactor ?? 1)
             XCTAssertTrue(NSApplication.shared.windows.contains { $0 === w })
             w.close()
             XCTAssertFalse(NSApplication.shared.windows.contains { $0 === w })

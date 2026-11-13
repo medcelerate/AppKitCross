@@ -134,8 +134,22 @@ private func sendKey(_ chars: String, code: UInt16, to window: NSWindow) {
 }
 
 final class DocumentTests: XCTestCase, @unchecked Sendable {
+    private var savedSheetDuration: TimeInterval = 0
+
+    /// Sheets attach and detach at once (the platform backends slide them on the frame
+    /// clock, which these tests do not run): a rolling-up sheet is still visible and
+    /// would answer `visibleAlertButton` in place of the next one.
+    override func setUp() {
+        super.setUp()
+        MainActor.assumeIsolated {
+            savedSheetDuration = NSWindow._sheetAnimationDuration
+            NSWindow._sheetAnimationDuration = 0
+        }
+    }
+
     override func tearDown() {
         MainActor.assumeIsolated {
+            NSWindow._sheetAnimationDuration = savedSheetDuration
             for w in NSApplication.shared.windows { w.close() }
             NSDocumentController._shared?.clearRecentDocuments(nil)
             NSDocumentController._shared = nil

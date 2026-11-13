@@ -320,17 +320,30 @@ final class TextExtrasTests: XCTestCase, @unchecked Sendable {
             let pb = Win32Pasteboard()
             var pixels: [UInt32] = [0x00FF0000, 0x000000FF, 0x0000FF00, 0x00FFFFFF]
             guard let hbm = CreateBitmap(2, 2, 1, 32, &pixels) else { throw XCTSkip("CreateBitmap failed") }
-            guard OpenClipboard(nil) else { DeleteObject(HGDIOBJ(hbm)); throw XCTSkip("no clipboard on this runner") }
-            EmptyClipboard()
-            let placed = SetClipboardData(UINT(CF_BITMAP), HANDLE(hbm)) != nil
-            CloseClipboard()
+            // Placed as another application would: opened under an owner window (with a
+            // NULL owner SetClipboardData is documented to fail), emptied, CF_BITMAP only.
+            guard let placed = pb.withOpenClipboard({ () -> Bool in
+                EmptyClipboard()
+                return SetClipboardData(UINT(CF_BITMAP), HANDLE(hbm)) != nil
+            }) else { DeleteObject(HGDIOBJ(hbm)); throw XCTSkip("no clipboard on this runner") }
             guard placed else { DeleteObject(HGDIOBJ(hbm)); throw XCTSkip("SetClipboardData(CF_BITMAP) failed") }
+            let written = GetClipboardSequenceNumber()
             let entries = pb.read()
             XCTAssertFalse(pb.lastReadFailed)
-            let bmp = try XCTUnwrap(entries.first { $0.type == PlatformClipboardImage.bmpType }?.data, "types: \(entries.map(\.type))")
+            let formats: [UINT] = pb.withOpenClipboard { () -> [UINT] in
+                var all: [UINT] = []
+                var f = EnumClipboardFormats(0)
+                while f != 0 { all.append(f); f = EnumClipboardFormats(f) }
+                return all
+            } ?? []
+            let now = GetClipboardSequenceNumber()
+            if entries.isEmpty, now != written {
+                throw XCTSkip("another process replaced the clipboard between the write and the read (sequence \(written) -> \(now): a clipboard manager or a remote-desktop / VM clipboard sync)")
+            }
+            let bmp = try XCTUnwrap(entries.first { $0.type == PlatformClipboardImage.bmpType }?.data, "types: \(entries.map(\.type)), clipboard formats: \(formats), sequence \(written) -> \(now)")
             XCTAssertEqual(Array(bmp.prefix(2)), [0x42, 0x4D])
             XCTAssertEqual(NSImage(data: bmp)?.size, NSSize(width: 2, height: 2))
-            if OpenClipboard(nil) { EmptyClipboard(); CloseClipboard() }
+            _ = pb.withOpenClipboard { EmptyClipboard() }
         }
     }
     #endif

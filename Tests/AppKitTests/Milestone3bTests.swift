@@ -37,8 +37,10 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
             let button = NSButton(title: "Close", target: nil, action: nil)
             button.frame = NSRect(x: 10, y: 160, width: 80, height: 28)
             w.contentView!.addSubview(button)
-            // Top band drags the window; a button there does not; the body is content.
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 190)), .caption)
+            // Top band drags the window; a button there does not; the body is content. The
+            // point is clear of the standard buttons in either style (traffic lights at the
+            // left, Windows caption buttons over the trailing 138 points; ADR-0022).
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 120, y: 190)), .caption)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 20, y: 170)), .client)
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 150, y: 100)), .client)
             w.isMovableByWindowBackground = true

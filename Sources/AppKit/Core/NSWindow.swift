@@ -120,7 +120,7 @@ import CoreText
     /// `platformWindowDrawTitleBar` paints (ClientSideDecoration.swift).
     internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
     /// Traffic lights at the left (macOS, Linux) or Windows caption buttons at the right (ADR-0022).
-    internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.backend.windowButtonStyle }
+    internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.windowButtonStyle }
     /// What the standard buttons occupy at each edge of the title band (plus a gap), 0 when
     /// no buttons show there: what a toolbar or a title bar accessory lays out inside.
     internal var _windowButtonsLeadingInset: CGFloat {
@@ -2293,7 +2293,7 @@ import CoreText
     @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? {
         switch b {
         case .closeButton, .miniaturizeButton, .zoomButton:
-            let button = _NSWindowButton(kind: b, style: Platform.backend.windowButtonStyle)
+            let button = _NSWindowButton(kind: b, style: Platform.windowButtonStyle)
             button.isEnabled = b == .closeButton ? styleMask.contains(.closable) : b == .miniaturizeButton ? styleMask.contains(.miniaturizable) : styleMask.contains(.resizable)
             return button
         default: return nil
