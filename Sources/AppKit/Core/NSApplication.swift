@@ -86,6 +86,7 @@ import CoreText
 
     internal func _unregister(window: NSWindow) {
         _windows.removeAll { $0 === window }
+        _zOrder.removeAll { $0 == ObjectIdentifier(window) }
         if _keyWindow === window { _keyWindow = nil }
         if _mainWindow === window { _mainWindow = nil }
         // The last window closed: hidden windows (ended sheets, ordered-out panels) do not
@@ -414,7 +415,23 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/ordereddocuments
     @MainActor open var orderedDocuments: [NSDocument] { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderedwindows
-    @MainActor open var orderedWindows: [NSWindow] { _windows.filter { $0.isVisible } }
+    /// Front to back: the order windows were last ordered front (or back) in; windows
+    /// never ordered keep their registration order behind those (ADR-0036).
+    @MainActor open var orderedWindows: [NSWindow] {
+        let visible = _windows.filter { $0.isVisible }
+        let rank = Dictionary(_zOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return visible.enumerated().sorted { a, b in
+            let ra = rank[ObjectIdentifier(a.element)] ?? Int.max, rb = rank[ObjectIdentifier(b.element)] ?? Int.max
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element)
+    }
+    /// Window identities front first, as last ordered.
+    private var _zOrder: [ObjectIdentifier] = []
+    internal func _windowOrdered(_ window: NSWindow, front: Bool) {
+        let id = ObjectIdentifier(window)
+        _zOrder.removeAll { $0 == id }
+        if front { _zOrder.insert(id, at: 0) } else { _zOrder.append(id) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/postevent(_:atstart:)
     @MainActor open func postEvent(_ event: NSEvent, atStart: Bool) {
         if atStart { _eventQueue.insert(event, at: 0) } else { _eventQueue.append(event) }

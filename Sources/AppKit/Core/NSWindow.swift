@@ -2106,6 +2106,7 @@ import CoreText
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.orderBack()
+        NSApplication.shared._windowOrdered(self, front: false)
         if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfront(_:)
@@ -2115,6 +2116,7 @@ import CoreText
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.displayIfNeeded()
+        NSApplication.shared._windowOrdered(self, front: true)
         if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfrontregardless()

@@ -264,6 +264,9 @@ import CoreText
         CATransaction.setDisableActions(true)
         l.bounds = bounds
         l.position = _frame.origin
+        // The layer's anchor is the frame origin, so frame rotation is a turn about it.
+        let turn = CGAffineTransform(rotationAngle: _frameRotation * .pi / 180)
+        if _frameRotation != 0 || l.affineTransform() != .identity { l.setAffineTransform(_frameRotation == 0 ? .identity : turn) }
         CATransaction.commit()
     }
 
@@ -1220,6 +1223,7 @@ import CoreText
         set {
             guard newValue != _frameRotation else { return }
             _frameRotation = newValue
+            _syncLayerGeometry()
             _setNeedsUpdateTrackingAreas()
             _superview?.setNeedsDisplay(_superview?.bounds ?? .zero)
             if _postsFrameChangedNotifications {
