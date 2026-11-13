@@ -27,10 +27,14 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
     }
 
+    /// True where the tests run against the host workspace stub: the host backend on Windows and Linux, and always on Darwin (Platform.swift).
+    /// Keyed on the backend, not the environment, so the Darwin CI run, which sets no APPKITWIN_HOST_BACKEND, keeps its setup.
+    private var hasHostBackend: Bool { MainActor.assumeIsolated { Platform.backend is HostBackend } }
+
     override func setUp() {
         super.setUp()
-        // Skipped tests reach setUp too: touch NSApplication and the shared workspace only on the host backend.
-        guard ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == "1" else { return }
+        // Skipped tests reach setUp too: touch NSApplication and the shared workspace only when the test runs.
+        guard hasHostBackend else { return }
         try? FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         MainActor.assumeIsolated {
             _ = NSApplication.shared
@@ -42,7 +46,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         for o in observers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
         observers.removeAll()
         try? FileManager.default.removeItem(at: temp)
-        if ProcessInfo.processInfo.environment["APPKITWIN_HOST_BACKEND"] == "1" { MainActor.assumeIsolated { host.reset() } }
+        if hasHostBackend { MainActor.assumeIsolated { host.reset() } }
         super.tearDown()
     }
 
