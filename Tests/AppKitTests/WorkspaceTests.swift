@@ -57,7 +57,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSharedWorkspaceAndNotificationNames() {
+    func testSharedWorkspaceAndNotificationNames() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         XCTAssertTrue(NSWorkspace.shared === NSWorkspace.shared)
         XCTAssertEqual(NSWorkspace.didActivateApplicationNotification.rawValue, "NSWorkspaceDidActivateApplicationNotification")
         XCTAssertEqual(NSWorkspace.applicationUserInfoKey, "NSWorkspaceApplicationKey")
@@ -66,7 +67,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(NSWorkspace.shared.notificationCenter === NSWorkspace.shared.notificationCenter)
     }
 
-    func testRunningApplicationsContainTheCurrentApplication() {
+    func testRunningApplicationsContainTheCurrentApplication() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let current = NSRunningApplication.current
             XCTAssertTrue(current === NSRunningApplication.current)
@@ -95,7 +97,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testOpeningURLsReachesThePlatform() {
+    func testOpeningURLsReachesThePlatform() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let url = URL(string: "https://example.com/")!
             XCTAssertTrue(NSWorkspace.shared.open(url))
@@ -117,6 +120,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     }
 
     func testOpeningWithAnApplicationLaunchesAndReportsTheProcess() async throws {
+        try await requireHostBackendAsync("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         let app = file("editor", "#!/bin/sh\n")
         let txt = file("b.txt")
         let log = _NotificationLog()
@@ -175,7 +179,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(NSWorkspace.shared.urlForApplication(toOpen: txt)?.path, "/opt/other")
     }
 
-    func testOpenConfigurationCopies() {
+    func testOpenConfigurationCopies() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         let c = NSWorkspace.OpenConfiguration()
         XCTAssertTrue(c.activates); XCTAssertTrue(c.promptsUserIfNeeded); XCTAssertTrue(c.allowsRunningApplicationSubstitution)
         XCTAssertFalse(c.hides); XCTAssertFalse(c.createsNewApplicationInstance)
@@ -185,7 +190,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         XCTAssertFalse(copy === c)
     }
 
-    func testIconsComeFromThePlatformOrAreDrawn() {
+    func testIconsComeFromThePlatformOrAreDrawn() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let txt = NSWorkspace.shared.icon(forFileType: "txt")
             XCTAssertEqual(txt.size, NSSize(width: 32, height: 32))
@@ -221,6 +227,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     }
 
     func testFileTypesGoThroughUniformTypeIdentifiers() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         let txt = file("d.txt")
         XCTAssertEqual(try NSWorkspace.shared.type(ofFile: txt.path), "public.plain-text")
         XCTAssertEqual(try NSWorkspace.shared.type(ofFile: temp.path), "public.folder")
@@ -246,6 +253,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     }
 
     func testRecycleAndDuplicate() async throws {
+        try await requireHostBackendAsync("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         let a = file("e.txt"), b = file("f.txt")
         let log = _NotificationLog()
         record([NSWorkspace.didPerformFileOperationNotification], into: log)
@@ -281,7 +289,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     /// frontmost application, which refreshes the list mid-notification. The change must
     /// already be recorded, or the refresh posts it again without end (a stack overflow on
     /// Windows, inside the foreground hook's callback).
-    func testHandOffKeepsTheLaunchedApplicationObject() {
+    func testHandOffKeepsTheLaunchedApplicationObject() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             _ = NSWorkspace.shared.runningApplications
             let stub = PlatformRunningApplication(processIdentifier: 5151, localizedName: "notepad", bundleIdentifier: "notepad", executableURL: URL(fileURLWithPath: "/w/System32/notepad.exe"))
@@ -316,7 +325,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     /// A single-instance application already running takes the launch: the stub's hand-off
     /// goes to that process, whose object (the user's instance) is left alone; the stub's
     /// object terminates.
-    func testHandOffToARunningInstanceLeavesThatInstanceAlone() {
+    func testHandOffToARunningInstanceLeavesThatInstanceAlone() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             _ = NSWorkspace.shared.runningApplications
             let users = PlatformRunningApplication(processIdentifier: 2416, localizedName: "Notepad", bundleIdentifier: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
@@ -348,6 +358,7 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
     /// activation manager names the single instance): the workspace returns that process's
     /// existing object, as AppKit does, and posts no launch.
     func testLaunchAnsweredByARunningInstanceReturnsItsObject() async throws {
+        try await requireHostBackendAsync("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         let app = file("notepad", "#!/bin/sh\n")
         let users = PlatformRunningApplication(processIdentifier: 2416, localizedName: "Notepad", bundleIdentifier: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
                                                executableURL: URL(fileURLWithPath: "/w/WindowsApps/Notepad/Notepad.exe"), launchDate: Date(timeIntervalSinceNow: -600))
@@ -373,7 +384,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testObserverAskingForTheFrontmostApplicationDoesNotRecurse() {
+    func testObserverAskingForTheFrontmostApplicationDoesNotRecurse() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             NSApplication.shared.activate(ignoringOtherApps: true)
             _ = NSWorkspace.shared.runningApplications
@@ -409,7 +421,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testApplicationNotificationsFollowThePlatform() {
+    func testApplicationNotificationsFollowThePlatform() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let log = _NotificationLog()
             record([NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification,
@@ -471,7 +484,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testPowerSessionAndAccessibilityNotifications() {
+    func testPowerSessionAndAccessibilityNotifications() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let log = _NotificationLog()
             record([NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification, NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification,
@@ -498,7 +512,8 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDockTileBadgeReachesTheTaskbar() {
+    func testDockTileBadgeReachesTheTaskbar() throws {
+        try requireHostBackend("needs the host workspace stub (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let tile = NSApplication.shared.dockTile
             XCTAssertTrue(tile === NSApplication.shared.dockTile)
@@ -552,3 +567,4 @@ final class WorkspaceTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

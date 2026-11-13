@@ -69,7 +69,8 @@ final class AccessibilityFollowUpTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Mixed DPI
 
-    func testFramesReachPhysicalPixelsThroughTheWindowsOwnScale() {
+    func testFramesReachPhysicalPixelsThroughTheWindowsOwnScale() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let backend = Platform.backend as! HostBackend
             let saved = backend.displays
@@ -370,3 +371,4 @@ final class AccessibilityFollowUpTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

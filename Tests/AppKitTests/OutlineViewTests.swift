@@ -369,6 +369,7 @@ final class OutlineViewTests: XCTestCase, @unchecked Sendable {
     }
 
     func testDisclosureTrianglePixels() throws {
+        try requireHostBackend()
         // Reads HostWindow's last frame, so it only means something on the host backend.
         guard MainActor.assumeIsolated({ Platform.backend is HostBackend }) else {
             throw XCTSkip("pixel reads come from HostWindow (APPKITWIN_HOST_BACKEND=1)")
@@ -506,3 +507,4 @@ final class OutlineViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

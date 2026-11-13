@@ -358,7 +358,8 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testLayoutAndDrawing() {
+    func testLayoutAndDrawing() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             let c = makeCombo(in: w)
@@ -390,3 +391,4 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

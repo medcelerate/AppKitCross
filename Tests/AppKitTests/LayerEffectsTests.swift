@@ -23,7 +23,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
         return (data[i], data[i + 1], data[i + 2], data[i + 3])
     }
 
-    func testShadowIsBlurredAroundTheLayer() {
+    func testShadowIsBlurredAroundTheLayer() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let root = CALayer()
             root.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -49,7 +50,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testShadowOffsetFollowsTheLayerOrientation() {
+    func testShadowOffsetFollowsTheLayerOrientation() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             @MainActor func shadowAlpha(flipped: Bool) -> (above: UInt8, below: UInt8) {
                 let root = CALayer()
@@ -77,7 +79,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testGroupOpacityCompositesTheSubtreeOnce() {
+    func testGroupOpacityCompositesTheSubtreeOnce() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             @MainActor func overlapAlpha(group: Bool) -> UInt8 {
                 let root = CALayer()
@@ -102,7 +105,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testAlphaMaskUsesTheMaskLayersPixels() {
+    func testAlphaMaskUsesTheMaskLayersPixels() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let root = CALayer()
             root.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -132,7 +136,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testShapeMaskStillClips() {
+    func testShapeMaskStillClips() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let root = CALayer()
             root.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -152,7 +157,8 @@ final class LayerEffectsTests: XCTestCase, @unchecked Sendable {
 }
 
 final class SwiftUIShadowTests: XCTestCase, @unchecked Sendable {
-    func testShadowModifierDrawsBeyondTheViewsBounds() {
+    func testShadowModifierDrawsBeyondTheViewsBounds() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Probe: View {
                 var body: some View {
@@ -188,3 +194,4 @@ final class SwiftUIShadowTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

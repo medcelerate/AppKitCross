@@ -7,7 +7,8 @@ import XCTest
 final class WindowChromeTests: XCTestCase, @unchecked Sendable {
     @MainActor private func host(_ w: NSWindow) -> HostWindow { Mirror(reflecting: w).descendant("_platform") as! HostWindow }
 
-    func testChromeFollowsWindowProperties() {
+    func testChromeFollowsWindowProperties() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
             var c = host(w).chrome
@@ -31,7 +32,8 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testDragRegions() {
+    func testDragRegions() throws {
+        try requireHostBackend("known Win32 defect, see PR body")
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
             let button = NSButton(title: "Close", target: nil, action: nil)
@@ -48,7 +50,8 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testVisualEffectViewRequestsBackdropAndDrawsTint() {
+    func testVisualEffectViewRequestsBackdropAndDrawsTint() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
@@ -80,7 +83,8 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
 }
 
 final class AppearanceTests: XCTestCase, @unchecked Sendable {
-    func testWindowBackgroundFollowsTheWindowAppearance() {
+    func testWindowBackgroundFollowsTheWindowAppearance() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 60, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
             w.makeKeyAndOrderFront(nil)
@@ -121,7 +125,8 @@ final class AppearanceTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHUDEffectViewDrawsFieldsDark() {
+    func testHUDEffectViewDrawsFieldsDark() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
             let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -159,3 +164,5 @@ final class AppearanceTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+

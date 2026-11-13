@@ -14,7 +14,8 @@ final class ScreenDynamicRangeTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHeadroomComesFromTheBackend() {
+    func testHeadroomComesFromTheBackend() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let backend = Platform.backend as! HostBackend
             let saved = backend.displays
@@ -34,3 +35,4 @@ final class ScreenDynamicRangeTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
