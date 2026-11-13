@@ -185,6 +185,7 @@ extension App {
     public static func main() {
         let app = Self()
         let runner = _AppRunner(name: _AppRunner.defaultName)
+        runner._nameIsExecutableStem = _AppRunner.bundleName == nil
         runner.install(app)
         runner.run(scene: app.body)
         runner.installMenuBar()
@@ -195,8 +196,13 @@ extension App {
 /// Runs an App: creates the NSApplication, installs the delegate adaptor, opens windows.
 @MainActor
 public final class _AppRunner {
-    public let applicationName: String
+    public private(set) var applicationName: String
     public private(set) var windows: [NSWindow] = []
+    /// The runner of the running App (nil in tests that make their own).
+    static weak var _current: _AppRunner?
+    /// The name is the executable's file stem, not a bundle's: the main window's navigation
+    /// title is a better name and replaces it (`_adoptName`).
+    var _nameIsExecutableStem = false
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
     /// `.windowToolbarStyle(_:)` for the windows the next scene opens (Toolbar.swift).
@@ -211,13 +217,28 @@ public final class _AppRunner {
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
 
-    public init(name: String) { applicationName = name }
+    public init(name: String) {
+        applicationName = name
+        _AppRunner._current = self
+    }
+
+    /// Renames an app named after its executable (no bundle): the app menu follows.
+    func _adoptName(_ name: String) {
+        guard _nameIsExecutableStem, !name.isEmpty, name != applicationName else { return }
+        applicationName = name
+        if NSApplication.shared.mainMenu != nil { installMenuBar() }
+    }
+
+    static var bundleName: String? {
+        guard let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty else { return nil }
+        return n
+    }
 
     /// The bundle's name where there is an Info.plist, else the executable's name without
     /// its extension (Windows executables carry `.exe`; the app menu and window titles
     /// read "DailyTodo", not "DailyTodo.exe").
     static var defaultName: String {
-        if let bundleName = Bundle.main.infoDictionary?["CFBundleName"] as? String, !bundleName.isEmpty { return bundleName }
+        if let bundleName { return bundleName }
         let path = CommandLine.arguments.first ?? "App"
         let file = (path as NSString).lastPathComponent
         let stem = (file as NSString).deletingPathExtension

@@ -567,8 +567,13 @@ for it off macOS, under Apple's module names: `UserNotifications` (prints the re
   following its binding, strikethrough drawing, the date picker keeping its field across
   updates, custom toolbar buttons not dragging the window, the system close box, bursts
   of injected text (`VK_PACKET`), and a last-window-closed policy off macOS (terminate
-  unless a status item or the delegate says otherwise). Left: the main thread spinning a
-  full core while the app idles on Win32 (trace instructions in the compatibility note).
+  unless a status item or the delegate says otherwise); the idle spin went with them. The
+  re-check's round: menus taller than the screen scroll (arrow bands, wheel, keyboard), a
+  sheet with a toolbar keeps its frame across parent layouts, scroll views lay rows out
+  against the new size, a bare executable takes its window's navigation title as its app
+  name, and the NavigationStack draws no title row at the root. Left: the sheet slide
+  resizing the HWND every step on Win32 (2–3 s; clip instead), the first Up after a
+  click in the date field.
 
 ## M11: Accessibility
 

@@ -94,7 +94,8 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
         MainActor.assumeIsolated {
             struct Main: View {
                 var body: some View {
-                    NavigationStack { Text("Tasks").frame(minWidth: 560, minHeight: 420).navigationTitle("Daily To Do") }
+                    // A column that grows without bound (the app's list does), with a minimum.
+                    NavigationStack { VStack { HStack { Text("Tasks"); Spacer() }; Spacer() }.frame(minWidth: 560, minHeight: 420).navigationTitle("Daily To Do") }
                 }
             }
             let runner = _AppRunner(name: "DailyTodo")
@@ -273,6 +274,20 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             let sheet = w.sheets[0]
             let st = texts(sheet.contentView!)
             for s in ["Workday", "Schedule", "Reminder time", "1:00 PM", "Next reminder", "Tomorrow"] { XCTAssertTrue(st.contains(s), s) }
+            // The sheet's frame holds its content (560 tall) plus its own toolbar band, and
+            // keeps that height when the parent reports a frame (it shrank by the band each time).
+            let sheetHeight = sheet.frame.height
+            XCTAssertGreaterThan(sheetHeight, 560, "content plus the Done toolbar's band")
+            w.setFrameOrigin(NSPoint(x: w.frame.minX + 10, y: w.frame.minY))
+            (Platform.backend as! HostBackend).drain()
+            XCTAssertEqual(sheet.frame.height, sheetHeight, "the parent moving keeps the sheet's height")
+            // The grouped form is a card on the first open: its section header sits inside the
+            // card's inset, as it does on every later open.
+            @MainActor func headerInset(_ root: NSView) -> CGFloat? {
+                allViews(root).compactMap { $0 as? _TextView }.first { $0.storage.string == "Workday" }.map { $0.convert($0.bounds, to: root).minX }
+            }
+            let firstOpenInset = headerInset(sheet.contentView!)
+            XCTAssertNotNil(firstOpenInset)
             XCTAssertNotNil(allViews(sheet.contentView!).first { $0 is NSDatePicker }, "the hour-and-minute picker is an NSDatePicker")
             XCTAssertNotNil(allViews(sheet.contentView!).first { $0 is NSPopUpButton }, "the time zone picker is a pop-up")
             buttons(sheet.contentView!).first { $0.title == "Midday reminder" }?.performClick(nil)
@@ -287,6 +302,17 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             (Platform.backend as! HostBackend).drain()
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(w.sheets.isEmpty, "Done dismisses the sheet")
+            // A second open lays the grouped form out the same way as the first.
+            settingsButton?.accessibilityPress?()
+            (Platform.backend as! HostBackend).drain()
+            h.layoutSubtreeIfNeeded()
+            if let again = w.sheets.first {
+                again.contentView!.layoutSubtreeIfNeeded()
+                XCTAssertEqual(headerInset(again.contentView!), firstOpenInset, "the grouped card is there on the first open as on the second")
+                XCTAssertGreaterThanOrEqual(headerInset(again.contentView!) ?? 0, 28, "the header is inset by the card and the form padding")
+                (buttons(again.contentView!) + (again.toolbar?.items.compactMap(\.view).flatMap(allViews).compactMap { $0 as? NSButton } ?? [])).first { $0.title == "Done" }?.performClick(nil)
+                (Platform.backend as! HostBackend).drain()
+            } else { XCTFail("the sheet did not open a second time") }
             w.close()
         }
     }

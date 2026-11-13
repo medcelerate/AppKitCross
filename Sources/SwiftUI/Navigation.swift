@@ -431,7 +431,9 @@ struct _NavigationStackBody: View {
         state.pathSetter = setPath
         if let elements = pathElements?() { state.sync(path: elements) }
         return VStack(spacing: 0) {
-            if !state.pages.isEmpty || state.title != nil {
+            // The bar (back button and title) belongs to pushed pages; at the root the
+            // title goes to the window's title bar, as on macOS, with no row in the content.
+            if !state.pages.isEmpty {
                 HStack(spacing: 8) {
                     if !state.pages.isEmpty {
                         Button("‹ Back") { withAnimation(.easeOut(duration: 0.25)) { state.pop() } }.buttonStyle(.borderless)
@@ -524,8 +526,11 @@ struct _NavigationTitle<Content: View>: View, _PrimitiveView {
             else if nav.pages[nav.pages.count - 1].title != title { nav.pages[nav.pages.count - 1].title = title }
         }
         // The window shows the navigation title, as macOS does for a WindowGroup's content.
-        if let window = node.root?.host?.hostView.window, !(window is NSPanel), window.sheetParent == nil, window.title != title {
-            window.title = title
+        if let window = node.root?.host?.hostView.window, !(window is NSPanel), window.sheetParent == nil {
+            if window.title != title { window.title = title }
+            // An app with no bundle name (a bare executable) takes its main window's title
+            // as its name too, so the app menu and the window agree.
+            if let runner = _AppRunner._current, runner.windows.first === window { runner._adoptName(title) }
         }
         return _GroupPrimitive(children: [_ViewBox(content)])
     }

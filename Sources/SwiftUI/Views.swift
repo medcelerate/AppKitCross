@@ -1404,7 +1404,14 @@ final class _ScrollPrimitive: _Primitive {
                       height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : .infinity } ?? content.height) : content.height)
     }
     override func place(node: _ViewNode, in rect: CGRect) {
-        let inner = scroll.contentSize == .zero ? rect.size : scroll.contentSize
+        // The clip size for the rect being laid out: the scroll view's own content size is
+        // the previous frame's until the backing views sync (rows lagged one resize behind),
+        // so apply its current scroller and border insets to the new size instead.
+        var inner = rect.size
+        if scroll.contentSize != .zero, scroll.frame.size != .zero {
+            inner.width = max(0, rect.width - (scroll.frame.width - scroll.contentSize.width))
+            inner.height = max(0, rect.height - (scroll.frame.height - scroll.contentSize.height))
+        }
         let proposal = ProposedViewSize(width: axes.contains(.horizontal) ? nil : inner.width, height: axes.contains(.vertical) ? nil : inner.height)
         guard let content = node.children.first else { return }
         let s = content.sizeThatFits(proposal)

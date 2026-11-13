@@ -118,7 +118,9 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             CARuntime.now = { clock }
             defer { CARuntime.now = saved }
             let (w, h) = host(Nav())
-            XCTAssertTrue(texts(h).contains("Home"))
+            // At the root the title goes to the window, not a row in the content (macOS).
+            XCTAssertEqual(w.title, "Home")
+            XCTAssertFalse(texts(h).contains("Home"), "no in-content heading at the root")
             XCTAssertTrue(texts(h).contains("Depth 0"))
             let link = buttons(h).first { $0.title == "Go to detail" }
             XCTAssertNotNil(link)

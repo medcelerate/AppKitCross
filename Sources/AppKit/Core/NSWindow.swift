@@ -1157,7 +1157,11 @@ import CoreText
     /// Where the sheet goes: centred on the top of `contentLayoutRect` (under the title bar
     /// and the toolbar band), unless the delegate moves the attachment rect.
     private func _sheetFrame(for sheet: NSWindow) -> NSRect {
-        let size = sheet.contentRect(forFrameRect: sheet.frame).size
+        // The attached sheet is frameless, so its frame is its content plus its own toolbar
+        // band; converting to the content rect here dropped the band from the frame on
+        // every layout (a sheet with a toolbar shrank by the band each time its parent
+        // reported a frame, until nothing but the toolbar was left).
+        let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
         var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
@@ -1182,7 +1186,10 @@ import CoreText
         let h = max(1, (target.height * min(max(fraction, 0), 1)).rounded())
         let partial = NSRect(x: target.minX, y: target.maxY - h, width: target.width, height: h)
         if let cv = _contentView {
-            if cv.frame.size != target.size { cv.setFrameSize(target.size) }
+            // The content keeps its full size (the frame less this sheet's toolbar band),
+            // pinned to the top so it emerges from under the parent's title bar.
+            let full = contentRect(forFrameRect: target).size
+            if cv.frame.size != full { cv.setFrameSize(full) }
             cv.setFrameOrigin(NSPoint(x: 0, y: h - target.height))
         }
         if p.frame != partial { p.frame = partial }

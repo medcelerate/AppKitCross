@@ -116,6 +116,49 @@ final class MenuPopUpTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A menu taller than the screen (a pop-up listing every time zone) opens within the
+    /// screen's visible frame and scrolls: the wheel and the keyboard move the rows, the
+    /// highlighted row stays in view, and an arrow band shows where there is more.
+    func testTallMenuScrollsWithinTheScreen() {
+        MainActor.assumeIsolated {
+            let w = makeWindow()
+            let r = Receiver()
+            let menu = NSMenu(title: "Zones")
+            for i in 0..<400 { menu.addItem(withTitle: "Zone \(i)", action: Receiver.pick, keyEquivalent: "").target = r }
+            let click = NSEvent.mouseEvent(with: .rightMouseDown, location: NSPoint(x: 50, y: 150), modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                           context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            NSMenu.popUpContextMenu(menu, with: click, for: w.contentView!)
+            guard let mw = menuWindows().first else { return XCTFail("no menu window") }
+            defer { menu.cancelTracking(); w.close() }
+            let visible = (NSScreen.screens.first { $0.frame.contains(NSPoint(x: 50, y: 150)) } ?? NSScreen.main)?.visibleFrame ?? .zero
+            XCTAssertLessThanOrEqual(mw.frame.height, visible.height, "the window takes at most the screen's height")
+            XCTAssertGreaterThanOrEqual(mw.frame.minY, visible.minY - 0.5)
+            XCTAssertLessThanOrEqual(mw.frame.maxY, visible.maxY + 0.5)
+            XCTAssertTrue(mw.isScrollable)
+            XCTAssertEqual(mw.scrollOffset, 0, "a context menu opens at its first row")
+            // Keyboard: the highlight moves down through the rows and scrolls them into view.
+            let rowsThatFit = Int(mw.frame.height / _NSMenuLayout.itemHeight)
+            for _ in 0..<(rowsThatFit + 5) { sendKey(125, window: w) }
+            XCTAssertEqual(menu.highlightedItem?.title, "Zone \(rowsThatFit + 4)")
+            XCTAssertGreaterThan(mw.scrollOffset, 0, "the keyboard scrolled the highlighted row into view")
+            let f = mw.menuView.layout.rows[rowsThatFit + 4].frame
+            XCTAssertLessThanOrEqual(f.maxY - mw.scrollOffset, mw.frame.height, "the highlighted row is inside the window")
+            // The wheel scrolls too, and the row under the pointer is highlighted afterwards.
+            let before = mw.scrollOffset
+            let center = NSPoint(x: mw.frame.midX, y: mw.frame.midY)
+            let wheel = NSEvent._scrollEvent(location: mw.convertPoint(fromScreen: center), modifierFlags: [], timestamp: 0, windowNumber: mw.windowNumber, deltaX: 0, deltaY: -3, precise: false)
+            NSApplication.shared.sendEvent(wheel)
+            XCTAssertGreaterThan(mw.scrollOffset, before, "wheel down scrolls further")
+            XCTAssertNotNil(menu.highlightedItem)
+            // The row under the pointer is the one reported for the point.
+            XCTAssertEqual(menu.highlightedItem?.title.hasPrefix("Zone "), true)
+            // Scrolling to the end hides the bottom band; the top band shows.
+            mw.scrollOffset = mw.maxScrollOffset
+            XCTAssertNil(mw.scrollDirection(at: NSPoint(x: 20, y: 4)), "no bottom band at the end (window coordinates are unflipped: y 4 is the bottom)")
+            XCTAssertEqual(mw.scrollDirection(at: NSPoint(x: 20, y: mw.frame.height - 4)), -1, "the top band is there")
+        }
+    }
+
     func testMenuWindowIsAllClientArea() {
         MainActor.assumeIsolated {
             let w = makeWindow()
