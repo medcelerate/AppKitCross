@@ -665,7 +665,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/datepickerelements
     @MainActor open var datePickerElements: NSDatePicker.ElementFlags {
         get { _elements }
-        set { _elements = newValue; _selectedField = -1; _changed() }
+        set { guard newValue != _elements else { return }; _elements = newValue; _selectedField = -1; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/datepickermode
     @MainActor open var datePickerMode: NSDatePicker.Mode {
@@ -711,7 +711,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/locale
     @MainActor open var locale: Locale? {
         get { _locale }
-        set { _locale = newValue; _selectedField = -1; _changed() }
+        set { guard newValue != _locale else { return }; _locale = newValue; _selectedField = -1; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/maxdate
     @MainActor open var maxDate: Date? {

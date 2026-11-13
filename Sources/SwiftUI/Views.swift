@@ -1048,7 +1048,10 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
     private func apply() {
         guard let node else { return }
-        if control.stringValue != text.wrappedValue, control.currentEditor == nil { control.stringValue = text.wrappedValue }
+        // The binding changed under the field (a submit handler clearing it): the field
+        // editor shows the new text too, as it does on macOS, rather than the stale text
+        // until focus leaves.
+        if control.stringValue != text.wrappedValue { control._setStringValueUpdatingEditor(text.wrappedValue) }
         if control.placeholderString != placeholder { control.placeholderString = placeholder }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
@@ -1393,8 +1396,12 @@ final class _ScrollPrimitive: _Primitive {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let content = node.children.first?.sizeThatFits(ProposedViewSize(width: axes.contains(.horizontal) ? nil : proposal.width, height: axes.contains(.vertical) ? nil : proposal.height)) ?? .zero
-        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : content.width } ?? content.width) : content.width,
-                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : content.height } ?? content.height) : content.height)
+        // Along a scroll axis the view takes what it is offered, and an infinite probe (a
+        // stack measuring flexibility) gets infinity: a scroll view, and so a List, fills
+        // the room its siblings leave rather than stopping at its content's height. Only an
+        // unspecified proposal reports the content's size.
+        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : .infinity } ?? content.width) : content.width,
+                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : .infinity } ?? content.height) : content.height)
     }
     override func place(node: _ViewNode, in rect: CGRect) {
         let inner = scroll.contentSize == .zero ? rect.size : scroll.contentSize
@@ -1757,7 +1764,9 @@ final class _DatePickerPrimitive: _ControlPrimitive<NSDatePicker> {
         control.minDate = view.minimum
         control.maxDate = view.maximum
         if control.dateValue != view.selection.wrappedValue { control.dateValue = view.selection.wrappedValue }
-        control.locale = node?.environment.locale
+        // Only on a change: setting the locale resets the picker's selected field, and every
+        // body update would otherwise drop the field the user is stepping or typing into.
+        if control.locale != node?.environment.locale { control.locale = node?.environment.locale }
         control.isEnabled = node?.environment.isEnabled ?? true
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }

@@ -546,6 +546,12 @@ final class _ContainerView: NSView {
     override func mouseDown(with event: NSEvent) {
         if mouseDownHandler?(event) != true { super.mouseDown(with: event) }
     }
+    /// A container that handles presses (a custom button, a gesture) is a control for the
+    /// window: a press on it, or on the label inside it, never drags the window.
+    override var mouseDownCanMoveWindow: Bool {
+        if mouseDownHandler != nil || !installedRecognizers.isEmpty { return false }
+        return super.mouseDownCanMoveWindow
+    }
     override func mouseUp(with event: NSEvent) {
         if let h = mouseUpHandler { h(event) } else { super.mouseUp(with: event) }
     }

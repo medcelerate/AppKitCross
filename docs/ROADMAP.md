@@ -561,6 +561,14 @@ for it off macOS, under Apple's module names: `UserNotifications` (prints the re
 - SF Symbol glyphs for `Image(systemName:)` (the toolbar gear, the empty state's check mark
   and the rows' arrow show no icon; the titles do), shared with the LibraryCompat follow-up.
 - `NSImage(systemSymbolName:accessibilityDescription:)` is still `unimplemented()`.
+- The Windows run (2026-11-13) fixed in the port: the window title from the navigation
+  title and the app name without `.exe`, `windowResizability(.contentSize)` as a size
+  range, scroll views and lists taking a stack's leftover height, the field editor
+  following its binding, strikethrough drawing, the date picker keeping its field across
+  updates, custom toolbar buttons not dragging the window, the system close box, bursts
+  of injected text (`VK_PACKET`), and a last-window-closed policy off macOS (terminate
+  unless a status item or the delegate says otherwise). Left: the main thread spinning a
+  full core while the app idles on Win32 (trace instructions in the compatibility note).
 
 ## M11: Accessibility
 

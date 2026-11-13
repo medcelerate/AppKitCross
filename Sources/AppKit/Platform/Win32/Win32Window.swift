@@ -1002,7 +1002,11 @@ final class Win32Window: PlatformWindow {
             // translation (a modifier the injecting process left down). The text field
             // would otherwise drop the key, Backspace and the other special keys still
             // working, which is how the print panels' fields refused typed digits.
-            if chars.isEmpty, !translated.isEmpty {
+            // VK_PACKET (0xE7) carries its character in the message's scan code; ToUnicode
+            // answers with the thread's latest injected character instead, so a burst of
+            // SendInput keystrokes came out as the last character repeated. The translation
+            // is the message's own.
+            if !translated.isEmpty, vk == 0xE7 || chars.isEmpty {
                 var units = translated
                 if let high = pendingHighSurrogate { units.insert(high, at: 0); pendingHighSurrogate = nil }
                 if let last = units.last, UTF16.isLeadSurrogate(last) {
@@ -1343,14 +1347,16 @@ final class Win32Window: PlatformWindow {
             // A press on a package-drawn caption button is the button's to track (DefWindowProc
             // would track a system caption button the frame does not have): capture, so the
             // drag and the release arrive as client messages like any control's.
-            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            // With the system frame the caption buttons are DefWindowProc's: taking the
+            // press here left the close box showing its tooltip and never closing.
+            guard usesCustomFrame, Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
             if let hwnd { SetCapture(hwnd) }
             pressedButtons |= 1
             NSEvent._pressedMouseButtons = pressedButtons
             nonClientMouse(.leftMouseDown, lParam, clickCount: 1)
             return 0
         case WM_NCLBUTTONUP:
-            guard Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            guard usesCustomFrame, Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
             pressedButtons &= ~1
             NSEvent._pressedMouseButtons = pressedButtons
             if pressedButtons == 0 { ReleaseCapture() }

@@ -87,6 +87,29 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A WindowGroup window: titled by the content's navigation title, and under
+    /// `.windowResizability(.contentSize)` still resizable when the content has only a minimum.
+    func testWindowGroupTitleAndContentSizeResizability() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Main: View {
+                var body: some View {
+                    NavigationStack { Text("Tasks").frame(minWidth: 560, minHeight: 420).navigationTitle("Daily To Do") }
+                }
+            }
+            let runner = _AppRunner(name: "DailyTodo")
+            runner.run(scene: WindowGroup { Main() }.windowResizability(.contentSize))
+            guard let w = runner.windows.last else { return XCTFail("no window") }
+            defer { w.close() }
+            w.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(w.title, "Daily To Do")
+            XCTAssertTrue(w.styleMask.contains(.resizable), "a minimum without a maximum leaves the window resizable")
+            XCTAssertGreaterThanOrEqual(w.minSize.width, 560)
+            XCTAssertGreaterThanOrEqual(w.minSize.height, 420)
+            XCTAssertGreaterThan(w.maxSize.width, 10_000, "no maximum from the content")
+        }
+    }
+
     /// Daily To Do's main window and its settings sheet, built from the same views the app uses.
     func testDailyTodoScreensHostAndTheSettingsSheetOpens() throws {
         try requireHostBackend()
@@ -181,9 +204,61 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             let settingsButton = tb.items.compactMap(\.view).flatMap(allViews).compactMap { $0 as? _ContainerView }.first { $0.accessibilityPress != nil }
             XCTAssertNotNil(settingsButton, "the primary-action item hosts the Settings button")
             XCTAssertTrue(tb.items.compactMap(\.view).flatMap(allViews).compactMap { ($0 as? _TextView)?.storage.string }.contains("Settings"))
+            // A press on the button (or on the label inside it) is the button's, not a
+            // title-bar drag: the Win32 frame asks the window before it moves the window.
+            if let b = settingsButton {
+                let p = b.convert(NSPoint(x: b.bounds.midX, y: b.bounds.midY), to: nil)
+                XCTAssertEqual(w.platformWindowHitTest(p), .client, "the toolbar's custom button is content, not caption")
+            }
+            // The list takes the height the fixed rows leave: the header sits at the top and
+            // the footer at the bottom, with no empty band and nothing pushed out.
+            @MainActor func offsets(_ v: NSView) -> (top: CGFloat, bottom: CGFloat) {
+                let r = v.convert(v.bounds, to: h)
+                return h.isFlipped ? (r.minY, h.bounds.height - r.maxY) : (h.bounds.height - r.maxY, r.minY)
+            }
+            if let day = allViews(h).first(where: { $0 is NSDatePicker }) { XCTAssertLessThan(offsets(day).top, 40, "the Day row is at the top") }
+            if let footer = allViews(h).compactMap({ $0 as? _TextView }).first(where: { $0.storage.string == "0 pending" }) {
+                let o = offsets(footer)
+                XCTAssertGreaterThanOrEqual(o.bottom, 0, "the footer is inside the window")
+                XCTAssertLessThan(o.bottom, 40, "the footer sits at the bottom")
+            } else { XCTFail("no footer text") }
+
+            // Typing into the field and adding: the field follows its binding back to empty
+            // while it is still being edited.
+            guard let field = allViews(h).compactMap({ $0 as? NSTextField }).first(where: { $0.isEditable }) else { return XCTFail("no task field") }
+            XCTAssertTrue(w.makeFirstResponder(field))
+            (field.currentEditor as? NSTextView)?.insertText("Write the report", replacementRange: NSRange(location: 0, length: 0))
+            (Platform.backend as! HostBackend).drain()
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(buttons(h).first { $0.title == "Add" }?.isEnabled, true, "Add enables once there is text")
+            buttons(h).first { $0.title == "Add" }?.performClick(nil)
+            (Platform.backend as! HostBackend).drain()
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(store.items.map(\.title), ["Write the report"])
+            XCTAssertEqual(field.stringValue, "", "the binding cleared the field")
+            XCTAssertEqual(field.currentEditor?.string ?? "", "", "and the field editor shows it cleared")
+
+            // The date field keeps its selected field across body updates, so arrows step it.
+            if let picker = allViews(h).compactMap({ $0 as? NSDatePicker }).first {
+                let before = store.day
+                XCTAssertTrue(w.makeFirstResponder(picker))
+                let up = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber, context: nil,
+                                          characters: "\u{F700}", charactersIgnoringModifiers: "\u{F700}", isARepeat: false, keyCode: 126)!
+                picker.keyDown(with: up)
+                (Platform.backend as! HostBackend).drain()
+                h.layoutSubtreeIfNeeded()
+                XCTAssertNotEqual(store.day, before, "Up steps the selected field into the binding")
+                XCTAssertGreaterThanOrEqual(picker._dateCell?._selectedField ?? -1, 0, "the field stays selected after the body update")
+                picker.keyDown(with: up)
+                (Platform.backend as! HostBackend).drain()
+                XCTAssertGreaterThan(abs(store.day.timeIntervalSince(before)), 86_000, "a second Up steps again")
+            }
 
             store.items = [Item(title: "Write the report"), Item(title: "Call the bank", done: true)]
             h.layoutSubtreeIfNeeded()
+            if let footer = allViews(h).compactMap({ $0 as? _TextView }).first(where: { $0.storage.string == "1 pending" }) {
+                XCTAssertLessThan(offsets(footer).bottom, 40, "the footer stays at the bottom once there are rows")
+            }
             XCTAssertFalse(texts(h).contains("No tasks"), "the empty state goes once there are rows")
             XCTAssertTrue(texts(h).contains("Write the report"))
             XCTAssertTrue(texts(h).contains("1 pending"))

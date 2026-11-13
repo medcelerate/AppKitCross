@@ -712,7 +712,14 @@ import CoreText
             default: return .zoomButton
             }
         }
-        if let v = hit, !v.mouseDownCanMoveWindow { return .client }
+        // The hit view or any ancestor that takes the click keeps it from moving the window:
+        // a label inside a custom button (SwiftUI's Button with a Label body) is the button's.
+        var v = hit
+        while let view = v {
+            if !view.mouseDownCanMoveWindow { return .client }
+            if view === content || view === _toolbarView || view === _accessoryHost { break }
+            v = view.superview
+        }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if let a = _accessoryHost, !a.isHidden, let v = hit, v === a || v.isDescendant(of: a) { return .caption }
         if _isMovableByWindowBackground { return .caption }

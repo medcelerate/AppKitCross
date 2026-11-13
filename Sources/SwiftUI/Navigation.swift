@@ -523,6 +523,10 @@ struct _NavigationTitle<Content: View>: View, _PrimitiveView {
             if nav.pages.isEmpty { if nav.rootTitle != title { nav.rootTitle = title; nav.objectWillChange.send() } }
             else if nav.pages[nav.pages.count - 1].title != title { nav.pages[nav.pages.count - 1].title = title }
         }
+        // The window shows the navigation title, as macOS does for a WindowGroup's content.
+        if let window = node.root?.host?.hostView.window, !(window is NSPanel), window.sheetParent == nil, window.title != title {
+            window.title = title
+        }
         return _GroupPrimitive(children: [_ViewBox(content)])
     }
 }
