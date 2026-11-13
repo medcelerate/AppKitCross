@@ -111,6 +111,33 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// An animating progress indicator runs frames only while its window shows: closed or
+    /// ordered out, it neither invalidates nor keeps the frame clock going (the idle-sheet
+    /// test on Linux CI caught two spinners of an earlier test still ticking in closed windows).
+    func testProgressIndicatorAnimatesOnlyWhileItsWindowShows() {
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            let spinner = NSProgressIndicator(frame: NSRect(x: 10, y: 10, width: 32, height: 32))
+            spinner.style = .spinning
+            w.contentView!.addSubview(spinner)
+            spinner.startAnimation(nil)
+            @MainActor func invalidationsOverOneTick() -> Int {
+                let before = NSView._invalidationCount
+                CARuntime.tick()
+                return NSView._invalidationCount - before
+            }
+            XCTAssertEqual(invalidationsOverOneTick(), 0, "not shown yet: no frames")
+            w.makeKeyAndOrderFront(nil)
+            XCTAssertGreaterThan(invalidationsOverOneTick(), 0, "shown: the spinner turns")
+            w.orderOut(nil)
+            XCTAssertEqual(invalidationsOverOneTick(), 0, "ordered out: no frames")
+            w.makeKeyAndOrderFront(nil)
+            XCTAssertGreaterThan(invalidationsOverOneTick(), 0, "shown again: it turns again")
+            w.close()
+            XCTAssertEqual(invalidationsOverOneTick(), 0, "closed: no frames")
+        }
+    }
+
     /// A presented sheet with a date picker, a pop-up picker and a toolbar left idle performs
     /// no root measurement, no layout pass and no invalidation per frame once it has settled
     /// (on Windows a loop of toolbar re-sizing, content layout and repaint kept a core busy).

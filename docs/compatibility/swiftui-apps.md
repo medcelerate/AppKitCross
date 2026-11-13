@@ -95,6 +95,8 @@ The third re-check (at cd00cb2) passed the sheet, the resize, the app name and t
 | After relaunch with Punta Arenas saved, the Day field read 12/11/2026 at 16:21 local on 13 Nov | The app's `selectedDay` is the start of the day in the *planner's* zone (Punta Arenas, UTC−3: 13 Nov 03:00 UTC), and the date field displays it in the local zone; a machine west of UTC−3 shows 12 Nov. The same happens on macOS. | — | App logic, not a port gap. |
 | The parent's rows and field show through the sheet's top band on some opens | A stale paint (the fourth re-check: a click inside the sheet repaints it away; the sheet does not move): the slide's last step lands the sheet's final size, and the top rows of the resized surface kept what it held until something else invalidated them. | `AppKit/Core/NSWindow.swift` (`_NSSheetSlide.finish`) | Fixed: once the slide-in's last step has been processed, the whole sheet is invalidated again (`_repaintAfterSheetSlide`, posted to the backend's queue). |
 
+Caught by the idle-sheet test on the Linux CI jobs (not a finding of the PC): an animating `NSProgressIndicator` kept its display link after its window closed or ordered out, invalidating a view nothing showed on every tick and keeping the frame clock running for good (two spinners of an earlier test were still turning in closed windows). Owner `AppKit/Core/NSProgressIndicator.swift`; fixed: the link runs only while the indicator's window is visible, following the window's visibility and the view's move into a window (test: shown, ordered out, shown again, closed).
+
 The fourth re-check (at 95eb094) passed the scrolling menu (wheel, bands, click, Escape) and both settings persisting, and found:
 
 | PC finding | Root cause | Owner in `Sources/` | Status |
