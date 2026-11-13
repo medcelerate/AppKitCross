@@ -687,7 +687,7 @@ import CoreText
         c.transparentTitleBar = _titlebarAppearsTransparent
         c.backdrop = _backdrop
         c.isTransparent = !_isOpaque
-        c.hasShadow = _hasShadow
+        c.hasShadow = _hasShadow && _sheetSlide == nil
         c.movableByBackground = _isMovableByWindowBackground
         c.hasDraggableBand = _toolbarView.map { !$0.isHidden } ?? false
         return c
@@ -1066,7 +1066,13 @@ import CoreText
     /// Presented (attached, ordered in) rather than waiting in the parent's queue.
     private var _sheetIsPresented = false
     /// The slide in or out running on this sheet.
-    private var _sheetSlide: _NSSheetSlide? = nil
+    /// While a sheet slides it shows no shadow: on Win32 a borderless window's shadow is a
+    /// WS_THICKFRAME frame (ADR-0016), and Windows never sizes such a window below its
+    /// border width (about 14 px), so the slide could not start 1 point tall (the drawer
+    /// hit the same, PR 68). `hasShadow` itself is unchanged; the chrome follows.
+    private var _sheetSlide: _NSSheetSlide? = nil {
+        didSet { if (oldValue == nil) != (_sheetSlide == nil) { _updateChrome() } }
+    }
     /// Escape ends this sheet with `.cancel` when no key equivalent took it (SwiftUI's
     /// `.sheet`, as on macOS). Not part of Apple's API: SwiftUI sets it on its sheets.
     public var _cancelsSheetOnEscape = false
