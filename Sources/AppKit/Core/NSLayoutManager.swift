@@ -1040,7 +1040,31 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                 ctx.restoreGState()
             }
             _drawAttachments(forGlyphRange: glyphsToShow, at: origin)
+            _drawStrikethroughs(forGlyphRange: glyphsToShow, at: origin)
             _drawSpellingMarks(forGlyphRange: glyphsToShow, at: origin)
+        }
+    }
+
+    /// CoreText draws underlines from the line's attributes; strikethrough is the layout
+    /// manager's to draw (as AppKit's does), one stroke per fragment in the text colour.
+    @MainActor private func _drawStrikethroughs(forGlyphRange range: NSRange, at origin: NSPoint) {
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let whole = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(.strikethroughStyle, in: whole, options: []) { value, run, _ in
+            guard let style = (value as? NSNumber)?.intValue ?? (value as? Int), style != 0 else { return }
+            let attrs = storage.attributes(at: run.location, effectiveRange: nil)
+            let color = (attrs[.strikethroughColor] as? NSColor) ?? (attrs[.foregroundColor] as? NSColor) ?? NSColor.textColor
+            color.setFill()
+            var at = run.location
+            let end = run.location + run.length
+            while at < end, let fi = _fragmentIndex(forCharacter: at) {
+                let f = _fragments[fi]
+                let stop = min(end, f.visibleEnd)
+                guard stop > at else { break }
+                drawStrikethrough(forGlyphRange: NSRange(location: at, length: stop - at), strikethroughType: NSUnderlineStyle(rawValue: style),
+                                  baselineOffset: f.baseline, lineFragmentRect: f.rect, lineFragmentGlyphRange: f.charRange, containerOrigin: origin)
+                at = max(stop, f.charRange.location + f.charRange.length)
+            }
         }
     }
 

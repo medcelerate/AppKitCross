@@ -186,6 +186,49 @@ public protocol PlatformWindow: AnyObject {
     /// shows what is behind it): DirectComposition and Wayland do, a plain X11 window
     /// does not. A popover draws an opaque backing around its body where it does not.
     var supportsTransparency: Bool { get }
+    /// `NSWindow.aspectRatio`/`contentAspectRatio`/`resizeIncrements`/
+    /// `contentResizeIncrements` changed: live resizes by the user keep to them (ADR-0036).
+    /// Programmatic frames do not, as in AppKit. The default ignores them (Wayland's
+    /// xdg-shell has no aspect or increment hints).
+    func setResizeConstraints(_ constraints: PlatformResizeConstraints)
+}
+
+/// What a user's live resize must keep to (`NSWindow` aspect ratios and increments).
+public struct PlatformResizeConstraints: Equatable, Sendable {
+    /// Frame proportion (width:height); zero for none.
+    public var aspectRatio = NSSize.zero
+    /// Content proportion; zero for none. AppKit keeps one of the two.
+    public var contentAspectRatio = NSSize.zero
+    /// Frame size steps.
+    public var resizeIncrements = NSSize(width: 1, height: 1)
+    /// Content size steps.
+    public var contentResizeIncrements = NSSize(width: 1, height: 1)
+    public init() {}
+
+    public var isUnconstrained: Bool { self == PlatformResizeConstraints() }
+
+    /// The size a user's drag may take, given the proposed content size and the frame's
+    /// extra size around it (title bar, borders). Increments snap each dimension to a
+    /// whole number of steps (at least one); an aspect ratio then derives the height from
+    /// the width, or the width from the height when only a top or bottom edge moves.
+    public func constrain(contentSize proposed: NSSize, frameExtra: NSSize, heightEdgeOnly: Bool) -> NSSize {
+        var frameSize = NSSize(width: proposed.width + frameExtra.width, height: proposed.height + frameExtra.height)
+        func snap(_ v: CGFloat, _ step: CGFloat) -> CGFloat { step > 1 ? max(step, (v / step).rounded() * step) : v }
+        frameSize.width = snap(frameSize.width, resizeIncrements.width)
+        frameSize.height = snap(frameSize.height, resizeIncrements.height)
+        var content = NSSize(width: frameSize.width - frameExtra.width, height: frameSize.height - frameExtra.height)
+        content.width = snap(content.width, contentResizeIncrements.width)
+        content.height = snap(content.height, contentResizeIncrements.height)
+        if contentAspectRatio.width > 0, contentAspectRatio.height > 0 {
+            let r = contentAspectRatio.width / contentAspectRatio.height
+            if heightEdgeOnly { content.width = (content.height * r).rounded() } else { content.height = (content.width / r).rounded() }
+        } else if aspectRatio.width > 0, aspectRatio.height > 0 {
+            let r = aspectRatio.width / aspectRatio.height
+            let fw = content.width + frameExtra.width, fh = content.height + frameExtra.height
+            if heightEdgeOnly { content.width = (fh * r).rounded() - frameExtra.width } else { content.height = (fw / r).rounded() - frameExtra.height }
+        }
+        return content
+    }
 }
 
 /// A native surface within a window's content area that a swap chain presents into
@@ -235,6 +278,7 @@ extension PlatformWindow {
     public func captureContent() -> CGImage? { nil }
     public func attachSheet(to parent: PlatformWindow?) { }
     public var supportsTransparency: Bool { true }
+    public func setResizeConstraints(_ constraints: PlatformResizeConstraints) { }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }

@@ -267,7 +267,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
             let window = event.window ?? view.window
             let point = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
             let isDown = event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown
-            _NSMenuTracker.begin(menu: menu, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: nil), font: font, openedWithMouseDown: isDown)
+            view.willOpenMenu(menu, with: event)
+            _NSMenuTracker.begin(menu: menu, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: nil), font: font, openedWithMouseDown: isDown) { [weak view] _ in
+                view?.didCloseMenu(menu, with: nil)
+            }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/presentationstyle

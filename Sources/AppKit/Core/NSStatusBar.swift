@@ -10,6 +10,8 @@ import CoreGraphics
 open class NSStatusBar: NSObject {
     @MainActor private static var _system: NSStatusBar?
     @MainActor internal var _items: [NSStatusItem] = []
+    /// Whether any status item is installed (SwiftUI's last-window-closed rule off macOS).
+    @MainActor public var _hasItems: Bool { !_items.isEmpty }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsstatusbar/isvertical
     open var isVertical: Bool { false }

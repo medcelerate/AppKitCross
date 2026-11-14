@@ -185,6 +185,7 @@ extension App {
     public static func main() {
         let app = Self()
         let runner = _AppRunner(name: _AppRunner.defaultName)
+        runner._nameIsExecutableStem = _AppRunner.bundleName == nil
         runner.install(app)
         runner.run(scene: app.body)
         runner.installMenuBar()
@@ -195,8 +196,13 @@ extension App {
 /// Runs an App: creates the NSApplication, installs the delegate adaptor, opens windows.
 @MainActor
 public final class _AppRunner {
-    public let applicationName: String
+    public private(set) var applicationName: String
     public private(set) var windows: [NSWindow] = []
+    /// The runner of the running App (nil in tests that make their own).
+    static weak var _current: _AppRunner?
+    /// The name is the executable's file stem, not a bundle's: the main window's navigation
+    /// title is a better name and replaces it (`_adoptName`).
+    var _nameIsExecutableStem = false
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
     /// `.windowToolbarStyle(_:)` for the windows the next scene opens (Toolbar.swift).
@@ -211,11 +217,32 @@ public final class _AppRunner {
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
 
-    public init(name: String) { applicationName = name }
+    public init(name: String) {
+        applicationName = name
+        _AppRunner._current = self
+    }
 
+    /// Renames an app named after its executable (no bundle): the app menu follows.
+    func _adoptName(_ name: String) {
+        guard _nameIsExecutableStem, !name.isEmpty, name != applicationName else { return }
+        applicationName = name
+        if NSApplication.shared.mainMenu != nil { installMenuBar() }
+    }
+
+    static var bundleName: String? {
+        guard let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty else { return nil }
+        return n
+    }
+
+    /// The bundle's name where there is an Info.plist, else the executable's name without
+    /// its extension (Windows executables carry `.exe`; the app menu and window titles
+    /// read "DailyTodo", not "DailyTodo.exe").
     static var defaultName: String {
+        if let bundleName { return bundleName }
         let path = CommandLine.arguments.first ?? "App"
-        return (path as NSString).lastPathComponent
+        let file = (path as NSString).lastPathComponent
+        let stem = (file as NSString).deletingPathExtension
+        return stem.isEmpty ? file : stem
     }
 
     func install<A: App>(_ app: A) {
@@ -283,16 +310,33 @@ public final class _AppRunner {
         size.height = max(size.height, ideal.height)
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         if pendingHidesTitleBar { style.insert(.fullSizeContentView) }
-        // `.contentSize`: the window is fixed at its content's size (no resize frame, no
-        // zoom); `.contentMinSize`: it cannot shrink below the content's ideal size.
-        if pendingResizability == .contentSize { style.remove(.resizable) }
+        // `.contentSize`: the window's size range is the content's (its minimum and
+        // maximum frame sizes), so content with a minimum and no maximum still resizes;
+        // only content of one size gives a fixed window with no resize frame and no zoom.
+        // `.contentMinSize`: it cannot shrink below the content's ideal size.
+        var contentMin = size, contentMax: NSSize? = nil
+        if pendingResizability == .contentSize {
+            let lo = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let hi = hosting.sizeThatFits(NSHostingSizeProposal(width: .infinity, height: .infinity))
+            contentMin = NSSize(width: max(lo.width, 1), height: max(lo.height, 1))
+            contentMax = NSSize(width: hi.width.isFinite ? max(hi.width, contentMin.width) : .greatestFiniteMagnitude,
+                                height: hi.height.isFinite ? max(hi.height, contentMin.height) : .greatestFiniteMagnitude)
+            // The window opens at the content's ideal size (a default size if the scene
+            // gave one), within the content's range: no 300×200 floor for fixed content.
+            var s = defaultSize ?? pendingDefaultSize ?? ideal
+            s.width = min(max(s.width, contentMin.width), contentMax!.width)
+            s.height = min(max(s.height, contentMin.height), contentMax!.height)
+            size = s
+            if contentMin == contentMax { style.remove(.resizable) }
+        }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: style, backing: .buffered, defer: false)
         window.title = title
         switch pendingResizability.kind {
-        case .contentSize: window.minSize = size; window.maxSize = size
+        case .contentSize: window.minSize = contentMin; if let contentMax { window.maxSize = contentMax }
         case .contentMinSize: window.minSize = ideal
         case .automatic: break
         }
+        observeClose(of: window)
         if pendingHidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
         window.toolbarStyle = pendingToolbarStyle
         hosting.frame = NSRect(origin: .zero, size: size)
@@ -302,6 +346,33 @@ public final class _AppRunner {
         window.makeKeyAndOrderFront(nil)
         windows.append(window)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private var closeObservers: [any NSObjectProtocol] = []
+    /// Forgets a scene window once it closes. Where there is no Dock to reopen the app
+    /// from (Windows, Linux), a SwiftUI app whose last window closed would linger with no
+    /// window, no menu bar and no way back, so it terminates then, unless it keeps a status
+    /// item (a menu-bar app) or its delegate took the decision. On macOS AppKit's rule
+    /// applies: the app keeps running and the Dock reopens it.
+    private func observeClose(of window: NSWindow) {
+        let token = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window else { return }
+                self.windows.removeAll { $0 === window }
+                self.lastWindowDidClose()
+            }
+        }
+        closeObservers.append(token)
+    }
+    private func lastWindowDidClose() {
+        #if !canImport(Darwin)
+        guard windows.isEmpty, settingsWindow?.isVisible != true else { return }
+        let app = NSApplication.shared
+        guard !NSStatusBar.system._hasItems, app.delegate?.applicationShouldTerminateAfterLastWindowClosed(app) != true else { return }
+        // After the close finishes: terminate from inside willClose would tear the window
+        // down under its own notification.
+        DispatchQueue.main.async { if NSApplication.shared.windows.allSatisfy({ !$0.isVisible }) { NSApplication.shared.terminate(nil) } }
+        #endif
     }
 }
 

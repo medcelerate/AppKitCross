@@ -826,11 +826,23 @@ bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, u
                 VARIANT v; VariantInit(&v); v.vt = VT_R4; v.fltVal = quality;
                 props->Write(1, &opt, &v);
             }
-            if (SUCCEEDED(frame->Initialize(props))) {
+            // The pixels are premultiplied BGRA. Encoders take what SetPixelFormat hands
+            // back (PNG: straight BGRA, JPEG: 24-bit BGR), so a WIC converter turns the
+            // pixels into that format (dividing the alpha out) rather than writing
+            // premultiplied bytes as if they were straight.
+            IWICBitmap *src = nullptr;
+            IWICFormatConverter *conv = nullptr;
+            if (SUCCEEDED(frame->Initialize(props)) &&
+                SUCCEEDED(f->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppPBGRA, stride, stride * height, const_cast<BYTE *>(pixels), &src))) {
                 WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppPBGRA;
                 frame->SetSize(width, height);
                 frame->SetPixelFormat(&fmt);
-                if (SUCCEEDED(frame->WritePixels(height, stride, stride * height, const_cast<BYTE *>(pixels))) &&
+                IWICBitmapSource *source = src;
+                if (!IsEqualGUID(fmt, GUID_WICPixelFormat32bppPBGRA) && SUCCEEDED(f->CreateFormatConverter(&conv)) &&
+                    SUCCEEDED(conv->Initialize(src, fmt, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                    source = conv;
+                }
+                if (SUCCEEDED(frame->WriteSource(source, nullptr)) &&
                     SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit())) {
                     STATSTG st = {};
                     if (SUCCEEDED(mem->Stat(&st, STATFLAG_NONAME))) {
@@ -844,6 +856,8 @@ bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, u
                     }
                 }
             }
+            if (conv) conv->Release();
+            if (src) src->Release();
             if (props) props->Release();
             frame->Release();
         }

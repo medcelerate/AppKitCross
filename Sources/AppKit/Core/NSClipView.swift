@@ -73,7 +73,20 @@ import CoreText
         set { _automaticallyAdjustsContentInsets = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/autoscroll(with:)
-    @MainActor open override func autoscroll(with event: NSEvent) -> Bool { false }
+    /// Scrolls towards an event outside the visible bounds by the overshoot (a drag past
+    /// the edge), true if it moved.
+    @MainActor open override func autoscroll(with event: NSEvent) -> Bool {
+        guard event.window == nil || event.window === window else { return false }
+        let p = convert(event.locationInWindow, from: nil)
+        let b = bounds
+        var o = b.origin
+        if p.x < b.minX { o.x -= b.minX - p.x } else if p.x > b.maxX { o.x += p.x - b.maxX }
+        if p.y < b.minY { o.y -= b.minY - p.y } else if p.y > b.maxY { o.y += p.y - b.maxY }
+        let c = constrainScroll(o)
+        guard c != b.origin else { return false }
+        scroll(to: c)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/backgroundcolor
     @MainActor open var backgroundColor: NSColor {
         get { _backgroundColor }

@@ -293,7 +293,13 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/view
     open var view: NSView? {
         get { _view }
-        set { _view = newValue; _notifyChanged() }
+        set {
+            MainActor.assumeIsolated {
+                if _view?._enclosingMenuItem === self { _view?._enclosingMenuItem = nil }
+                newValue?._enclosingMenuItem = self
+            }
+            _view = newValue; _notifyChanged()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/writingtoolsitems
     @available(macOS 15.2, *)
