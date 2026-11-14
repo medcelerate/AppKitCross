@@ -360,6 +360,8 @@ import CoreText
         get { _parentWindow }
         set {
             guard newValue !== _parentWindow else { return }
+            _parentWindow?._drawers.removeAll { $0.drawer == nil || $0.drawer === self }
+            newValue?._drawers.append(_NSWeakDrawer(self))
             let wasOpen = _state == .openState || _state == .openingState
             if _state != .closedState {
                 if let w = _window { w.orderOut(nil); _parentWindow?.removeChildWindow(w) }

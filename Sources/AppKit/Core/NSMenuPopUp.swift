@@ -126,7 +126,11 @@ final class _NSMenuView: NSView {
         NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
         border.lineWidth = 1
         border.stroke()
-        for (i, row) in layout.rows.enumerated() {
+        // Only the rows in view are drawn: a scrolled menu lists hundreds of rows, and
+        // laying every title out on each repaint kept the main thread busy for the whole
+        // frame (on Windows the menu froze and the process spun a core while it was open).
+        let visible = dirtyRect.intersection(visibleRect.isEmpty ? bounds : visibleRect)
+        for (i, row) in layout.rows.enumerated() where row.frame.intersects(visible) {
             let item = row.item
             let f = row.frame
             if item.isSeparatorItem {
@@ -194,6 +198,104 @@ final class _NSMenuView: NSView {
     }
 }
 
+// MARK: Scrolling clip
+
+/// The window's content when the menu is taller than the screen: the menu view scrolled
+/// up by `offset` inside it, with an arrow band at the top or bottom edge wherever there
+/// is more to scroll, as AppKit's long menus do. With a menu that fits it is a plain host.
+@MainActor
+final class _NSMenuClipView: NSView {
+    static let arrowBandHeight: CGFloat = 16
+    let menuView: _NSMenuView
+    private let upArrow = _NSMenuScrollArrow(direction: -1)
+    private let downArrow = _NSMenuScrollArrow(direction: 1)
+
+    init(menuView: _NSMenuView) {
+        self.menuView = menuView
+        super.init(frame: NSRect(origin: .zero, size: menuView.frame.size))
+        addSubview(menuView)
+        addSubview(upArrow)
+        addSubview(downArrow)
+        layoutArrows()
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        offset = min(offset, maxOffset)
+        layoutArrows()
+    }
+
+    var maxOffset: CGFloat { max(0, menuView.frame.height - bounds.height) }
+    var offset: CGFloat = 0 {
+        didSet {
+            offset = min(max(offset, 0), maxOffset)
+            menuView.setFrameOrigin(NSPoint(x: 0, y: -offset))
+            layoutArrows()
+            needsDisplay = true
+        }
+    }
+    private func layoutArrows() {
+        let h = _NSMenuClipView.arrowBandHeight
+        upArrow.frame = NSRect(x: 0, y: 0, width: bounds.width, height: h)
+        downArrow.frame = NSRect(x: 0, y: bounds.height - h, width: bounds.width, height: h)
+        upArrow.isHidden = offset <= 0
+        downArrow.isHidden = offset >= maxOffset
+    }
+    func arrowDirection(at point: NSPoint) -> Int? {
+        if !upArrow.isHidden, upArrow.frame.contains(point) { return -1 }
+        if !downArrow.isHidden, downArrow.frame.contains(point) { return 1 }
+        return nil
+    }
+    func scrollRowToVisible(_ rowFrame: NSRect) {
+        guard maxOffset > 0 else { return }
+        let band = _NSMenuClipView.arrowBandHeight
+        let top = offset + (offset > 0 ? band : 0), bottom = offset + bounds.height - (offset < maxOffset ? band : 0)
+        if rowFrame.minY < top { offset = rowFrame.minY - band }
+        else if rowFrame.maxY > bottom { offset = rowFrame.maxY + band - bounds.height }
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        NSBezierPath.fill(bounds)
+    }
+
+    // Accessibility: the clip is invisible; the window's children are the menu's rows.
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { menuView.accessibilityChildren() }
+}
+
+/// One scroll arrow band of a long menu.
+@MainActor
+final class _NSMenuScrollArrow: NSView {
+    let direction: Int
+    init(direction: Int) {
+        self.direction = direction
+        super.init(frame: .zero)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        NSBezierPath.fill(bounds)
+        let arrow = NSBezierPath()
+        let cx = bounds.midX, cy = bounds.midY
+        if direction < 0 {
+            arrow.move(to: NSPoint(x: cx - 4, y: cy + 2)); arrow.line(to: NSPoint(x: cx, y: cy - 2)); arrow.line(to: NSPoint(x: cx + 4, y: cy + 2))
+        } else {
+            arrow.move(to: NSPoint(x: cx - 4, y: cy - 2)); arrow.line(to: NSPoint(x: cx, y: cy + 2)); arrow.line(to: NSPoint(x: cx + 4, y: cy - 2))
+        }
+        arrow.close()
+        NSColor.labelColor.setFill()
+        arrow.fill()
+    }
+}
+
 // MARK: Window
 
 /// The borderless window a menu opens in. It never becomes key: the window that opened the
@@ -201,16 +303,38 @@ final class _NSMenuView: NSView {
 @MainActor
 final class _NSMenuWindow: NSPanel {
     let menuView: _NSMenuView
+    private let clip: _NSMenuClipView
     init(menu: NSMenu, layout: _NSMenuLayout) {
         menuView = _NSMenuView(menu: menu, layout: layout)
+        clip = _NSMenuClipView(menuView: menuView)
         super.init(contentRect: NSRect(origin: .zero, size: layout.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = .popUpMenu
-        contentView = menuView
+        contentView = clip
         isReleasedWhenClosed = false
     }
     required init?(coder: NSCoder) { nil }
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // MARK: Scrolling (a menu taller than the screen)
+
+    /// How far the rows are scrolled up, in points (0 when the whole menu fits).
+    var scrollOffset: CGFloat {
+        get { clip.offset }
+        set {
+            // The clip takes the window's (possibly clamped) size before the offset applies.
+            let size = contentRect(forFrameRect: frame).size
+            if clip.frame.size != size { clip.setFrameSize(size) }
+            clip.offset = newValue
+        }
+    }
+    var maxScrollOffset: CGFloat { clip.maxOffset }
+    var isScrollable: Bool { clip.maxOffset > 0 }
+    func scroll(by delta: CGFloat) { clip.offset += delta }
+    /// The scroll arrow band under a window point: -1 the top band, 1 the bottom one.
+    func scrollDirection(at pointInWindow: NSPoint) -> Int? { clip.arrowDirection(at: clip.convert(pointInWindow, from: nil)) }
+    /// Scrolls so the row (menu view coordinates) is fully visible, clear of the arrows.
+    func scrollRowToVisible(_ rowFrame: NSRect) { clip.scrollRowToVisible(rowFrame) }
 
     // Accessibility (ADR-0013): an open menu is an AXMenu at the top of its window's tree
     // (UI Automation's Menu, AT-SPI's menu), labelled by the menu's title.
@@ -244,6 +368,9 @@ final class _NSMenuTracker {
         let menu: NSMenu
         let window: _NSMenuWindow
         let parentRow: Int?         // row in the parent level that opened this submenu
+        /// A pop-up's selected row: where keyboard navigation starts when nothing is
+        /// highlighted (the pointer left the menu), as AppKit's pop-ups do.
+        var anchorRow: Int? = nil
     }
     private(set) var levels: [Level] = []
     private let completion: @MainActor (NSMenuItem?) -> Void
@@ -320,23 +447,48 @@ final class _NSMenuTracker {
         }
         // Keep the menu on the screen that holds the anchor.
         let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) } ?? NSScreen.main
+        var frameSize = size
+        var scrollOffset: CGFloat = 0
         if let visible = screen?.visibleFrame {
-            if origin.x + size.width > visible.maxX { origin.x = max(visible.minX, visible.maxX - size.width) }
+            if size.height > visible.height {
+                // Taller than the screen: the window takes the screen's height and the rows
+                // scroll inside it (arrow bands at the edges). A pop-up still opens with its
+                // selected item over the button where the scroll range allows.
+                frameSize.height = visible.height.rounded(.down)
+                origin.y = visible.minY
+                if case .overAnchor(let itemIndex, _) = placement, let row = layout.row(forItemIndex: itemIndex) {
+                    let rowCenterFromTop = visible.maxY - anchor.midY        // where the row should sit, from the window's top
+                    scrollOffset = row.frame.midY - rowCenterFromTop
+                }
+                scrollOffset = min(max(scrollOffset, 0), size.height - frameSize.height)
+            }
+            if origin.x + frameSize.width > visible.maxX { origin.x = max(visible.minX, visible.maxX - frameSize.width) }
             if origin.x < visible.minX { origin.x = visible.minX }
             if origin.y < visible.minY {
                 // No room below: a pull-down flips above its anchor, anything else slides up.
-                if case .besideAnchor(let edge) = placement, edge != .minX, edge != .maxX, anchor.maxY + size.height <= visible.maxY {
+                if case .besideAnchor(let edge) = placement, edge != .minX, edge != .maxX, anchor.maxY + frameSize.height <= visible.maxY {
                     origin.y = anchor.maxY
                 } else {
                     origin.y = visible.minY
                 }
             }
-            if origin.y + size.height > visible.maxY { origin.y = max(visible.minY, visible.maxY - size.height) }
+            if origin.y + frameSize.height > visible.maxY { origin.y = max(visible.minY, visible.maxY - frameSize.height) }
         }
-        window.setFrame(NSRect(origin: origin, size: size), display: false)
-        levels.append(Level(menu: menu, window: window, parentRow: parentRow))
+        window.setFrame(NSRect(origin: origin, size: frameSize), display: false)
+        window.scrollOffset = scrollOffset
+        var level = Level(menu: menu, window: window, parentRow: parentRow)
+        // A pop-up opens with its selected item highlighted, as AppKit's does, so Down
+        // moves to the next item rather than back to the first (and Return re-chose the
+        // current one: the binding never changed). The row stays the keyboard's starting
+        // point after the pointer leaves the menu and clears the highlight.
+        if case .overAnchor(let itemIndex, _) = placement, let r = layout.rows.firstIndex(where: { $0.index == itemIndex }),
+           !layout.rows[r].item.isSeparatorItem, layout.rows[r].item.isEnabled {
+            level.anchorRow = r
+        }
+        levels.append(level)
         window.orderFront(nil)
         window._accessibilityNotify(.menuOpened(window._accessibilityElementID))
+        if let r = level.anchorRow { setHighlight(r, in: levels.count - 1, openSubmenus: false) }
         if parentRow != nil, levels.count >= 2 {
             // The parent item now shows its submenu open (UIA ExpandCollapse).
             let parent = levels[levels.count - 2]
@@ -378,6 +530,7 @@ final class _NSMenuTracker {
         let view = level.window.menuView
         if view.highlightedRow != row {
             view.highlightedRow = row
+            if let row, !keyboardScrollSuppressed { level.window.scrollRowToVisible(view.layout.rows[row].frame) }
             level.menu.delegate?.menu(level.menu, willHighlight: row.map { view.layout.rows[$0].item })
             // Keyboard (or mouse) navigation is on this item: screen readers follow focus.
             if let row { level.window._accessibilityNotify(.focus(view.layout.rows[row].item._accessibilityElementID)) }
@@ -389,14 +542,74 @@ final class _NSMenuTracker {
         }
     }
 
-    /// The deepest level whose window contains the screen point, and the row under it.
+    /// The deepest level whose window contains the screen point, and the row under it (none
+    /// over a scroll arrow band).
     private func hit(_ point: NSPoint) -> (level: Int, row: Int?)? {
         for (i, level) in levels.enumerated().reversed() where level.window.frame.contains(point) {
-            let local = level.window.menuView.convert(level.window.convertPoint(fromScreen: point), from: nil)
+            let inWindow = level.window.convertPoint(fromScreen: point)
+            if level.window.scrollDirection(at: inWindow) != nil { return (i, nil) }
+            let local = level.window.menuView.convert(inWindow, from: nil)
             let rows = level.window.menuView.layout.rows
             return (i, rows.firstIndex { $0.frame.contains(local) })
         }
         return nil
+    }
+
+    // MARK: Scrolling long menus
+
+    /// True while the mouse drives the highlight: the rows under the pointer never scroll
+    /// away from it (only keyboard navigation scrolls the highlighted row into view).
+    private var keyboardScrollSuppressed = false
+    private var scrollTimer: _NSFrameTimer?
+    private var scrollingLevel: Int?
+    private var scrollingDirection = 0
+
+    /// Hovering an arrow band scrolls one row every 50 ms until the pointer leaves it.
+    private func updateArrowScrolling(at point: NSPoint) {
+        var found: (Int, Int)? = nil
+        for (i, level) in levels.enumerated().reversed() where level.window.frame.contains(point) {
+            if let d = level.window.scrollDirection(at: level.window.convertPoint(fromScreen: point)) { found = (i, d) }
+            break
+        }
+        guard let (levelIndex, direction) = found else { stopArrowScrolling(); return }
+        if scrollTimer != nil, scrollingLevel == levelIndex, scrollingDirection == direction { return }
+        stopArrowScrolling()
+        scrollingLevel = levelIndex
+        scrollingDirection = direction
+        let step = { [weak self] in
+            guard let self, let i = self.scrollingLevel, i < self.levels.count else { return }
+            let w = self.levels[i].window
+            // The pointer left the band (no mouse-moved event reports a pointer outside every
+            // window): stop rather than scroll to the end.
+            let pointer = Platform.backend.mouseLocation
+            guard w.frame.contains(pointer), w.scrollDirection(at: w.convertPoint(fromScreen: pointer)) == self.scrollingDirection else { self.stopArrowScrolling(); return }
+            w.scroll(by: CGFloat(self.scrollingDirection) * _NSMenuLayout.itemHeight)
+            if (self.scrollingDirection < 0 && w.scrollOffset <= 0) || (self.scrollingDirection > 0 && w.scrollOffset >= w.maxScrollOffset) { self.stopArrowScrolling() }
+        }
+        step()
+        scrollTimer = _NSFrameTimer(delay: 0.05, interval: 0.05, action: step)
+    }
+    private func stopArrowScrolling() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        scrollingLevel = nil
+        scrollingDirection = 0
+    }
+    private func scrollWheel(_ event: NSEvent) {
+        let p = screenPoint(of: event)
+        let index = levels.indices.reversed().first { levels[$0].window.frame.contains(p) } ?? levels.indices.last
+        guard let index else { return }
+        let w = levels[index].window
+        guard w.isScrollable else { return }
+        let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * _NSMenuLayout.itemHeight
+        w.scroll(by: -delta)
+        // The row under the (unmoved) pointer changed: refresh the highlight.
+        if let h = hit(p) {
+            keyboardScrollSuppressed = true
+            defer { keyboardScrollSuppressed = false }
+            if let row = h.row, !levels[h.level].window.menuView.layout.rows[row].item.isSeparatorItem { setHighlight(row, in: h.level, openSubmenus: false) }
+            else { setHighlight(nil, in: h.level, openSubmenus: false) }
+        }
     }
 
     private func screenPoint(of event: NSEvent) -> NSPoint {
@@ -417,6 +630,9 @@ final class _NSMenuTracker {
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             let p = screenPoint(of: event)
             if let o = openPoint, abs(p.x - o.x) > 3 || abs(p.y - o.y) > 3 { movedSinceOpen = true }
+            updateArrowScrolling(at: p)
+            keyboardScrollSuppressed = true
+            defer { keyboardScrollSuppressed = false }
             if let h = hit(p) {
                 if let row = h.row {
                     let item = levels[h.level].window.menuView.layout.rows[row].item
@@ -452,6 +668,8 @@ final class _NSMenuTracker {
             }
         case .keyDown:
             keyDown(event)
+        case .scrollWheel:
+            scrollWheel(event)
         default:
             break
         }
@@ -464,7 +682,7 @@ final class _NSMenuTracker {
         func selectable(_ i: Int) -> Bool { let it = rows[i].item; return !it.isSeparatorItem && it.isEnabled }
         func move(_ delta: Int) {
             guard !rows.isEmpty else { return }
-            var i = view.highlightedRow ?? (delta > 0 ? -1 : rows.count)
+            var i = view.highlightedRow ?? levels[last].anchorRow ?? (delta > 0 ? -1 : rows.count)
             for _ in 0..<rows.count {
                 i = (i + delta + rows.count) % rows.count
                 if selectable(i) { setHighlight(i, in: last, openSubmenus: false); return }
@@ -554,6 +772,7 @@ final class _NSMenuTracker {
         guard !finished else { return }
         finished = true
         chosenItem = item
+        stopArrowScrolling()
         let root = levels.first?.menu
         closeLevels(from: 0)
         if _NSMenuTracker.current === self { _NSMenuTracker.current = nil }

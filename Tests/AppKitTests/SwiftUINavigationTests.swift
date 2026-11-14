@@ -95,6 +95,44 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A body pass with unchanged data must not rebuild a 400-item pop-up picker: the
+    /// throwaway primitive of each evaluation used to fill a fresh NSPopUpButton (one
+    /// invalidation per item) before the attached one ignored it.
+    func testPopUpPickerUpdatesCostNothingWhenUnchanged() {
+        MainActor.assumeIsolated {
+            final class Ticker: ObservableObject { @Published var tick = 0; @Published var zone = "Zone 7" }
+            struct Settings: View {
+                @ObservedObject var ticker: Ticker
+                let zones = (0..<400).map { "Zone \($0)" }
+                var body: some View {
+                    VStack {
+                        Picker("Time zone", selection: $ticker.zone) { ForEach(zones, id: \.self) { Text($0).tag($0) } }
+                        Text("tick \(ticker.tick)")
+                    }
+                }
+            }
+            let ticker = Ticker()
+            let (w, h) = host(Settings(ticker: ticker))
+            guard let popup = allViews(h).compactMap({ $0 as? NSPopUpButton }).first else { return XCTFail("no pop-up") }
+            XCTAssertEqual(popup.numberOfItems, 400)
+            XCTAssertEqual(popup.titleOfSelectedItem, "Zone 7")
+            let before = NSView._invalidationCount
+            for i in 1...5 {
+                ticker.tick = i                      // an unrelated change re-evaluates the body
+                h.layoutSubtreeIfNeeded()
+            }
+            XCTAssertTrue(texts(h).contains("tick 5"))
+            let perPass = (NSView._invalidationCount - before) / 5
+            XCTAssertLessThan(perPass, 40, "an unchanged picker costs no per-item invalidations per pass (got \(perPass))")
+            XCTAssertEqual(popup.numberOfItems, 400)
+            XCTAssertEqual(popup.titleOfSelectedItem, "Zone 7")
+            ticker.zone = "Zone 9"
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(popup.titleOfSelectedItem, "Zone 9", "a selection change still reaches the control")
+            w.close()
+        }
+    }
+
     func testNavigationStackPushesAndPops() {
         MainActor.assumeIsolated {
             struct Nav: View {
@@ -118,7 +156,9 @@ final class SwiftUINavigationTests: XCTestCase, @unchecked Sendable {
             CARuntime.now = { clock }
             defer { CARuntime.now = saved }
             let (w, h) = host(Nav())
-            XCTAssertTrue(texts(h).contains("Home"))
+            // At the root the title goes to the window, not a row in the content (macOS).
+            XCTAssertEqual(w.title, "Home")
+            XCTAssertFalse(texts(h).contains("Home"), "no in-content heading at the root")
             XCTAssertTrue(texts(h).contains("Depth 0"))
             let link = buttons(h).first { $0.title == "Go to detail" }
             XCTAssertNotNil(link)

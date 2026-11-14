@@ -1048,7 +1048,10 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
     private func apply() {
         guard let node else { return }
-        if control.stringValue != text.wrappedValue, control.currentEditor == nil { control.stringValue = text.wrappedValue }
+        // The binding changed under the field (a submit handler clearing it): the field
+        // editor shows the new text too, as it does on macOS, rather than the stale text
+        // until focus leaves.
+        if control.stringValue != text.wrappedValue { control._setStringValueUpdatingEditor(text.wrappedValue) }
         if control.placeholderString != placeholder { control.placeholderString = placeholder }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
@@ -1393,11 +1396,22 @@ final class _ScrollPrimitive: _Primitive {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let content = node.children.first?.sizeThatFits(ProposedViewSize(width: axes.contains(.horizontal) ? nil : proposal.width, height: axes.contains(.vertical) ? nil : proposal.height)) ?? .zero
-        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : content.width } ?? content.width) : content.width,
-                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : content.height } ?? content.height) : content.height)
+        // Along a scroll axis the view takes what it is offered, and an infinite probe (a
+        // stack measuring flexibility) gets infinity: a scroll view, and so a List, fills
+        // the room its siblings leave rather than stopping at its content's height. Only an
+        // unspecified proposal reports the content's size.
+        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : .infinity } ?? content.width) : content.width,
+                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : .infinity } ?? content.height) : content.height)
     }
     override func place(node: _ViewNode, in rect: CGRect) {
-        let inner = scroll.contentSize == .zero ? rect.size : scroll.contentSize
+        // The clip size for the rect being laid out: the scroll view's own content size is
+        // the previous frame's until the backing views sync (rows lagged one resize behind),
+        // so apply its current scroller and border insets to the new size instead.
+        var inner = rect.size
+        if scroll.contentSize != .zero, scroll.frame.size != .zero {
+            inner.width = max(0, rect.width - (scroll.frame.width - scroll.contentSize.width))
+            inner.height = max(0, rect.height - (scroll.frame.height - scroll.contentSize.height))
+        }
         let proposal = ProposedViewSize(width: axes.contains(.horizontal) ? nil : inner.width, height: axes.contains(.vertical) ? nil : inner.height)
         guard let content = node.children.first else { return }
         let s = content.sizeThatFits(proposal)
@@ -1443,7 +1457,19 @@ extension Section where Parent == EmptyView, Footer == EmptyView {
 public struct Form<Content: View>: View {
     let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
-    public var body: some View { VStack(alignment: .leading, spacing: 10) { content }.padding() }
+    @Environment(\._formStyle) private var style
+    public var body: some View {
+        switch style {
+        case .grouped:
+            // The grouped style boxes the rows on the window's background, as macOS's does.
+            VStack(alignment: .leading, spacing: 12) { content }
+                .padding(14)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .padding()
+        case .automatic, .columns:
+            VStack(alignment: .leading, spacing: 10) { content }.padding()
+        }
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressview
@@ -1742,10 +1768,14 @@ final class _DatePickerPrimitive: _ControlPrimitive<NSDatePicker> {
         if control.datePickerElements != flags { control.datePickerElements = flags }
         let style: NSDatePicker.Style = node?.environment.datePickerStyle == .graphical ? .clockAndCalendar : (node?.environment.datePickerStyle == .field ? .textField : .textFieldAndStepper)
         if control.datePickerStyle != style { control.datePickerStyle = style }
-        control.minDate = view.minimum
-        control.maxDate = view.maximum
+        // Only on a change: each setter redraws the picker, and an update that always
+        // invalidates feeds the next frame.
+        if control.minDate != view.minimum { control.minDate = view.minimum }
+        if control.maxDate != view.maximum { control.maxDate = view.maximum }
         if control.dateValue != view.selection.wrappedValue { control.dateValue = view.selection.wrappedValue }
-        control.locale = node?.environment.locale
+        // Only on a change: setting the locale resets the picker's selected field, and every
+        // body update would otherwise drop the field the user is stepping or typing into.
+        if control.locale != node?.environment.locale { control.locale = node?.environment.locale }
         control.isEnabled = node?.environment.isEnabled ?? true
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }

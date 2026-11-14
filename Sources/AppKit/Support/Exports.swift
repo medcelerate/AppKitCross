@@ -19,3 +19,10 @@
 #if canImport(CoreImage)
 @_exported import CoreImage
 #endif
+// On macOS `import AppKit` (through Foundation's overlay) brings Combine's ObservableObject
+// and @Published into scope, and apps rely on it without importing Combine themselves
+// (Examples/DailyTodo); corelibs' Foundation has no Combine, so the port's AppKit re-exports
+// the port's Combine on Windows and Linux.
+#if !canImport(ObjectiveC) && canImport(Combine)
+@_exported import Combine
+#endif

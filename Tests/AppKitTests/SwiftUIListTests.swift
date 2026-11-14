@@ -39,6 +39,30 @@ private func key(_ code: UInt16, _ chars: String = "", flags: NSEvent.ModifierFl
 }
 
 final class SwiftUIListTests: XCTestCase, @unchecked Sendable {
+    /// Rows follow a resize in the same layout pass (they lagged one resize behind: the
+    /// scroll primitive measured them against the scroll view's previous content size).
+    func testRowsFollowAResizeAtOnce() {
+        MainActor.assumeIsolated {
+            struct Rows: View {
+                var body: some View {
+                    List { ForEach(0..<3, id: \.self) { i in HStack { Text("Row \(i)"); Spacer(); Text("end") } } }
+                }
+            }
+            let (w, h) = host(Rows(), width: 320, height: 260)
+            guard let list = allViews(h).compactMap({ $0 as? _ListView }).first else { return XCTFail("no list view") }
+            XCTAssertEqual(list.rowFrames.first?.width ?? 0, list.bounds.width, accuracy: 1)
+            let narrowEnd = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "end" }.map { $0.convert($0.bounds, to: h).minX } ?? 0
+            w.setContentSize(NSSize(width: 520, height: 260))
+            h.frame = NSRect(x: 0, y: 0, width: 520, height: 260)
+            h.layoutSubtreeIfNeeded()
+            XCTAssertEqual(list.rowFrames.first?.width ?? 0, list.bounds.width, accuracy: 1, "rows span the new width in the same pass")
+            XCTAssertGreaterThan(list.bounds.width, 480)
+            let wideEnd = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "end" }.map { $0.convert($0.bounds, to: h).minX } ?? 0
+            XCTAssertGreaterThan(wideEnd, narrowEnd + 150, "the trailing text moved with the new width")
+            w.close()
+        }
+    }
+
     /// Text measured before its window turned dark draws with colours resolved for dark.
     func testTextColourFollowsTheDrawingAppearance() throws {
         try requireHostBackend()

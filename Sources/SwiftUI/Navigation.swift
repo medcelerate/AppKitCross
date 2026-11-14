@@ -431,7 +431,9 @@ struct _NavigationStackBody: View {
         state.pathSetter = setPath
         if let elements = pathElements?() { state.sync(path: elements) }
         return VStack(spacing: 0) {
-            if !state.pages.isEmpty || state.title != nil {
+            // The bar (back button and title) belongs to pushed pages; at the root the
+            // title goes to the window's title bar, as on macOS, with no row in the content.
+            if !state.pages.isEmpty {
                 HStack(spacing: 8) {
                     if !state.pages.isEmpty {
                         Button("‹ Back") { withAnimation(.easeOut(duration: 0.25)) { state.pop() } }.buttonStyle(.borderless)
@@ -523,6 +525,13 @@ struct _NavigationTitle<Content: View>: View, _PrimitiveView {
             if nav.pages.isEmpty { if nav.rootTitle != title { nav.rootTitle = title; nav.objectWillChange.send() } }
             else if nav.pages[nav.pages.count - 1].title != title { nav.pages[nav.pages.count - 1].title = title }
         }
+        // The window shows the navigation title, as macOS does for a WindowGroup's content.
+        if let window = node.root?.host?.hostView.window, !(window is NSPanel), window.sheetParent == nil {
+            if window.title != title { window.title = title }
+            // An app with no bundle name (a bare executable) takes its main window's title
+            // as its name too, so the app menu and the window agree.
+            if let runner = _AppRunner._current, runner.windows.first === window { runner._adoptName(title) }
+        }
         return _GroupPrimitive(children: [_ViewBox(content)])
     }
 }
@@ -535,6 +544,23 @@ public struct NavigationView<Content: View>: View {
 }
 
 // MARK: Sheets
+
+/// Presented content (a sheet, a popover) inherits the presenting view's environment, as on
+/// macOS: its environment objects, fonts, tints and custom keys. The values the new host's
+/// root sets from its own window (appearance, scale, activity, direction, locale) are kept.
+@MainActor
+func _presented(_ content: AnyView, from node: _ViewNode?) -> AnyView {
+    guard let inherited = node?.environment else { return content }
+    return AnyView(_EnvironmentView(content: content) { env in
+        var e = inherited
+        e.colorScheme = env.colorScheme
+        e.displayScale = env.displayScale
+        e.layoutDirection = env.layoutDirection
+        e.locale = env.locale
+        e.controlActiveState = env.controlActiveState
+        env = e
+    })
+}
 
 @MainActor
 final class _SheetPrimitive: _Primitive {
@@ -567,7 +593,7 @@ final class _SheetPrimitive: _Primitive {
         guard let host = node?.root?.host?.hostWindow else { return }
         parentWindow = host
         let dismiss = DismissAction { [weak self] in self?.isPresented.wrappedValue = false }
-        let content = make().environment(\.dismiss, dismiss)
+        let content = _presented(AnyView(make().environment(\.dismiss, dismiss)), from: node)
         let hosting = NSHostingView(rootView: content)
         let size = hosting.sizeThatFits(.unspecified)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: max(size.width, 200), height: max(size.height, 120)), styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -692,7 +718,7 @@ final class _PopoverPrimitive: _Primitive {
         case .trailing: edge = rtl ? .maxX : .minX
         }
         let dismiss = DismissAction { [weak self] in self?.isPresented.wrappedValue = false }
-        let content = make().environment(\.dismiss, dismiss)
+        let content = _presented(AnyView(make().environment(\.dismiss, dismiss)), from: node)
         let hosting = NSHostingView(rootView: content)
         let size = hosting.sizeThatFits(.unspecified)
         hosting.frame = NSRect(x: 0, y: 0, width: max(size.width.rounded(.up), 40), height: max(size.height.rounded(.up), 20))
