@@ -218,6 +218,13 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         set { _chrome = newValue }
     }
 
+    private var resizeConstraints = PlatformResizeConstraints()
+    func setResizeConstraints(_ constraints: PlatformResizeConstraints) {
+        guard constraints != resizeConstraints else { return }
+        resizeConstraints = constraints
+        applySizeHints()
+    }
+
     private func applySizeHints() {
         var hints = XSizeHints()
         hints.flags = PMinSize | PMaxSize
@@ -228,6 +235,21 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         if !_styleMask.contains(.resizable) {
             hints.min_width = Int32(_frame.width * scale); hints.max_width = hints.min_width
             hints.min_height = Int32(_frame.height * scale); hints.max_height = hints.min_height
+        }
+        // NSWindow aspect ratios and increments (ADR-0036): the X client window is the
+        // content, so the content values apply directly and frame ones as an approximation.
+        let rc = resizeConstraints
+        let aspect = rc.contentAspectRatio.width > 0 ? rc.contentAspectRatio : rc.aspectRatio
+        if aspect.width > 0, aspect.height > 0, _styleMask.contains(.resizable) {
+            hints.flags |= PAspect
+            let num = Int32((aspect.width * 1000).rounded()), den = Int32((aspect.height * 1000).rounded())
+            hints.min_aspect.x = num; hints.min_aspect.y = den
+            hints.max_aspect.x = num; hints.max_aspect.y = den
+        }
+        let inc = rc.contentResizeIncrements.width > 1 || rc.contentResizeIncrements.height > 1 ? rc.contentResizeIncrements : rc.resizeIncrements
+        if inc.width > 1 || inc.height > 1 {
+            hints.flags |= PResizeInc
+            hints.width_inc = Int32(max(1, inc.width * scale)); hints.height_inc = Int32(max(1, inc.height * scale))
         }
         if sheetParent != nil {
             // The manager places a transient itself unless the position is the user's.
