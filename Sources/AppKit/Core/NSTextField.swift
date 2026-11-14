@@ -154,7 +154,7 @@ import CoreText
 
     /// Sets the text, in the field editor too while editing (the editor's text is the
     /// model's source during a session).
-    @MainActor internal func _setStringValueUpdatingEditor(_ string: String) {
+    @MainActor public func _setStringValueUpdatingEditor(_ string: String) {
         stringValue = string
         if let e = _editor, e.string != string {
             e.string = string

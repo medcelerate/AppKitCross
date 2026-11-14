@@ -397,7 +397,10 @@ import CoreText
             _drawText(f.text, attributes: attrs, in: f.rect, alignment: .center, flipped: flipped)
         }
         if _style == .textFieldAndStepper {
-            _stepper.isEnabled = _isEnabled
+            // Only on a change: the cell's setter marks the control view dirty, and doing
+            // that from every draw scheduled the next paint (a picker with a stepper kept
+            // its window repainting, and the main thread busy, for as long as it showed).
+            if _stepper.isEnabled != _isEnabled { _stepper.isEnabled = _isEnabled }
             _stepper.draw(withFrame: _stepperRect(forBounds: cellFrame), in: _controlView!)
         }
     }
@@ -665,7 +668,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/datepickerelements
     @MainActor open var datePickerElements: NSDatePicker.ElementFlags {
         get { _elements }
-        set { _elements = newValue; _selectedField = -1; _changed() }
+        set { guard newValue != _elements else { return }; _elements = newValue; _selectedField = -1; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/datepickermode
     @MainActor open var datePickerMode: NSDatePicker.Mode {
@@ -711,7 +714,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/locale
     @MainActor open var locale: Locale? {
         get { _locale }
-        set { _locale = newValue; _selectedField = -1; _changed() }
+        set { guard newValue != _locale else { return }; _locale = newValue; _selectedField = -1; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdatepickercell/maxdate
     @MainActor open var maxDate: Date? {

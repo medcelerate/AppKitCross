@@ -98,9 +98,21 @@ import CoreText
         if indeterminate != _isIndeterminate { _isIndeterminate = indeterminate; needsDisplay = true }
     }
 
+    /// Frames run only while the indicator can be seen: an animating indicator whose window
+    /// closed or ordered out kept its display link, invalidating a view nothing shows on
+    /// every tick and keeping the frame clock running for good.
     private func _updateLink() {
         let needsFrames = (_isAnimating && _isIndeterminate) || _observedProgress != nil
-        if needsFrames { _startLink() } else { _stopLink() }
+        let visible = window?.isVisible ?? false
+        if needsFrames && visible { _startLink() } else { _stopLink() }
+    }
+    @MainActor open override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        _updateLink()
+    }
+    override func _windowVisibilityDidChange(_ visible: Bool) {
+        super._windowVisibilityDidChange(visible)
+        _updateLink()
     }
 
     // MARK: Drawing

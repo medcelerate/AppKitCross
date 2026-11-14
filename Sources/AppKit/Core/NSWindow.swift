@@ -753,7 +753,14 @@ import CoreText
             default: return .zoomButton
             }
         }
-        if let v = hit, !v.mouseDownCanMoveWindow { return .client }
+        // The hit view or any ancestor that takes the click keeps it from moving the window:
+        // a label inside a custom button (SwiftUI's Button with a Label body) is the button's.
+        var v = hit
+        while let view = v {
+            if !view.mouseDownCanMoveWindow { return .client }
+            if view === content || view === _toolbarView || view === _accessoryHost { break }
+            v = view.superview
+        }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if let a = _accessoryHost, !a.isHidden, let v = hit, v === a || v.isDescendant(of: a) { return .caption }
         if _isMovableByWindowBackground { return .caption }
@@ -1216,7 +1223,11 @@ import CoreText
     /// Where the sheet goes: centred on the top of `contentLayoutRect` (under the title bar
     /// and the toolbar band), unless the delegate moves the attachment rect.
     private func _sheetFrame(for sheet: NSWindow) -> NSRect {
-        let size = sheet.contentRect(forFrameRect: sheet.frame).size
+        // The attached sheet is frameless, so its frame is its content plus its own toolbar
+        // band; converting to the content rect here dropped the band from the frame on
+        // every layout (a sheet with a toolbar shrank by the band each time its parent
+        // reported a frame, until nothing but the toolbar was left).
+        let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
         var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
@@ -1241,11 +1252,26 @@ import CoreText
         let h = max(1, (target.height * min(max(fraction, 0), 1)).rounded())
         let partial = NSRect(x: target.minX, y: target.maxY - h, width: target.width, height: h)
         if let cv = _contentView {
-            if cv.frame.size != target.size { cv.setFrameSize(target.size) }
+            // The content keeps its full size (the frame less this sheet's toolbar band),
+            // pinned to the top so it emerges from under the parent's title bar.
+            let full = contentRect(forFrameRect: target).size
+            if cv.frame.size != full { cv.setFrameSize(full) }
             cv.setFrameOrigin(NSPoint(x: 0, y: h - target.height))
         }
         if p.frame != partial { p.frame = partial }
         p.setNeedsDisplay(nil)
+    }
+
+    /// After the slide's last step: the window's final size lands with that step, and on
+    /// Windows the top rows of the sheet kept whatever the resized surface held (the
+    /// parent's content showed through until the next repaint), so the whole sheet is
+    /// invalidated again once the step has been processed.
+    fileprivate func _repaintAfterSheetSlide() {
+        Platform.backend.post { [weak self] in
+            guard let self, let p = self._platform else { return }
+            self._contentView?.needsDisplay = true
+            p.setNeedsDisplay(nil)
+        }
     }
 
     /// Ends the sheet session on this sheet's parent with `.cancel` (a sheet closed or
@@ -3111,6 +3137,7 @@ extension NSWindow: PlatformAccessibilityProvider {
         link?.invalidate()
         link = nil
         apply(1)
+        if direction == .in { sheet._repaintAfterSheetSlide() }
         completion()
     }
 }

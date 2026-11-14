@@ -83,7 +83,7 @@ let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
 // The spell checker seam (ADR-0030): the Windows Spell Checking API over COM.
 targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("ole32")])]
-appKitDependencies += ["CSpellCheck"]
+appKitDependencies += ["CSpellCheck", "Combine"]
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -151,7 +151,7 @@ let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO", "UniformTypeIdentifiers"]
 // The spell checker seam (ADR-0030): hunspell, loaded at run time.
 targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("dl")])]
-appKitDependencies += ["CSpellCheck"]
+appKitDependencies += ["CSpellCheck", "Combine"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -236,7 +236,15 @@ if buildsAVFAudio {
 #if os(Windows) || os(Linux)
 let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
 let combineTestDependencies: [Target.Dependency] = ["Combine"]
+// Examples/DailyTodo imports UserNotifications and ServiceManagement, which exist only in
+// Apple's SDK: Examples/DailyTodo/Shims supplies both under their module names here.
+targets += [
+    .target(name: "UserNotifications", path: "Examples/DailyTodo/Shims/UserNotifications"),
+    .target(name: "ServiceManagement", path: "Examples/DailyTodo/Shims/ServiceManagement"),
+]
+let dailyTodoShimDependencies: [Target.Dependency] = ["Combine", "UserNotifications", "ServiceManagement"]
 #else
+let dailyTodoShimDependencies: [Target.Dependency] = []
 let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
@@ -284,6 +292,13 @@ targets += [
     .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
     .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
+    // A real third-party SwiftUI app, vendored unmodified (one `#if canImport(ObjectiveC)`
+    // around an `@objc`): Daily To Do (MIT, Examples/DailyTodo/README.md). Its logic module and
+    // its dependency-free self-checks come along; the frameworks the port lacks are shimmed.
+    // Upstream declares tools version 5.9, so its three targets build in Swift 5 language mode.
+    .target(name: "DailyTodoCore", path: "Examples/DailyTodo/Sources/DailyTodoCore", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoShimDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "DailyTodoChecks", dependencies: ["DailyTodoCore"], path: "Examples/DailyTodo/Sources/DailyTodoChecks", swiftSettings: [.swiftLanguageMode(.v5)]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,
