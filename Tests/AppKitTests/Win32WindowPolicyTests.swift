@@ -47,6 +47,26 @@ final class Win32WindowPolicyTests: XCTestCase {
         XCTAssertFalse(Win32WindowPolicy.isCaptionButton(hitCode: 12))    // HTTOP: the resize band over the buttons
     }
 
+    /// Who handles a non-client press or release, for every hit code a caption can answer.
+    /// A custom frame takes presses on the buttons it draws. A system frame leaves every code
+    /// to DefWindowProc: when it took HTMINBUTTON and HTMAXBUTTON, a click on Windows' own
+    /// minimise or maximise button did nothing, although the snap layouts flyout still showed.
+    func testOnlyCustomFramesTakeCaptionButtonPresses() {
+        let table: [(code: Int32, name: String, customFrameTakes: Bool)] = [
+            (0, "HTNOWHERE", false), (1, "HTCLIENT", false), (2, "HTCAPTION", false), (3, "HTSYSMENU", false),
+            (8, "HTMINBUTTON", true), (9, "HTMAXBUTTON", true), (10, "HTLEFT", false), (11, "HTRIGHT", false),
+            (12, "HTTOP", false), (13, "HTTOPLEFT", false), (14, "HTTOPRIGHT", false), (15, "HTBOTTOM", false),
+            (16, "HTBOTTOMLEFT", false), (17, "HTBOTTOMRIGHT", false), (18, "HTBORDER", false),
+            (20, "HTCLOSE", true), (21, "HTHELP", false),
+        ]
+        for row in table {
+            XCTAssertEqual(Win32WindowPolicy.takesNonClientMouse(hitCode: row.code, customFrame: true), row.customFrameTakes,
+                           "custom frame, \(row.name)")
+            XCTAssertFalse(Win32WindowPolicy.takesNonClientMouse(hitCode: row.code, customFrame: false),
+                           "system frame, \(row.name) must go to DefWindowProc")
+        }
+    }
+
     /// `orderFront(_:)` shows without activating (SW_SHOWNA): a panel ordered front leaves
     /// the document window key, as in AppKit; `makeKey()` is what activates.
     func testOrderFrontShowsWithoutActivating() {
