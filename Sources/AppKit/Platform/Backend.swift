@@ -99,6 +99,19 @@ public protocol PlatformBackend: AnyObject {
     /// covers the title bar, client-side decorations): macOS traffic lights at the left, or
     /// the platform's caption buttons at the right (ADR-0022). Default: traffic lights.
     var windowButtonStyle: PlatformWindowButtonStyle { get }
+
+    /// The characters the key with this event key code types under the current keyboard
+    /// layout with `modifierFlags` (only .shift, .option, .control and .capsLock are passed)
+    /// held, for `NSEvent.characters(byApplyingModifiers:)` (ADR-0038). The key code is the
+    /// one the backend put in its key events: a Windows virtual-key code, an X keysym, the
+    /// macOS virtual key code on the host backend. Nil when the key types nothing.
+    func characters(forKeyCode keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> String?
+
+    /// Starts (`handler` non-nil) or stops reporting the mouse and keyboard events of `mask`
+    /// that go to other applications, for `NSEvent.addGlobalMonitorForEvents` (ADR-0038).
+    /// Locations are screen coordinates. Default: the platform does not show other
+    /// applications' input, and nothing is reported.
+    func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?)
 }
 
 /// The look and placement of the standard window buttons the package draws (ADR-0022).
@@ -267,6 +280,7 @@ public struct PlatformPresentationSurfaceHandle: Sendable {
 public typealias PlatformLayerScene = _CALayerScene
 
 extension PlatformBackend {
+    public func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?) { }
     public func runNested(until stop: @escaping @MainActor () -> Bool) { runModal(for: nil, until: stop) }
     public var windowButtonStyle: PlatformWindowButtonStyle { .trafficLights }
 }

@@ -403,6 +403,37 @@ final class WaylandBackend: PlatformBackend {
     }
 
     func beep() { FileHandle.standardError.write(Data([0x07])) }   // no bell in the Wayland protocol
+
+    /// The key of the current keymap that types this keysym (at any level), translated by a
+    /// scratch xkb state holding Shift, Lock, Control and Option as Mod5 (ISO Level 3, the
+    /// layout's AltGr level) (ADR-0038).
+    func characters(forKeyCode keyCode: UInt16, modifierFlags flags: NSEvent.ModifierFlags) -> String? {
+        guard let keymap = xkbKeymap else { return nil }
+        let target = xkb_keysym_t(keyCode)
+        var found: xkb_keycode_t? = nil
+        search: for kc in xkb_keymap_min_keycode(keymap)...xkb_keymap_max_keycode(keymap) {
+            for level in 0..<xkb_keymap_num_levels_for_key(keymap, kc, 0) {
+                var syms: UnsafePointer<xkb_keysym_t>? = nil
+                let n = xkb_keymap_key_get_syms_by_level(keymap, kc, 0, level, &syms)
+                if n > 0, let syms, (0..<Int(n)).contains(where: { syms[$0] == target }) { found = kc; break search }
+            }
+        }
+        guard let kc = found, let state = xkb_state_new(keymap) else { return nil }
+        defer { xkb_state_unref(state) }
+        func mask(_ name: String) -> xkb_mod_mask_t {
+            let i = xkb_keymap_mod_get_index(keymap, name)
+            return i == 0xFFFF_FFFF ? 0 : 1 << i
+        }
+        var depressed: xkb_mod_mask_t = 0
+        if flags.contains(.shift) { depressed |= mask("Shift") }
+        if flags.contains(.control) { depressed |= mask("Control") }
+        if flags.contains(.option) { depressed |= mask("Mod5") }
+        let locked: xkb_mod_mask_t = flags.contains(.capsLock) ? mask("Lock") : 0
+        _ = xkb_state_update_mask(state, depressed, 0, locked, 0, 0, 0)
+        var buffer = [CChar](repeating: 0, count: 32)
+        let n = xkb_state_key_get_utf8(state, kc, &buffer, 32)
+        return n > 0 ? String(cString: buffer) : nil
+    }
     var systemAppearanceIsDark: Bool { false }
 
     var mouseLocation: NSPoint {

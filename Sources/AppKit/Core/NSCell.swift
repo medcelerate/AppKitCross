@@ -1,5 +1,5 @@
 // NSCell (hand-written; seeded from the generated stub, see tools/apigen)
-// Members still marked unimplemented() are stubs awaiting implementation.
+// Members still marked unimplemented() say why (ADR-0038).
 //
 // Every member is either implemented (hand-written types only), stubbed with
 // unimplemented(), or listed as SKIPPED with the reason it cannot compile on Windows yet.
@@ -48,6 +48,13 @@ import CoreText
     internal var _baseWritingDirection: NSWritingDirection = .natural
     internal var _menu: NSMenu? = nil
     internal var _sendActionMask: Int = Int(NSEvent.EventTypeMask.leftMouseUp.rawValue)
+    internal var _allowsUndo = true
+    internal var _allowsEditingTextAttributes = false
+    internal var _importsGraphics = false
+    internal var _controlTint: NSControlTint = .defaultControlTint
+    internal var _sendsActionOnEndEditing = false
+    internal var _userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection = .leftToRight
+    internal var _wantsNotificationForMarkedText = false
 
     /// Marks the control view dirty after a value change.
     internal func _changed() { _controlView?.needsDisplay = true }
@@ -61,7 +68,13 @@ import CoreText
 
     open override var description: String { MainActor.assumeIsolated { "<\(Swift.type(of: self)) '\(stringValue)'>" } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/init()
-    @MainActor public override init() { unimplemented() }
+    /// A null cell (`.nullCellType`) with no value; macOS 15 reports allowsEditingTextAttributes
+    /// true for it (and false for a text cell).
+    @MainActor public override init() {
+        super.init()
+        _type = .nullCellType
+        _allowsEditingTextAttributes = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/init(coder:)
     @MainActor public required init(coder: NSCoder) { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/init(imagecell:)
@@ -89,9 +102,10 @@ import CoreText
         set { _alignment = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/allowseditingtextattributes
+    /// Stored; the field editor is rich text while it is set (`setUpFieldEditorAttributes`).
     @MainActor open var allowsEditingTextAttributes: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsEditingTextAttributes }
+        set { _allowsEditingTextAttributes = newValue; if !newValue { _importsGraphics = false } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/allowsmixedstate
     @MainActor open var allowsMixedState: Bool {
@@ -99,9 +113,10 @@ import CoreText
         set { _allowsMixedState = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/allowsundo
+    /// Stored (default true); handed to the field editor in `setUpFieldEditorAttributes`.
     @MainActor open var allowsUndo: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsUndo }
+        set { _allowsUndo = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/attributedstringvalue
     @MainActor open var attributedStringValue: NSAttributedString {
@@ -149,9 +164,10 @@ import CoreText
         set { _controlSize = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/controltint
+    /// Stored (default `.defaultControlTint`); the port's controls draw with the accent colour.
     @MainActor open var controlTint: NSControlTint {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _controlTint }
+        set { _controlTint = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/controlview
     @MainActor open var controlView: NSView? {
@@ -161,7 +177,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/defaultfocusringtype
     @MainActor class public var defaultFocusRingType: NSFocusRingType { NSFocusRingType(rawValue: 2)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/defaultmenu
-    @MainActor class public var defaultMenu: NSMenu? { unimplemented() }
+    /// Nil: a cell has no default contextual menu (macOS).
+    @MainActor class public var defaultMenu: NSMenu? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/doublevalue
     @MainActor open var doubleValue: Double {
         get {
@@ -173,9 +190,32 @@ import CoreText
         set { objectValue = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/draggingimagecomponents(withframe:in:)
-    @MainActor open func draggingImageComponents(withFrame frame: NSRect, in view: NSView) -> [NSDraggingImageComponent] { unimplemented() }
+    /// An icon component (the cell as drawn) and, for a text cell, a label component (its
+    /// text), each covering `frame` (macOS gives both the whole frame). The images draw the
+    /// cell when the drag image is composed, not now.
+    @MainActor open func draggingImageComponents(withFrame frame: NSRect, in view: NSView) -> [NSDraggingImageComponent] {
+        let bounds = NSRect(origin: .zero, size: frame.size)
+        let flipped = view.isFlipped
+        let icon = NSDraggingImageComponent(key: .icon)
+        icon.frame = frame
+        icon.contents = NSImage(size: frame.size, flipped: flipped) { [weak self, weak view] _ in
+            guard let self, let view else { return false }
+            if self._type == .textCellType { if let image = self._image { image.draw(in: self.imageRect(forBounds: bounds)) } } else { self.draw(withFrame: bounds, in: view) }
+            return true
+        }
+        guard _type == .textCellType else { return [icon] }
+        let label = NSDraggingImageComponent(key: .label)
+        label.frame = frame
+        label.contents = NSImage(size: frame.size, flipped: flipped) { [weak self, weak view] _ in
+            guard let self, let view else { return false }
+            self.drawInterior(withFrame: bounds, in: view)
+            return true
+        }
+        return [icon, label]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/draw(withexpansionframe:in:)
-    @MainActor open func draw(withExpansionFrame cellFrame: NSRect, in view: NSView) { unimplemented() }
+    /// Draws the cell in the expansion tool tip's frame (`draw(withFrame:in:)`).
+    @MainActor open func draw(withExpansionFrame cellFrame: NSRect, in view: NSView) { draw(withFrame: cellFrame, in: view) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/draw(withframe:in:)
     @MainActor open func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         _controlView = controlView
@@ -188,7 +228,13 @@ import CoreText
         drawInterior(withFrame: cellFrame, in: controlView)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/drawfocusringmask(withframe:in:)
-    @MainActor open func drawFocusRingMask(withFrame cellFrame: NSRect, in controlView: NSView) { unimplemented() }
+    /// Fills `focusRingMaskBounds` (empty for a plain cell, so nothing is drawn).
+    @MainActor open func drawFocusRingMask(withFrame cellFrame: NSRect, in controlView: NSView) {
+        let r = focusRingMaskBounds(forFrame: cellFrame, in: controlView)
+        guard !r.isEmpty else { return }
+        NSColor.black.setFill()
+        NSBezierPath.fill(r)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/drawinterior(withframe:in:)
     @MainActor open func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         guard _type == .textCellType, !stringValue.isEmpty else { return }
@@ -216,20 +262,54 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/drawingrect(forbounds:)
     @MainActor open func drawingRect(forBounds rect: NSRect) -> NSRect { (_isBordered || _isBezeled) ? rect.insetBy(dx: 2, dy: 2) : rect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/edit(withframe:in:editor:delegate:event:)
-    @MainActor open func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) { unimplemented() }
+    /// Starts editing a text cell in `textObj` (normally the window's field editor): the
+    /// editor is set up (`setUpFieldEditorAttributes`), takes the cell's text and font, is
+    /// placed over `rect` in `controlView`, gets `delegate` and becomes first responder; a
+    /// mouse-down `event` goes on to it, otherwise the insertion point is at the start (macOS).
+    /// The cell's value is not updated until the control takes the editor's text.
+    @MainActor open func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+        _beginFieldEditor(textObj, frame: rect, in: controlView, delegate: delegate)
+        if let event { textObj.mouseDown(with: event) } else { textObj.selectedRange = NSRange(location: 0, length: 0) }
+    }
+
+    @MainActor internal func _beginFieldEditor(_ textObj: NSText, frame rect: NSRect, in controlView: NSView, delegate: Any?) {
+        guard _type == .textCellType else { return }
+        _controlView = controlView
+        let editor = setUpFieldEditorAttributes(textObj)
+        editor.font = _effectiveFont
+        if _allowsEditingTextAttributes, let tv = editor as? NSTextView, let storage = tv.textStorage {
+            storage.setAttributedString(attributedStringValue)
+        } else {
+            editor.string = stringValue
+        }
+        editor.frame = rect
+        editor.delegate = delegate as? NSTextDelegate
+        if editor.superview !== controlView { controlView.addSubview(editor) }
+        _ = controlView.window?.makeFirstResponder(editor)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/endediting(_:)
-    @MainActor open func endEditing(_ textObj: NSText) { unimplemented() }
+    /// Ends an editing session: the editor loses its delegate and first-responder status (the
+    /// window takes it), leaves the view and is emptied. The cell keeps its value (macOS).
+    @MainActor open func endEditing(_ textObj: NSText) {
+        textObj.delegate = nil
+        if let w = textObj.window, w.firstResponder === textObj { _ = w.makeFirstResponder(nil) }
+        textObj.removeFromSuperview()
+        textObj.string = ""
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/expansionframe(withframe:in:)
-    @MainActor open func expansionFrame(withFrame cellFrame: NSRect, in view: NSView) -> NSRect { unimplemented() }
+    /// Zero: a plain cell has no expansion tool tip (text field cells answer their own).
+    @MainActor open func expansionFrame(withFrame cellFrame: NSRect, in view: NSView) -> NSRect { .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/fieldeditor(for:)
-    @MainActor open func fieldEditor(for controlView: NSView) -> NSTextView? { unimplemented() }
+    /// Nil: the window's shared field editor is used (macOS's default).
+    @MainActor open func fieldEditor(for controlView: NSView) -> NSTextView? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/floatvalue
     @MainActor open var floatValue: Float {
         get { Float(doubleValue) }
         set { objectValue = Double(newValue) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/focusringmaskbounds(forframe:in:)
-    @MainActor open func focusRingMaskBounds(forFrame cellFrame: NSRect, in controlView: NSView) -> NSRect { unimplemented() }
+    /// Zero for a plain cell (macOS); subclasses that draw a focus ring answer their shape.
+    @MainActor open func focusRingMaskBounds(forFrame cellFrame: NSRect, in controlView: NSView) -> NSRect { .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/focusringtype
     @MainActor open var focusRingType: NSFocusRingType {
         get { _focusRingType }
@@ -246,13 +326,19 @@ import CoreText
         set { _formatter = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/getperiodicdelay(_:interval:)
-    @MainActor open func getPeriodicDelay(_ delay: UnsafeMutablePointer<Float>, interval: UnsafeMutablePointer<Float>) { unimplemented() }
+    /// 0.2 s before the first repeat, then every 0.025 s (macOS's values for a plain cell).
+    @MainActor open func getPeriodicDelay(_ delay: UnsafeMutablePointer<Float>, interval: UnsafeMutablePointer<Float>) { delay.pointee = 0.2; interval.pointee = 0.025 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/hasvalidobjectvalue
-    @MainActor open var hasValidObjectValue: Bool { unimplemented() }
+    /// False only when a formatter cannot show the value it was given.
+    @MainActor open var hasValidObjectValue: Bool {
+        guard let f = _formatter, let v = _objectValue else { return true }
+        return f.string(for: v) != nil
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/highlight(_:withframe:in:)
     @MainActor open func highlight(_ flag: Bool, withFrame cellFrame: NSRect, in controlView: NSView) { isHighlighted = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/highlightcolor(withframe:in:)
-    @MainActor open func highlightColor(withFrame cellFrame: NSRect, in controlView: NSView) -> NSColor? { unimplemented() }
+    /// The secondary selection colour (macOS 15's answer for a plain or text field cell).
+    @MainActor open func highlightColor(withFrame cellFrame: NSRect, in controlView: NSView) -> NSColor? { .secondarySelectedControlColor }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/hittest(for:in:of:)
     @MainActor open func hitTest(for event: NSEvent, in cellFrame: NSRect, of controlView: NSView) -> NSCell.HitResult { cellFrame.contains(controlView.convert(event.locationInWindow, from: nil)) ? .contentArea : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/image
@@ -263,9 +349,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/imagerect(forbounds:)
     @MainActor open func imageRect(forBounds rect: NSRect) -> NSRect { drawingRect(forBounds: rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/importsgraphics
+    /// Stored; setting it also allows editing text attributes (AppKit).
     @MainActor open var importsGraphics: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _importsGraphics }
+        set { _importsGraphics = newValue; if newValue { _allowsEditingTextAttributes = true } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/intvalue
     @MainActor open var intValue: Int32 {
@@ -339,7 +426,8 @@ import CoreText
         set { _menu = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/menu(for:in:of:)
-    @MainActor open func menu(for event: NSEvent, in cellFrame: NSRect, of view: NSView) -> NSMenu? { unimplemented() }
+    /// The cell's menu (nil when it has none; `defaultMenu` is nil).
+    @MainActor open func menu(for event: NSEvent, in cellFrame: NSRect, of view: NSView) -> NSMenu? { _menu ?? NSCell.defaultMenu }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/mousedownflags
     @MainActor open var mouseDownFlags: Int { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/nextstate
@@ -361,7 +449,7 @@ import CoreText
         if let control = _controlView as? NSControl { control.performClick(sender) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/preferstrackinguntilmouseup
-    @MainActor class public var prefersTrackingUntilMouseUp: Bool { unimplemented() }
+    @MainActor class public var prefersTrackingUntilMouseUp: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/refusesfirstresponder
     @MainActor open var refusesFirstResponder: Bool {
         get { _refusesFirstResponder }
@@ -375,13 +463,18 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/resetcursorrect(_:in:)
     @MainActor open func resetCursorRect(_ cellFrame: NSRect, in controlView: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/select(withframe:in:editor:delegate:start:length:)
-    @MainActor open func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) { unimplemented() }
+    /// `edit(withFrame:in:editor:delegate:event:)` without an event, then selects the range.
+    @MainActor open func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+        _beginFieldEditor(textObj, frame: rect, in: controlView, delegate: delegate)
+        textObj.selectedRange = NSRange(location: selStart, length: selLength)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/sendaction(on:)
     @MainActor open func sendAction(on mask: NSEvent.EventTypeMask) -> Int { let old = _sendActionMask; _sendActionMask = Int(mask.rawValue); return old }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/sendsactiononendediting
+    /// Stored (default false).
     @MainActor open var sendsActionOnEndEditing: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _sendsActionOnEndEditing }
+        set { _sendsActionOnEndEditing = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/setcellattribute(_:to:)
     @MainActor open func setCellAttribute(_ parameter: NSCell.Attribute, to value: Int) {
@@ -396,7 +489,20 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/setnextstate()
     @MainActor open func setNextState() { state = NSControl.StateValue(rawValue: nextState) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/setupfieldeditorattributes(_:)
-    @MainActor open func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText { unimplemented() }
+    /// Configures the editor for this cell: text colour (dimmed when disabled), no
+    /// background, the cell's alignment, editability, rich text and graphics, undo.
+    @MainActor open func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText {
+        textObj.textColor = _textColor
+        textObj.drawsBackground = false
+        textObj.alignment = _alignment
+        textObj.isEditable = _isEditable
+        textObj.isSelectable = _isEditable || _isSelectable
+        textObj.isRichText = _allowsEditingTextAttributes
+        textObj.importsGraphics = _importsGraphics
+        textObj.isFieldEditor = true
+        if let tv = textObj as? NSTextView { tv.allowsUndo = _allowsUndo }
+        return textObj
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/showsfirstresponder
     @MainActor open var showsFirstResponder: Bool {
         get { _showsFirstResponder }
@@ -428,17 +534,17 @@ import CoreText
         set { _tag = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takedoublevaluefrom(_:)
-    @MainActor open func takeDoubleValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeDoubleValueFrom(_ sender: Any?) { if let c = sender as? NSControl { doubleValue = c.doubleValue } else if let c = sender as? NSCell { doubleValue = c.doubleValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takefloatvaluefrom(_:)
-    @MainActor open func takeFloatValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeFloatValueFrom(_ sender: Any?) { if let c = sender as? NSControl { floatValue = c.floatValue } else if let c = sender as? NSCell { floatValue = c.floatValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takeintvaluefrom(_:)
     @MainActor open func takeIntValueFrom(_ sender: Any?) { if let c = sender as? NSControl { intValue = c.intValue } else if let c = sender as? NSCell { intValue = c.intValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takeintegervaluefrom(_:)
-    @MainActor open func takeIntegerValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeIntegerValueFrom(_ sender: Any?) { if let c = sender as? NSControl { integerValue = c.integerValue } else if let c = sender as? NSCell { integerValue = c.integerValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takeobjectvaluefrom(_:)
-    @MainActor open func takeObjectValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeObjectValueFrom(_ sender: Any?) { if let c = sender as? NSControl { objectValue = c.objectValue } else if let c = sender as? NSCell { objectValue = c.objectValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/takestringvaluefrom(_:)
-    @MainActor open func takeStringValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeStringValueFrom(_ sender: Any?) { if let c = sender as? NSControl { stringValue = c.stringValue } else if let c = sender as? NSCell { stringValue = c.stringValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/target
     @MainActor open var target: AnyObject? {
         get { nil }
@@ -464,9 +570,10 @@ import CoreText
         set { _type = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/userinterfacelayoutdirection
+    /// Stored (default left to right, whatever the application's direction; macOS).
     @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _userInterfaceLayoutDirection }
+        set { _userInterfaceLayoutDirection = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/usessinglelinemode
     @MainActor open var usesSingleLineMode: Bool {
@@ -474,7 +581,8 @@ import CoreText
         set { _usesSingleLineMode = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/wantsnotificationformarkedtext
-    @MainActor open var wantsNotificationForMarkedText: Bool { unimplemented() }
+    /// Set by `NSTextFieldCell.setWantsNotificationForMarkedText(_:)`.
+    @MainActor open var wantsNotificationForMarkedText: Bool { _wantsNotificationForMarkedText }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/wraps
     @MainActor open var wraps: Bool {
         get { _wraps }
@@ -504,15 +612,19 @@ import CoreText
         _usesSingleLineMode = other._usesSingleLineMode; _focusRingType = other._focusRingType
         _refusesFirstResponder = other._refusesFirstResponder; _showsFirstResponder = other._showsFirstResponder
         _baseWritingDirection = other._baseWritingDirection; _menu = other._menu; _sendActionMask = other._sendActionMask
+        _allowsUndo = other._allowsUndo; _allowsEditingTextAttributes = other._allowsEditingTextAttributes; _importsGraphics = other._importsGraphics
+        _controlTint = other._controlTint; _sendsActionOnEndEditing = other._sendsActionOnEndEditing
+        _userInterfaceLayoutDirection = other._userInterfaceLayoutDirection; _wantsNotificationForMarkedText = other._wantsNotificationForMarkedText
     }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
+    /// The control view's frame; zero for a cell not in a view.
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _controlView?.accessibilityFrame() ?? .zero } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
+    open func accessibilityParent() -> Any? { MainActor.assumeIsolated { _controlView } }
     // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
+    open func isAccessibilityFocused() -> Bool { MainActor.assumeIsolated { _controlView.map { $0.window?.firstResponder === $0 } ?? false } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { "" }
 }

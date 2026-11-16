@@ -183,7 +183,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     private var _length: Int { _textStorage?.length ?? 0 }
 
     /// NSFont / NSColor attributes expressed for CoreText, with temporary attributes merged.
-    private func _coreTextString() -> NSAttributedString {
+    internal func _coreTextString() -> NSAttributedString {
         guard let storage = _textStorage else { return NSAttributedString(string: "") }
         let out = NSMutableAttributedString(string: storage.string)
         let n = storage.length
@@ -214,13 +214,26 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                 ct[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = cg
                 if let u = attrs[.underlineStyle] as? NSNumber, u.intValue != 0 { ct[NSAttributedString.Key(kCTUnderlineStyleAttributeName as String)] = u }
                 if let ucg { ct[NSAttributedString.Key(kCTUnderlineColorAttributeName as String)] = ucg }
+                // Outline (positive) and fill-and-stroke (negative) glyphs, as a percentage of the size.
+                if let w = attrs[.strokeWidth] as? NSNumber, w.doubleValue != 0 {
+                    ct[NSAttributedString.Key(kCTStrokeWidthAttributeName as String)] = w
+                    if let sc = attrs[.strokeColor] as? NSColor {
+                        var scg = sc.cgColor
+                        appearance?.performAsCurrentDrawingAppearance { scg = sc.cgColor }
+                        ct[NSAttributedString.Key(kCTStrokeColorAttributeName as String)] = scg
+                    }
+                }
             }
             if let ps = attrs[.paragraphStyle] as? NSParagraphStyle, let cts = ctStyle(ps) { ct[NSAttributedString.Key(kCTParagraphStyleAttributeName as String)] = cts }
             if let k = attrs[.kern] as? NSNumber { ct[NSAttributedString.Key(kCTKernAttributeName as String)] = k }
             if let b = attrs[.baselineOffset] as? NSNumber { ct[NSAttributedString.Key(kCTBaselineOffsetAttributeName as String)] = b }
             out.addAttributes(ct, range: range)
         }
-        storage.enumerateAttributes(in: NSRange(location: 0, length: n), options: []) { attrs, range, _ in
+        // Links draw with the text view's link attributes (blue and underlined by default).
+        let linkAttributes: [NSAttributedString.Key: Any]? = MainActor.assumeIsolated { firstTextView?.linkTextAttributes }
+        storage.enumerateAttributes(in: NSRange(location: 0, length: n), options: []) { stored, range, _ in
+            var attrs = stored
+            if stored[.link] != nil, let la = linkAttributes { for (k, v) in la { attrs[k] = v } }
             var merged = attrs
             for t in _temporary where t.range.location < range.location + range.length && t.range.location + t.range.length > range.location {
                 // Split the run where temporary attributes apply.
