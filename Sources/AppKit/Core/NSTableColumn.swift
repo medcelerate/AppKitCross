@@ -28,7 +28,7 @@ import CoreGraphics
     /// `NSHidden`, `NSResizingMask`, `NSHeaderToolTip`, the header cell's title as
     /// `NSHeaderTitle` — the port does not archive cells).
     public required init?(coder: NSCoder) {
-        _identifier = NSUserInterfaceItemIdentifier(coder.decodeObject(forKey: "NSIdentifier") as? String ?? "")
+        _identifier = NSUserInterfaceItemIdentifier(coder._decodeObjectIfPresent(forKey: "NSIdentifier") as? String ?? "")
         _headerCell = MainActor.assumeIsolated { NSTableHeaderCell(textCell: "") }
         super.init()
         if coder.containsValue(forKey: "NSWidth") { _width = CGFloat(coder.decodeDouble(forKey: "NSWidth")) }
@@ -37,8 +37,8 @@ import CoreGraphics
         if coder.containsValue(forKey: "NSIsEditable") { _isEditable = coder.decodeBool(forKey: "NSIsEditable") }
         _isHidden = coder.decodeBool(forKey: "NSHidden")
         if coder.containsValue(forKey: "NSResizingMask") { _resizingMask = NSTableColumn.ResizingOptions(rawValue: UInt(coder.decodeInteger(forKey: "NSResizingMask"))) }
-        _headerToolTip = coder.decodeObject(forKey: "NSHeaderToolTip") as? String
-        if let t = coder.decodeObject(forKey: "NSHeaderTitle") as? String { _title = t; MainActor.assumeIsolated { _headerCell.stringValue = t } }
+        _headerToolTip = coder._decodeObjectIfPresent(forKey: "NSHeaderToolTip") as? String
+        if let t = coder._decodeObjectIfPresent(forKey: "NSHeaderTitle") as? String { _title = t; MainActor.assumeIsolated { _headerCell.stringValue = t } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablecolumn/init(identifier:)
     @MainActor public init(identifier: NSUserInterfaceItemIdentifier) {

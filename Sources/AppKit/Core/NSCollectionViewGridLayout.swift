@@ -35,16 +35,16 @@ import CoreGraphics
     /// colours.
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
-        if let m = coder.decodeObject(forKey: "NSMargins") as? [NSNumber], m.count == 4 {
+        if let m = coder._decodeObjectIfPresent(forKey: "NSMargins") as? [NSNumber], m.count == 4 {
             _margins = NSEdgeInsets(top: CGFloat(m[0].doubleValue), left: CGFloat(m[1].doubleValue), bottom: CGFloat(m[2].doubleValue), right: CGFloat(m[3].doubleValue))
         }
         _minimumInteritemSpacing = CGFloat(coder.decodeDouble(forKey: "NSMinimumInteritemSpacing"))
         _minimumLineSpacing = CGFloat(coder.decodeDouble(forKey: "NSMinimumLineSpacing"))
         _maximumNumberOfRows = coder.decodeInteger(forKey: "NSMaximumNumberOfRows")
         _maximumNumberOfColumns = coder.decodeInteger(forKey: "NSMaximumNumberOfColumns")
-        if let v = coder.decodeObject(forKey: "NSMinimumItemSize") as? NSValue { _minimumItemSize = v.sizeValue }
-        if let v = coder.decodeObject(forKey: "NSMaximumItemSize") as? NSValue { _maximumItemSize = v.sizeValue }
-        _backgroundColors = coder.decodeObject(forKey: "NSBackgroundColors") as? [NSColor] ?? []
+        if let v = coder._decodeObjectIfPresent(forKey: "NSMinimumItemSize") as? NSValue { _minimumItemSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSMaximumItemSize") as? NSValue { _maximumItemSize = v.sizeValue }
+        _backgroundColors = coder._decodeObjectIfPresent(forKey: "NSBackgroundColors") as? [NSColor] ?? []
     }
     open override func encode(with coder: NSCoder) {
         super.encode(with: coder)

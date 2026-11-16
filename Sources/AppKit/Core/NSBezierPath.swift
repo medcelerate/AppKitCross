@@ -606,7 +606,7 @@ open class NSBezierPath: NSObject, NSCopying, NSSecureCoding, NSCoding {
             for k in 0..<4 { bits = bits << 8 | UInt32(d[d.startIndex + at + k]) }
             return CGFloat(Float(bitPattern: bits))
         }
-        if let data = coder.decodeObject(forKey: "NSSegments") as? Data {
+        if let data = coder._decodeObjectIfPresent(forKey: "NSSegments") as? Data {
             var i = 0, pending: [NSPoint] = []
             while i + 9 <= data.count {
                 let type = data[data.startIndex + i]
@@ -628,7 +628,7 @@ open class NSBezierPath: NSObject, NSCopying, NSSecureCoding, NSCoding {
         if coder.containsValue(forKey: "NSMiterLimit") { _miterLimit = CGFloat(coder.decodeDouble(forKey: "NSMiterLimit")) }
         if coder.containsValue(forKey: "NSFlatness") { _flatness = CGFloat(coder.decodeDouble(forKey: "NSFlatness")) }
         if coder.containsValue(forKey: "NSWindingRule") { _windingRule = NSBezierPath.WindingRule(rawValue: coder.decodeInteger(forKey: "NSWindingRule")) ?? .nonZero }
-        if let d = coder.decodeObject(forKey: "NSDashPatterns") as? Data {
+        if let d = coder._decodeObjectIfPresent(forKey: "NSDashPatterns") as? Data {
             _dash = stride(from: 0, to: d.count - 3, by: 4).map { float(d, $0) }
             _dashPhase = CGFloat(coder.decodeDouble(forKey: "NSDashPhase"))
         }

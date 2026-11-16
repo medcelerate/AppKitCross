@@ -66,10 +66,10 @@ open class NSTrackingArea: NSObject, NSCopying, NSCoding {
     }
     // Requirement of NSCoding
     public required init?(coder: NSCoder) {
-        _rect = (coder.decodeObject(forKey: "NSRect") as? NSValue)?.rectValue ?? .zero
+        _rect = (coder._decodeObjectIfPresent(forKey: "NSRect") as? NSValue)?.rectValue ?? .zero
         _options = NSTrackingArea.Options(rawValue: UInt(coder.decodeInteger(forKey: "NSOptions")))
         _owner = nil
-        _userInfo = (coder.decodeObject(forKey: "NSUserInfo") as? [String: Any]).map { Dictionary(uniqueKeysWithValues: $0.map { (AnyHashable($0.key), $0.value) }) }
+        _userInfo = (coder._decodeObjectIfPresent(forKey: "NSUserInfo") as? [String: Any]).map { Dictionary(uniqueKeysWithValues: $0.map { (AnyHashable($0.key), $0.value) }) }
         super.init()
     }
 

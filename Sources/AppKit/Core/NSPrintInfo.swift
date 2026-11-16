@@ -59,7 +59,7 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         super.init()
         _paperSize = NSSize(width: CGFloat(coder.decodeDouble(forKey: "NSPaperWidth")), height: CGFloat(coder.decodeDouble(forKey: "NSPaperHeight")))
         if _paperSize.width <= 0 || _paperSize.height <= 0 { _paperSize = paper.size }
-        _paperName = (coder.decodeObject(forKey: "NSPaperName") as? String).map { NSPrinter.PaperName($0) }
+        _paperName = (coder._decodeObjectIfPresent(forKey: "NSPaperName") as? String).map { NSPrinter.PaperName($0) }
         _orientation = coder.decodeInteger(forKey: "NSOrientation") == 1 ? .landscape : .portrait
         if coder.containsValue(forKey: "NSLeftMargin") { _leftMargin = CGFloat(coder.decodeDouble(forKey: "NSLeftMargin")) }
         if coder.containsValue(forKey: "NSRightMargin") { _rightMargin = CGFloat(coder.decodeDouble(forKey: "NSRightMargin")) }
@@ -70,8 +70,8 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         _verticalPagination = PaginationMode(rawValue: coder.decodeInteger(forKey: "NSVerticalPagination")) ?? .automatic
         if coder.containsValue(forKey: "NSHorizontallyCentered") { _horizontallyCentered = coder.decodeBool(forKey: "NSHorizontallyCentered") }
         if coder.containsValue(forKey: "NSVerticallyCentered") { _verticallyCentered = coder.decodeBool(forKey: "NSVerticallyCentered") }
-        if let d = coder.decodeObject(forKey: "NSJobDisposition") as? String { _jobDisposition = JobDisposition(rawValue: d) }
-        if let name = coder.decodeObject(forKey: "NSPrinterName") as? String { _printer = NSPrinter(name: name) }
+        if let d = coder._decodeObjectIfPresent(forKey: "NSJobDisposition") as? String { _jobDisposition = JobDisposition(rawValue: d) }
+        if let name = coder._decodeObjectIfPresent(forKey: "NSPrinterName") as? String { _printer = NSPrinter(name: name) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/init(dictionary:)
     public init(dictionary attributes: [NSPrintInfo.AttributeKey : Any]) {

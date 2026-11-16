@@ -47,16 +47,16 @@ import CoreGraphics
     /// `NSSectionInset`, header and footer sizes and pinning.
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
-        if let v = coder.decodeObject(forKey: "NSItemSize") as? NSValue { _itemSize = v.sizeValue }
-        if let v = coder.decodeObject(forKey: "NSEstimatedItemSize") as? NSValue { _estimatedItemSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSItemSize") as? NSValue { _itemSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSEstimatedItemSize") as? NSValue { _estimatedItemSize = v.sizeValue }
         if coder.containsValue(forKey: "NSLineSpacing") { _minimumLineSpacing = CGFloat(coder.decodeDouble(forKey: "NSLineSpacing")) }
         if coder.containsValue(forKey: "NSInteritemSpacing") { _minimumInteritemSpacing = CGFloat(coder.decodeDouble(forKey: "NSInteritemSpacing")) }
         _scrollDirection = NSCollectionView.ScrollDirection(rawValue: coder.decodeInteger(forKey: "NSScrollDirection")) ?? .vertical
-        if let i = coder.decodeObject(forKey: "NSSectionInset") as? [NSNumber], i.count == 4 {
+        if let i = coder._decodeObjectIfPresent(forKey: "NSSectionInset") as? [NSNumber], i.count == 4 {
             _sectionInset = NSEdgeInsets(top: CGFloat(i[0].doubleValue), left: CGFloat(i[1].doubleValue), bottom: CGFloat(i[2].doubleValue), right: CGFloat(i[3].doubleValue))
         }
-        if let v = coder.decodeObject(forKey: "NSHeaderReferenceSize") as? NSValue { _headerReferenceSize = v.sizeValue }
-        if let v = coder.decodeObject(forKey: "NSFooterReferenceSize") as? NSValue { _footerReferenceSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSHeaderReferenceSize") as? NSValue { _headerReferenceSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSFooterReferenceSize") as? NSValue { _footerReferenceSize = v.sizeValue }
         _headersPin = coder.decodeBool(forKey: "NSSectionHeadersPinToVisibleBounds")
         _footersPin = coder.decodeBool(forKey: "NSSectionFootersPinToVisibleBounds")
     }

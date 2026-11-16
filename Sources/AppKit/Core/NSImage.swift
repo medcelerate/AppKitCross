@@ -123,9 +123,9 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/init(coder:)
     /// Unarchives what `encode(with:)` wrote: the size and a TIFF of the representations.
     public required init(coder: NSCoder) {
-        _size = (coder.decodeObject(forKey: "NSSize") as? NSValue)?.sizeValue ?? .zero
+        _size = (coder._decodeObjectIfPresent(forKey: "NSSize") as? NSValue)?.sizeValue ?? .zero
         super.init()
-        if let data = coder.decodeObject(forKey: "NSTIFFRepresentation") as? Data {
+        if let data = coder._decodeObjectIfPresent(forKey: "NSTIFFRepresentation") as? Data {
             let reps = NSBitmapImageRep.imageReps(with: data)
             _representations = reps
             if _size == .zero, let first = reps.first { _size = first.size }

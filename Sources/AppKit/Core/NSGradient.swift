@@ -63,9 +63,9 @@ open class NSGradient: NSObject, NSCopying, NSSecureCoding, NSCoding {
     /// AppKit's `NSGradientColorArray`, with the port's `NSGradientLocations` (macOS omits
     /// evenly spaced locations; the port writes them always).
     public required convenience init?(coder: NSCoder) {
-        guard let colors = coder.decodeObject(forKey: "NSGradientColorArray") as? [NSColor], colors.count >= 2 else { return nil }
-        let locations = (coder.decodeObject(forKey: "NSGradientLocations") as? [NSNumber])?.map { CGFloat($0.doubleValue) }
-        self.init(_colors: colors, locations: locations?.count == colors.count ? locations : nil, colorSpace: coder.decodeObject(forKey: "NSGradientColorSpace") as? NSColorSpace)
+        guard let colors = coder._decodeObjectIfPresent(forKey: "NSGradientColorArray") as? [NSColor], colors.count >= 2 else { return nil }
+        let locations = (coder._decodeObjectIfPresent(forKey: "NSGradientLocations") as? [NSNumber])?.map { CGFloat($0.doubleValue) }
+        self.init(_colors: colors, locations: locations?.count == colors.count ? locations : nil, colorSpace: coder._decodeObjectIfPresent(forKey: "NSGradientColorSpace") as? NSColorSpace)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgradient/init(colors:)
     public convenience init?(colors colorArray: [NSColor]) {

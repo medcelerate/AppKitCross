@@ -38,8 +38,8 @@ open class NSRulerMarker: NSObject, NSCopying, NSCoding {
     public required init(coder: NSCoder) {
         _ruler = nil
         _location = CGFloat(coder.decodeDouble(forKey: "NSLocation"))
-        _image = coder.decodeObject(forKey: "NSImage") as? NSImage ?? NSImage(size: .zero)
-        _imageOrigin = (coder.decodeObject(forKey: "NSImageOrigin") as? NSValue)?.pointValue ?? .zero
+        _image = coder._decodeObjectIfPresent(forKey: "NSImage") as? NSImage ?? NSImage(size: .zero)
+        _imageOrigin = (coder._decodeObjectIfPresent(forKey: "NSImageOrigin") as? NSValue)?.pointValue ?? .zero
         super.init()
         if coder.containsValue(forKey: "NSMovable") { _isMovable = coder.decodeBool(forKey: "NSMovable") }
         _isRemovable = coder.decodeBool(forKey: "NSRemovable")

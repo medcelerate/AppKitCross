@@ -279,7 +279,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         _catalog = decoded.catalog
     }
     private static func _components(_ coder: NSCoder, _ key: String) -> [CGFloat] {
-        guard let d = coder.decodeObject(forKey: key) as? Data else { return [] }
+        guard let d = coder._decodeObjectIfPresent(forKey: key) as? Data else { return [] }
         let text = String(decoding: d.prefix { $0 != 0 }, as: UTF8.self)
         return text.split(separator: " ").compactMap { Double($0).map { CGFloat($0) } }
     }
@@ -292,12 +292,12 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
             let c = _components(coder, "NSCMYK") + [0, 0, 0, 0]
             return (.cmyk(c[0], c[1], c[2], c[3], c.count > 8 ? c[4] : 1), nil)
         case 6:
-            let list = coder.decodeObject(forKey: "NSCatalogName") as? String ?? "System"
-            let name = coder.decodeObject(forKey: "NSColorName") as? String ?? ""
+            let list = coder._decodeObjectIfPresent(forKey: "NSCatalogName") as? String ?? "System"
+            let name = coder._decodeObjectIfPresent(forKey: "NSColorName") as? String ?? ""
             if let c = MainActor.assumeIsolated({ NSColor(catalogName: list, colorName: name) }) {
                 return (c.storage, list == "System" ? nil : (list, name))
             }
-            if let fallback = coder.decodeObject(forKey: "NSColor") as? NSColor { return (fallback.storage, nil) }
+            if let fallback = coder._decodeObjectIfPresent(forKey: "NSColor") as? NSColor { return (fallback.storage, nil) }
             return (.rgb(0, 0, 0, 1), nil)
         default:
             let c = _components(coder, "NSRGB")

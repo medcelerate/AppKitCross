@@ -60,7 +60,7 @@ open class NSAnimation: NSObject, NSCopying, NSCoding {
         super.init()
         if coder.containsValue(forKey: "NSAnimationFramesPerSecond") { _frameRate = coder.decodeFloat(forKey: "NSAnimationFramesPerSecond") }
         _blockingMode = NSAnimation.BlockingMode(rawValue: coder.decodeInteger(forKey: "NSAnimationAnimationBlockingMode")) ?? .blocking
-        _marks = ((coder.decodeObject(forKey: "NSAnimationProgressMarks") as? [NSNumber]) ?? []).map { $0.floatValue }
+        _marks = ((coder._decodeObjectIfPresent(forKey: "NSAnimationProgressMarks") as? [NSNumber]) ?? []).map { $0.floatValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimation/init(duration:animationcurve:)
     public init(duration: TimeInterval, animationCurve: NSAnimation.Curve) {

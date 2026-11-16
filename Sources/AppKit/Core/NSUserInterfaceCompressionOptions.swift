@@ -15,7 +15,7 @@ open class NSUserInterfaceCompressionOptions: NSObject, NSCopying, NSCoding {
     public override init() { _identifiers = []; super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuserinterfacecompressionoptions/init(coder:)
     public required init(coder: NSCoder) {
-        let list = coder.decodeObject(forKey: "NSIdentifiers") as? [String] ?? []
+        let list = coder._decodeObjectIfPresent(forKey: "NSIdentifiers") as? [String] ?? []
         _identifiers = Set(list)
         super.init()
     }

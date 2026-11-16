@@ -202,10 +202,10 @@ open class NSSound: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     }
     // Requirement of NSCoding
     public required convenience init?(coder: NSCoder) {
-        if let d = coder.decodeObject(forKey: "NSSoundData") as? Data {
+        if let d = coder._decodeObjectIfPresent(forKey: "NSSoundData") as? Data {
             self.init(source: .data(d))
-            _name = coder.decodeObject(forKey: "NSName") as? String
-        } else if let n = coder.decodeObject(forKey: "NSName") as? String {
+            _name = coder._decodeObjectIfPresent(forKey: "NSName") as? String
+        } else if let n = coder._decodeObjectIfPresent(forKey: "NSName") as? String {
             self.init(named: n)
         } else {
             return nil
