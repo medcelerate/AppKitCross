@@ -15,11 +15,6 @@ import QuartzCore
 #if canImport(CoreText)
 import CoreText
 #endif
-@available(macOS 14.0, *)
-extension NSImage {
-    // SKIPPED (CoreTransferable.TransferRepresentation): typealias Representation = some TransferRepresentation
-}
-
 @available(macOS 11.0, *)
 extension NSImage {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/symbolconfiguration
@@ -203,4 +198,9 @@ extension NSImage {
         // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
         // SKIPPED (constrained extension): var hashValue: Int { get }
     }
+}
+
+@available(macOS 14.0, *)
+extension NSImage {
+    // SKIPPED (CoreTransferable.TransferRepresentation): typealias Representation = some TransferRepresentation
 }

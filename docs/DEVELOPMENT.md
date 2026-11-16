@@ -39,6 +39,12 @@ state is in [ROADMAP.md](ROADMAP.md).
   `tools/apigen/config.json` under `handwritten`, the generator stops emitting it. Seed a new
   hand-written type by moving its file from `Generated/` and regenerating (nested types move
   to `Generated/<Name>+Types.swift`).
+- A nested type that Core declares (in the type's body or an extension of it, in any Core
+  file) is never emitted in a `+Types` companion, and a hand-written type with all its nested
+  types in Core has no companion at all (ADR-0037). To take over a nested type, declare it in
+  Core and regenerate; no `skipMembers` entry or hand deletion is needed. A clean
+  `python3 tools/apigen/apigen.py` on main leaves `git status` clean (`GeneratorDriftTests`
+  checks the checked-in files).
 - Everything else under `Sources/AppKit/Generated` is machine-generated. Fix
   `tools/apigen/apigen.py` and regenerate rather than editing those files.
 - Unimplemented behaviour calls `unimplemented()`; stubs never return dummy values.
@@ -233,6 +239,9 @@ tools/apigen/extract.sh          # macOS only: dumps symbol graphs from the SDK
 tools/apigen/probe.sh            # macOS only: records enum raw values and string constants
 python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API-COVERAGE.md
 ```
+
+The symbol graphs in `api-inventory/raw/` are git-ignored; in a worktree copy them from the
+main checkout (`cp -R ../../../api-inventory/raw api-inventory/raw`) before regenerating.
 
 ## Rendering comparisons
 

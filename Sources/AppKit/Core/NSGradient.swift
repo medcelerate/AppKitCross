@@ -81,8 +81,7 @@ open class NSGradient: NSObject, NSCopying, NSSecureCoding, NSCoding {
     public convenience init?(starting startingColor: NSColor, ending endingColor: NSColor) {
         self.init(_colors: [startingColor, endingColor], locations: [0, 1], colorSpace: nil)
     }
-    /// The space given at initialisation; AppKit's generic RGB space otherwise (which the
-    /// port's `NSColorSpace` does not model yet).
+    /// The space given at initialisation; AppKit's generic RGB space otherwise.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgradient/colorspace
     open var colorSpace: NSColorSpace { _colorSpace ?? NSColorSpace.genericRGB }
 

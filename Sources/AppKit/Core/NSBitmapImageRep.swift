@@ -39,6 +39,8 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
     private var _bytesShared = false
     private var _properties: [NSBitmapImageRep.PropertyKey: Any] = [:]
     private var _incrementalData: Data? = nil
+    /// The space `retagging(with:)` or `converting(to:renderingIntent:)` gave the rep.
+    private var _taggedColorSpace: NSColorSpace? = nil
     private let _lock = NSLock()
 
     deinit { if _ownsPlanes { for p in _planes { p.deallocate() } } }
@@ -228,8 +230,20 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
                       : NSColor(calibratedRed: comps[0], green: comps[1], blue: comps[2], alpha: a)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/colorspace
-    /// Out of scope (ADR-0036): `NSColorSpace` is a generated stub.
-    open var colorSpace: NSColorSpace { unimplemented("NSBitmapImageRep.colorSpace — NSColorSpace is not modelled") }
+    /// The tagged space, else the one the colour space name implies (calibrated RGB is
+    /// Generic RGB, calibrated white Generic Gray, the device names the device spaces).
+    open var colorSpace: NSColorSpace {
+        if let t = _taggedColorSpace { return t }
+        switch _colorSpaceName {
+        case .calibratedRGB: return .genericRGB
+        case .deviceWhite: return .deviceGray
+        case .calibratedWhite: return .genericGray
+        default:
+            if NSBitmapImageRep._isBlack(_colorSpaceName) { return .deviceGray }
+            if _colorSpaceName.rawValue == "NSDeviceCMYKColorSpace" { return .deviceCMYK }
+            return .deviceRGB
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/colorize(bymappinggray:to:blackmapping:whitemapping:)
     /// Maps each pixel's gray level onto black → `shadowColor`, `midPoint` →
     /// `midPointColor`, white → `lightColor` (piecewise linear), keeping alpha.
@@ -248,8 +262,37 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/converting(to:renderingintent:)
-    /// Out of scope (ADR-0036): `NSColorSpace` is a generated stub.
-    open func converting(to targetSpace: NSColorSpace, renderingIntent: NSColorRenderingIntent) -> NSBitmapImageRep? { unimplemented("NSBitmapImageRep.converting(to:renderingIntent:) — NSColorSpace is not modelled") }
+    /// A new 8-bit meshed rep in `targetSpace` (RGB or gray), alpha kept, each pixel converted
+    /// through the D50 connection space (ADR-0037). The rendering intent is not used: every
+    /// space here is matrix/TRC, where intents other than absolute colorimetric agree.
+    /// Nil for a CMYK or other target, or a source the rep cannot read colours from.
+    open func converting(to targetSpace: NSColorSpace, renderingIntent: NSColorRenderingIntent) -> NSBitmapImageRep? {
+        let n = targetSpace.numberOfColorComponents
+        guard targetSpace.colorSpaceModel == .rgb || targetSpace.colorSpaceModel == .gray else { return nil }
+        let source = colorSpace
+        let srcSamples = NSBitmapImageRep._colorSamples(_colorSpaceName)
+        guard srcSamples == source.numberOfColorComponents, srcSamples > 0 else { return nil }
+        let name: NSColorSpaceName = n == 1 ? .calibratedWhite : .calibratedRGB
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: _pixelsWide, pixelsHigh: _pixelsHigh,
+                                         bitsPerSample: 8, samplesPerPixel: n + (_hasAlpha ? 1 : 0), hasAlpha: _hasAlpha,
+                                         isPlanar: false, colorSpaceName: name, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        out._taggedColorSpace = targetSpace
+        out._size = _size
+        var pixel = [Int](repeating: 0, count: n + 1)
+        for y in 0..<_pixelsHigh {
+            for x in 0..<_pixelsWide {
+                guard let c = colorAt(x: x, y: y) else { continue }
+                var comps: [CGFloat] = srcSamples == 1 ? [c.whiteComponent] : [c.redComponent, c.greenComponent, c.blueComponent]
+                if srcSamples == 1, NSBitmapImageRep._isBlack(_colorSpaceName) { comps = [1 - comps[0]] }
+                guard let conv = source._convert(comps, to: targetSpace) else { return nil }
+                let a = _hasAlpha ? c.alphaComponent : 1
+                for i in 0..<n { pixel[i] = Int((min(1, max(0, conv[i])) * a * 255).rounded()) }
+                if _hasAlpha { pixel[n] = Int((a * 255).rounded()) }
+                pixel.withUnsafeMutableBufferPointer { out.setPixel($0.baseAddress!, atX: x, y: y) }
+            }
+        }
+        return out
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/getbitmapdataplanes(_:)
     /// Fills `data` with one pointer per plane (five slots, unused ones nil).
     open func getBitmapDataPlanes(_ data: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>) {
@@ -354,8 +397,30 @@ open class NSBitmapImageRep: NSImageRep, NSSecureCoding {
         return (imageReps.first { $0 is NSBitmapImageRep } as? NSBitmapImageRep)?.representation(using: storageType, properties: properties)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/retagging(with:)
-    /// Out of scope (ADR-0036): `NSColorSpace` is a generated stub.
-    open func retagging(with newSpace: NSColorSpace) -> NSBitmapImageRep? { unimplemented("NSBitmapImageRep.retagging(with:) — NSColorSpace is not modelled") }
+    /// A copy with the same samples, reinterpreted in `newSpace`; nil when the space's
+    /// component count differs from the rep's colour samples.
+    open func retagging(with newSpace: NSColorSpace) -> NSBitmapImageRep? {
+        let samples = NSBitmapImageRep._colorSamples(_colorSpaceName)
+        guard samples > 0, newSpace.numberOfColorComponents == samples else { return nil }
+        let name: NSColorSpaceName = samples == 1 ? .calibratedWhite : .calibratedRGB
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: _pixelsWide, pixelsHigh: _pixelsHigh,
+                                         bitsPerSample: _bitsPerSample, samplesPerPixel: _samplesPerPixel, hasAlpha: _hasAlpha,
+                                         isPlanar: _isPlanar, colorSpaceName: name, bitmapFormat: _bitmapFormat,
+                                         bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        out._taggedColorSpace = newSpace
+        out._size = _size
+        out._properties = _properties
+        var pixel = [Int](repeating: 0, count: max(1, _samplesPerPixel))
+        for y in 0..<_pixelsHigh {
+            for x in 0..<_pixelsWide {
+                pixel.withUnsafeMutableBufferPointer { b in
+                    getPixel(b.baseAddress!, atX: x, y: y)
+                    out.setPixel(b.baseAddress!, atX: x, y: y)
+                }
+            }
+        }
+        return out
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/samplesperpixel
     open var samplesPerPixel: Int { _samplesPerPixel }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbitmapimagerep/setcolor(_:atx:y:)

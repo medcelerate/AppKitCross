@@ -2,26 +2,50 @@ import Foundation
 
 public final class CGColorSpace: Equatable, @unchecked Sendable {
     public static let sRGB = "kCGColorSpaceSRGB"
+    public static let extendedSRGB = "kCGColorSpaceExtendedSRGB"
+    public static let linearSRGB = "kCGColorSpaceLinearSRGB"
     public static let genericRGBLinear = "kCGColorSpaceGenericRGBLinear"
-    public static let genericGrayGamma2_2 = "kCGColorSpaceGenericGrayGamma2_2"
     public static let displayP3 = "kCGColorSpaceDisplayP3"
+    public static let adobeRGB1998 = "kCGColorSpaceAdobeRGB1998"
+    public static let genericGrayGamma2_2 = "kCGColorSpaceGenericGrayGamma2_2"
+    public static let extendedGray = "kCGColorSpaceExtendedGray"
+    public static let linearGray = "kCGColorSpaceLinearGray"
+    public static let genericCMYK = "kCGColorSpaceGenericCMYK"
 
     public enum Model: Int32, Sendable { case unknown = -1, monochrome, rgb, cmyk, lab, deviceN, indexed, pattern, XYZ }
 
     public let name: String?
     public let model: Model
 
+    /// Names the port knows, with their model. The deprecated generic and the device names
+    /// are here so AppKit's `NSColorSpace.genericRGB` / `deviceRGB` (and gray, CMYK) can hand
+    /// back a colour space with Apple's name; drawing treats every RGB space as sRGB.
+    private static let models: [String: Model] = [
+        sRGB: .rgb, extendedSRGB: .rgb, linearSRGB: .rgb, genericRGBLinear: .rgb, displayP3: .rgb,
+        adobeRGB1998: .rgb, "kCGColorSpaceGenericRGB": .rgb, "kCGColorSpaceDeviceRGB": .rgb,
+        genericGrayGamma2_2: .monochrome, extendedGray: .monochrome, linearGray: .monochrome,
+        "kCGColorSpaceGenericGray": .monochrome, "kCGColorSpaceDeviceGray": .monochrome,
+        genericCMYK: .cmyk, "kCGColorSpaceDeviceCMYK": .cmyk,
+    ]
+
     public init?(name: String) {
+        guard let m = CGColorSpace.models[name] else { return nil }
         self.name = name
-        switch name {
-        case CGColorSpace.sRGB, CGColorSpace.genericRGBLinear, CGColorSpace.displayP3: model = .rgb
-        case CGColorSpace.genericGrayGamma2_2: model = .monochrome
-        default: return nil
+        self.model = m
+    }
+    public var numberOfComponents: Int {
+        switch model {
+        case .monochrome: return 1
+        case .cmyk: return 4
+        default: return 3
         }
     }
-    public var numberOfComponents: Int { model == .monochrome ? 1 : 3 }
     public static func == (l: CGColorSpace, r: CGColorSpace) -> Bool { l.name == r.name }
 }
+
+public func CGColorSpaceCreateDeviceRGB() -> CGColorSpace { CGColorSpace(name: "kCGColorSpaceDeviceRGB")! }
+public func CGColorSpaceCreateDeviceGray() -> CGColorSpace { CGColorSpace(name: "kCGColorSpaceDeviceGray")! }
+public func CGColorSpaceCreateDeviceCMYK() -> CGColorSpace { CGColorSpace(name: "kCGColorSpaceDeviceCMYK")! }
 
 // Hashable as Apple's CF types are. It matters beyond API shape: Foundation on Windows and
 // Linux boxes a non-Hashable value with an identity hash, so two equal colours in adjacent
@@ -68,6 +92,10 @@ public final class CGColor: NSObject, @unchecked Sendable {
     /// sRGB red, green, blue, alpha whatever the storage model.
     public var rgba: (CGFloat, CGFloat, CGFloat, CGFloat) {
         if components.count == 2 { return (components[0], components[0], components[0], components[1]) }
+        if components.count == 5 {   // CMYK, naively through device RGB
+            let k = 1 - components[3]
+            return ((1 - components[0]) * k, (1 - components[1]) * k, (1 - components[2]) * k, components[4])
+        }
         return (components[0], components[1], components[2], components[3])
     }
 
