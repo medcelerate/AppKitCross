@@ -654,7 +654,7 @@ final class Win32Workspace: PlatformWorkspace {
             CreateFileW($0, DWORD(0x8000_0000) | DWORD(0x4000_0000), DWORD(1 | 2), nil, DWORD(3), 0, nil)
         }
         guard let handle, Int(bitPattern: handle) != -1 /* INVALID_HANDLE_VALUE */ else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) could not be opened") }
-        defer { CloseHandle(handle) }
+        defer { _ = CloseHandle(handle) }
         var returned: DWORD = 0
         func control(_ code: DWORD, _ input: UnsafeMutableRawPointer? = nil, _ size: DWORD = 0) -> Bool {
             DeviceIoControl(handle, code, input, size, nil, 0, &returned, nil)
