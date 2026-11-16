@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 200 |
-| Types generated | 339 |
+| Types handwritten | 201 |
+| Types generated | 338 |
 | Types pending | 2 |
 | Types skipped | 0 |
 | Members emitted | 10096 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 479 |
+| Members unimplemented-calls | 451 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -161,7 +161,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 6 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 4 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
 | NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
 | NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |
@@ -227,7 +227,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFindPanelSubstringMatchType | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingPlacement | enum | generated | 4 | 0 | 0 |  |
 | NSFocusRingType | enum | generated | 3 | 0 | 0 |  |
-| NSFont | class | handwritten | 90 | 4 | 4 | 20 |
+| NSFont | class | handwritten | 90 | 4 | 4 | 7 |
 | NSFontAction | enum | generated | 8 | 0 | 0 |  |
 | NSFontAssetRequest | class | generated | 5 | 0 | 1 |  |
 | NSFontChanging | protocol | generated | 2 | 0 | 0 |  |
@@ -354,7 +354,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSPrinter | class | handwritten | 12 | 0 | 3 | 1 |
 | NSProgressIndicator | class | handwritten | 17 | 0 | 1 | 1 |
 | NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
-| NSResponder | class | handwritten | 69 | 2 | 0 | 16 |
+| NSResponder | class | handwritten | 69 | 2 | 0 | 3 |
 | NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
 | NSRuleEditor | class | handwritten | 44 | 0 | 3 | 3 |
 | NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
@@ -550,7 +550,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserActivityRestoring | protocol | generated | 0 | 1 | 0 |  |
 | NSUserDefaultsController | class | handwritten | 11 | 0 | 0 | 1 |
 | NSUserInterfaceCompression | protocol | generated | 3 | 0 | 0 |  |
-| NSUserInterfaceCompressionOptions | class | generated | 14 | 0 | 0 |  |
+| NSUserInterfaceCompressionOptions | class | handwritten | 14 | 0 | 0 | 0 |
 | NSUserInterfaceItemIdentification | protocol | generated | 1 | 0 | 0 |  |
 | NSUserInterfaceItemIdentifier | struct | generated | 0 | 0 | 0 |  |
 | NSUserInterfaceItemSearching | protocol | generated | 4 | 0 | 0 |  |

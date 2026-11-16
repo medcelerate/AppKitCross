@@ -192,6 +192,7 @@
     "NSTreeController",
     "NSTreeNode",
     "NSUserDefaultsController",
+    "NSUserInterfaceCompressionOptions",
     "NSView",
     "NSViewAnimation",
     "NSViewController",

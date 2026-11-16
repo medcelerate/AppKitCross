@@ -174,3 +174,46 @@ extension NSLayoutManager {
         return markers
     }
 }
+
+// MARK: Ruler accessory (ADR-0039)
+
+/// The formatting strip AppKit puts above a rich text view's ruler: alignment as a
+/// four-segment control (left, centre, right, justified) showing the paragraph's alignment
+/// and sending the text view's align actions. AppKit's strip also has spacing and list
+/// pop-ups; the port's has the alignment control only.
+@MainActor
+internal final class _NSRulerAccessoryView: NSView, NSSelectorHandling {
+    weak var textView: NSTextView?
+    let alignment: NSSegmentedControl
+    static let order: [NSTextAlignment] = [.left, .center, .right, .justified]
+
+    init(textView: NSTextView, style: NSParagraphStyle, enabled: Bool) {
+        self.textView = textView
+        alignment = NSSegmentedControl(labels: ["Left", "Center", "Right", "Justify"], trackingMode: .selectOne, target: nil, action: Selector(("_rulerAlignmentChosen:")))
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 28))
+        alignment.target = self
+        alignment.isEnabled = enabled
+        alignment.selectedSegment = _NSRulerAccessoryView.order.firstIndex(of: style.alignment) ?? -1
+        addSubview(alignment)
+    }
+    required init?(coder: NSCoder) {
+        alignment = NSSegmentedControl(labels: ["Left", "Center", "Right", "Justify"], trackingMode: .selectOne, target: nil, action: nil)
+        super.init(coder: coder)
+    }
+    override func layout() {
+        super.layout()
+        let size = alignment.intrinsicContentSize
+        alignment.frame = NSRect(x: 4, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
+    }
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action == Selector(("_rulerAlignmentChosen:")), let tv = textView else { return false }
+        switch alignment.selectedSegment {
+        case 0: tv.alignLeft(sender)
+        case 1: tv.alignCenter(sender)
+        case 2: tv.alignRight(sender)
+        case 3: tv.alignJustified(sender)
+        default: break
+        }
+        return true
+    }
+}

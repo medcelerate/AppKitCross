@@ -623,6 +623,74 @@ final class Win32Workspace: PlatformWorkspace {
         path.withCString(encodedAs: UTF16.self) { SHChangeNotify(LONG(SHCNE_UPDATEITEM), UINT(SHCNF_PATHW), $0, nil) }
     }
 
+    // MARK: Volumes and search (ADR-0039)
+
+    /// GetDriveType's DRIVE_REMOVABLE (2) and DRIVE_CDROM (5).
+    private static func isRemovableDrive(_ root: String) -> Bool {
+        let t = root.withCString(encodedAs: UTF16.self) { GetDriveTypeW($0) }
+        return t == 2 || t == 5
+    }
+    /// The drive roots ("E:/" as a URL path would show it: forward slashes) of removable drives.
+    func removableVolumePaths() -> [String] {
+        let mask = GetLogicalDrives()
+        var out: [String] = []
+        for i in 0..<26 where mask & (1 << DWORD(i)) != 0 {
+            let letter = String(UnicodeScalar(UInt8(65 + i)))
+            if Win32Workspace.isRemovableDrive("\(letter):\\") { out.append("\(letter):/") }
+        }
+        return out
+    }
+    /// Locks, dismounts and ejects the drive (FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME,
+    /// IOCTL_STORAGE_MEDIA_REMOVAL off, IOCTL_STORAGE_EJECT_MEDIA), as Explorer's Eject does.
+    func ejectVolume(at url: URL) throws {
+        var path = url.path.replacingOccurrences(of: "/", with: "\\")
+        if path.hasPrefix("\\") && path.count > 2 && Array(path)[2] == ":" { path.removeFirst() }
+        guard path.count >= 2, Array(path)[1] == ":" else { throw PlatformWorkspaceError.fileOperationFailed("\(url.path) is not a drive") }
+        let letter = String(path.prefix(2))
+        guard Win32Workspace.isRemovableDrive(letter + "\\") else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) is not a removable drive") }
+        let device = "\\\\.\\" + letter
+        let handle = device.withCString(encodedAs: UTF16.self) {
+            // GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, OPEN_EXISTING
+            CreateFileW($0, DWORD(0x8000_0000) | DWORD(0x4000_0000), DWORD(1 | 2), nil, DWORD(3), 0, nil)
+        }
+        guard let handle, Int(bitPattern: handle) != -1 /* INVALID_HANDLE_VALUE */ else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) could not be opened") }
+        defer { CloseHandle(handle) }
+        var returned: DWORD = 0
+        func control(_ code: DWORD, _ input: UnsafeMutableRawPointer? = nil, _ size: DWORD = 0) -> Bool {
+            DeviceIoControl(handle, code, input, size, nil, 0, &returned, nil)
+        }
+        guard control(0x0009_0018) /* FSCTL_LOCK_VOLUME */ else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) is in use") }
+        guard control(0x0009_0020) /* FSCTL_DISMOUNT_VOLUME */ else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) could not be dismounted") }
+        var prevent: UInt8 = 0   // PREVENT_MEDIA_REMOVAL { PreventMediaRemoval = FALSE }
+        _ = control(0x002D_4804 /* IOCTL_STORAGE_MEDIA_REMOVAL */, &prevent, 1)
+        guard control(0x002D_4808) /* IOCTL_STORAGE_EJECT_MEDIA */ else { throw PlatformWorkspaceError.fileOperationFailed("\(letter) could not be ejected") }
+    }
+    /// GetVolumePathName for the volume root, GetVolumeInformation for the file system's
+    /// name and read-only flag, GetDriveType for removability.
+    func fileSystemInfo(forPath path: String) -> PlatformFileSystemInfo? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let native = path.replacingOccurrences(of: "/", with: "\\")
+        var root = [WCHAR](repeating: 0, count: 300)
+        let gotRoot = native.withCString(encodedAs: UTF16.self) { GetVolumePathNameW($0, &root, DWORD(root.count)) }
+        guard gotRoot else { return nil }
+        var name = [WCHAR](repeating: 0, count: 64)
+        var flags: DWORD = 0
+        let gotInfo = GetVolumeInformationW(root, nil, 0, nil, nil, &flags, &name, DWORD(name.count))
+        let rootString = String(decodingCString: root, as: UTF16.self)
+        let removable = Win32Workspace.isRemovableDrive(rootString)
+        let readOnly = flags & 0x0008_0000 != 0   // FILE_READ_ONLY_VOLUME
+        return PlatformFileSystemInfo(type: gotInfo ? String(decodingCString: name, as: UTF16.self) : "unknown", isRemovable: removable,
+                                      isWritable: !readOnly && FileManager.default.isWritableFile(atPath: path), isUnmountable: removable)
+    }
+    /// Windows Search through the `search-ms:` protocol (Explorer opens a results window).
+    func showSearchResults(forQuery query: String) -> Bool {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed),
+              let url = URL(string: "search-ms:query=\(encoded)") else { return false }
+        return open(url)
+    }
+
     // MARK: Settings
 
     var accessibilityDisplayOptions: PlatformAccessibilityDisplayOptions {

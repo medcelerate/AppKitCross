@@ -41,6 +41,8 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     private var _locale: Locale? = nil
     private var _symbolConfiguration: NSImage.SymbolConfiguration? = nil
     private var _matchesOnlyOnBestFittingAxis = false
+    /// Tinted copies of a template image (`_tintedForTemplate`), by colour and pixel size.
+    internal var _tintCache: [String: NSImage] = [:]
 
     open override var description: String { "<NSImage \(_name.map { "'\($0)' " } ?? "")size=\(_size) reps=\(_representations.count)>" }
 

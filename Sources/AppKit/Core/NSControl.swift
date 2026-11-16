@@ -118,10 +118,13 @@ import CoreText
     @MainActor open func drawCellInside(_ cell: NSCell) { if cell === _cell { needsDisplay = true } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/edit(withframe:editor:delegate:event:)
     @available(macOS 10.10, *)
-    @MainActor open func edit(withFrame rect: NSRect, editor textObj: NSText, delegate: Any?, event: NSEvent) { unimplemented() }
+    /// The cell's field-editor set-up (NSCell.edit(withFrame:in:…)) in this control.
+    @MainActor open func edit(withFrame rect: NSRect, editor textObj: NSText, delegate: Any?, event: NSEvent) {
+        _cell?.edit(withFrame: rect, in: self, editor: textObj, delegate: delegate, event: event)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/endediting(_:)
     @available(macOS 10.10, *)
-    @MainActor open func endEditing(_ textObj: NSText) { unimplemented() }
+    @MainActor open func endEditing(_ textObj: NSText) { _cell?.endEditing(textObj) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/expansionframe(withframe:)
     @available(macOS 10.10, *)
     @MainActor open func expansionFrame(withFrame contentFrame: NSRect) -> NSRect { .zero }
@@ -193,9 +196,17 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/select(withframe:editor:delegate:start:length:)
     @available(macOS 10.10, *)
-    @MainActor open func select(withFrame rect: NSRect, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) { unimplemented() }
+    @MainActor open func select(withFrame rect: NSRect, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+        _cell?.select(withFrame: rect, in: self, editor: textObj, delegate: delegate, start: selStart, length: selLength)
+    }
+    /// For a single-cell control, turns its cell on and redraws (AppKit's NSControl; NSMatrix
+    /// overrides it to select among its cells). Another cell is ignored.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/selectcell(_:)
-    @MainActor open func selectCell(_ cell: NSCell) { unimplemented() }
+    @MainActor open func selectCell(_ cell: NSCell) {
+        guard cell === _cell else { return }
+        cell.state = .on
+        needsDisplay = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/selectedcell()
     @MainActor open func selectedCell() -> NSCell? { _cell }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/selectedtag()
@@ -211,7 +222,11 @@ import CoreText
     @MainActor open func setNeedsDisplay() { needsDisplay = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/sizethatfits(_:)
     @available(macOS 10.10, *)
-    @MainActor open func sizeThatFits(_ size: NSSize) -> NSSize { unimplemented() }
+    /// The cell's size for bounds of `size` (a wrapping text field fits its text to the width).
+    @MainActor open func sizeThatFits(_ size: NSSize) -> NSSize {
+        guard let c = _cell else { return .zero }
+        return c.cellSize(forBounds: NSRect(origin: .zero, size: size))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/sizetofit()
     @MainActor open func sizeToFit() { if let c = _cell { setFrameSize(c.cellSize) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/stringvalue
@@ -236,17 +251,17 @@ import CoreText
         set { _cell?.tag = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takedoublevaluefrom(_:)
-    @MainActor open func takeDoubleValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeDoubleValueFrom(_ sender: Any?) { _cell?.takeDoubleValueFrom(sender); invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takefloatvaluefrom(_:)
-    @MainActor open func takeFloatValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeFloatValueFrom(_ sender: Any?) { _cell?.takeFloatValueFrom(sender); invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takeintvaluefrom(_:)
     @MainActor open func takeIntValueFrom(_ sender: Any?) { _cell?.takeIntValueFrom(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takeintegervaluefrom(_:)
-    @MainActor open func takeIntegerValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeIntegerValueFrom(_ sender: Any?) { _cell?.takeIntegerValueFrom(sender); invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takeobjectvaluefrom(_:)
-    @MainActor open func takeObjectValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeObjectValueFrom(_ sender: Any?) { _cell?.takeObjectValueFrom(sender); invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/takestringvaluefrom(_:)
-    @MainActor open func takeStringValueFrom(_ sender: Any?) { unimplemented() }
+    @MainActor open func takeStringValueFrom(_ sender: Any?) { _cell?.takeStringValueFrom(sender); invalidateIntrinsicContentSize(); needsDisplay = true; _accessibilityValueChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/target
     @MainActor open var target: AnyObject? {
         get { _cell?.target }
