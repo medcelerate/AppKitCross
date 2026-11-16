@@ -153,9 +153,13 @@ import CoreText
         set { _placeholderString = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/setupfieldeditorattributes(_:)
-    @MainActor open override func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText { textObj }
+    @MainActor open override func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText {
+        let editor = super.setUpFieldEditorAttributes(textObj)
+        if let c = textColor, isEnabled { editor.textColor = c }
+        return editor
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/setwantsnotificationformarkedtext(_:)
-    @MainActor open func setWantsNotificationForMarkedText(_ flag: Bool) { }
+    @MainActor open func setWantsNotificationForMarkedText(_ flag: Bool) { _wantsNotificationForMarkedText = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/textcolor
     @MainActor open var textColor: NSColor? {
         get { _textColorValue }

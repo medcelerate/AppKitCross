@@ -13,7 +13,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Types generated | 339 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10097 |
+| Members emitted | 10096 |
 | Members blocked | 175 |
 | Members unavailable | 0 |
 | Members synthesized | 1435 |
@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 645 |
+| Members unimplemented-calls | 479 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -33,7 +33,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | Group | Hand-written in Core | Still stubbed (unimplemented) |
 | --- | ---: | ---: |
 | Free functions and variables (`_Globals.swift`) | 24 | 8 |
-| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | 48 | 19 |
+| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | 49 | 19 |
 
 ## Types
 
@@ -91,7 +91,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
 | NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
 | NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 34 |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 6 |
 | NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
 | NSArrayController | class | handwritten | 38 | 1 | 0 | 0 |
 | NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
@@ -112,7 +112,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCIImageRep | class | generated | 0 | 2 | 0 |  |
 | NSCandidateListTouchBarItem | class | generated | 10 | 1 | 0 |  |
 | NSCandidateListTouchBarItemDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSCell | class | handwritten | 128 | 0 | 5 | 41 |
+| NSCell | class | handwritten | 128 | 0 | 5 | 2 |
 | NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |
 | NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |
 | NSClickGestureRecognizer | class | handwritten | 3 | 0 | 0 | 0 |
@@ -161,7 +161,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 37 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 6 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
 | NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
 | NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |
@@ -219,7 +219,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSEPSImageRep | class | generated | 4 | 0 | 0 |  |
 | NSEditor | protocol | generated | 4 | 0 | 0 |  |
 | NSEditorRegistration | protocol | generated | 2 | 0 | 0 |  |
-| NSEvent | class | handwritten | 282 | 0 | 12 | 40 |
+| NSEvent | class | handwritten | 281 | 0 | 12 | 5 |
 | NSFilePromiseProvider | class | generated | 5 | 0 | 0 |  |
 | NSFilePromiseProviderDelegate | protocol | generated | 3 | 0 | 0 |  |
 | NSFilePromiseReceiver | class | generated | 4 | 0 | 0 |  |
@@ -517,7 +517,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |
 | NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |
 | NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 42 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 9 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
 | NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |

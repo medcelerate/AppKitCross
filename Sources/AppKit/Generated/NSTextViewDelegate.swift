@@ -80,14 +80,14 @@ extension NSTextViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:menu:for:at:)
     @MainActor public func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldchangetextin:replacementstring:)
-    @MainActor public func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool { return false }
+    @MainActor public func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldchangetextinranges:replacementstrings:)
-    @MainActor public func textView(_ textView: NSTextView, shouldChangeTextInRanges affectedRanges: [NSValue], replacementStrings: [String]?) -> Bool { return false }
+    @MainActor public func textView(_ textView: NSTextView, shouldChangeTextInRanges affectedRanges: [NSValue], replacementStrings: [String]?) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldchangetypingattributes:toattributes:)
-    @MainActor public func textView(_ textView: NSTextView, shouldChangeTypingAttributes oldTypingAttributes: [String : Any], toAttributes newTypingAttributes: [NSAttributedString.Key : Any]) -> [NSAttributedString.Key : Any] { unimplementedOptionalRequirement() }
+    @MainActor public func textView(_ textView: NSTextView, shouldChangeTypingAttributes oldTypingAttributes: [String : Any], toAttributes newTypingAttributes: [NSAttributedString.Key : Any]) -> [NSAttributedString.Key : Any] { return newTypingAttributes }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldselectcandidateat:)
     @available(macOS 10.12, *)
-    @MainActor public func textView(_ textView: NSTextView, shouldSelectCandidateAt index: Int) -> Bool { return false }
+    @MainActor public func textView(_ textView: NSTextView, shouldSelectCandidateAt index: Int) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldsetspellingstate:range:)
     @MainActor public func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range affectedCharRange: NSRange) -> Int { return value }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:shouldupdatetouchbaritemidentifiers:)
@@ -96,9 +96,9 @@ extension NSTextViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:urlforcontentsof:at:)
     @MainActor public func textView(_ textView: NSTextView, urlForContentsOf textAttachment: NSTextAttachment, at charIndex: Int) -> URL? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:willchangeselectionfromcharacterrange:tocharacterrange:)
-    @MainActor public func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange { unimplementedOptionalRequirement() }
+    @MainActor public func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange { return newSelectedCharRange }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:willchangeselectionfromcharacterranges:tocharacterranges:)
-    @MainActor public func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRanges oldSelectedCharRanges: [NSValue], toCharacterRanges newSelectedCharRanges: [NSValue]) -> [NSValue] { unimplementedOptionalRequirement() }
+    @MainActor public func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRanges oldSelectedCharRanges: [NSValue], toCharacterRanges newSelectedCharRanges: [NSValue]) -> [NSValue] { return newSelectedCharRanges }
     // SKIPPED (Foundation.NSTextCheckingTypes not in corelibs): @MainActor func textView(_ view: NSTextView, willCheckTextIn range: NSRange, options: [NSSpellChecker.OptionKey : Any], types checkingTypes: UnsafeMutablePointer<NSTextCheckingTypes>) -> [NSSpellChecker.OptionKey : Any]
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextviewdelegate/textview(_:willdisplaytooltip:forcharacterat:)
     @MainActor public func textView(_ textView: NSTextView, willDisplayToolTip tooltip: String, forCharacterAt characterIndex: Int) -> String? { return nil }
