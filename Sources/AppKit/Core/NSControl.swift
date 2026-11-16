@@ -50,7 +50,12 @@ import CoreText
     @MainActor open override var acceptsFirstResponder: Bool { isEnabled && !_refusesFirstResponder }
     @MainActor open override func mouseDown(with event: NSEvent) { super.mouseDown(with: event) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/init(coder:)
-    public required init?(coder: NSCoder) { super.init(coder: coder) }
+    /// Makes the class's default cell, as `init(frame:)` does (a decoded control has its cell).
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        _cell = type(of: self)._makeDefaultCell()
+        _cell?.controlView = self
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

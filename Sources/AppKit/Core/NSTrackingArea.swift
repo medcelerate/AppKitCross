@@ -54,9 +54,24 @@ open class NSTrackingArea: NSObject, NSCopying, NSCoding {
     // Requirement of NSCopying
     open func copy(with zone: NSZone? = nil) -> Any { NSTrackingArea(rect: _rect, options: _options, owner: _owner, userInfo: _userInfo) }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// AppKit's keys: `NSRect`, `NSOptions`, `NSUserInfo` (string keys) — the owner is not
+    /// archived (macOS writes it as nil too).
+    open func encode(with coder: NSCoder) {
+        coder.encode(NSValue(rect: _rect), forKey: "NSRect")
+        coder.encode(Int(_options.rawValue), forKey: "NSOptions")
+        if let info = _userInfo {
+            let strings = Dictionary(uniqueKeysWithValues: info.compactMap { k, v in (k.base as? String).map { ($0, v) } })
+            coder.encode(strings as NSDictionary, forKey: "NSUserInfo")
+        }
+    }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) {
+        _rect = (coder.decodeObject(forKey: "NSRect") as? NSValue)?.rectValue ?? .zero
+        _options = NSTrackingArea.Options(rawValue: UInt(coder.decodeInteger(forKey: "NSOptions")))
+        _owner = nil
+        _userInfo = (coder.decodeObject(forKey: "NSUserInfo") as? [String: Any]).map { Dictionary(uniqueKeysWithValues: $0.map { (AnyHashable($0.key), $0.value) }) }
+        super.init()
+    }
 
     open override var description: String {
         "<NSTrackingArea rect=\(_rect) options=\(_options.rawValue) inside=\(MainActor.assumeIsolated { _isInside })>"

@@ -1560,6 +1560,10 @@ import CoreText
     @MainActor open var textLayoutManager: NSTextLayoutManager? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textstorage
     @MainActor open var textStorage: NSTextStorage? { _storage }
+    @MainActor internal override func _richContents() -> NSAttributedString { _storage }
+    @MainActor internal override func _replaceRich(_ range: NSRange, with content: NSAttributedString) {
+        _replaceAttributed(range, with: isRichText ? content : NSAttributedString(string: content.string, attributes: typingAttributes), selectAfter: false)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/tightenkerning(_:)
     @MainActor open func tightenKerning(_ sender: Any?) { _adjustKern(by: -1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticdashsubstitution(_:)

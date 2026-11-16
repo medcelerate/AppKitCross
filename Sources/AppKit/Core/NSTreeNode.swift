@@ -142,9 +142,9 @@ final class _NSTreeNodeChildArray: NSMutableArray {
         self.node = node
         super.init()
     }
-    required init?(coder: NSCoder) { unimplemented() }
-    required convenience init(arrayLiteral elements: Any...) { unimplemented() }
-    required init(objects: UnsafePointer<AnyObject>?, count cnt: Int) { unimplemented() }
+    required init?(coder: NSCoder) { unimplemented("_NSTreeNodeChildArray — an internal helper; nothing archives it") }
+    required convenience init(arrayLiteral elements: Any...) { unimplemented("_NSTreeNodeChildArray (made only by its node) — an internal helper; nothing archives it") }
+    required init(objects: UnsafePointer<AnyObject>?, count cnt: Int) { unimplemented("_NSTreeNodeChildArray (made only by its node) — an internal helper; nothing archives it") }
 
     override var count: Int { node._children.count }
     override func object(at index: Int) -> Any { node._children[index] }

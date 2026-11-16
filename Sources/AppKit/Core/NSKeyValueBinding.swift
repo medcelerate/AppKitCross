@@ -509,7 +509,7 @@ final class _NSBinding {
             return ValueTransformer(forName: n)
             #else
             _ = name
-            unimplemented()
+            unimplemented("bindings: valueTransformerName — ValueTransformer is not in corelibs Foundation; pass a transformer object with .valueTransformer")
             #endif
         }
         return nil
@@ -521,7 +521,7 @@ final class _NSBinding {
         return (t as? ValueTransformer)?.transformedValue(value)
         #else
         _ = t
-        unimplemented()
+        unimplemented("bindings: value transformers — ValueTransformer is not in corelibs Foundation")
         #endif
     }
 
@@ -531,7 +531,7 @@ final class _NSBinding {
         return (t as? ValueTransformer)?.reverseTransformedValue(value)
         #else
         _ = t
-        unimplemented()
+        unimplemented("bindings: value transformers — ValueTransformer is not in corelibs Foundation")
         #endif
     }
 }
@@ -625,7 +625,22 @@ extension NSObject {
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/objectivec/nsobject/valueclassforbinding(_:)
-    public func valueClassForBinding(_ binding: NSBindingName) -> AnyClass? { unimplemented() }
+    /// macOS 15's answers for the standard bindings: NSString for a text field's or text
+    /// view's value, NSNumber for a slider's, stepper's, level or progress indicator's value
+    /// and for the state bindings (enabled, hidden, editable), NSImage for an image view's
+    /// value; nil otherwise (an NSButton's value too).
+    public func valueClassForBinding(_ binding: NSBindingName) -> AnyClass? {
+        MainActor.assumeIsolated { () -> AnyClass? in
+            if [NSBindingName.enabled, .hidden, .editable].contains(binding), self is NSControl || self is NSTextView { return NSNumber.self }
+            guard binding == .value else { return nil }
+            switch self {
+            case is NSTextField, is NSTextView: return NSString.self
+            case is NSSlider, is NSStepper, is NSLevelIndicator, is NSProgressIndicator: return NSNumber.self
+            case is NSImageView: return NSImage.self
+            default: return nil
+            }
+        }
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/objectivec/nsobject/bind(_:to:withkeypath:options:)
     public func bind(_ binding: NSBindingName, to observable: Any, withKeyPath keyPath: String, options: [NSBindingOption: Any]? = nil) {

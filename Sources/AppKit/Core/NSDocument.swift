@@ -848,7 +848,7 @@ import UniformTypeIdentifiers
     // MARK: Versions, sharing, printing, PDF (not implemented)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/browseversions(_:)
-    @MainActor open func browseVersions(_ sender: Any?) { unimplemented() }
+    @MainActor open func browseVersions(_ sender: Any?) { unimplemented("NSDocument.browseVersions — the Versions browser is a macOS system service (document versions are not stored)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/isbrowsingversions
     @MainActor open var isBrowsingVersions: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/stopbrowsingversions()
@@ -1022,7 +1022,7 @@ import UniformTypeIdentifiers
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/restorestate(with:)
     @MainActor open func restoreState(with coder: NSCoder) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/restorewindow(withidentifier:state:)
-    @MainActor open func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder) async throws -> NSWindow { unimplemented() }
+    @MainActor open func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder) async throws -> NSWindow { unimplemented("NSDocument.restoreWindow — the port writes no restoration archives (ADR-0038)") }
     // DUPLICATE: @MainActor open func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder) async throws -> NSWindow
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor func updateUserActivityState(_ activity: NSUserActivity)
     // SKIPPED (Foundation.NSUserActivity not in corelibs): @MainActor var userActivity: NSUserActivity? { get set }

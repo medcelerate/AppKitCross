@@ -60,7 +60,13 @@ open class NSGradient: NSObject, NSCopying, NSSecureCoding, NSCoding {
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgradient/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// AppKit's `NSGradientColorArray`, with the port's `NSGradientLocations` (macOS omits
+    /// evenly spaced locations; the port writes them always).
+    public required convenience init?(coder: NSCoder) {
+        guard let colors = coder.decodeObject(forKey: "NSGradientColorArray") as? [NSColor], colors.count >= 2 else { return nil }
+        let locations = (coder.decodeObject(forKey: "NSGradientLocations") as? [NSNumber])?.map { CGFloat($0.doubleValue) }
+        self.init(_colors: colors, locations: locations?.count == colors.count ? locations : nil, colorSpace: coder.decodeObject(forKey: "NSGradientColorSpace") as? NSColorSpace)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgradient/init(colors:)
     public convenience init?(colors colorArray: [NSColor]) {
         self.init(_colors: colorArray, locations: nil, colorSpace: nil)
@@ -158,7 +164,11 @@ open class NSGradient: NSObject, NSCopying, NSSecureCoding, NSCoding {
     // Requirement of NSSecureCoding
     class public var supportsSecureCoding: Bool { true }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) {
+        coder.encode(_colors as NSArray, forKey: "NSGradientColorArray")
+        coder.encode(_locations.map { NSNumber(value: Double($0)) } as NSArray, forKey: "NSGradientLocations")
+        if let cs = _colorSpace { coder.encode(cs, forKey: "NSGradientColorSpace") }
+    }
 
     // MARK: Geometry (internal so the tests can check it)
 

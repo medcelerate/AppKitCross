@@ -45,7 +45,12 @@ open class NSViewAnimation: NSAnimation {
         set { _viewAnimations = newValue; _tracks = nil }
     }
     // Required by the superclass (NSCoding).
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// The animation's timing (NSAnimation's keys); the view dictionaries name live views
+    /// and windows, which an archive cannot hold, so it starts with none.
+    public required init?(coder: NSCoder) {
+        _viewAnimations = []
+        super.init(coder: coder)
+    }
 
     open override var currentProgress: NSAnimation.Progress {
         get { super.currentProgress }

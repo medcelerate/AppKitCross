@@ -162,7 +162,16 @@ import CoreText
     }
     // DUPLICATE: @MainActor open func beginSheetModal(for sheetWindow: NSWindow) async -> NSApplication.ModalResponse
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalert/beginsheetmodal(for:modaldelegate:didend:contextinfo:)
-    @MainActor open func beginSheetModal(for window: NSWindow, modalDelegate delegate: Any?, didEnd didEndSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) { unimplemented() }
+    /// The sheet; when it ends the delegate gets `didEndSelector` through the target/action
+    /// registry with the return code as an NSNumber sender (the three-argument callback needs
+    /// the runtime; NSApplication's legacy beginSheet does the same, ADR-0038).
+    @MainActor open func beginSheetModal(for window: NSWindow, modalDelegate delegate: Any?, didEnd didEndSelector: Selector?, contextInfo: UnsafeMutableRawPointer?) {
+        beginSheetModal(for: window) { response in
+            if let sel = didEndSelector, let target = delegate as AnyObject? {
+                _ = ActionRegistry.perform(sel, on: target, with: NSNumber(value: response.rawValue))
+            }
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalert/buttons
     @MainActor open var buttons: [NSButton] { _buttons }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsalert/delegate

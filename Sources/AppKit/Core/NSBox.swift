@@ -46,7 +46,20 @@ import CoreGraphics
         addSubview(content)
         _layoutContent()
     }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) {
+        _titleCell = NSTextFieldCell(textCell: "Title")
+        super.init(coder: coder)
+        _titleCell.font = _titleFont
+        _titleCell.alignment = .center
+        _titleCell.isBordered = false
+        _titleCell.isBezeled = false
+        _titleCell.drawsBackground = false
+        let content = NSView(frame: .zero)
+        _contentView = content
+        addSubview(content)
+        _layoutContent()
+    }
 
     @MainActor open override var isFlipped: Bool { true }
 
