@@ -4,6 +4,10 @@
 // ADR-0038 adds an event monitor (local and global; every event it sees is traced to stderr
 // as "coredepth2 monitor …", keys with their Shift and Option characters from the keyboard
 // layout) and a sheet run through the legacy NSApp.beginSheet(_:modalFor:modalDelegate:…).
+// ADR-0039 adds a top strip: glyph outlines with their bounding rects and advances (NSFont
+// glyph metrics, NSBezierPath.appendGlyph), a path that answers clicks with a hit test, a
+// palette menu popped up from code, a pasteboard round trip, and buttons with images
+// (template tint, image positions). Results go to the status line and stderr as "coredepth3 …".
 
 import AppKit
 import Foundation
@@ -55,12 +59,109 @@ final class TurnedLabelView: NSView {
     override func mouseDown(with event: NSEvent) { clicks += 1; needsDisplay = true }
 }
 
+/// "Hg" drawn as glyph outlines, each glyph's bounding rect outlined and its advance marked.
+final class GlyphMetricsDemoView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        bounds.fill()
+        let font = NSFont.systemFont(ofSize: 56)
+        var glyphs: [NSGlyph] = "Hg".unicodeScalars.map { font.glyph(withName: String($0)) }
+        if glyphs.contains(0) { glyphs = [font.glyph(withName: "H"), font.glyph(withName: "g")] }
+        var x: CGFloat = 12
+        let baseline: CGFloat = 26
+        for g in glyphs {
+            let r = font.boundingRect(forGlyph: g).offsetBy(dx: x, dy: baseline)
+            NSColor.systemOrange.setStroke()
+            NSBezierPath.stroke(r)
+            let adv = font.advancement(forGlyph: g).width
+            NSColor.systemBlue.setStroke()
+            NSBezierPath.strokeLine(from: NSPoint(x: x + adv, y: 6), to: NSPoint(x: x + adv, y: bounds.height - 6))
+            x += adv
+        }
+        let outline = NSBezierPath()
+        outline.move(to: NSPoint(x: 12, y: baseline))
+        outline.appendGlyphs(&glyphs, count: glyphs.count, in: font)
+        NSColor.labelColor.setFill()
+        outline.fill()
+        NSColor.secondaryLabelColor.setStroke()
+        NSBezierPath.strokeLine(from: NSPoint(x: 4, y: baseline), to: NSPoint(x: bounds.width - 4, y: baseline))
+    }
+}
+
+/// A rounded star; a click reports whether `contains(_:)` hit it and flashes the flattened outline.
+final class HitTestDemoView: NSView {
+    var onHit: ((Bool, NSPoint) -> Void)?
+    private var lastHit: Bool? = nil
+    lazy var star: NSBezierPath = {
+        let p = NSBezierPath()
+        let c = NSPoint(x: bounds.midX, y: bounds.midY)
+        for i in 0..<10 {
+            let r: CGFloat = i % 2 == 0 ? 44 : 18
+            let a = CGFloat(i) * .pi / 5 + .pi / 2
+            let pt = NSPoint(x: c.x + r * cos(a), y: c.y + r * sin(a))
+            if i == 0 { p.move(to: pt) } else { p.line(to: pt) }
+        }
+        p.close()
+        return p
+    }()
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.textBackgroundColor.setFill()
+        bounds.fill()
+        (lastHit == true ? NSColor.systemGreen : NSColor.systemPurple).withAlphaComponent(0.7).setFill()
+        star.fill()
+        let flat = star.reversed.flattened
+        flat.lineWidth = 1
+        NSColor.labelColor.setStroke()
+        flat.stroke()
+    }
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let hit = star.contains(p)
+        lastHit = hit
+        needsDisplay = true
+        onHit?(hit, p)
+    }
+}
+
 final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
     let nineSlice = NineSliceDemoView(frame: NSRect(x: 16, y: 16, width: 344, height: 176))
     let status = NSTextField(labelWithString: "")
     var autosaveWindow: NSWindow?
     var monitors: [Any] = []
     var legacySheet: NSWindow?
+    weak var paletteAnchor: NSButton?
+
+    private func trace3(_ line: String) { FileHandle.standardError.write(Data("coredepth3 \(line)\n".utf8)) }
+
+    /// A palette menu popped up from code just below its button, item 0 under the point.
+    private func popUpPalette() {
+        guard let anchor = paletteAnchor else { return }
+        let menu = NSMenu.palette(colors: [.systemRed, .systemOrange, .systemGreen, .systemBlue], titles: ["Red", "Orange", "Green", "Blue"]) { [weak self] m in
+            let names = m.selectedItems.map(\.title).joined(separator: ", ")
+            self?.status.stringValue = "Palette selection: \(names.isEmpty ? "none" : names)"
+            self?.trace3("palette \(names)")
+        }
+        let chosen = menu.popUp(positioning: menu.item(at: 0), at: NSPoint(x: 0, y: -4), in: anchor)
+        trace3("popUp returned \(chosen)")
+    }
+
+    /// Writes an attributed string (RTF), a colour and a pasteboard item to a private
+    /// pasteboard, reads them back and reports what survived.
+    private func pasteboardRoundTrip() {
+        let pb = NSPasteboard(name: NSPasteboard.Name("AppKitCross.coredepth3"))
+        pb.clearContents()
+        let text = NSAttributedString(string: "Round trip", attributes: [.font: NSFont.boldSystemFont(ofSize: 13)])
+        let item = NSPasteboardItem()
+        _ = item.setString("plain item", forType: NSPasteboard.PasteboardType("public.utf8-plain-text.coredepth3"))
+        _ = pb.writeObjects([NSColor.systemTeal, item])
+        if let rtf = text.rtf(from: NSRange(location: 0, length: text.length)) { _ = pb.setData(rtf, forType: .rtf) }
+        let texts = pb.data(forType: .rtf).flatMap { NSAttributedString(rtf: $0, documentAttributes: nil) }.map { [$0] } ?? []
+        let colors = pb.readObjects(forClasses: [NSColor.self], options: nil) as? [NSColor] ?? []
+        let bold = texts.first.map { ($0.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.fontDescriptor.symbolicTraits.contains(.bold) == true } ?? false
+        let line = "Pasteboard: text \"\(texts.first?.string ?? "-")\" bold \(bold), \(colors.count) colour(s), \(pb.pasteboardItems?.count ?? 0) item(s)"
+        status.stringValue = line
+        trace3(line)
+    }
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -69,7 +170,33 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
     required init?(coder: NSCoder) { nil }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 840, height: 270))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 840, height: 390))
+        // ADR-0039 strip (top).
+        let glyphs = GlyphMetricsDemoView(frame: NSRect(x: 16, y: 280, width: 180, height: 96))
+        glyphs.toolTip = "NSFont glyph bounding rects (orange) and advances (blue); outlines from NSBezierPath.appendGlyphs"
+        root.addSubview(glyphs)
+        let hits = HitTestDemoView(frame: NSRect(x: 206, y: 280, width: 120, height: 96))
+        hits.toolTip = "Click: NSBezierPath.contains hit test"
+        hits.onHit = { [weak self] hit, p in
+            self?.status.stringValue = "Hit test at (\(Int(p.x)), \(Int(p.y))): \(hit ? "inside" : "outside") the star"
+            self?.trace3("hit \(hit ? "inside" : "outside") \(Int(p.x)),\(Int(p.y))")
+        }
+        root.addSubview(hits)
+        let plus = NSImage(systemSymbolName: "plus", accessibilityDescription: nil) ?? NSImage(size: NSSize(width: 16, height: 16))
+        for (i, position) in [NSControl.ImagePosition.imageLeft, .imageAbove, .imageOnly].enumerated() {
+            let b = NSButton(title: "Add", image: plus, target: nil, action: nil)
+            b.imagePosition = position
+            if i == 1 { b.contentTintColor = .systemRed }
+            b.frame = NSRect(x: 336 + CGFloat(i) * 70, y: 300, width: 64, height: position == .imageAbove ? 52 : 28)
+            root.addSubview(b)
+        }
+        let row3: [(String, Selector)] = [("Pop-up Palette", Selector(("popUpPalette:"))), ("Pasteboard Round-Trip", Selector(("pasteboardRoundTrip:")))]
+        for (i, (title, action)) in row3.enumerated() {
+            let b = NSButton(title: title, target: self, action: action)
+            b.frame = NSRect(x: 560 + CGFloat(i) * 140, y: 330, width: 132, height: 28)
+            if i == 0 { paletteAnchor = b }
+            root.addSubview(b)
+        }
         nineSlice.toolTip = "NSImage capInsets: nine slices"
         root.addSubview(nineSlice)
         let turned = TurnedLabelView(frame: NSRect(x: 420, y: 175, width: 210, height: 26))
@@ -126,6 +253,8 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
         case Selector(("openAutosaveWindow:")): openAutosaveWindow(sender)
         case Selector(("toggleEventMonitor:")): toggleEventMonitor(sender as? NSButton)
         case Selector(("showLegacySheet:")): showLegacySheet()
+        case Selector(("popUpPalette:")): popUpPalette()
+        case Selector(("pasteboardRoundTrip:")): pasteboardRoundTrip()
         case Selector(("endLegacySheet:")): if let s = legacySheet { NSApp.endSheet(s, returnCode: (sender as? NSButton)?.tag ?? 0) }
         case Selector(("legacySheetDidEnd:returnCode:contextInfo:")):
             let code = (sender as? NSNumber)?.intValue ?? 0

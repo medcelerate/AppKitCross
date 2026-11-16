@@ -67,16 +67,16 @@ open class NSBezierPath: NSObject, NSCopying, NSSecureCoding, NSCoding {
 
     /// Appends a circular arc as cubic Bézier segments. Angles in degrees, counter-clockwise
     /// positive like AppKit.
-    private func addArc(center: NSPoint, radius: CGFloat, startDeg: CGFloat, endDeg: CGFloat, clockwise: Bool) {
+    private func addArc(center: NSPoint, radius: CGFloat, startDeg: CGFloat, endDeg: CGFloat, clockwise: Bool, joinsCurrentPoint: Bool = false) {
         var start = startDeg * .pi / 180, end = endDeg * .pi / 180
         if clockwise { while end > start { end -= 2 * .pi } } else { while end < start { end += 2 * .pi } }
         let total = end - start
-        let n = max(1, Int((abs(total) / (.pi / 2)).rounded(.up)))
+        let n = max(1, Int((abs(total) / (.pi / 2) - 1e-9).rounded(.up)))
         let step = total / CGFloat(n)
         let k = 4.0 / 3.0 * tan(step / 4)
         var a0 = start
         let p0 = NSPoint(x: center.x + radius * cos(a0), y: center.y + radius * sin(a0))
-        if segments.isEmpty { move(to: p0) } else { line(to: p0) }
+        if segments.isEmpty { move(to: p0) } else if !joinsCurrentPoint { line(to: p0) }
         for _ in 0..<n {
             let a1 = a0 + step
             let c0 = NSPoint(x: center.x + radius * (cos(a0) - k * sin(a0)), y: center.y + radius * (sin(a0) + k * cos(a0)))
@@ -142,7 +142,7 @@ open class NSBezierPath: NSObject, NSCopying, NSSecureCoding, NSCoding {
         let a0 = atan2(t1.y - center.y, t1.x - center.x) * 180 / .pi
         let a1 = atan2(t2.y - center.y, t2.x - center.x) * 180 / .pi
         line(to: t1)
-        addArc(center: center, radius: radius, startDeg: a0, endDeg: a1, clockwise: cross > 0)
+        addArc(center: center, radius: radius, startDeg: a0, endDeg: a1, clockwise: cross > 0, joinsCurrentPoint: true)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbezierpath/appendarc(withcenter:radius:startangle:endangle:)
     open func appendArc(withCenter center: NSPoint, radius: CGFloat, startAngle: CGFloat, endAngle: CGFloat) { addArc(center: center, radius: radius, startDeg: startAngle, endDeg: endAngle, clockwise: false) }
