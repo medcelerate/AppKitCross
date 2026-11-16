@@ -1350,17 +1350,18 @@ final class Win32Window: PlatformWindow {
         case WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK:
             // A press on a package-drawn caption button is the button's to track (DefWindowProc
             // would track a system caption button the frame does not have): capture, so the
-            // drag and the release arrive as client messages like any control's.
-            // With the system frame the caption buttons are DefWindowProc's: taking the
-            // press here left the close box showing its tooltip and never closing.
-            guard usesCustomFrame, Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            // drag and the release arrive as client messages like any control's. On a system
+            // frame the caption buttons are Windows' own and DefWindowProc tracks them: taking
+            // the press here left the close box showing its tooltip and never closing, and the
+            // minimise and maximise buttons doing nothing.
+            guard Win32WindowPolicy.takesNonClientMouse(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
             if let hwnd { SetCapture(hwnd) }
             pressedButtons |= 1
             NSEvent._pressedMouseButtons = pressedButtons
             nonClientMouse(.leftMouseDown, lParam, clickCount: 1)
             return 0
         case WM_NCLBUTTONUP:
-            guard usesCustomFrame, Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) else { return nil }
+            guard Win32WindowPolicy.takesNonClientMouse(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
             pressedButtons &= ~1
             NSEvent._pressedMouseButtons = pressedButtons
             if pressedButtons == 0 { ReleaseCapture() }

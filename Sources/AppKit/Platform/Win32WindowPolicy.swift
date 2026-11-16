@@ -71,6 +71,16 @@ public enum Win32WindowPolicy {
         hitCode == HTCLOSE || hitCode == HTMINBUTTON || hitCode == HTMAXBUTTON
     }
 
+    /// Whether the window takes a non-client mouse message (`WM_NCMOUSEMOVE`,
+    /// `WM_NCLBUTTONDOWN`, `WM_NCLBUTTONUP`, ...) with hit code `hitCode` for a button it draws.
+    /// Only a custom frame (`fullSizeContentView`, borderless, content extended into the
+    /// title bar) has package-drawn caption buttons. On a system frame `HTCLOSE`,
+    /// `HTMINBUTTON` and `HTMAXBUTTON` are Windows' own buttons, which `DefWindowProc` must
+    /// track. If the window takes them, the minimise and maximise buttons do nothing.
+    public static func takesNonClientMouse(hitCode: Int32, customFrame: Bool) -> Bool {
+        customFrame && isCaptionButton(hitCode: hitCode)
+    }
+
     // MARK: Showing (orderFront)
 
     public static let SW_SHOWNA: Int32 = 8
