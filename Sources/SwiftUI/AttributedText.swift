@@ -49,6 +49,7 @@ extension Text {
             r.backgroundColor = run.backgroundColor
             r.underline = run.underlineStyle
             r.strikethrough = run.strikethroughStyle
+            r.link = run.link
             r.kerning = run.kern ?? 0
             r.tracking = run.tracking ?? 0
             r.baselineOffset = run.baselineOffset ?? 0

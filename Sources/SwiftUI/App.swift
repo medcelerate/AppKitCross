@@ -405,9 +405,11 @@ public final class _AppRunner {
         }
         closeObservers.append(token)
     }
+    /// Test hook: false keeps a test process alive when it closes a runner's last window.
+    static var _terminatesAfterLastWindowCloses = true
     private func lastWindowDidClose() {
         #if !canImport(Darwin)
-        guard windows.isEmpty, settingsWindow?.isVisible != true else { return }
+        guard _AppRunner._terminatesAfterLastWindowCloses, windows.isEmpty, settingsWindow?.isVisible != true else { return }
         let app = NSApplication.shared
         guard !NSStatusBar.system._hasItems, app.delegate?.applicationShouldTerminateAfterLastWindowClosed(app) != true else { return }
         // After the close finishes: terminate from inside willClose would tear the window

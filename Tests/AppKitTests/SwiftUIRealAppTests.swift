@@ -27,6 +27,17 @@ private func texts(_ v: NSView) -> [String] { allViews(v).compactMap { ($0 as? _
 private func buttons(_ v: NSView) -> [NSButton] { allViews(v).compactMap { $0 as? NSButton } }
 
 final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
+    // These tests make `_AppRunner`s and close their windows; off macOS closing a runner's
+    // last window quits the app (App.swift), which would end the test process early.
+    override func setUp() {
+        super.setUp()
+        MainActor.assumeIsolated { _AppRunner._terminatesAfterLastWindowCloses = false }
+    }
+    override func tearDown() {
+        MainActor.assumeIsolated { _AppRunner._terminatesAfterLastWindowCloses = true }
+        super.tearDown()
+    }
+
     func testLabeledContentShowsLabelAndValue() {
         MainActor.assumeIsolated {
             let (w, h) = host(Form {

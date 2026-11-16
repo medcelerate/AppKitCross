@@ -77,9 +77,19 @@ protocol _MenuItemConvertible {
 /// nested menus submenus, toggles checked items and plain text disabled items.
 @MainActor
 func _buildMenu(_ box: _AnyViewBox, into menu: NSMenu) {
-    for b in _flattenBoxes(box) {
+    for (b, environment) in _flattenMenuBoxes(box, environment: EnvironmentValues()) {
         let (meta, content) = _metadata(of: b)
         let before = menu.items.count
+        defer {
+            // `.disabled(true)` around an item (or a group of them) disables it: no action,
+            // so the menu's validation keeps it disabled too.
+            if !environment.isEnabled {
+                for item in menu.items.dropFirst(before) where !item.isSeparatorItem && item.submenu == nil {
+                    item.isEnabled = false
+                    item.action = nil
+                }
+            }
+        }
         if let c = content.value as? _MenuItemConvertible {
             c._addMenuItems(to: menu)
         } else if let t = content.value as? Text {
@@ -100,6 +110,16 @@ func _buildMenu(_ box: _AnyViewBox, into menu: NSMenu) {
             }
         }
     }
+}
+
+/// `_flattenBoxes` for menus: the leaves with the environment the wrappers above each
+/// set (`.disabled` is an environment wrapper, and must reach the item it disables).
+@MainActor
+func _flattenMenuBoxes(_ box: _AnyViewBox, environment: EnvironmentValues) -> [(_AnyViewBox, EnvironmentValues)] {
+    guard !(box.value is _MetadataView), box.isPrimitive, let p = box.makePrimitive(node: _ViewNode.placeholder), p.isLayoutTransparent, !(box.value is _LeafMarker) else { return [(box, environment)] }
+    var env = environment
+    p.environmentTransform?(&env)
+    return p.children.flatMap { _flattenMenuBoxes($0, environment: env) }
 }
 
 /// A menu item that runs a closure when chosen.

@@ -102,6 +102,12 @@ private func menuItem(_ title: String, in menu: NSMenu?) -> NSMenuItem? {
 }
 
 final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
+    override func setUp() {
+        super.setUp()
+        // Closing a runner's last window quits off macOS (App.swift); not the test process.
+        MainActor.assumeIsolated { _AppRunner._terminatesAfterLastWindowCloses = false }
+    }
+
     override func tearDown() {
         MainActor.assumeIsolated {
             for w in NSApplication.shared.windows { w.close() }
@@ -111,6 +117,7 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
             _SwiftUIDocumentController.installed = nil
             _DocumentGroupEntry._reset()
             NSApplication.shared.mainMenu = nil
+            _AppRunner._terminatesAfterLastWindowCloses = true
         }
         super.tearDown()
     }
@@ -159,7 +166,6 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
 
             guard let tv = textView(of: doc) else { return XCTFail("no text view in the document window") }
             tv.insertText("# Hello", replacementRange: NSRange(location: NSNotFound, length: 0))
-            print("DEBUG tv.string=\(tv.string) editable=\(tv.isEditable) delegate=\(String(describing: tv.delegate))")
             XCTAssertEqual((doc._content as? NoteDocument)?.text, "# Hello", "the representable wrote the binding")
             pump()
             XCTAssertTrue(doc.isDocumentEdited, "a binding write marks the document edited")
@@ -269,6 +275,137 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual((monoText?.storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.fontName, mono.fontName)
             let faint = views.first { $0.storage.string == "faint" }
             XCTAssertEqual(faint?.storage.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, NSColor.tertiaryLabelColor)
+        }
+    }
+
+    /// Undo and redo of typing go through the document's undo manager (the text view
+    /// registers them there) and take the document back to clean and edited again; the
+    /// binding follows the text both ways.
+    func testTypingUndoReturnsTheDocumentToClean() throws {
+        try requireHostBackend()
+        try MainActor.assumeIsolated {
+            let (_, dc) = runApp()
+            guard let doc = try dc.openUntitledDocumentAndDisplay(true) as? _HostingDocument, let tv = textView(of: doc) else { return XCTFail("no document") }
+            doc.windowControllers.first?.window?.makeFirstResponder(tv)
+            XCTAssertTrue(tv.undoManager === doc.undoManager, "the text view registers with the document's undo manager")
+            tv.insertText("abc", replacementRange: NSRange(location: NSNotFound, length: 0))
+            pump()
+            XCTAssertTrue(doc.isDocumentEdited)
+            doc.undoManager?.undo()
+            pump()
+            XCTAssertEqual(tv.string, "")
+            XCTAssertEqual((doc._content as? NoteDocument)?.text, "", "the binding followed the undo")
+            XCTAssertFalse(doc.isDocumentEdited, "undoing the only change leaves the document clean")
+            doc.undoManager?.redo()
+            pump()
+            XCTAssertEqual((doc._content as? NoteDocument)?.text, "abc")
+            XCTAssertTrue(doc.isDocumentEdited)
+        }
+    }
+
+    /// The viewer's shapes (MarkdownView.swift): attributed text runs with AppKit fonts,
+    /// links, strikethrough and code backgrounds; a Grid table with a divider row; a
+    /// horizontally scrolling code block; list markers; a status bar on `.bar`; all in a
+    /// scroll view with `textSelection`. Laid out and drawn without trapping.
+    func testMarkdownViewerShapesRender() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            func run(_ text: String, size: CGFloat, bold: Bool = false, mono: Bool = false) -> AttributedString {
+                var r = AttributedString(text)
+                var font: NSFont = mono ? .monospacedSystemFont(ofSize: size, weight: bold ? .semibold : .regular) : .systemFont(ofSize: size, weight: bold ? .bold : .regular)
+                if !mono, let italic = NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(.italic), size: size) { font = italic }
+                r.font = Font(font)
+                return r
+            }
+            var para = run("Plain ", size: 15)
+            var code = run("code", size: 14, mono: true); code.backgroundColor = Color.primary.opacity(0.08)
+            var link = run("link", size: 15); link.link = URL(string: "https://example.com"); link.foregroundColor = .accentColor; link.underlineStyle = .single
+            var strike = run(" gone", size: 15); strike.strikethroughStyle = .single
+            para.append(code); para.append(link); para.append(strike)
+            let viewer = VStack(spacing: 0) {
+                ScrollView(.vertical) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text(run("Heading", size: 30, bold: true)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        Divider()
+                        Text(para).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                        HStack(alignment: .firstTextBaseline, spacing: 9) {
+                            Image(systemName: "checkmark.square.fill").foregroundStyle(Color.accentColor)
+                            Text("1.").font(Font(NSFont.systemFont(ofSize: 15, weight: .medium))).monospacedDigit().foregroundStyle(.secondary)
+                            Text("item")
+                        }
+                        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                            GridRow { Text("A").bold(); Text("B").bold().gridColumnAlignment(.trailing) }
+                            Divider().gridCellUnsizedAxes(.horizontal)
+                            GridRow { Text("1"); Text("2").frame(maxWidth: .infinity, alignment: .trailing).background(Color.primary.opacity(0.03)) }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.primary.opacity(0.12)))
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("SWIFT").font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(.tertiary)
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                Text("let x = 1 // a long line of code that scrolls sideways in its block").font(Font(NSFont.monospacedSystemFont(ofSize: 13, weight: .regular))).padding(15)
+                            }
+                        }
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.055)))
+                    }
+                    .frame(maxWidth: 690, alignment: .leading)
+                    .padding(.horizontal, 40)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .textSelection(.enabled)
+                .background(Color(nsColor: .textBackgroundColor))
+                Divider()
+                HStack(spacing: 12) {
+                    Text("Viewer").fontWeight(.semibold)
+                    Text("\u{2318}E to switch").foregroundStyle(.tertiary)
+                    Spacer()
+                    Text("3 words")
+                }
+                .font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 5).background(.bar)
+            }
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 720), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            defer { w.close() }
+            let h = NSHostingView(rootView: viewer)
+            h.frame = w.contentView!.bounds
+            w.contentView!.addSubview(h)
+            w.makeKeyAndOrderFront(nil)
+            h.layoutSubtreeIfNeeded()
+            w.displayIfNeeded()
+            let strings = texts(h)
+            XCTAssertTrue(strings.contains("Plain codelink gone"), "\(strings)")
+            XCTAssertTrue(strings.contains("A") && strings.contains("2"))
+            let paragraph = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Plain codelink gone" }
+            XCTAssertNotNil(paragraph?.storage.attribute(.link, at: 10, effectiveRange: nil), "the link run")
+            XCTAssertNotNil(paragraph?.storage.attribute(.strikethroughStyle, at: 16, effectiveRange: nil), "the struck run")
+        }
+    }
+
+    /// The editor's highlighter (SyntaxHighlighter.swift): line-anchored regexes with
+    /// look-behind over an NSTextStorage, dynamic colours from a provider, fonts per range.
+    func testHighlighterShapes() {
+        MainActor.assumeIsolated {
+            let dynamic = NSColor(name: nil) { appearance in appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? .white : .black }
+            let storage = NSTextStorage(string: "# Title\n\nSome **bold** and *it* and `code`\n- [x] done\n")
+            let full = NSRange(location: 0, length: storage.length)
+            let base = NSFont.monospacedSystemFont(ofSize: 13.5, weight: .regular)
+            storage.beginEditing()
+            storage.setAttributes([.font: base, .foregroundColor: NSColor.labelColor], range: full)
+            let heading = try! NSRegularExpression(pattern: "^[ \\t]{0,3}(#{1,6})([ \\t]+)(.*)$", options: [.anchorsMatchLines])
+            let strong = try! NSRegularExpression(pattern: "(\\*\\*|__)(?=\\S)(.+?)(?<=\\S)\\1", options: [.anchorsMatchLines])
+            let emphasis = try! NSRegularExpression(pattern: "(?<![\\*\\w])(\\*)(?=[^\\s\\*])([^\\*\\n]+?)(?<=[^\\s\\*])(\\*)(?!\\*)", options: [.anchorsMatchLines])
+            let task = try! NSRegularExpression(pattern: "^[ \\t]*(?:[-*+]|[0-9]{1,9}[.)])[ \\t]+(\\[[ xX]\\])", options: [.anchorsMatchLines])
+            var hits: [String] = []
+            for (name, re) in [("heading", heading), ("strong", strong), ("emphasis", emphasis), ("task", task)] {
+                re.enumerateMatches(in: storage.string, range: full) { m, _, _ in
+                    guard let m else { return }
+                    hits.append(name)
+                    storage.addAttributes([.foregroundColor: dynamic, .backgroundColor: NSColor.systemBlue], range: m.range(at: 1))
+                }
+            }
+            storage.endEditing()
+            XCTAssertEqual(hits, ["heading", "strong", "emphasis", "task"])
+            XCTAssertNotNil(storage.attribute(.backgroundColor, at: 0, effectiveRange: nil))
+            XCTAssertEqual(NSAppearance(named: .darkAqua)?.bestMatch(from: [.aqua, .darkAqua]), .darkAqua)
         }
     }
 

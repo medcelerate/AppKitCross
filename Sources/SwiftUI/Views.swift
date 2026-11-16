@@ -498,6 +498,9 @@ public struct Text: View, _PrimitiveView, Equatable {
         var monospacedDigits = false
         /// An inline image (`Text(image)`), drawn as an attachment.
         var image: Image? = nil
+        /// An attributed string's `link` run: drawn in the accent colour (when the run sets
+        /// none) and carried as the text's `.link` attribute. Not yet clickable.
+        var link: URL? = nil
     }
     var runs: [Run]
 
@@ -589,6 +592,10 @@ public struct Text: View, _PrimitiveView, Equatable {
             let color = r.color ?? baseColor
             attrs[.foregroundColor] = color?.nsColor ?? (env.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor)
             if let bg = r.backgroundColor { attrs[.backgroundColor] = bg.nsColor }
+            if let link = r.link {
+                attrs[.link] = link
+                if r.color == nil { attrs[.foregroundColor] = Color.accentColor.nsColor }
+            }
             if let u = r.underline { attrs[.underlineStyle] = u.nsStyle.rawValue; if let c = u.color { attrs[.underlineColor] = c.nsColor } }
             if let st = r.strikethrough { attrs[.strikethroughStyle] = st.nsStyle.rawValue; if let c = st.color { attrs[.strikethroughColor] = c.nsColor } }
             if r.kerning != 0 || r.tracking != 0 { attrs[.kern] = r.kerning + r.tracking }
