@@ -151,12 +151,13 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
             monitors = []
             button?.title = "Start Event Monitor"
             status.stringValue = "Event monitor stopped"
+            trace("monitor stopped")
             return
         }
         let describe: (NSEvent) -> String = { e in
             guard e.type == .keyDown else { return "\(e.type) at (\(Int(e.locationInWindow.x)), \(Int(e.locationInWindow.y)))" }
-            let shifted = e.characters(byApplyingModifiers: .shift) ?? "nil"
-            let option = e.characters(byApplyingModifiers: .option) ?? "nil"
+            let shifted = e.characters(byApplyingModifiers: .shift) ?? ""
+            let option = e.characters(byApplyingModifiers: .option) ?? ""
             return "keyDown keyCode \(e.keyCode) chars '\(e.characters ?? "")' shift '\(shifted)' option '\(option)'"
         }
         if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { [weak self] e in
