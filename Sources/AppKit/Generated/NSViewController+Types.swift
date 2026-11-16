@@ -15,20 +15,6 @@ import QuartzCore
 #if canImport(CoreText)
 import CoreText
 #endif
-@available(macOS 13.3, *)
-extension NSViewController {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading
-    @available(macOS 13.3, *)
-    @propertyWrapper public struct ViewLoading<Value> {
-        // wrappedValue is unavailable in the SDK (enclosing-instance subscript wrapper); declared for the wrapper to be valid.
-        @available(*, unavailable) public var wrappedValue: Value { get { unimplemented() } set { unimplemented() } }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading/init()
-        public init() { unimplemented() }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading/init(wrappedvalue:)
-        public init(wrappedValue: Value) { unimplemented() }
-    }
-}
-
 @available(macOS 10.10, *)
 extension NSViewController {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/transitionoptions
@@ -53,5 +39,19 @@ extension NSViewController {
         static public var slideRight: NSViewController.TransitionOptions { NSViewController.TransitionOptions(rawValue: 128) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/transitionoptions/slideup
         static public var slideUp: NSViewController.TransitionOptions { NSViewController.TransitionOptions(rawValue: 16) }
+    }
+}
+
+@available(macOS 13.3, *)
+extension NSViewController {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading
+    @available(macOS 13.3, *)
+    @propertyWrapper public struct ViewLoading<Value> {
+        // wrappedValue is unavailable in the SDK (enclosing-instance subscript wrapper); declared for the wrapper to be valid.
+        @available(*, unavailable) public var wrappedValue: Value { get { unimplemented() } set { unimplemented() } }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading/init()
+        public init() { unimplemented() }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/viewloading/init(wrappedvalue:)
+        public init(wrappedValue: Value) { unimplemented() }
     }
 }

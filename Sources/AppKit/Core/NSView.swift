@@ -1104,8 +1104,14 @@ import CoreText
     @MainActor open func drawSheetBorder(with borderSize: NSSize) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/edgeinsets(for:)
     @available(macOS 26.0, *)
-    /// Out of scope (ADR-0036): `NSView.LayoutRegion` is a generated stub (macOS 26).
-    @MainActor open func edgeInsets(for region: NSView.LayoutRegion) -> NSEdgeInsets { unimplemented("NSView.edgeInsets(for:) — NSView.LayoutRegion is not modelled") }
+    /// The safe area answers `safeAreaInsets`; the port's layout margins are zero (the margins
+    /// guide covers the bounds). Corner adaptation has no effect (ADR-0037).
+    @MainActor open func edgeInsets(for region: NSView.LayoutRegion) -> NSEdgeInsets {
+        switch region._kind {
+        case .safeArea: return safeAreaInsets
+        case .margins: return NSEdgeInsets()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enclosingmenuitem
     @MainActor open var enclosingMenuItem: NSMenuItem? {
         var v: NSView? = self
@@ -1408,7 +1414,12 @@ import CoreText
     @MainActor open func layout() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutguide(for:)
     @available(macOS 26.0, *)
-    @MainActor open func layoutGuide(for region: NSView.LayoutRegion) -> NSLayoutGuide { unimplemented("NSView.layoutGuide(for:) — NSView.LayoutRegion is not modelled") }
+    @MainActor open func layoutGuide(for region: NSView.LayoutRegion) -> NSLayoutGuide {
+        switch region._kind {
+        case .safeArea: return safeAreaLayoutGuide
+        case .margins: return layoutMarginsGuide
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutguides
     @available(macOS 10.11, *)
     @MainActor open var layoutGuides: [NSLayoutGuide] { _layoutGuides }
@@ -1668,7 +1679,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rect(for:)
     @available(macOS 26.0, *)
-    @MainActor open func rect(for region: NSView.LayoutRegion) -> NSRect { unimplemented("NSView.rect(for:) — NSView.LayoutRegion is not modelled") }
+    @MainActor open func rect(for region: NSView.LayoutRegion) -> NSRect {
+        let b = bounds, i = edgeInsets(for: region)
+        return NSRect(x: b.minX + i.left, y: b.minY + (isFlipped ? i.top : i.bottom),
+                      width: max(0, b.width - i.left - i.right), height: max(0, b.height - i.top - i.bottom))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectforpage(_:)
     /// The rect of page `page` for a view that `knowsPageRange`; the default answers the
     /// print operation's own pagination.
@@ -2382,6 +2397,12 @@ import CoreText
         // UI Automation shows them as child buttons: the element's children changed.
         if window != nil { _accessibilityNotify(.structure(_accessibilityElementID)) }
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/accessibilitycustomrotors()
+    /// Stored for assistive technology; UI Automation and AT-SPI do not navigate rotors yet
+    /// (ADR-0037, ROADMAP accessibility follow-ups).
+    open func accessibilityCustomRotors() -> [NSAccessibilityCustomRotor] { _a11y.customRotors }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilitycustomrotors(_:)
+    open func setAccessibilityCustomRotors(_ accessibilityCustomRotors: [NSAccessibilityCustomRotor]) { _a11y.customRotors = accessibilityCustomRotors }
 }
 
 

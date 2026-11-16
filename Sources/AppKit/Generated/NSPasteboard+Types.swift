@@ -15,48 +15,6 @@ import QuartzCore
 #if canImport(CoreText)
 import CoreText
 #endif
-@available(macOS 15.4, *)
-extension NSPasteboard {
-    /// A type that contains common types of data that the data detection system matches for a pasteboard.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues
-    @available(macOS 15.4, *)
-    public struct DetectedValues {
-        // SKIPPED (unknown module (? DDMatchCalendarEvent)): var calendarEvents: [DDMatchCalendarEvent] { get }
-        // SKIPPED (unknown module (? DDMatchEmailAddress)): var emailAddresses: [DDMatchEmailAddress] { get }
-        // SKIPPED (unknown module (? DDMatchFlightNumber)): var flightNumbers: [DDMatchFlightNumber] { get }
-        // SKIPPED (unknown module (? DDMatchLink)): var links: [DDMatchLink] { get }
-        // SKIPPED (unknown module (? DDMatchMoneyAmount)): var moneyAmounts: [DDMatchMoneyAmount] { get }
-        /// A number that the data detection system identifies.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/number
-        public var number: Double? { unimplemented() }
-        /// A set of key paths that represent patterns that the data detection system identifies.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/patterns
-        public var patterns: Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented() }
-        // SKIPPED (unknown module (? DDMatchPhoneNumber)): var phoneNumbers: [DDMatchPhoneNumber] { get }
-        // SKIPPED (unknown module (? DDMatchPostalAddress)): var postalAddresses: [DDMatchPostalAddress] { get }
-        /// A string that the data detection system identifies as a probable web search item, suitable for implementing "Paste and Search".
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/probablewebsearch
-        public var probableWebSearch: String { unimplemented() }
-        /// A string that the data detection system identifies as a probable web URL, suitable for implementing "Paste and Go".
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/probableweburl
-        public var probableWebURL: String { unimplemented() }
-        // SKIPPED (unknown module (? DDMatchShipmentTrackingNumber)): var shipmentTrackingNumbers: [DDMatchShipmentTrackingNumber] { get }
-    }
-}
-
-@available(macOS 15.4, *)
-extension NSPasteboard {
-    /// An object that contains common types of metadata that the data detection system matches for a pasteboard.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata
-    @available(macOS 15.4, *)
-    public struct DetectedMetadata {
-        // SKIPPED (UniformTypeIdentifiers.UTType): var contentType: UTType? { get }
-        /// A set of key paths that represent metadata types that the data detection system identifies.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata/metadatatypes
-        public var metadataTypes: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>> { unimplemented() }
-    }
-}
-
 extension NSPasteboard {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/pasteboardtype
     public struct PasteboardType: RawRepresentable, Hashable, Equatable, Sendable {
@@ -254,5 +212,47 @@ extension NSPasteboard {
         static public var asPropertyList: NSPasteboard.ReadingOptions { NSPasteboard.ReadingOptions(rawValue: 2) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/readingoptions/asstring
         static public var asString: NSPasteboard.ReadingOptions { NSPasteboard.ReadingOptions(rawValue: 1) }
+    }
+}
+
+@available(macOS 15.4, *)
+extension NSPasteboard {
+    /// A type that contains common types of data that the data detection system matches for a pasteboard.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues
+    @available(macOS 15.4, *)
+    public struct DetectedValues {
+        // SKIPPED (unknown module (? DDMatchCalendarEvent)): var calendarEvents: [DDMatchCalendarEvent] { get }
+        // SKIPPED (unknown module (? DDMatchEmailAddress)): var emailAddresses: [DDMatchEmailAddress] { get }
+        // SKIPPED (unknown module (? DDMatchFlightNumber)): var flightNumbers: [DDMatchFlightNumber] { get }
+        // SKIPPED (unknown module (? DDMatchLink)): var links: [DDMatchLink] { get }
+        // SKIPPED (unknown module (? DDMatchMoneyAmount)): var moneyAmounts: [DDMatchMoneyAmount] { get }
+        /// A number that the data detection system identifies.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/number
+        public var number: Double? { unimplemented() }
+        /// A set of key paths that represent patterns that the data detection system identifies.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/patterns
+        public var patterns: Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented() }
+        // SKIPPED (unknown module (? DDMatchPhoneNumber)): var phoneNumbers: [DDMatchPhoneNumber] { get }
+        // SKIPPED (unknown module (? DDMatchPostalAddress)): var postalAddresses: [DDMatchPostalAddress] { get }
+        /// A string that the data detection system identifies as a probable web search item, suitable for implementing "Paste and Search".
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/probablewebsearch
+        public var probableWebSearch: String { unimplemented() }
+        /// A string that the data detection system identifies as a probable web URL, suitable for implementing "Paste and Go".
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues/probableweburl
+        public var probableWebURL: String { unimplemented() }
+        // SKIPPED (unknown module (? DDMatchShipmentTrackingNumber)): var shipmentTrackingNumbers: [DDMatchShipmentTrackingNumber] { get }
+    }
+}
+
+@available(macOS 15.4, *)
+extension NSPasteboard {
+    /// An object that contains common types of metadata that the data detection system matches for a pasteboard.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata
+    @available(macOS 15.4, *)
+    public struct DetectedMetadata {
+        // SKIPPED (UniformTypeIdentifiers.UTType): var contentType: UTType? { get }
+        /// A set of key paths that represent metadata types that the data detection system identifies.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata/metadatatypes
+        public var metadataTypes: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>> { unimplemented() }
     }
 }

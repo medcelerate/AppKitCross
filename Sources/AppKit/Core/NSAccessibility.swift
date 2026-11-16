@@ -111,6 +111,8 @@ internal struct _NSAccessibilityOverrides {
     var maxValue: Any? = nil
     var index: Int? = nil
     var customActions: [NSAccessibilityCustomAction]? = nil
+    /// Registered rotors (ADR-0037); the platform bridges do not navigate them yet.
+    var customRotors: [NSAccessibilityCustomRotor] = []
 }
 
 /// Element ids: one counter for views, windows, virtual elements and custom actions,

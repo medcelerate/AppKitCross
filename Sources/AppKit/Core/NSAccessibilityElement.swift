@@ -94,6 +94,10 @@ open class NSAccessibilityElement: NSObject, NSAccessibilityProtocol {
     open func setAccessibilityIndex(_ accessibilityIndex: Int) { _overrides.index = accessibilityIndex }
     open func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { _overrides.customActions }
     open func setAccessibilityCustomActions(_ accessibilityCustomActions: [NSAccessibilityCustomAction]?) { _overrides.customActions = accessibilityCustomActions }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/accessibilitycustomrotors()
+    open func accessibilityCustomRotors() -> [NSAccessibilityCustomRotor] { _overrides.customRotors }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilitycustomrotors(_:)
+    open func setAccessibilityCustomRotors(_ accessibilityCustomRotors: [NSAccessibilityCustomRotor]) { _overrides.customRotors = accessibilityCustomRotors }
     open func accessibilityParent() -> Any? { _overrides.parent }
     open func setAccessibilityParent(_ accessibilityParent: Any?) { _overrides.parent = accessibilityParent }
     open func accessibilityChildren() -> [Any]? { _overrides.children }
