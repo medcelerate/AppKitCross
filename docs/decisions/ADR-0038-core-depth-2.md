@@ -110,6 +110,14 @@ Add Link…) and lets the document's undo manager count its changes instead of c
 event monitor button (each event it sees is traced to stderr as `coredepth2 monitor local|global …`,
 keys with their Shift and Option characters) and a sheet begun with the legacy call.
 
+**PC round fixes.** NSMenu validates its items before matching a key equivalent (Redo, disabled at
+the last update, ignored Ctrl+Shift+Z after an Undo); the Win32 menu bar refreshes titles too when a
+menu opens (TextEdit's Make Rich/Plain Text kept its first title); outline text reaches the layout
+(`kCTStrokeWidth`/`kCTStrokeColor`) and the port's CoreText strokes glyph outlines (positive width
+strokes only, negative fills then strokes); links draw with the text view's `linkTextAttributes`; the
+RTF writer emits AppKit's `\outl\strokewidth`, `\AppleHighlight` and HYPERLINK fields, and the
+reader reads them (it used to skip field groups, dropping a link's text).
+
 **Undo grouping.** A manager that groups by event (the default) opens the event's group on
 registration, so the text view opens a group of its own only for a manager that does not; with
 both, NSDocument saw two group closes per keystroke and stayed edited after an undo.

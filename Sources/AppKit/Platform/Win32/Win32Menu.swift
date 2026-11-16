@@ -95,13 +95,17 @@ final class Win32MenuBar {
         }
     }
 
-    /// WM_INITMENUPOPUP: refresh enabled/checked states from the host before showing.
+    /// WM_INITMENUPOPUP: refresh titles and enabled/checked states from the host before
+    /// showing (validation may retitle an item, as TextEdit's Make Rich/Plain Text does).
     func willOpen(_ hmenu: HMENU) {
         let bits = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(hmenu)))
         guard let id = menusByHandle[bits], let fresh = host?.platformMenuWillOpen(id) else { return }
-        for item in fresh.items where !item.isSeparator && item.submenu == nil {
-            EnableMenuItem(hmenu, UINT(item.id), UINT(MF_BYCOMMAND) | (item.isEnabled ? UINT(MF_ENABLED) : UINT(MF_GRAYED)))
-            CheckMenuItem(hmenu, UINT(item.id), UINT(MF_BYCOMMAND) | (item.isChecked ? UINT(MF_CHECKED) : UINT(MF_UNCHECKED)))
+        for item in fresh.items where !item.isSeparator && item.submenu == nil && !item.isHidden {
+            let label = item.keyEquivalentLabel.isEmpty ? item.title : item.title + "\t" + item.keyEquivalentLabel
+            var flags = UINT(MF_BYCOMMAND) | UINT(MF_STRING)
+            flags |= item.isEnabled ? UINT(MF_ENABLED) : UINT(MF_GRAYED)
+            flags |= item.isChecked ? UINT(MF_CHECKED) : UINT(MF_UNCHECKED)
+            _ = label.withCString(encodedAs: UTF16.self) { ModifyMenuW(hmenu, UINT(item.id), flags, UINT_PTR(item.id), $0) }
         }
     }
 

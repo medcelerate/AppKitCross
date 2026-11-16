@@ -1270,8 +1270,15 @@ import CoreText
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let text = field.stringValue.trimmingCharacters(in: .whitespaces)
-        _withUndoName("Link") { _setCharacterAttribute(.link, text.isEmpty ? nil : (URL(string: text) as Any?) ?? text) }
+        setSelectedRange(r)
+        _applyLink(field.stringValue)
+    }
+
+    /// Links the selection to `text` (a URL when it parses as one), or removes the link when empty.
+    internal func _applyLink(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        _withUndoName("Link") { _setCharacterAttribute(.link, t.isEmpty ? nil : (URL(string: t) as Any?) ?? t) }
+        needsDisplay = true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontlistpanel(_:)
     @MainActor open func orderFrontListPanel(_ sender: Any?) {

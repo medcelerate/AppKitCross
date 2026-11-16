@@ -214,6 +214,10 @@ struct _RTFWriter {
         var underline: Bool
         var colorIndex: Int
         var attachment: NSTextAttachment?
+        /// Stroke width in twentieths of a percent of the size (Cocoa's `\strokewidth`).
+        var strokeWidth = 0
+        var highlight = false
+        var link: String? = nil
     }
 
     private static func twips(_ v: CGFloat) -> Int { Int((v * 20).rounded()) }
@@ -333,8 +337,14 @@ struct _RTFWriter {
                 }
                 let ci = (attrs[.foregroundColor] as? NSColor).map(colorIndex) ?? 0
                 let underline = ((attrs[.underlineStyle] as? Int) ?? (attrs[.underlineStyle] as? NSNumber)?.intValue ?? 0) != 0
-                let run = Run(text: text.substring(with: r), fontIndex: fontIndex, halfPoints: Int(((font?.pointSize ?? 12) * 2).rounded()),
+                var run = Run(text: text.substring(with: r), fontIndex: fontIndex, halfPoints: Int(((font?.pointSize ?? 12) * 2).rounded()),
                               bold: bold, italic: italic, underline: underline, colorIndex: ci, attachment: attrs[.attachment] as? NSTextAttachment)
+                // Cocoa's extensions (ADR-0038), as AppKit writes them: outline as \outl with
+                // \strokewidth (20 × the attribute), text highlights as \AppleHighlight, links
+                // as HYPERLINK fields around the run's text.
+                if let w = (attrs[.strokeWidth] as? NSNumber)?.doubleValue { run.strokeWidth = Int((w * 20).rounded()) }
+                run.highlight = attrs[NSAttributedString.Key("NSTextHighlightStyle")] != nil
+                if let link = attrs[.link] { run.link = (link as? URL)?.absoluteString ?? (link as? String) ?? "\(link)" }
                 if state == nil || state!.fontIndex != run.fontIndex || state!.halfPoints != run.halfPoints || state!.bold != run.bold
                     || state!.italic != run.italic || state!.underline != run.underline || state!.colorIndex != run.colorIndex {
                     body += "\\f\(run.fontIndex)\\fs\(run.halfPoints)"
@@ -342,7 +352,14 @@ struct _RTFWriter {
                     body += run.italic ? "\\i" : "\\i0"
                     body += run.underline ? "\\ul" : "\\ulnone"
                     body += "\\cf\(run.colorIndex) "
-                    state = run
+                }
+                if run.strokeWidth != (state?.strokeWidth ?? 0) {
+                    body += run.strokeWidth > 0 ? "\\outl\\strokewidth\(run.strokeWidth) " : "\\outl0\\strokewidth\(run.strokeWidth) "
+                }
+                if run.highlight != (state?.highlight ?? false) { body += run.highlight ? "\\AppleHighlight-1 " : "\\AppleHighlight0 " }
+                state = run
+                if let link = run.link {
+                    body += "{\\field{\\*\\fldinst{HYPERLINK \"\(link.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\"}}{\\fldrslt "
                 }
                 for scalar in run.text.unicodeScalars {
                     switch scalar {
@@ -369,6 +386,7 @@ struct _RTFWriter {
                         }
                     }
                 }
+                if run.link != nil { body += "}}" }
             }
             // A cell whose text does not end in a newline (the end of the range) still closes.
             if isLastOfCell, para.range.length == 0 || ![0x0A, 0x0D, 0x2029].contains(text.character(at: NSMaxRange(para.range) - 1)) {
@@ -458,6 +476,9 @@ final class _RTFReader {
         var italic = false
         var underline = false
         var colorIndex = 0
+        var strokeWidth = 0             // \strokewidth, twentieths
+        var highlight = false           // \AppleHighlight
+        var link: String? = nil         // inside a HYPERLINK field's result
         var paragraph = Paragraph()
         var unicodeSkip = 1
         var skipping = false            // inside a destination we ignore
@@ -500,6 +521,8 @@ final class _RTFReader {
     // Attachments.
     private var graphicName = ""
     private var skipsNotSign = false
+    /// The instruction of the field being read (`HYPERLINK "url"`).
+    private var fieldInstruction = ""
 
     init(data: Data) { bytes = Array(data) }
 
@@ -589,6 +612,7 @@ final class _RTFReader {
                 index = end
                 if state.destination == "fonttbl" { fontCollecting?.name += text.replacingOccurrences(of: ";", with: "") }
                 else if state.destination == "colortbl" { if text.contains(";") { flushColor() } }
+                else if state.destination == "fldinst" { fieldInstruction += text }
                 else if !state.skipping { append(text, state) }
             }
         }
@@ -614,7 +638,16 @@ final class _RTFReader {
             if state.destination == "listoverridetable" { overrides[param ?? 0] = overrideListID } else { state.paragraph.list = param ?? 0 }
         case "ilvl": state.paragraph.level = param ?? 0
         case "NeXTGraphic": state.destination = "nextgraphic"; state.skipping = false; graphicName = ""
-        case "stylesheet", "info", "pict", "header", "footer", "expandedcolortbl", "field", "fldinst", "themedata", "colorschememapping", "latentstyles", "datastore", "xmlnstbl", "rsidtbl", "generator", "mmathPr":
+        // Fields: the instruction is collected; a HYPERLINK's result text carries the link.
+        case "field": fieldInstruction = ""
+        case "fldinst": state.destination = "fldinst"; state.skipping = false
+        case "fldrslt":
+            let parts = fieldInstruction.trimmingCharacters(in: .whitespaces).components(separatedBy: "\"")
+            if fieldInstruction.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("HYPERLINK"), parts.count >= 2, !parts[1].isEmpty { state.link = parts[1] }
+        case "outl": if (param ?? 1) != 0, state.strokeWidth == 0 { state.strokeWidth = 60 }
+        case "strokewidth": state.strokeWidth = param ?? 0
+        case "AppleHighlight": state.highlight = (param ?? 1) != 0
+        case "stylesheet", "info", "pict", "header", "footer", "expandedcolortbl", "themedata", "colorschememapping", "latentstyles", "datastore", "xmlnstbl", "rsidtbl", "generator", "mmathPr":
             state.skipping = true
         case "red": if state.destination == "colortbl" { colorCollecting.r = param ?? 0; colorCollecting.seen = true }
         case "green": if state.destination == "colortbl" { colorCollecting.g = param ?? 0; colorCollecting.seen = true }
@@ -627,7 +660,7 @@ final class _RTFReader {
         case "ul": state.underline = (param ?? 1) != 0
         case "ulnone": state.underline = false
         case "cf": state.colorIndex = param ?? 0
-        case "plain": state.bold = false; state.italic = false; state.underline = false; state.colorIndex = 0; state.halfPoints = 24; state.fontIndex = 0
+        case "plain": state.bold = false; state.italic = false; state.underline = false; state.colorIndex = 0; state.halfPoints = 24; state.fontIndex = 0; state.strokeWidth = 0; state.highlight = false
         case "pard": state.paragraph = Paragraph()
         case "ql": state.paragraph.alignment = .left
         case "qc": state.paragraph.alignment = .center
@@ -755,6 +788,7 @@ final class _RTFReader {
     private func sameAttributes(_ a: State, _ b: State) -> Bool {
         a.fontIndex == b.fontIndex && a.halfPoints == b.halfPoints && a.bold == b.bold && a.italic == b.italic && a.underline == b.underline
             && a.colorIndex == b.colorIndex && a.paragraph == b.paragraph
+            && a.strokeWidth == b.strokeWidth && a.highlight == b.highlight && a.link == b.link
     }
 
     /// One colour object per table entry: swift-corelibs-foundation's CFAttributedString
@@ -825,6 +859,9 @@ final class _RTFReader {
         attrs[.font] = font
         if let c = color(s.colorIndex) { attrs[.foregroundColor] = c }
         if s.underline { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+        if s.strokeWidth != 0 { attrs[.strokeWidth] = NSNumber(value: Double(s.strokeWidth) / 20) }
+        if s.highlight { attrs[NSAttributedString.Key("NSTextHighlightStyle")] = "NSTextHighlightStyleDefault" }
+        if let link = s.link { attrs[.link] = URL(string: link).map { $0 as Any } ?? link }
         let p = s.paragraph
         if p != Paragraph() {
             let style = NSMutableParagraphStyle()

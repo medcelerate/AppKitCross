@@ -228,6 +228,9 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     open func performKeyEquivalent(with event: NSEvent) -> Bool {
         MainActor.assumeIsolated {
             guard event.type == .keyDown else { return false }
+            // Validate first, as AppKit does: an item disabled at the last update (Redo before
+            // an Undo) must still match once its target can perform it.
+            update()
             for (i, item) in _items.enumerated() where !item.isHidden || item.allowsKeyEquivalentWhenHidden {
                 if let sub = item.submenu {
                     if sub.performKeyEquivalent(with: event) { return true }

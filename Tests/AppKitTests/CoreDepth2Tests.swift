@@ -690,3 +690,90 @@ final class CoreDepth2ColorSpaceTests: XCTestCase {
         assertNear(comps(label), [0, 0, 0, 0.85], 0.01)
     }
 }
+
+/// The Windows PC round on PR 79: shifted key equivalents, outline and link rendering, RTF for
+/// outline, highlight and links.
+private final class _RedoTarget: NSObject, NSMenuItemValidation {
+    var canRedo = false
+    var fired = 0
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { canRedo }
+}
+
+final class CoreDepth2PCRoundTests: XCTestCase {
+    func testShiftedKeyEquivalentMatchesAnItemDisabledAtTheLastUpdate() {
+        MainActor.assumeIsolated {
+            let target = _RedoTarget()
+            let menu = NSMenu(title: "Edit")
+            let redo = menu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+            redo.keyEquivalentModifierMask = [.command, .shift]
+            redo.target = target
+            target.setActionHandler(for: Selector(("redo:"))) { [weak target] _ in target?.fired += 1 }
+            menu.update()
+            XCTAssertFalse(redo.isEnabled, "nothing to redo at the last update")
+            target.canRedo = true   // an Undo happened since: the menu was not opened again
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: 0, windowNumber: 0, context: nil,
+                                         characters: "Z", charactersIgnoringModifiers: "Z", isARepeat: false, keyCode: 6)!
+            XCTAssertTrue(menu.performKeyEquivalent(with: event))
+            XCTAssertEqual(target.fired, 1, "Ctrl+Shift+Z reaches Redo")
+            let plain = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: 0, context: nil,
+                                         characters: "z", charactersIgnoringModifiers: "z", isARepeat: false, keyCode: 6)!
+            XCTAssertFalse(menu.performKeyEquivalent(with: plain), "Ctrl+Z is not Redo's chord")
+        }
+    }
+
+    func testOutlineAndLinksReachTheLayout() {
+        MainActor.assumeIsolated {
+            let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+            tv.isRichText = true
+            tv.string = "alpha bravo"
+            tv.setSelectedRange(NSRange(location: 0, length: 5))
+            tv.outline(nil)
+            tv.setSelectedRange(NSRange(location: 6, length: 5))
+            tv._applyLink("https://example.com")
+            XCTAssertEqual(tv.textStorage!.attribute(.link, at: 6, effectiveRange: nil) as? URL, URL(string: "https://example.com"))
+            let ct = tv.layoutManager!._coreTextString()
+            XCTAssertEqual((ct.attribute(NSAttributedString.Key(kCTStrokeWidthAttributeName as String), at: 0, effectiveRange: nil) as? NSNumber)?.doubleValue, 3)
+            XCTAssertNotNil(ct.attribute(NSAttributedString.Key(kCTUnderlineStyleAttributeName as String), at: 6, effectiveRange: nil), "links draw underlined")
+            XCTAssertNil(ct.attribute(NSAttributedString.Key(kCTUnderlineStyleAttributeName as String), at: 0, effectiveRange: nil))
+            tv._applyLink("")
+            XCTAssertNil(tv.textStorage!.attribute(.link, at: 6, effectiveRange: nil), "an empty URL removes the link")
+        }
+    }
+
+    func testRTFWritesAndReadsOutlineHighlightAndLinks() throws {
+        MainActor.assumeIsolated {
+            let font = NSFont(name: "Helvetica", size: 12) ?? NSFont.systemFont(ofSize: 12)
+            let s = NSMutableAttributedString(string: "alpha bravo charlie delta", attributes: [.font: font])
+            s.addAttribute(.strokeWidth, value: NSNumber(value: 3), range: NSRange(location: 0, length: 5))
+            s.addAttribute(.link, value: URL(string: "https://example.com")!, range: NSRange(location: 6, length: 5))
+            s.addAttribute(NSAttributedString.Key("NSTextHighlightStyle"), value: "NSTextHighlightStyleDefault", range: NSRange(location: 12, length: 7))
+            s.addAttribute(.strokeWidth, value: NSNumber(value: -3), range: NSRange(location: 20, length: 5))
+            let data = _RTFWriter(attributedString: s, range: NSRange(location: 0, length: s.length)).write()!
+            let rtf = String(decoding: data, as: UTF8.self)
+            // AppKit's own encodings (macOS 15's writer).
+            XCTAssertTrue(rtf.contains("\\outl\\strokewidth60 alpha"), rtf)
+            XCTAssertTrue(rtf.contains("{\\field{\\*\\fldinst{HYPERLINK \"https://example.com\"}}{\\fldrslt bravo}}"), rtf)
+            XCTAssertTrue(rtf.contains("\\AppleHighlight-1 charlie"), rtf)
+            XCTAssertTrue(rtf.contains("\\outl0\\strokewidth-60 delta"), rtf)
+            let back = _RTFReader(data: data).read()!
+            XCTAssertEqual(back.string, s.string, "the link's text survives (the reader used to skip field results)")
+            XCTAssertEqual((back.attribute(.strokeWidth, at: 0, effectiveRange: nil) as? NSNumber)?.doubleValue, 3)
+            XCTAssertEqual((back.attribute(.link, at: 6, effectiveRange: nil) as? URL)?.absoluteString, "https://example.com")
+            XCTAssertNil(back.attribute(.link, at: 12, effectiveRange: nil))
+            XCTAssertNotNil(back.attribute(NSAttributedString.Key("NSTextHighlightStyle"), at: 12, effectiveRange: nil))
+            XCTAssertEqual((back.attribute(.strokeWidth, at: 20, effectiveRange: nil) as? NSNumber)?.doubleValue, -3)
+            XCTAssertNil(back.attribute(.strokeWidth, at: 6, effectiveRange: nil))
+        }
+    }
+
+    func testReadsAppKitsOwnRTF() {
+        MainActor.assumeIsolated {
+            // What macOS 15's writer produced for the same string (probed).
+            let rtf = #"{\rtf1\ansi\ansicpg1252\cocoartf2822 {\fonttbl\f0\fswiss\fcharset0 Helvetica;}{\colortbl;\red255\green255\blue255;}\pard\pardirnatural\partightenfactor0 \f0\fs24 \cf0 \outl\strokewidth60 \strokec0 alpha\outl0\strokewidth0  {\field{\*\fldinst{HYPERLINK "https://example.com"}}{\fldrslt bravo}} \AppleHighlight-1 charlie\AppleHighlight0  \outl0\strokewidth-60 delta}"#
+            let back = _RTFReader(data: Data(rtf.utf8)).read()!
+            XCTAssertEqual(back.string, "alpha bravo charlie delta")
+            XCTAssertEqual((back.attribute(.link, at: 6, effectiveRange: nil) as? URL)?.absoluteString, "https://example.com")
+            XCTAssertEqual((back.attribute(.strokeWidth, at: 0, effectiveRange: nil) as? NSNumber)?.doubleValue, 3)
+        }
+    }
+}

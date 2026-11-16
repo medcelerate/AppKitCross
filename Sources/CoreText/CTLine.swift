@@ -78,7 +78,25 @@ public final class CTRun: NSObject {
             absolute.append(CGPoint(x: origin.x + p.x, y: origin.y + p.y))
             drawn.append(glyphs[i])
         }
-        font.engine.draw(glyphs: drawn, positions: absolute, color: color, in: ctx)
+        // kCTStrokeWidthAttributeName (a percentage of the size): positive strokes the glyph
+        // outlines only (outline text), negative fills and then strokes them, as Apple's CoreText.
+        let strokeWidth = _ctNumber(attributes[.ctStrokeWidth]).map { CGFloat($0) } ?? 0
+        if strokeWidth <= 0 { font.engine.draw(glyphs: drawn, positions: absolute, color: color, in: ctx) }
+        if strokeWidth != 0 {
+            ctx.saveGState()
+            ctx.setStrokeColor((attributes[.ctStrokeColor] as? CGColor) ?? color)
+            ctx.setLineWidth(abs(strokeWidth) * font.engine.size / 100)
+            ctx.setLineJoin(.round)
+            for (i, g) in drawn.enumerated() {
+                guard let path = font.engine.path(for: g) else { continue }
+                ctx.saveGState()
+                ctx.translateBy(x: absolute[i].x, y: absolute[i].y)
+                ctx.addPath(path)
+                ctx.strokePath()
+                ctx.restoreGState()
+            }
+            ctx.restoreGState()
+        }
         if let styleValue = _ctNumber(attributes[.ctUnderlineStyle]).map({ Int32($0) }), styleValue != 0 {
             let style = CTUnderlineStyle(rawValue: styleValue & 0xFF)
             let thickness = max(0.5, font.engine.underlineThickness) * (style.contains(.thick) ? 2 : 1)
