@@ -171,6 +171,24 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
 }
 
 extension WindowChromeTests {
+    /// CGContextClearRect sets the rect to transparent black whatever was drawn there (on
+    /// Windows a clear-colour fill blended source-over and changed nothing), and leaves
+    /// the rest alone. The host backend clears non-opaque windows with it every frame.
+    func testContextClearZeroesTheRect() throws {
+        let ctx = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)!
+        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 0.9))
+        ctx.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        ctx.clear(CGRect(x: 0, y: 0, width: 4, height: 8))
+        let image = ctx.makeImage()!
+        let data = _pixels(image)
+        func alpha(_ x: Int, _ y: Int) -> UInt8 { data[y * image.bytesPerRow + x * 4 + 3] }
+        XCTAssertEqual(alpha(1, 4), 0, "cleared")
+        XCTAssertEqual(data[4 * image.bytesPerRow + 1 * 4], 0, "cleared to black too")
+        XCTAssertGreaterThan(alpha(6, 4), 200, "outside the rect untouched")
+    }
+
     /// FramelessWindow with the Backdrop checkbox off: the effect view is hidden and the
     /// card paints an opaque fill, so a card pixel is exactly the fill colour (nothing of
     /// the hidden material or the desktop behind it shows through) while the corners
