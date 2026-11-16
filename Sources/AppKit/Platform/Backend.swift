@@ -347,6 +347,13 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public var transparentTitleBar = false
     /// System backdrop behind the content (from `NSVisualEffectView` materials).
     public var backdrop: Backdrop = .none
+    /// Whether the effect views asking for `backdrop` cover the whole content area. False
+    /// when none spans it, or one has a `maskImage`: a system backdrop that fills the window
+    /// rectangle (DWM's) would then show where the content draws nothing.
+    public var backdropCoversWindow = true
+    /// The largest corner radius (points) the layers of those effect views, or of their
+    /// ancestors, clip them to; 0 for square corners.
+    public var backdropCornerRadius: CGFloat = 0
     /// `!isOpaque`: the content is drawn with alpha over the backdrop.
     public var isTransparent = false
     public var hasShadow = true
