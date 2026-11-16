@@ -251,6 +251,50 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// FramelessWindow on Windows: over the dark card the hovered minimise and maximise
+    /// buttons lighten visibly (the PC measured 88,91,99 -> 84,86,94 with the old
+    /// darkening 6 %), and close stays red.
+    func testCaptionHoverLightensOverADarkCard() throws {
+        try requireHostBackend()
+        withCaptionButtons {
+            let w = window([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            let card = _DarkCard(frame: w.contentView!.bounds)
+            w.contentView = card
+            w.makeKeyAndOrderFront(nil)
+            let mini = w.standardWindowButton(.miniaturizeButton) as! _NSWindowButton
+            let zoom = w.standardWindowButton(.zoomButton) as! _NSWindowButton
+            let close = w.standardWindowButton(.closeButton) as! _NSWindowButton
+            @MainActor func pixel(_ x: Int, _ y: Int) -> (r: Int, g: Int, b: Int) {     // y from the top, in points
+                w.display()
+                let image = (w._platformWindow as! HostWindow).lastImage!
+                let scale = Int(w.backingScaleFactor)
+                let data = _pixels(image)
+                let i = (y * scale) * image.bytesPerRow + (x * scale) * 4
+                return (Int(data[i + 2]), Int(data[i + 1]), Int(data[i]))
+            }
+            // Cell corners, clear of the glyphs: minimise at 300-138, maximise at 300-92.
+            let idleMini = pixel(300 - 138 + 4, 3), idleZoom = pixel(300 - 92 + 4, 3)
+            mini.isHovered = true
+            let hotMini = pixel(300 - 138 + 4, 3)
+            mini.isHovered = false
+            zoom.isHovered = true
+            let hotZoom = pixel(300 - 92 + 4, 3)
+            zoom.isHovered = false
+            XCTAssertGreaterThanOrEqual(hotMini.r - idleMini.r, 12, "minimise hover lightens: \(idleMini) -> \(hotMini)")
+            XCTAssertGreaterThanOrEqual(hotMini.g - idleMini.g, 12)
+            XCTAssertGreaterThanOrEqual(hotZoom.b - idleZoom.b, 12, "maximise hover lightens: \(idleZoom) -> \(hotZoom)")
+            close.isHovered = true
+            let red = pixel(300 - 40, 3)
+            XCTAssertGreaterThan(red.r, 150, "close stays red: \(red)")
+            XCTAssertLessThan(red.g, 90)
+        }
+    }
+
     /// A FramelessWindow-style window (content covering the title bar, movable by
     /// background, non-opaque, clear background) under the caption style is shown, key,
     /// on screen and painted after `makeKeyAndOrderFront`, with the buttons placed in
@@ -329,3 +373,11 @@ final class WindowButtonsTests: XCTestCase, @unchecked Sendable {
 }
 
 
+
+/// FramelessWindow's card colour (opaque, so the pixels compare in plain RGB).
+private final class _DarkCard: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(calibratedRed: 0.345, green: 0.357, blue: 0.388, alpha: 1).setFill()
+        NSBezierPath(rect: bounds).fill()
+    }
+}
