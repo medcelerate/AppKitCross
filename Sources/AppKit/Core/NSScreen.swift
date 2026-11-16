@@ -43,13 +43,16 @@ open class NSScreen: NSObject {
     open var backingScaleFactor: CGFloat { _display.backingScaleFactor }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/canrepresent(_:)
     @available(macOS 10.12, *)
-    open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { unimplemented() }
+    /// The port composes in sRGB on every platform (Direct2D, Cairo), so only the sRGB
+    /// gamut is representable (ADR-0037).
+    open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { displayGamut == .sRGB }
     /// The CGDirectDisplayID for this screen. This will return nil if there isn't one and will never return kCGNullDirectDisplay.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/cgdirectdisplayid
     @available(macOS 26.0, *)
     open var cgDirectDisplayID: CGDirectDisplayID? { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/colorspace
-    open var colorSpace: NSColorSpace? { unimplemented() }
+    /// sRGB: the port composes in sRGB on every platform (ADR-0037).
+    open var colorSpace: NSColorSpace? { .sRGB }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/colorspacedidchangenotification
     static public var colorSpaceDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSScreenColorSpaceDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/convertrectfrombacking(_:)

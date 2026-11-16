@@ -16,195 +16,6 @@ import QuartzCore
 import CoreText
 #endif
 extension NSEvent {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey
-    public struct SpecialKey: RawRepresentable, Equatable, Hashable {
-        public let rawValue: Int
-        public init(rawValue: Int) { self.rawValue = rawValue }
-        public init(_ rawValue: Int) { self.rawValue = rawValue }
-
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/backtab
-        static public var backTab: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 25) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/backspace
-        static public var backspace: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/begin
-        static public var begin: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63274) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/break
-        static public var `break`: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63282) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/carriagereturn
-        static public var carriageReturn: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 13) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/cleardisplay
-        static public var clearDisplay: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63290) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/clearline
-        static public var clearLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63289) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/delete
-        static public var delete: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 127) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deletecharacter
-        static public var deleteCharacter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63294) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deleteforward
-        static public var deleteForward: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63272) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deleteline
-        static public var deleteLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63292) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/downarrow
-        static public var downArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63233) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/end
-        static public var end: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63275) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/enter
-        static public var enter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 3) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/execute
-        static public var execute: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63298) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f1
-        static public var f1: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63236) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f10
-        static public var f10: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63245) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f11
-        static public var f11: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63246) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f12
-        static public var f12: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63247) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f13
-        static public var f13: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63248) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f14
-        static public var f14: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63249) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f15
-        static public var f15: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63250) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f16
-        static public var f16: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63251) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f17
-        static public var f17: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63252) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f18
-        static public var f18: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63253) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f19
-        static public var f19: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63254) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f2
-        static public var f2: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63237) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f20
-        static public var f20: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63255) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f21
-        static public var f21: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63256) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f22
-        static public var f22: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63257) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f23
-        static public var f23: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63258) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f24
-        static public var f24: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63259) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f25
-        static public var f25: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63260) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f26
-        static public var f26: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63261) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f27
-        static public var f27: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63262) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f28
-        static public var f28: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63263) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f29
-        static public var f29: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63264) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f3
-        static public var f3: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63238) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f30
-        static public var f30: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63265) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f31
-        static public var f31: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63266) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f32
-        static public var f32: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63267) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f33
-        static public var f33: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63268) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f34
-        static public var f34: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63269) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f35
-        static public var f35: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63270) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f4
-        static public var f4: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63239) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f5
-        static public var f5: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63240) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f6
-        static public var f6: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63241) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f7
-        static public var f7: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63242) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f8
-        static public var f8: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63243) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f9
-        static public var f9: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63244) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/find
-        static public var find: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63301) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/formfeed
-        static public var formFeed: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 12) }
-        // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
-        // SKIPPED (constrained extension): var hashValue: Int { get }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/help
-        static public var help: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63302) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/home
-        static public var home: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63273) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insert
-        static public var insert: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63271) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insertcharacter
-        static public var insertCharacter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63293) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insertline
-        static public var insertLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63291) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/leftarrow
-        static public var leftArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63234) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/lineseparator
-        static public var lineSeparator: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8232) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/menu
-        static public var menu: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63285) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/modeswitch
-        static public var modeSwitch: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63303) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/newline
-        static public var newline: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 10) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/next
-        static public var next: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63296) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pagedown
-        static public var pageDown: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63277) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pageup
-        static public var pageUp: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63276) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/paragraphseparator
-        static public var paragraphSeparator: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8233) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pause
-        static public var pause: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63280) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/prev
-        static public var prev: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63295) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/print
-        static public var print: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63288) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/printscreen
-        static public var printScreen: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63278) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/redo
-        static public var redo: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63300) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/reset
-        static public var reset: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63283) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/rightarrow
-        static public var rightArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63235) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/scrolllock
-        static public var scrollLock: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63279) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/select
-        static public var select: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63297) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/stop
-        static public var stop: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63284) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/sysreq
-        static public var sysReq: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63281) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/system
-        static public var system: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63287) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/tab
-        static public var tab: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 9) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/undo
-        static public var undo: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63299) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/unicodescalar
-        public var unicodeScalar: Unicode.Scalar { unimplemented() }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/uparrow
-        static public var upArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63232) }
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/user
-        static public var user: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63286) }
-    }
-
-}
-extension NSEvent.SpecialKey {
-    /// The raw type that can be used to represent all values of the conforming
-    /// type.
-    /// 
-    /// Every distinct value of the conforming type has a corresponding unique
-    /// value of the `RawValue` type, but there may be values of the `RawValue`
-    /// type that don't have a corresponding value of the conforming type.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/rawvalue
-    public typealias RawValue = Int
-}
-
-extension NSEvent {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/eventtype
     public enum EventType: Int, Sendable, Equatable, Hashable {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/eventtype/appkitdefined
@@ -525,4 +336,193 @@ extension NSEvent {
         // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
         // SKIPPED (constrained extension): var hashValue: Int { get }
     }
+}
+
+extension NSEvent {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey
+    public struct SpecialKey: RawRepresentable, Equatable, Hashable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+        public init(_ rawValue: Int) { self.rawValue = rawValue }
+
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/backtab
+        static public var backTab: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 25) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/backspace
+        static public var backspace: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/begin
+        static public var begin: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63274) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/break
+        static public var `break`: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63282) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/carriagereturn
+        static public var carriageReturn: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 13) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/cleardisplay
+        static public var clearDisplay: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63290) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/clearline
+        static public var clearLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63289) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/delete
+        static public var delete: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 127) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deletecharacter
+        static public var deleteCharacter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63294) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deleteforward
+        static public var deleteForward: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63272) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/deleteline
+        static public var deleteLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63292) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/downarrow
+        static public var downArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63233) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/end
+        static public var end: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63275) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/enter
+        static public var enter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 3) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/execute
+        static public var execute: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63298) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f1
+        static public var f1: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63236) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f10
+        static public var f10: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63245) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f11
+        static public var f11: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63246) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f12
+        static public var f12: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63247) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f13
+        static public var f13: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63248) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f14
+        static public var f14: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63249) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f15
+        static public var f15: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63250) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f16
+        static public var f16: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63251) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f17
+        static public var f17: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63252) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f18
+        static public var f18: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63253) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f19
+        static public var f19: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63254) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f2
+        static public var f2: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63237) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f20
+        static public var f20: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63255) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f21
+        static public var f21: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63256) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f22
+        static public var f22: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63257) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f23
+        static public var f23: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63258) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f24
+        static public var f24: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63259) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f25
+        static public var f25: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63260) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f26
+        static public var f26: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63261) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f27
+        static public var f27: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63262) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f28
+        static public var f28: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63263) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f29
+        static public var f29: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63264) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f3
+        static public var f3: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63238) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f30
+        static public var f30: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63265) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f31
+        static public var f31: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63266) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f32
+        static public var f32: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63267) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f33
+        static public var f33: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63268) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f34
+        static public var f34: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63269) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f35
+        static public var f35: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63270) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f4
+        static public var f4: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63239) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f5
+        static public var f5: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63240) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f6
+        static public var f6: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63241) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f7
+        static public var f7: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63242) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f8
+        static public var f8: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63243) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/f9
+        static public var f9: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63244) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/find
+        static public var find: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63301) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/formfeed
+        static public var formFeed: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 12) }
+        // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
+        // SKIPPED (constrained extension): var hashValue: Int { get }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/help
+        static public var help: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63302) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/home
+        static public var home: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63273) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insert
+        static public var insert: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63271) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insertcharacter
+        static public var insertCharacter: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63293) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/insertline
+        static public var insertLine: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63291) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/leftarrow
+        static public var leftArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63234) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/lineseparator
+        static public var lineSeparator: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8232) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/menu
+        static public var menu: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63285) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/modeswitch
+        static public var modeSwitch: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63303) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/newline
+        static public var newline: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 10) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/next
+        static public var next: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63296) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pagedown
+        static public var pageDown: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63277) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pageup
+        static public var pageUp: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63276) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/paragraphseparator
+        static public var paragraphSeparator: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 8233) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/pause
+        static public var pause: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63280) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/prev
+        static public var prev: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63295) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/print
+        static public var print: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63288) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/printscreen
+        static public var printScreen: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63278) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/redo
+        static public var redo: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63300) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/reset
+        static public var reset: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63283) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/rightarrow
+        static public var rightArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63235) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/scrolllock
+        static public var scrollLock: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63279) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/select
+        static public var select: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63297) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/stop
+        static public var stop: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63284) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/sysreq
+        static public var sysReq: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63281) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/system
+        static public var system: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63287) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/tab
+        static public var tab: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 9) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/undo
+        static public var undo: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63299) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/unicodescalar
+        public var unicodeScalar: Unicode.Scalar { unimplemented() }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/uparrow
+        static public var upArrow: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63232) }
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/user
+        static public var user: NSEvent.SpecialKey { NSEvent.SpecialKey(rawValue: 63286) }
+    }
+
+}
+extension NSEvent.SpecialKey {
+    /// The raw type that can be used to represent all values of the conforming
+    /// type.
+    /// 
+    /// Every distinct value of the conforming type has a corresponding unique
+    /// value of the `RawValue` type, but there may be values of the `RawValue`
+    /// type that don't have a corresponding value of the conforming type.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/specialkey/rawvalue
+    public typealias RawValue = Int
 }

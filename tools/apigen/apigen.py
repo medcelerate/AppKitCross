@@ -16,6 +16,16 @@ Foundation+AppKit.swift and reported under "Globals and Foundation extensions").
 The probe records the values of enum cases, typed constants and plain Int/String globals, so
 a constant with a probed value is emitted with that value instead of unimplemented().
 
+Hand-written types and their nested types (ADR-0037): a type listed under `handwritten` is
+not emitted at all. Its nested types (NSView.AutoresizingMask, NSToolbar.DisplayMode, ...)
+go to Generated/<Name>+Types.swift, EXCEPT any nested type Sources/AppKit/Core declares,
+inside the type's body or in an extension of it in any Core file (core_nested_types()). So a
+nested type moved into Core is never emitted again, and a hand-written type whose nested
+types all live in Core gets no +Types companion; nothing needs deleting after a run, and
+nested types need no skipMembers entry. Nested types are emitted clang-imported first, then
+Swift-overlay ones, so the order does not depend on the symbol graph's relationship order.
+Tests/AppKitTests GeneratorDriftTests checks the rule against the checked-in sources.
+
 Outputs:
   Sources/AppKit/Generated/*.swift   compiled stubs
   Stubs/Pending/AppKit/*.swift       stubs for types listed as pending in config.json
@@ -1412,11 +1422,17 @@ class Generator:
         pid = sym["identifier"]["precise"]
         path = tuple(sym["pathComponents"])
         out = []
-        for mid in self.inv.members.get(pid, []):
+        core_nested = self.core_nested_types()
+        # Clang-imported nested types first, then Swift-only overlay ones: the symbol graph's
+        # relationship order between the two groups is not stable across extractions.
+        mids = sorted(self.inv.members.get(pid, []), key=lambda mid: not mid.startswith("c:"))
+        for mid in mids:
             m = self.inv.sym(mid)
             if m and m["kind"]["identifier"] in ("swift.class", "swift.struct", "swift.enum", "swift.protocol", "swift.typealias"):
-                # A nested type listed in skipMembers is hand-written next to its parent.
-                if ".".join(m["pathComponents"]) in self.skip_members:
+                dotted = ".".join(m["pathComponents"])
+                # A nested type Core declares (or one listed in skipMembers) is hand-written
+                # next to its parent and never re-emitted here.
+                if dotted in self.skip_members or dotted in core_nested:
                     continue
                 nl, _ = self.emit_type(m, "", parent_sym=sym)
                 k = self.first_file_scope_index(nl)
@@ -1427,6 +1443,44 @@ class Generator:
                 out += nl[k:]
                 out.append("")
         return "\n".join(out)
+
+    CORE_TYPE_DECL_RE = re.compile(
+        r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:open|public|internal|fileprivate|private|final|indirect)\s+)*"
+        r"(?:struct|enum|class|protocol|typealias|actor)\s+([A-Za-z_]\w*)\b")
+    CORE_CONTAINER_RE = re.compile(
+        r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:open|public|internal|fileprivate|private|final)\s+)*"
+        r"(?:class|struct|enum|extension)\s+([A-Za-z_][\w.]*)")
+
+    def core_nested_types(self):
+        """Dotted paths ("NSToolbar.DisplayMode") of every nested type that Sources/AppKit/Core
+        declares, either inside the type's own body or in an extension of it, in any Core file.
+        nested_only() never emits these, so a hand-written class whose nested types all live in
+        Core gets no Generated/<Name>+Types.swift companion at all."""
+        if getattr(self, "_core_nested_cache", None) is not None:
+            return self._core_nested_cache
+        found = set()
+        core = os.path.join(ROOT, "Sources", "AppKit", "Core")
+        for dp, _, fs in os.walk(core):
+            for fn in sorted(fs):
+                if not fn.endswith(".swift"):
+                    continue
+                depth = 0
+                container = None
+                for line in open(os.path.join(dp, fn), encoding="utf-8").read().split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("//"):
+                        continue
+                    if depth == 0:
+                        m = self.CORE_CONTAINER_RE.match(stripped)
+                        container = m.group(1) if m else None
+                    elif depth == 1 and container:
+                        m = self.CORE_TYPE_DECL_RE.match(stripped)
+                        if m:
+                            found.add(container + "." + m.group(1))
+                    code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', line.split("//")[0])
+                    depth += code.count("{") - code.count("}")
+        self._core_nested_cache = found
+        return found
 
     def handwritten_stats(self, name):
         c = collections.Counter()
