@@ -1320,6 +1320,9 @@ import CoreText
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
+            // A hidden effect view no longer asks for the system backdrop (nor do those
+            // under a hidden ancestor).
+            if let w = _window, w._hasEffectViews { w._updateBackdrop() }
             if _window != nil { _accessibilityStructureChanged(newValue ? .removed : .added) }
         }
     }

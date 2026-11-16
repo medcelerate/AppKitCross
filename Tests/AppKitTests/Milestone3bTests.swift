@@ -78,8 +78,104 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(alpha, 20)
             XCTAssertLessThan(alpha, 250)
             effect.removeFromSuperview()
+            XCTAssertEqual(host(w).chrome.backdrop, .none, "a removed effect view no longer asks for the backdrop")
             w.close()
         }
+    }
+
+    func testHiddenEffectViewDropsTheBackdrop() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            let holder = NSView(frame: w.contentView!.bounds)
+            let effect = NSVisualEffectView(frame: holder.bounds)
+            effect.material = .hudWindow
+            holder.addSubview(effect)
+            w.contentView!.addSubview(holder)
+            XCTAssertEqual(host(w).chrome.backdrop, .acrylic)
+            effect.isHidden = true
+            XCTAssertEqual(host(w).chrome.backdrop, .none, "FramelessWindow's Backdrop checkbox hides the view")
+            effect.isHidden = false
+            XCTAssertEqual(host(w).chrome.backdrop, .acrylic)
+            holder.isHidden = true
+            XCTAssertEqual(host(w).chrome.backdrop, .none, "under a hidden ancestor")
+            holder.isHidden = false
+            XCTAssertEqual(host(w).chrome.backdrop, .acrylic)
+            w.close()
+        }
+    }
+
+    /// FramelessWindow: a non-opaque window whose effect view is clipped to the card's
+    /// rounded corners. DWM's backdrop would fill the rectangle, so Win32 drops it there.
+    func testRoundedEffectViewOnANonOpaqueWindowKeepsTheCornersClear() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            let card = _RoundedCardView(frame: w.contentView!.bounds)
+            w.contentView = card
+            let effect = NSVisualEffectView(frame: card.bounds.insetBy(dx: 1, dy: 1))
+            effect.material = .hudWindow
+            effect.state = .active
+            effect.wantsLayer = true
+            effect.layer?.cornerRadius = 22
+            effect.layer?.masksToBounds = true
+            card.addSubview(effect)
+            var c = host(w).chrome
+            XCTAssertEqual(c.backdrop, .acrylic)
+            XCTAssertTrue(c.isTransparent)
+            XCTAssertTrue(c.backdropCoversWindow)
+            XCTAssertEqual(c.backdropCornerRadius, 22)
+            XCTAssertEqual(Win32WindowPolicy.systemBackdrop(for: c), .none, "DWM cannot clip its backdrop to 22 pt corners")
+            XCTAssertTrue(Win32WindowPolicy.hidesBorder(styleMask: w.styleMask, chrome: c))
+            // Square corners (or DWM's own radius) over the whole window keep the backdrop.
+            effect.layer?.cornerRadius = 0
+            effect.frame = card.bounds
+            c = host(w).chrome
+            XCTAssertEqual(c.backdropCornerRadius, 0)
+            XCTAssertEqual(Win32WindowPolicy.systemBackdrop(for: c), .acrylic)
+            // Part of the window only: the rest would show the backdrop.
+            effect.frame = NSRect(x: 0, y: 0, width: 80, height: 120)
+            c = host(w).chrome
+            XCTAssertFalse(c.backdropCoversWindow)
+            XCTAssertEqual(Win32WindowPolicy.systemBackdrop(for: c), .none)
+            // An opaque window covers its rectangle itself.
+            w.isOpaque = true
+            XCTAssertEqual(Win32WindowPolicy.systemBackdrop(for: host(w).chrome), .acrylic)
+            XCTAssertFalse(Win32WindowPolicy.hidesBorder(styleMask: w.styleMask, chrome: host(w).chrome))
+            w.isOpaque = false
+
+            // The pixels: outside the rounded card the window is at alpha 0.
+            effect.frame = card.bounds.insetBy(dx: 1, dy: 1)
+            effect.layer?.cornerRadius = 22
+            w.makeKeyAndOrderFront(nil)
+            w.display()
+            let image = host(w).lastImage!
+            let data = _pixels(image)
+            let scale = image.width / 200
+            @MainActor func alpha(_ x: Int, _ y: Int) -> UInt8 { data[(y * scale) * image.bytesPerRow + (x * scale) * 4 + 3] }
+            XCTAssertEqual(alpha(1, 1), 0, "top-left corner outside the card")
+            XCTAssertEqual(alpha(198, 118), 0, "bottom-right corner outside the card")
+            XCTAssertGreaterThan(alpha(100, 60), 100, "inside the card")
+            // A repaint clears again rather than piling translucent frames up.
+            let before = alpha(100, 60)
+            card.needsDisplay = true
+            w.display()
+            let again = _pixels(host(w).lastImage!)
+            XCTAssertEqual(again[(60 * scale) * image.bytesPerRow + (100 * scale) * 4 + 3], before)
+            XCTAssertEqual(again[(1 * scale) * image.bytesPerRow + (1 * scale) * 4 + 3], 0)
+            w.close()
+        }
+    }
+}
+
+/// FramelessWindow's CardView: a rounded translucent card, nothing outside it.
+private final class _RoundedCardView: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 22, yRadius: 22).fill()
     }
 }
 

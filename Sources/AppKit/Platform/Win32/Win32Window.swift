@@ -240,14 +240,22 @@ final class Win32Window: PlatformWindow {
         }
         // A borderless window shows no border line (macOS draws none), only the shadow;
         // so the extended pixel of a translucent window stays invisible too.
-        setDwmAttribute(Win32Window.dwmwaBorderColor, _styleMask.contains(.titled) ? Win32Window.dwmColorDefault : Win32Window.dwmColorNone)
+        // A non-opaque window drawing its own shape over a custom frame shows none either:
+        // the line would outline the rectangle around the shape.
+        setDwmAttribute(Win32Window.dwmwaBorderColor, Win32WindowPolicy.hidesBorder(styleMask: _styleMask, chrome: _chrome) ? Win32Window.dwmColorNone : Win32Window.dwmColorDefault)
         if NSView._traceInvalidation {
             let frame = _styleMask.contains(.titled) ? "system caption" : isResizable ? "thick frame" : wantsShadowFrame(_styleMask) ? "shadow frame (WS_THICKFRAME added)" : "none"
             NSView._trace("win32 chrome '\(_title)' shadow \(_chrome.hasShadow ? "on" : "off") frame \(frame) extended \(margins.cyTopHeight) px transparent \(_chrome.isTransparent)")
         }
 
+        // DWM's backdrop fills the window rectangle: a non-opaque window whose content
+        // leaves corners uncovered keeps them transparent instead (Win32WindowPolicy).
+        let systemBackdrop = Win32WindowPolicy.systemBackdrop(for: _chrome)
+        if NSView._traceInvalidation, systemBackdrop != _chrome.backdrop {
+            NSView._trace("win32 chrome '\(_title)' backdrop \(_chrome.backdrop) not applied: non-opaque window, effect views cover \(_chrome.backdropCoversWindow ? "the window" : "part of it") with corner radius \(_chrome.backdropCornerRadius) pt")
+        }
         let backdrop: Int32
-        switch _chrome.backdrop {
+        switch systemBackdrop {
         case .none: backdrop = Win32Window.dwmsbtNone
         case .mica: backdrop = Win32Window.dwmsbtMainWindow
         case .micaAlt: backdrop = Win32Window.dwmsbtTabbedWindow
@@ -279,7 +287,7 @@ final class Win32Window: PlatformWindow {
         if usesCustomFrame, _chrome.hasShadow {
             if let forced = Win32Window.frameTopMarginOverride {
                 margins.cyTopHeight = forced
-            } else if _chrome.isTransparent || _chrome.backdrop != .none {
+            } else if _chrome.isTransparent || Win32WindowPolicy.systemBackdrop(for: _chrome) != .none {
                 margins.cyTopHeight = 0
             } else {
                 margins.cyTopHeight = Int32((NSWindow._titleBarBandHeight * scale).rounded())

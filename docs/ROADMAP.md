@@ -337,6 +337,14 @@ trailing edge clear of the buttons. The row is a flipped strip across the band, 
 buttons an application moves through `standardWindowButton(_:)` stay where it put them.
 macOS keeps its real buttons; X11 and Wayland keep the traffic lights.
 
+Rounded non-opaque windows (2026-11-16): DWM's system backdrop fills the window rectangle
+behind every translucent pixel, so a non-opaque window whose behind-window effect views
+leave part of it uncovered, or clip it to corners rounder than DWM's 8 pt, gets no DWM
+backdrop (`Win32WindowPolicy.systemBackdrop`; `PlatformWindowChrome.backdropCoversWindow`
+and `backdropCornerRadius` carry the shape) and its uncovered pixels stay at alpha 0. Such
+windows on a custom frame also drop DWM's border line. Hidden or removed effect views no
+longer ask for the backdrop (FramelessWindow's Backdrop checkbox).
+
 ## M7: Metal translation layer (separate track)
 
 Only needed for `MTKView`/`CAMetalLayer` and apps that use Metal directly. Options to
