@@ -1,6 +1,9 @@
 // Layout Demo tab "coredepth" (ADR-0036): a nine-slice image stretched to three sizes and
 // tiled, a turned view, tool tips, PNG/TIFF/BMP export of the panel, and a window that
 // remembers its frame (frame autosave) and keeps a 4:3 content proportion while resized.
+// ADR-0038 adds an event monitor (local and global; every event it sees is traced to stderr
+// as "coredepth2 monitor …", keys with their Shift and Option characters from the keyboard
+// layout) and a sheet run through the legacy NSApp.beginSheet(_:modalFor:modalDelegate:…).
 
 import AppKit
 import Foundation
@@ -56,6 +59,8 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
     let nineSlice = NineSliceDemoView(frame: NSRect(x: 16, y: 16, width: 344, height: 176))
     let status = NSTextField(labelWithString: "")
     var autosaveWindow: NSWindow?
+    var monitors: [Any] = []
+    var legacySheet: NSWindow?
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -74,10 +79,11 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
         let buttons: [(String, Selector)] = [
             ("Export PNG…", Selector(("exportPNG:"))), ("Export TIFF…", Selector(("exportTIFF:"))), ("Export BMP…", Selector(("exportBMP:"))),
             ("Open Autosaved Window", Selector(("openAutosaveWindow:"))),
+            ("Start Event Monitor", Selector(("toggleEventMonitor:"))), ("Legacy Sheet…", Selector(("showLegacySheet:"))),
         ]
         for (i, (title, action)) in buttons.enumerated() {
             let b = NSButton(title: title, target: self, action: action)
-            b.frame = NSRect(x: 400 + CGFloat(i % 2) * 190, y: 90 - CGFloat(i / 2) * 34, width: 180, height: 28)
+            b.frame = NSRect(x: 400 + CGFloat(i % 2) * 190, y: 124 - CGFloat(i / 2) * 34, width: 180, height: 28)
             root.addSubview(b)
         }
         status.frame = NSRect(x: 400, y: 16, width: 420, height: 18)
@@ -118,9 +124,72 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
         case Selector(("exportTIFF:")): export(.tiff, name: "nine-slice.tiff")
         case Selector(("exportBMP:")): export(.bmp, name: "nine-slice.bmp")
         case Selector(("openAutosaveWindow:")): openAutosaveWindow(sender)
+        case Selector(("toggleEventMonitor:")): toggleEventMonitor(sender as? NSButton)
+        case Selector(("showLegacySheet:")): showLegacySheet()
+        case Selector(("endLegacySheet:")): if let s = legacySheet { NSApp.endSheet(s, returnCode: (sender as? NSButton)?.tag ?? 0) }
+        case Selector(("legacySheetDidEnd:returnCode:contextInfo:")):
+            let code = (sender as? NSNumber)?.intValue ?? 0
+            legacySheet?.orderOut(nil)
+            legacySheet = nil
+            status.stringValue = "Legacy sheet ended, return code \(code)"
+            trace("legacy sheet didEnd returnCode \(code)")
         default: return false
         }
         return true
+    }
+
+    private func trace(_ line: String) {
+        FileHandle.standardError.write(Data("coredepth2 \(line)\n".utf8))
+    }
+
+    /// Starts or stops a local monitor (keys and clicks in this application, passed on) and a
+    /// global one (the same in other applications: Windows only; X11 and Wayland do not
+    /// report other clients' input).
+    private func toggleEventMonitor(_ button: NSButton?) {
+        if !monitors.isEmpty {
+            monitors.forEach(NSEvent.removeMonitor)
+            monitors = []
+            button?.title = "Start Event Monitor"
+            status.stringValue = "Event monitor stopped"
+            return
+        }
+        let describe: (NSEvent) -> String = { e in
+            guard e.type == .keyDown else { return "\(e.type) at (\(Int(e.locationInWindow.x)), \(Int(e.locationInWindow.y)))" }
+            let shifted = e.characters(byApplyingModifiers: .shift) ?? "nil"
+            let option = e.characters(byApplyingModifiers: .option) ?? "nil"
+            return "keyDown keyCode \(e.keyCode) chars '\(e.characters ?? "")' shift '\(shifted)' option '\(option)'"
+        }
+        if let m = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { [weak self] e in
+            let line = describe(e)
+            self?.trace("monitor local \(line)")
+            self?.status.stringValue = "Local: \(line)"
+            return e
+        }) { monitors.append(m) }
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown], handler: { [weak self] e in
+            self?.trace("monitor global \(describe(e))")
+        }) { monitors.append(m) }
+        button?.title = "Stop Event Monitor"
+        status.stringValue = "Event monitor on: type or click (here and in other apps)"
+        trace("monitor started")
+    }
+
+    /// A sheet through the pre-10.9 call; its didEnd selector comes back here with the code.
+    private func showLegacySheet() {
+        guard legacySheet == nil, let parent = view.window else { return }
+        let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 110), styleMask: [.titled], backing: .buffered, defer: true)
+        let label = NSTextField(labelWithString: "Begun with NSApp.beginSheet(_:modalFor:…)")
+        label.frame = NSRect(x: 20, y: 66, width: 270, height: 20)
+        sheet.contentView?.addSubview(label)
+        for (i, (title, code)) in [("Cancel", 0), ("OK", 1)].enumerated() {
+            let b = NSButton(title: title, target: self, action: Selector(("endLegacySheet:")))
+            b.tag = code
+            b.frame = NSRect(x: 110 + CGFloat(i) * 92, y: 16, width: 84, height: 28)
+            if code == 1 { b.keyEquivalent = "\r" }
+            sheet.contentView?.addSubview(b)
+        }
+        legacySheet = sheet
+        NSApp.beginSheet(sheet, modalFor: parent, modalDelegate: self, didEnd: Selector(("legacySheetDidEnd:returnCode:contextInfo:")), contextInfo: nil)
+        trace("legacy sheet begun")
     }
 
     /// A window that comes back where it was left (across relaunches) and keeps 4:3 content.

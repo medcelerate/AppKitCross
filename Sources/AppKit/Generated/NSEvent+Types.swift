@@ -292,8 +292,6 @@ extension NSEvent {
         public let rawValue: UInt64
         public init(rawValue: UInt64) { self.rawValue = rawValue }
 
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/eventtypemask/init(type:)
-        public init(type: NSEvent.EventType) { unimplemented() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/eventtypemask/any
         static public var any: NSEvent.EventTypeMask { NSEvent.EventTypeMask(rawValue: 18446744073709551615) }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/eventtypemask/appkitdefined

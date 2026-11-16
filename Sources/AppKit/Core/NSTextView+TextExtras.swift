@@ -761,6 +761,23 @@ extension NSTextView {
     var selectionGranularity: NSSelectionGranularity = .selectByCharacter
     var defaultParagraphStyle: NSParagraphStyle? = nil
     var allowsCharacterPickerTouchBarItem = true
+    // ADR-0038: undo, highlight, writing-tools settings.
+    /// The open typing undo record while keystrokes coalesce into one undo step.
+    var typingUndo: _NSTextUndoRecord?
+    /// Set while a typed insertion or a delete key runs: its change may coalesce.
+    var isTyping = false
+    /// Set while an undo or redo replays a record (its inverse is registered by hand).
+    var isReplayingUndo = false
+    /// The undo action name of the change in progress ("Typing", "Underline", …).
+    var undoActionName: String?
+    var textHighlightAttributes: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.controlAccentColor, NSAttributedString.Key("NSTextHighlightOutlineColor"): NSColor.secondarySystemFill]
+    var inlinePredictionType: NSTextInputTraitType = .default
+    var mathExpressionCompletionType: NSTextInputTraitType = .default
+    /// Raw values: the Writing Tools types are macOS 15 API.
+    var writingToolsBehaviorRaw = 0
+    var allowedWritingToolsResultOptionsRaw: UInt = 0
+    var usesAdaptiveColorMappingForDarkAppearance = false
+    var contentType: NSTextContentType? = nil
 }
 
 // MARK: - Character attribute commands, scroll view factories

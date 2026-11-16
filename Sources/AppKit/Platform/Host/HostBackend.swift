@@ -72,6 +72,19 @@ final class HostBackend: PlatformBackend {
     }
 
     func beep() { beepCount += 1 }
+
+    func characters(forKeyCode keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> String? {
+        HostKeyboardLayout.characters(forKeyCode: keyCode, modifierFlags: modifierFlags)
+    }
+
+    /// Test hook: the mask and handler NSEvent's global monitors installed; a test reports
+    /// another application's event with `globalEventHandler?(event)`.
+    var globalEventMask: NSEvent.EventTypeMask = []
+    var globalEventHandler: (@MainActor (NSEvent) -> Void)? = nil
+    func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?) {
+        globalEventMask = handler == nil ? [] : mask
+        globalEventHandler = handler
+    }
     var systemAppearanceIsDark = false
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()

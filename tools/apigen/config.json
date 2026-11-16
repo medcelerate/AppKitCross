@@ -528,7 +528,13 @@
     "NSDrawerDelegate.drawerShouldOpen(_:)": "return true",
     "NSDrawerDelegate.drawerShouldClose(_:)": "return true",
     "NSDrawerDelegate.drawerWillResizeContents(_:to:)": "return contentSize",
-    "NSScrubberFlowLayoutDelegate.scrubber(_:layout:sizeForItemAt:)": "return MainActor.assumeIsolated { layout.itemSize }"
+    "NSScrubberFlowLayoutDelegate.scrubber(_:layout:sizeForItemAt:)": "return MainActor.assumeIsolated { layout.itemSize }",
+    "NSTextViewDelegate.textView(_:shouldChangeTextIn:replacementString:)": "return true",
+    "NSTextViewDelegate.textView(_:shouldChangeTextInRanges:replacementStrings:)": "return true",
+    "NSTextViewDelegate.textView(_:shouldSelectCandidateAt:)": "return true",
+    "NSTextViewDelegate.textView(_:willChangeSelectionFromCharacterRange:toCharacterRange:)": "return newSelectedCharRange",
+    "NSTextViewDelegate.textView(_:willChangeSelectionFromCharacterRanges:toCharacterRanges:)": "return newSelectedCharRanges",
+    "NSTextViewDelegate.textView(_:shouldChangeTypingAttributes:toAttributes:)": "return newTypingAttributes"
   },
   "defaultedProtocols": [
     "NSAccessibilityProtocol",
@@ -629,6 +635,7 @@
     "NSAttributedString.textTypes",
     "NSAttributedString.textUnfilteredTypes",
     "NSAttributedString.url(at:effectiveRange:)",
+    "NSEvent.EventTypeMask.init(type:)",
     "NSIndexPath.init(forItem:inSection:)",
     "NSIndexPath.item",
     "NSIndexPath.section",

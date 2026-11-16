@@ -275,6 +275,31 @@ final class LinuxBackend: PlatformBackend {
     }
 
     func beep() { XBell(display, 0) }
+
+    /// XLookupString on the key that types this keysym, with Shift, Lock, Control and Option as
+    /// ISO Level 3 (Mod5, the layout's AltGr level) in the state (ADR-0038).
+    func characters(forKeyCode keyCode: UInt16, modifierFlags flags: NSEvent.ModifierFlags) -> String? {
+        let code = XKeysymToKeycode(display, KeySym(keyCode))
+        guard code != 0 else { return nil }
+        var ev = XKeyEvent()
+        ev.type = KeyPress
+        ev.display = display
+        ev.keycode = UInt32(code)
+        var state: UInt32 = 0
+        if flags.contains(.shift) { state |= UInt32(ShiftMask) }
+        if flags.contains(.capsLock) { state |= UInt32(LockMask) }
+        if flags.contains(.control) { state |= UInt32(ControlMask) }
+        if flags.contains(.option) { state |= UInt32(Mod5Mask) }
+        ev.state = state
+        var buffer = [CChar](repeating: 0, count: 32)
+        var keysym: KeySym = 0
+        let n = XLookupString(&ev, &buffer, 32, &keysym, nil)
+        if n > 0 {
+            return String(String.UnicodeScalarView(buffer[0..<Int(n)].map { UnicodeScalar(UInt8(bitPattern: $0)) }))
+        }
+        if keysym & 0x0100_0000 != 0, let scalar = UnicodeScalar(UInt32(keysym & 0x00FF_FFFF)) { return String(scalar) }
+        return nil
+    }
     var systemAppearanceIsDark: Bool { false }
 
     var mouseLocation: NSPoint {

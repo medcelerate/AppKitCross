@@ -90,6 +90,9 @@ import CoreText
         case "runToolbarCustomizationPalette:": return _toolbar?.allowsUserCustomization == true
         case "print:", "printWindow:": return _contentView != nil && !_hasDocument
         case "runPageLayout:": return !_hasDocument
+        // Edit > Undo/Redo go to the window's undo manager, as on macOS (ADR-0038).
+        case "undo:": return undoManager?.canUndo == true
+        case "redo:": return undoManager?.canRedo == true
         default: return false
         }
     }
@@ -105,6 +108,8 @@ import CoreText
         case "performZoom:": performZoom(sender)
         case "toggleToolbarShown:": toggleToolbarShown(sender)
         case "runToolbarCustomizationPalette:": runToolbarCustomizationPalette(sender)
+        case "undo:": guard let m = undoManager, m.canUndo else { return false }; m.undo()
+        case "redo:": guard let m = undoManager, m.canRedo else { return false }; m.redo()
         default: return false
         }
         return true

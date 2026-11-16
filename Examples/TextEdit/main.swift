@@ -8,7 +8,9 @@
 // The text view is an editor (ADR-0030): Edit > Find (the find bar), Spelling and Grammar
 // (continuous checking, the Spelling panel, guesses in the context menu), Substitutions
 // and Complete; Format > Lists and Table; images dropped or pasted into rich text become
-// attachments, and a rich document with attachments is saved as RTFD.
+// attachments, and a rich document with attachments is saved as RTFD. Edit > Undo/Redo and
+// Format > Style (Underline, Outline, Highlight, Link…) are the text view's (ADR-0038); the
+// undo manager drives the document's change count, as in macOS TextEdit.
 //
 // Headless modes for CI: `--roundtrip out.rtf` makes a document through the document
 // controller, writes it as RTF, reads it back and checks the attributes;
@@ -147,13 +149,10 @@ final class TextDocument: NSDocument {
         window.contentView?.addSubview(scroll)
         window.initialFirstResponder = tv
         textView = tv
-        // Each edit is a change (the text view does not register undo actions yet, so the
-        // undo manager cannot drive the change count).
+        // The text view registers its edits with the document's undo manager (ADR-0038),
+        // which counts the changes (an undo back to the saved text is clean again).
         changeObserver = NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: tv, queue: nil) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.convertToRTFDIfNeeded()
-                self?.updateChangeCount(.changeDone)
-            }
+            MainActor.assumeIsolated { self?.convertToRTFDIfNeeded() }
         }
         let controller = NSWindowController(window: window)
         controller.shouldCascadeWindows = true
@@ -269,6 +268,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(NSMenuItem.separator())
         edit.addItem(withTitle: "Cut", action: Selector(("cut:")), keyEquivalent: "x")
         edit.addItem(withTitle: "Copy", action: Selector(("copy:")), keyEquivalent: "c")
         edit.addItem(withTitle: "Paste", action: Selector(("paste:")), keyEquivalent: "v")
@@ -304,6 +307,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let rich = format.addItem(withTitle: "Make Rich Text", action: Selector(("toggleRichText:")), keyEquivalent: "t")
         rich.keyEquivalentModifierMask = [.command, .shift]
         format.addItem(NSMenuItem.separator())
+        format.addItem(submenu("Style", [
+            item("Underline", "underline:", "u"), item("Outline", "outline:"), item("Highlight", "highlight:"),
+            .separator(), item("Add Link\u{2026}", "orderFrontLinkPanel:", "k"),
+        ]))
         // Items naming a marker format (or a table size) act at once; the plain ones open
         // the text view's Lists and Table panels.
         func list(_ title: String, _ format: String) -> NSMenuItem {
