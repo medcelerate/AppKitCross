@@ -797,3 +797,136 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+// MARK: - Natively hosted windows
+
+/// An item that fills its whole view with its represented object's colour.
+@MainActor
+final class SolidItem: NSCollectionViewItem {
+    final class SolidView: NSView {
+        var color = NSColor.black
+        override func draw(_ dirtyRect: NSRect) {
+            color.setFill()
+            NSBezierPath(rect: bounds).fill()
+        }
+    }
+    override func loadView() { view = SolidView(frame: NSRect(x: 0, y: 0, width: 40, height: 40)) }
+}
+
+/// A data source whose items are named colours (one section).
+@MainActor
+private final class SolidSource: NSObject, NSCollectionViewDataSource {
+    static let palette: [String: (r: CGFloat, g: CGFloat, b: CGFloat)] = [
+        "red": (1, 0, 0), "green": (0, 0.8, 0), "blue": (0, 0, 1), "black": (0, 0, 0),
+        "magenta": (1, 0, 1), "cyan": (0, 1, 1), "yellow": (1, 1, 0), "olive": (0.5, 0.5, 0),
+        "navy": (0, 0, 0.5), "maroon": (0.5, 0, 0),
+    ]
+    var items = ["red", "green", "blue", "black", "magenta"]
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { items.count }
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let item = collectionView.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("solid"), for: indexPath)
+        let c = SolidSource.palette[items[indexPath.item]]!
+        (item.view as? SolidItem.SolidView)?.color = NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1)
+        item.view.needsDisplay = true
+        item.representedObject = items[indexPath.item]
+        return item
+    }
+}
+
+final class CollectionViewHostingTests: XCTestCase, @unchecked Sendable {
+    /// The Windows PC's checklist on the Layout Demo's collection page (reload, insert, delete,
+    /// move, layout invalidation) composited through the host's reference native compositor
+    /// (the model of Win32's DirectComposition hosting): every item's pixels after each step.
+    /// Items made only in `viewWillDraw` run while the compositor rasterises, after the frame's
+    /// layer scene was built, and miss that commit; `layout()` makes them first.
+    func testEveryItemIsCompositedAfterEachUpdate() {
+        MainActor.assumeIsolated {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 215, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+            let source = SolidSource()
+            defer { withExtendedLifetime(source) {} }
+            let cv = NSCollectionView(frame: .zero)
+            let flow = NSCollectionViewFlowLayout()
+            flow.itemSize = NSSize(width: 40, height: 40)
+            flow.minimumInteritemSpacing = 10
+            flow.minimumLineSpacing = 10
+            flow.sectionInset = NSEdgeInsets(top: 5, left: 5, bottom: 5, right: 5)
+            cv.collectionViewLayout = flow
+            cv.register(SolidItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("solid"))
+            cv.dataSource = source
+            cv.backgroundColors = [NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)]
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 215, height: 160))
+            scroll.hasVerticalScroller = true
+            scroll.documentView = cv
+            window.contentView!.addSubview(scroll)
+            window.makeKeyAndOrderFront(nil)
+            let host = Mirror(reflecting: window).descendant("_platform") as? HostWindow
+            if let host {
+                window.contentView!.wantsLayer = true
+                host.layerHostingEnabled = true
+                window._updateLayerHosting()
+                XCTAssertTrue(window._hostsLayersNatively)
+            }
+            defer { if let host { host.layerHostingEnabled = false; window._updateLayerHosting() } }
+
+            /// The composited colour at the centre of the item at `index` (BGRA, rows top-down).
+            @MainActor func composited(_ index: Int) -> (r: CGFloat, g: CGFloat, b: CGFloat)? {
+                guard let host, let image = host.lastImage,
+                      let f = cv.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return nil }
+                let data = _pixels(image)
+                let content = window.contentView!.bounds
+                let scale = CGFloat(image.width) / content.width
+                let p = cv.convert(NSPoint(x: f.midX, y: f.midY), to: nil)
+                let x = Int(p.x * scale), y = Int((content.height - p.y) * scale)
+                guard x >= 0, y >= 0, x < image.width, y < image.height else { return nil }
+                let o = y * image.bytesPerRow + x * 4
+                return (CGFloat(data[o + 2]) / 255, CGFloat(data[o + 1]) / 255, CGFloat(data[o]) / 255)
+            }
+            @MainActor func check(_ label: String) {
+                window.display()
+                for (i, name) in source.items.enumerated() {
+                    let ip = IndexPath(item: i, section: 0)
+                    let item = cv.item(at: ip)
+                    XCTAssertNotNil(item, "\(label): item \(i) exists")
+                    XCTAssertTrue(item?.view.superview === cv && item?.view.isHidden == false, "\(label): item \(i) is shown in the collection view")
+                    XCTAssertEqual(item?.representedObject as? String, name, "\(label): item \(i)")
+                    XCTAssertEqual(item?.view.frame, cv.layoutAttributesForItem(at: ip)?.frame, "\(label): item \(i) frame")
+                    guard host != nil else { continue }
+                    let want = SolidSource.palette[name]!
+                    guard let got = composited(i) else { XCTFail("\(label): no composited pixel for item \(i)"); continue }
+                    let close = abs(got.r - want.r) < 0.15 && abs(got.g - want.g) < 0.15 && abs(got.b - want.b) < 0.15
+                    XCTAssertTrue(close, "\(label): item \(i) (\(name)) is composited, got \(got)")
+                }
+                XCTAssertEqual(cv.subviews.filter { $0 is SolidItem.SolidView && !$0.isHidden }.count, source.items.count, "\(label): item views")
+            }
+
+            check("launch")
+            // Reload with new contents (the demo's Reload).
+            source.items = ["yellow", "cyan", "olive", "navy", "maroon", "red"]
+            cv.reloadData()
+            check("reload")
+            // Insert at the front.
+            source.items.insert("green", at: 0)
+            cv.insertItems(at: [IndexPath(item: 0, section: 0)])
+            check("insert")
+            // Delete one.
+            source.items.remove(at: 2)
+            cv.deleteItems(at: [IndexPath(item: 2, section: 0)])
+            check("delete")
+            // Move the first to the end.
+            source.items.append(source.items.removeFirst())
+            cv.moveItem(at: IndexPath(item: 0, section: 0), to: IndexPath(item: source.items.count - 1, section: 0))
+            check("move")
+            // Reload items in place with a new colour.
+            source.items[1] = "blue"
+            cv.reloadItems(at: [IndexPath(item: 1, section: 0)])
+            check("reload items")
+            // Invalidate the layout (a property change re-flows the items).
+            flow.itemSize = NSSize(width: 30, height: 30)
+            check("invalidate")
+            // A second full reload with fewer items.
+            source.items = ["black", "magenta"]
+            cv.reloadData()
+            check("reload fewer")
+        }
+    }
+}
