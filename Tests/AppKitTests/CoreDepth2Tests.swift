@@ -647,3 +647,46 @@ final class CoreDepth2DocumentUndoTests: XCTestCase {
         }
     }
 }
+
+/// NSColor's colour-space members over NSColorSpace (PR #78's `_convert`); expected values
+/// printed by AppKit on macOS 15.
+final class CoreDepth2ColorSpaceTests: XCTestCase {
+    private func comps(_ c: NSColor?) -> [CGFloat] {
+        guard let c else { return [] }
+        var a = [CGFloat](repeating: 0, count: c.numberOfComponents)
+        c.getComponents(&a)
+        return a
+    }
+    private func assertNear(_ a: [CGFloat], _ b: [CGFloat], _ tol: CGFloat = 0.003, _ message: String = "", line: UInt = #line) {
+        XCTAssertEqual(a.count, b.count, message, line: line)
+        for (x, y) in zip(a, b) where abs(x - y) > tol { XCTFail("\(a) is not \(b) \(message)", line: line); return }
+    }
+
+    func testConversionsBetweenSpaces() {
+        let red = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+        assertNear(comps(red.usingColorSpace(.displayP3)), [0.9175, 0.2004, 0.1385, 1])
+        XCTAssertTrue(red.usingColorSpace(.displayP3)?.colorSpace === NSColorSpace.displayP3)
+        XCTAssertTrue(red.usingColorSpace(.sRGB) === red, "already in the space")
+        let p3 = NSColor(displayP3Red: 1, green: 0, blue: 0, alpha: 1)
+        XCTAssertEqual(p3.redComponent, 1, "components in the colour's own space")
+        XCTAssertEqual(p3.colorSpaceName, .custom)
+        XCTAssertTrue(p3.colorSpace === NSColorSpace.displayP3)
+        assertNear(comps(p3.usingColorSpace(.extendedSRGB)), [1.0931, -0.2268, -0.1501, 1])
+        var c: [CGFloat] = [0.2, 0.4, 0.6, 0.5]
+        let adobe = NSColor(colorSpace: .adobeRGB1998, components: &c, count: 4)
+        assertNear(comps(adobe), [0.2, 0.4, 0.6, 0.5])
+        XCTAssertEqual(adobe.numberOfComponents, 4)
+        assertNear(comps(adobe.usingColorSpace(.sRGB)), [0, 0.4005, 0.6124, 0.5], 0.01)
+        assertNear(comps(NSColor(colorSpace: .displayP3, hue: 0.5, saturation: 1, brightness: 1, alpha: 1)), [0, 1, 1, 1])
+        assertNear(comps(NSColor(white: 0.5, alpha: 1).usingColorSpace(.sRGB)), [0.5, 0.5, 0.5, 1], 0.01)
+        XCTAssertTrue(NSColor(white: 0.5, alpha: 1).colorSpace === NSColorSpace.genericGamma22Gray)
+        XCTAssertTrue(NSColor(deviceCyan: 0, magenta: 0, yellow: 0, black: 0, alpha: 1).colorSpace === NSColorSpace.deviceCMYK)
+        XCTAssertNil(NSColor(patternImage: NSImage(size: NSSize(width: 2, height: 2))).usingColorSpace(.sRGB))
+        let saved = NSAppearance.current
+        defer { NSAppearance.current = saved }
+        NSAppearance.current = NSAppearance(named: .aqua)
+        let label = NSColor.labelColor.usingColorSpace(.sRGB)
+        XCTAssertEqual(label?.type, .componentBased, "a catalog colour resolves under the current appearance")
+        assertNear(comps(label), [0, 0, 0, 0.85], 0.01)
+    }
+}

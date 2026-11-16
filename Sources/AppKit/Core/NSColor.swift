@@ -36,12 +36,19 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         /// Device CMYK (cyan, magenta, yellow, black, alpha), converted to RGB naively
         /// (r = (1 − c)(1 − k)); macOS converts through ColorSync profiles (ADR-0038).
         case cmyk(CGFloat, CGFloat, CGFloat, CGFloat, CGFloat)
+        /// Components (no alpha) in another colour space (Display P3, Adobe RGB, extended or
+        /// linear spaces, ICC profiles), converted to sRGB through NSColorSpace (ADR-0038).
+        case space(NSColorSpace, [CGFloat], CGFloat)
 
         var rgba: (CGFloat, CGFloat, CGFloat, CGFloat) {
             switch self {
             case let .rgb(r, g, b, a): return (r, g, b, a)
             case let .gray(w, a): return (w, w, w, a)
             case let .cmyk(c, m, y, k, a): return ((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k), a)
+            case let .space(cs, comps, a):
+                // init(colorSpace:…) admits only spaces NSColorSpace converts (RGB, gray, CMYK).
+                let rgb = cs._convert(comps, to: .sRGB)!
+                return (rgb[0], rgb[1], rgb[2], a)
             case let .named(name, r, g, b, a):
                 if NSAppearance.currentIsDark, let dark = NSColor.darkValues[name] { return dark }
                 return (r, g, b, a)
@@ -93,6 +100,38 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         return storage.rgba
     }
 
+    /// Red, green, blue as the colour's own space has them (an RGB colour in Display P3
+    /// reports its P3 components, as on macOS); sRGB otherwise.
+    internal var _ownRGBA: (CGFloat, CGFloat, CGFloat, CGFloat) {
+        if _provider == nil, case let .space(cs, comps, a) = storage, cs.colorSpaceModel == .rgb { return (comps[0], comps[1], comps[2], a) }
+        return _rgba
+    }
+
+    /// The colour as (space, components without alpha, alpha), for colour-space conversion;
+    /// a catalog or dynamic colour resolves to sRGB under the current appearance.
+    internal var _spaceComponents: (NSColorSpace, [CGFloat], CGFloat)? {
+        if _pattern != nil { return nil }
+        if _provider == nil {
+            switch storage {
+            case let .space(cs, comps, a): return (cs, comps, a)
+            case let .gray(w, a): return (.genericGamma22Gray, [w], a)
+            case let .cmyk(c, m, y, k, a): return (.deviceCMYK, [c, m, y, k], a)
+            case let .rgb(r, g, b, a): return (.sRGB, [r, g, b], a)
+            case .named, .namedAlpha: break
+            }
+        }
+        let (r, g, b, a) = _rgba
+        return (.sRGB, [r, g, b], a)
+    }
+
+    /// A component colour in `space`, stored in the plain cases when the space is theirs.
+    internal static func _make(_ space: NSColorSpace, _ comps: [CGFloat], _ alpha: CGFloat) -> NSColor {
+        if space === NSColorSpace.sRGB { return NSColor(storage: .rgb(comps[0], comps[1], comps[2], alpha)) }
+        if space === NSColorSpace.genericGamma22Gray { return NSColor(storage: .gray(comps[0], alpha)) }
+        if space === NSColorSpace.deviceCMYK { return NSColor(storage: .cmyk(comps[0], comps[1], comps[2], comps[3], alpha)) }
+        return NSColor(storage: .space(space, comps, alpha))
+    }
+
     /// AppKit raises when components are read from a pattern colour ("need to first
     /// convert colorspace"); the port stops the same way.
     private func _requireComponents(_ member: String = #function) {
@@ -142,7 +181,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     }
 
     private var hsb: (CGFloat, CGFloat, CGFloat) {
-        let (r, g, b, _) = _rgba
+        let (r, g, b, _) = _ownRGBA
         let maxC = max(r, g, b), minC = min(r, g, b)
         let delta = maxC - minC
         var h: CGFloat = 0
@@ -167,6 +206,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         case let .named(n, _, _, _, _): return "Catalog color: System \(n)"
         case let .namedAlpha(n, _, _, _, a): return "Catalog color: System \(n) alpha \(a)"
         case let .cmyk(c, m, y, k, a): return "NSDeviceCMYKColorSpace \(c) \(m) \(y) \(k) \(a)"
+        case let .space(cs, comps, a): return "\(cs.localizedName ?? "Custom") colorspace \((comps + [a]).map { "\($0)" }.joined(separator: " "))"
         }
     }
     open override func isEqual(_ object: Any?) -> Bool {
@@ -234,10 +274,24 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         super.init()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(colorspace:components:count:)
-    public init(colorSpace space: NSColorSpace, components: UnsafePointer<CGFloat>, count numberOfComponents: Int) { unimplemented("NSColor.init(colorSpace:components:count:) — NSColorSpace is still a generated stub (no colour space model to read the components by)") }
+    /// `count` is the space's components plus alpha (last).
+    public convenience init(colorSpace space: NSColorSpace, components: UnsafePointer<CGFloat>, count numberOfComponents: Int) {
+        let n = space.numberOfColorComponents
+        precondition(numberOfComponents == n + 1, "NSColor.init(colorSpace:components:count:): \(space.localizedName ?? "the space") takes \(n) components and alpha")
+        let comps = (0..<n).map { components[$0] }
+        guard [.rgb, .gray, .cmyk].contains(space.colorSpaceModel) else {
+            unimplemented("NSColor.init(colorSpace:components:count:) — \(space.colorSpaceModel) spaces have no conversion in NSColorSpace (RGB, gray and CMYK only)")
+        }
+        self.init(storage: NSColor._make(space, comps, components[n]).storage)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(colorspace:hue:saturation:brightness:alpha:)
     @available(macOS 10.12, *)
-    public init(colorSpace space: NSColorSpace, hue: CGFloat, saturation: CGFloat, brightness: CGFloat, alpha: CGFloat) { unimplemented("NSColor.init(colorSpace:hue:saturation:brightness:alpha:) — NSColorSpace is still a generated stub") }
+    /// HSB in an RGB-model space (macOS raises for others).
+    public convenience init(colorSpace space: NSColorSpace, hue: CGFloat, saturation: CGFloat, brightness: CGFloat, alpha: CGFloat) {
+        precondition(space.colorSpaceModel == .rgb, "NSColor.init(colorSpace:hue:saturation:brightness:alpha:) needs an RGB colour space")
+        let (r, g, b) = NSColor.hsbToRGB(hue, saturation, brightness)
+        self.init(storage: NSColor._make(space, [r, g, b], alpha).storage)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(devicecyan:magenta:yellow:black:alpha:)
     public init(deviceCyan cyan: CGFloat, magenta: CGFloat, yellow: CGFloat, black: CGFloat, alpha: CGFloat) {
         storage = .cmyk(cyan, magenta, yellow, black, alpha)
@@ -262,7 +316,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(displayp3red:green:blue:alpha:)
     @available(macOS 10.12, *)
     public init(displayP3Red red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) {
-        storage = .rgb(red, green, blue, alpha)
+        storage = .space(.displayP3, [red, green, blue], alpha)
         super.init()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(for:)
@@ -390,7 +444,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/blue
     class public var blue: NSColor { NSColor(storage: .rgb(0, 0, 1, 1)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/bluecomponent
-    open var blueComponent: CGFloat { _rgba.2 }
+    open var blueComponent: CGFloat { _ownRGBA.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/brightnesscomponent
     open var brightnessComponent: CGFloat { hsb.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/brown
@@ -417,12 +471,17 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         return NSColor.Name(n)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/colorspace
-    open var colorSpace: NSColorSpace { unimplemented("NSColor.colorSpace — NSColorSpace is still a generated stub (a sibling burn-down owns it)") }
+    /// Component colours only (macOS raises for catalog and pattern colours). The port's
+    /// device and calibrated RGB colours are sRGB, its white colours Generic Gray Gamma 2.2.
+    open var colorSpace: NSColorSpace {
+        precondition(!_isCatalog && _pattern == nil, "-colorSpace not valid for the NSColor \(description); need to first convert colorspace.")
+        return _spaceComponents!.0
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/colorspacename
     open var colorSpaceName: NSColorSpaceName {
         if _pattern != nil { return .pattern }
         if _isCatalog { return .named }
-        switch storage { case .gray: return .calibratedWhite; case .cmyk: return .deviceCMYK; default: return .calibratedRGB }
+        switch storage { case .gray: return .calibratedWhite; case .cmyk: return .deviceCMYK; case .space: return .custom; default: return .calibratedRGB }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/controlaccentcolor
     @available(macOS 10.14, *)
@@ -484,6 +543,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         _requireComponents()
         if case let .gray(w, a) = storage { components[0] = w; components[1] = a; return }
         if case let .cmyk(c, m, y, k, a) = storage { components[0] = c; components[1] = m; components[2] = y; components[3] = k; components[4] = a; return }
+        if case let .space(_, comps, a) = storage { for (i, c) in comps.enumerated() { components[i] = c }; components[comps.count] = a; return }
         let (r, g, b, a) = _rgba
         components[0] = r; components[1] = g; components[2] = b; components[3] = a
     }
@@ -500,7 +560,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/getred(_:green:blue:alpha:)
     open func getRed(_ red: UnsafeMutablePointer<CGFloat>?, green: UnsafeMutablePointer<CGFloat>?, blue: UnsafeMutablePointer<CGFloat>?, alpha: UnsafeMutablePointer<CGFloat>?) {
-        let (r, g, b, a) = _rgba
+        let (r, g, b, a) = _ownRGBA
         red?.pointee = r; green?.pointee = g; blue?.pointee = b; alpha?.pointee = a
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/getwhite(_:alpha:)
@@ -512,7 +572,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/green
     class public var green: NSColor { NSColor(storage: .rgb(0, 1, 0, 1)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/greencomponent
-    open var greenComponent: CGFloat { _rgba.1 }
+    open var greenComponent: CGFloat { _ownRGBA.1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/gridcolor
     class public var gridColor: NSColor { named("gridColor", 0.898, 0.898, 0.898, 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/headercolor
@@ -559,7 +619,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/numberofcomponents
     open var numberOfComponents: Int {
         _requireComponents()
-        switch storage { case .gray: return 2; case .cmyk: return 5; default: return 4 }
+        switch storage { case .gray: return 2; case .cmyk: return 5; case let .space(cs, _, _): return cs.numberOfColorComponents + 1; default: return 4 }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/orange
     class public var orange: NSColor { NSColor(storage: .rgb(1, 0.5, 0, 1)) }
@@ -589,7 +649,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/red
     class public var red: NSColor { NSColor(storage: .rgb(1, 0, 0, 1)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/redcomponent
-    open var redComponent: CGFloat { _rgba.0 }
+    open var redComponent: CGFloat { _ownRGBA.0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/saturationcomponent
     open var saturationComponent: CGFloat { hsb.1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/scrollbarcolor
@@ -711,7 +771,15 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     @available(macOS 10.14, *)
     class public var unemphasizedSelectedTextColor: NSColor { named("unemphasizedSelectedTextColor", 0, 0, 0, 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/usingcolorspace(_:)
-    open func usingColorSpace(_ space: NSColorSpace) -> NSColor? { self }
+    /// The colour in `space`, through NSColorSpace's D50 conversion (CMYK naively through
+    /// device RGB); catalog and dynamic colours resolve under the current appearance first.
+    /// Nil for a pattern colour or a space NSColorSpace does not convert (Lab, indexed).
+    open func usingColorSpace(_ space: NSColorSpace) -> NSColor? {
+        guard let (src, comps, a) = _spaceComponents else { return nil }
+        if src === space || (src.isEqual(space) && !_isCatalog) { return _isCatalog ? NSColor._make(space, comps, a) : self }
+        guard let out = src._convert(comps, to: space) else { return nil }
+        return NSColor._make(space, out, a)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/usingcolorspacename(_:)
     /// Converts between the component spaces: RGB (device or calibrated), white and device
     /// CMYK. CMYK goes through the naive device formulas (macOS uses ColorSync profiles, so
@@ -774,6 +842,7 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         case let .gray(w, _): return NSColor(storage: .gray(w, alpha))
         case let .named(n, r, g, b, _), let .namedAlpha(n, r, g, b, _): return NSColor(storage: .namedAlpha(n, r, g, b, alpha))
         case let .cmyk(c, m, y, k, _): return NSColor(storage: .cmyk(c, m, y, k, alpha))
+        case let .space(cs, comps, _): return NSColor(storage: .space(cs, comps, alpha))
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/withsystemeffect(_:)

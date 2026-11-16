@@ -22,7 +22,7 @@ and the tests assert those values.
 
 Each stub is **(a)** implementable with existing Core and seams, **(b)** needs a small backend
 hook, or **(c)** out of scope with the reason (kept as `unimplemented("…reason…")`). (a) and (b)
-are implemented. Core stubs: 657 → 491.
+are implemented. Core stubs: 657 → 491 from these types; with PR #78 merged in (it moves some stubbed types into Core and implements NSColorSpace) and the colour-space members built on it, Core stands at 483.
 
 **Events.** Local monitors run at the top of `NSApplication.sendEvent(_:)` — where macOS 15 runs
 them (probed: a posted event reaches them when it is sent, not when `nextEvent` dequeues it) — in
@@ -72,7 +72,13 @@ Pattern colours store their image and tile it in `drawSwatch`; filling with one 
 which the port's CoreGraphics lacks, so `cgColor`/`set()` of a pattern colour stop with that reason
 (a new, explicit trap where the init trapped before). The macOS 26 HDR members store an exposure
 over the SDR components. The new system fills and `controlAlternatingRowBackgroundColors` carry
-macOS 15's light and dark values.
+macOS 15's light and dark values. With PR #78's hand-written NSColorSpace merged in, a colour can live
+in any space NSColorSpace converts (a storage case holding the space and its components; sRGB,
+Generic Gray Gamma 2.2 and device CMYK keep their own cases): `colorSpace`, `usingColorSpace(_:)`
+through `NSColorSpace._convert` (D50 connection space), `init(colorSpace:components:count:)` and the
+HSB variant; `init(displayP3Red:…)` now really is Display P3 (it stored sRGB components). RGB
+components read in the colour's own space, as macOS does; drawing converts to sRGB. The port's
+device and calibrated RGB colours report sRGB (macOS distinguishes Device RGB).
 
 **Cells.** The field-editor lifecycle is AppKit's (probed): `edit`/`select(withFrame:…)` set the
 editor up (`setUpFieldEditorAttributes`, now also called by NSTextFieldCell's override), give it the
@@ -159,7 +165,7 @@ Plus `EventTypeMask.init(type:)` (generated stub → Core, config `handwrittenMe
 | controlAlternatingRowBackgroundColors, systemFill, secondary/tertiary/quaternary/quinarySystemFill, quinaryLabel | a | macOS 15 light/dark values |
 | init(red:…exposure:), init(red:…linearExposure:), linearExposure, applyingContentHeadroom, standardDynamicRange | a | stored exposure |
 | ignoresAlpha (get/set), supportsSecureCoding | a | stored false; true |
-| colorSpace, init(colorSpace:components:count:), init(colorSpace:hue:saturation:brightness:alpha:) | c | NSColorSpace is a generated stub here; PR #78 (ADR-0037) implements it — wire these after it merges |
+| colorSpace, init(colorSpace:components:count:), init(colorSpace:hue:saturation:brightness:alpha:) | a | over PR #78's NSColorSpace (merged into this branch); Lab and indexed spaces stop (no conversion) |
 
 ### NSCell (39)
 
@@ -196,7 +202,7 @@ Plus `EventTypeMask.init(type:)` (generated stub → Core, config `handwrittenMe
   use them), real text undo and the Format menu, cell-based editors, CMYK and asset-catalog colours.
 - Undo registration happens in `shouldChangeText`, as on macOS: a subclass that overrides it without
   calling super gets no undo, as there.
-- PR #78 also rewrites `Generated/NSEvent+Types.swift` and `tools/apigen/config.json`; whichever
-  merges second regenerates (this PR's generated hunks come from two config entries).
-- Follow-ups: NSColor's colour-space members after PR #78; X11 global monitors (XInput2 raw
+- This branch merges PR #78's branch (the colour-space members need its NSColorSpace); a clean
+  `apigen.py` run over both configs leaves the generated files unchanged.
+- Follow-ups: X11 global monitors (XInput2 raw
   events); vertical text layout; a speech seam; text-colour tint for highlights.
