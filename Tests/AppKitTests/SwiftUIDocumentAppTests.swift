@@ -375,8 +375,13 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(strings.contains("Plain codelink gone"), "\(strings)")
             XCTAssertTrue(strings.contains("A") && strings.contains("2"))
             let paragraph = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Plain codelink gone" }
+            #if !os(Windows)
+            // On Windows `Text(AttributedString)` draws the plain characters (the 6.2
+            // toolchain cannot link `AttributedString.runs`; AttributedText.swift), so the
+            // runs' attributes are not there: a known gap (docs/compatibility/swiftui-apps.md).
             XCTAssertNotNil(paragraph?.storage.attribute(.link, at: 10, effectiveRange: nil), "the link run")
             XCTAssertNotNil(paragraph?.storage.attribute(.strikethroughStyle, at: 16, effectiveRange: nil), "the struck run")
+            #endif
         }
     }
 
