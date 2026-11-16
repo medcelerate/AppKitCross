@@ -189,6 +189,11 @@ extension App {
         runner.install(app)
         runner.run(scene: app.body)
         runner.installMenuBar()
+        // Launching finishes once the scenes exist, as on macOS: the delegate's
+        // `applicationDidFinishLaunching` sees the scenes' windows, and a DocumentGroup's
+        // document controller opens the files named on the command line, or an untitled
+        // document, between the will- and did-finish messages.
+        NSApplication.shared.finishLaunching()
         NSApplication.shared.run()
     }
 }
@@ -216,6 +221,9 @@ public final class _AppRunner {
     var commands: [any Commands] = []
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
+    /// A DocumentGroup ran: the File menu gets the document commands (New, Open, Open
+    /// Recent, Save, Save As, Revert) instead of New Window.
+    var _hasDocumentGroups = false
 
     public init(name: String) {
         applicationName = name
@@ -229,9 +237,16 @@ public final class _AppRunner {
         if NSApplication.shared.mainMenu != nil { installMenuBar() }
     }
 
+    /// The bundle's name: its Info.plist's `CFBundleName`, or for a bare executable the
+    /// one in the Info.plist `APPKITWIN_INFO_PLIST` names (where AppKit's document
+    /// controller reads the document types too).
     static var bundleName: String? {
-        guard let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty else { return nil }
-        return n
+        if let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty { return n }
+        if let path = ProcessInfo.processInfo.environment["APPKITWIN_INFO_PLIST"], !path.isEmpty,
+           let data = FileManager.default.contents(atPath: path),
+           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+           let n = plist["CFBundleName"] as? String, !n.isEmpty { return n }
+        return nil
     }
 
     /// The bundle's name where there is an Info.plist, else the executable's name without
@@ -255,7 +270,6 @@ public final class _AppRunner {
                 NSApplication.shared.delegate = delegate as? NSApplicationDelegate
             }
         }
-        NSApplication.shared.finishLaunching()
     }
 
     public func run<S: Scene>(scene: S) {
@@ -303,9 +317,38 @@ public final class _AppRunner {
             let size = defaultSize ?? pendingDefaultSize
             primaryWindowGroup = { [weak self] in self?.openWindow(title: title, content: content, defaultSize: size) }
         }
+        let window = _makeWindow(title: title, content: content, defaultSize: defaultSize ?? pendingDefaultSize,
+                                 resizability: pendingResizability, hidesTitleBar: pendingHidesTitleBar, toolbarStyle: pendingToolbarStyle)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// A DocumentGroup document's window (not shown: its window controller shows it), with
+    /// the scene modifiers the group was declared under. Each new one cascades from the
+    /// last document window, as AppKit's document windows do.
+    func _makeDocumentWindow<Content: View>(content: Content, entry: _DocumentGroupEntry) -> NSWindow {
+        let window = _makeWindow(title: "", content: content, defaultSize: entry.defaultSize,
+                                 resizability: entry.resizability, hidesTitleBar: entry.hidesTitleBar, toolbarStyle: entry.toolbarStyle)
+        if let last = _lastDocumentWindow, last.isVisible {
+            let frame = last.frame
+            _ = window.cascadeTopLeft(from: window.cascadeTopLeft(from: NSPoint(x: frame.minX, y: frame.maxY)))
+        } else {
+            window.center()
+        }
+        _lastDocumentWindow = window
+        return window
+    }
+    private weak var _lastDocumentWindow: NSWindow?
+
+    /// A scene window hosting `content`, sized and styled as the scene modifiers say,
+    /// tracked by the runner (closing the last one quits off macOS). Not yet shown.
+    private func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
+                                            hidesTitleBar: Bool, toolbarStyle: NSWindow.ToolbarStyle) -> NSWindow {
+        let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar, pendingToolbarStyle = toolbarStyle
         let hosting = NSHostingView(rootView: content)
         let ideal = hosting.sizeThatFits(.unspecified)
-        var size = defaultSize ?? pendingDefaultSize ?? NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
+        var size = pendingDefaultSize ?? NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
         size.width = max(size.width, ideal.width)
         size.height = max(size.height, ideal.height)
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -323,7 +366,7 @@ public final class _AppRunner {
                                 height: hi.height.isFinite ? max(hi.height, contentMin.height) : .greatestFiniteMagnitude)
             // The window opens at the content's ideal size (a default size if the scene
             // gave one), within the content's range: no 300×200 floor for fixed content.
-            var s = defaultSize ?? pendingDefaultSize ?? ideal
+            var s = pendingDefaultSize ?? ideal
             s.width = min(max(s.width, contentMin.width), contentMax!.width)
             s.height = min(max(s.height, contentMin.height), contentMax!.height)
             size = s
@@ -342,10 +385,8 @@ public final class _AppRunner {
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting
-        window.center()
-        window.makeKeyAndOrderFront(nil)
         windows.append(window)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        return window
     }
 
     private var closeObservers: [any NSObjectProtocol] = []

@@ -7,7 +7,7 @@ import Foundation
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/commands
 public protocol Commands {
     associatedtype Body: Commands
-    @CommandsBuilder var body: Self.Body { get }
+    @CommandsBuilder @MainActor var body: Self.Body { get }
 }
 
 extension Never: Commands {}
@@ -148,6 +148,18 @@ public final class _MenuBarBuilder {
             Group(name: "printItem", items: []),
         ]))
         menus[1].groups[0].items[0].keyEquivalent = "n"
+        if runner._hasDocumentGroups {
+            // A DocumentGroup's File menu, as on macOS: the actions reach the document
+            // controller (New, Open, Open Recent) and the key window's document (Save, Save
+            // As, Revert) through the responder chain.
+            let recent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+            let recentMenu = NSMenu(title: "Open Recent")
+            recentMenu.addItem(item("Clear Menu", "clearRecentDocuments:"))
+            recent.submenu = recentMenu
+            menus[1].groups[0].items = [item("New", "newDocument:", "n"), item("Open\u{2026}", "openDocument:", "o"), recent]
+            menus[1].groups[2].items = [item("Save", "saveDocument:", "s"), item("Save As\u{2026}", "saveDocumentAs:", "s", mods: [.command, .shift]),
+                                        item("Revert to Saved", "revertDocumentToSaved:")]
+        }
         menus.append(MenuSpec(title: "Edit", groups: [
             Group(name: "undoRedo", items: [item("Undo", "undo:", "z"), item("Redo", "redo:", "z", mods: [.command, .shift])]),
             Group(name: "pasteboard", items: [item("Cut", "cut:", "x"), item("Copy", "copy:", "c"), item("Paste", "paste:", "v"),

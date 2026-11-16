@@ -11,6 +11,12 @@ extension View {
     public func foregroundColor(_ color: Color?) -> some View { environment(\.foregroundColor, color) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:)
     public func foregroundStyle(_ color: Color) -> some View { environment(\.foregroundColor, color) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:)
+    /// A colour or a hierarchical level (`.secondary`, `.tertiary`, ...) sets the
+    /// foreground colour; a style that is not one colour leaves it unchanged.
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> some View {
+        _EnvironmentView(content: self) { env in if let c = _foregroundColor(for: style, in: env) { env.foregroundColor = c } }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:_:)
     /// Only the primary style is applied (hierarchical secondary and tertiary levels are
     /// not drawn separately yet); a non-colour style leaves the foreground unchanged.
@@ -894,3 +900,33 @@ extension ListStyle where Self == PlainListStyle { public static var plain: Plai
 extension ListStyle where Self == SidebarListStyle { public static var sidebar: SidebarListStyle { SidebarListStyle() } }
 extension ListStyle where Self == InsetListStyle { public static var inset: InsetListStyle { InsetListStyle() } }
 extension ListStyle where Self == BorderedListStyle { public static var bordered: BorderedListStyle { BorderedListStyle() } }
+
+// MARK: Text selection
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/textselectability
+public protocol TextSelectability {
+    /// Whether text under this selectability can be selected.
+    static var allowsSelection: Bool { get }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/enabledtextselectability
+public struct EnabledTextSelectability: TextSelectability { public static var allowsSelection: Bool { true } }
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/disabledtextselectability
+public struct DisabledTextSelectability: TextSelectability { public static var allowsSelection: Bool { false } }
+extension TextSelectability where Self == EnabledTextSelectability { public static var enabled: EnabledTextSelectability { EnabledTextSelectability() } }
+extension TextSelectability where Self == DisabledTextSelectability { public static var disabled: DisabledTextSelectability { DisabledTextSelectability() } }
+
+extension EnvironmentValues {
+    private struct TextSelectionKey: EnvironmentKey { static let defaultValue = false }
+    /// Whether `.textSelection(.enabled)` is in effect (read by the text primitive).
+    var _allowsTextSelection: Bool { get { self[TextSelectionKey.self] } set { self[TextSelectionKey.self] = newValue } }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textselection(_:)
+    /// Recorded in the environment for the text below. Not yet acted on: `Text` draws
+    /// through a non-interactive view, so a drag does not select it and Copy has nothing
+    /// to copy (docs/compatibility/swiftui-apps.md, MD Vault, follow-up).
+    public func textSelection<S: TextSelectability>(_ selectability: S) -> some View {
+        _EnvironmentView(content: self) { $0._allowsTextSelection = S.allowsSelection }
+    }
+}

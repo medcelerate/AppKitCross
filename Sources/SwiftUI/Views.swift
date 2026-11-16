@@ -14,7 +14,16 @@ public struct Font: Hashable, Sendable {
     public enum Design: Hashable, Sendable { case `default`, serif, rounded, monospaced }
     public enum TextStyle: Hashable, CaseIterable, Sendable { case largeTitle, title, title2, title3, headline, subheadline, body, callout, footnote, caption, caption2 }
 
-    enum Base: Hashable { case system(CGFloat, Design), custom(String, CGFloat), style(TextStyle, Design) }
+    enum Base: Hashable { case system(CGFloat, Design), custom(String, CGFloat), style(TextStyle, Design), platform(_PlatformFont) }
+    /// An AppKit font kept as is (`Font(_:)` with an `NSFont`), compared by name and size.
+    final class _PlatformFont: Hashable, @unchecked Sendable {
+        let font: NSFont
+        let name: String
+        let size: CGFloat
+        init(_ font: NSFont) { self.font = font; name = font.fontName; size = font.pointSize }
+        static func == (a: _PlatformFont, b: _PlatformFont) -> Bool { a === b || (a.name == b.name && a.size == b.size) }
+        func hash(into h: inout Hasher) { h.combine(name); h.combine(size) }
+    }
     let base: Base
     var weight: Weight? = nil
     var isItalic = false
@@ -77,7 +86,7 @@ public struct Font: Hashable, Sendable {
         switch base {
         case .system(let s, _): return Font(base: .system(s, .monospaced), weight: weight, isItalic: isItalic)
         case .style(let st, _): return Font(base: .style(st, .monospaced), weight: weight, isItalic: isItalic)
-        case .custom: return self
+        case .custom, .platform: return self
         }
     }
 
@@ -120,6 +129,7 @@ public struct Font: Hashable, Sendable {
         case .style(let st, let d):
             size = Font.pointSize(st); design = d
             if st == .headline, w == nil { w = .semibold }
+        case .platform(let p): return p.font
         case .custom(let name, let s):
             let f = NSFont(name: name, size: s) ?? NSFont.systemFont(ofSize: s)
             return isItalic ? (NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)) : f
@@ -128,6 +138,15 @@ public struct Font: Hashable, Sendable {
         if isItalic { f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask) }
         return f
     }
+}
+
+extension Font {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/init(_:)
+    /// Apple's initializer takes a `CTFont`, which an `NSFont` is toll-free bridged to, so
+    /// apps write `Font(nsFont)`; the port's `NSFont` is not a `CTFont`, so it takes the
+    /// `NSFont` itself (the call site reads the same). The font is used as it is: weight,
+    /// italic and design modifiers do not change it.
+    public init(_ font: NSFont) { base = .platform(_PlatformFont(font)) }
 }
 
 // MARK: Color
@@ -531,6 +550,12 @@ public struct Text: View, _PrimitiveView, Equatable {
     public func font(_ font: Font?) -> Text { mapRuns { $0.font = font ?? $0.font } }
     public func foregroundColor(_ color: Color?) -> Text { mapRuns { $0.color = color } }
     public func foregroundStyle(_ color: Color) -> Text { mapRuns { $0.color = color } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/foregroundstyle(_:)
+    /// A colour or a hierarchical level colours the text; other styles leave it as it is.
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> Text {
+        guard let c = _foregroundColor(for: style, in: EnvironmentValues()) else { return self }
+        return mapRuns { $0.color = c }
+    }
     public func bold() -> Text { mapRuns { $0.bold = true } }
     public func italic() -> Text { mapRuns { $0.italic = true } }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/underline(_:pattern:color:)
