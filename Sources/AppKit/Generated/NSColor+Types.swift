@@ -15,11 +15,6 @@ import QuartzCore
 #if canImport(CoreText)
 import CoreText
 #endif
-@available(macOS 14.0, *)
-extension NSColor {
-    // SKIPPED (CoreTransferable.TransferRepresentation): typealias Representation = some TransferRepresentation
-}
-
 extension NSColor {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/colortype
     public enum ColorType: Int, Sendable, Equatable, Hashable {
@@ -57,4 +52,9 @@ extension NSColor {
 extension NSColor {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/name
     public typealias Name = String
+}
+
+@available(macOS 14.0, *)
+extension NSColor {
+    // SKIPPED (CoreTransferable.TransferRepresentation): typealias Representation = some TransferRepresentation
 }

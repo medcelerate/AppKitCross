@@ -15,74 +15,6 @@ import QuartzCore
 #if canImport(CoreText)
 import CoreText
 #endif
-@available(macOS 26.0, *)
-extension NSApplication {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent
-    @available(macOS 26.0, *)
-    public struct ShouldBeginSuppressingHighDynamicRangeContent {
-        /// Converts a posted notification into this main actor message type for any observers.
-        /// 
-        /// To implement this method in your own `MainActorMessage` conformance, retrieve values from the ``Notification``'s ``Notification/userInfo`` and set them as properties on the message.
-        /// - Parameter notification: The posted ``Notification``.
-        /// - Returns: The converted `MainActorMessage` or `nil` if conversion is not possible.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/makemessage(_:)
-        @MainActor public static func makeMessage(_ notification: Notification) -> NSApplication.ShouldBeginSuppressingHighDynamicRangeContent? { unimplemented() }
-        /// Converts a posted main actor message into a notification for any observers.
-        /// 
-        /// To implement this method in your own `MainActorMessage` conformance, use the properties defined by the message to populate the ``Notification``'s ``Notification/userInfo``.
-        /// - Parameters:
-        ///   - message: The posted `MainActorMessage`.
-        /// - Returns: The converted ``Notification``.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/makenotification(_:)
-        @MainActor public static func makeNotification(_ message: NSApplication.ShouldBeginSuppressingHighDynamicRangeContent) -> Notification { unimplemented() }
-        /// A optional name corresponding to this type, used to interoperate with notification posters and observers.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/name
-        static public var name: Notification.Name { unimplemented() }
-    }
-
-}
-@available(macOS 26.0, *)
-extension NSApplication.ShouldBeginSuppressingHighDynamicRangeContent {
-    /// A type which you can optionally post and observe along with this `MainActorMessage`.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/subject
-    @available(macOS 26.0, *)
-    public typealias Subject = NSApplication
-}
-
-@available(macOS 26.0, *)
-extension NSApplication {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent
-    @available(macOS 26.0, *)
-    public struct ShouldEndSuppressingHighDynamicRangeContent {
-        /// Converts a posted notification into this main actor message type for any observers.
-        /// 
-        /// To implement this method in your own `MainActorMessage` conformance, retrieve values from the ``Notification``'s ``Notification/userInfo`` and set them as properties on the message.
-        /// - Parameter notification: The posted ``Notification``.
-        /// - Returns: The converted `MainActorMessage` or `nil` if conversion is not possible.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/makemessage(_:)
-        @MainActor public static func makeMessage(_ notification: Notification) -> NSApplication.ShouldEndSuppressingHighDynamicRangeContent? { unimplemented() }
-        /// Converts a posted main actor message into a notification for any observers.
-        /// 
-        /// To implement this method in your own `MainActorMessage` conformance, use the properties defined by the message to populate the ``Notification``'s ``Notification/userInfo``.
-        /// - Parameters:
-        ///   - message: The posted `MainActorMessage`.
-        /// - Returns: The converted ``Notification``.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/makenotification(_:)
-        @MainActor public static func makeNotification(_ message: NSApplication.ShouldEndSuppressingHighDynamicRangeContent) -> Notification { unimplemented() }
-        /// A optional name corresponding to this type, used to interoperate with notification posters and observers.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/name
-        static public var name: Notification.Name { unimplemented() }
-    }
-
-}
-@available(macOS 26.0, *)
-extension NSApplication.ShouldEndSuppressingHighDynamicRangeContent {
-    /// A type which you can optionally post and observe along with this `MainActorMessage`.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/subject
-    @available(macOS 26.0, *)
-    public typealias Subject = NSApplication
-}
-
 extension NSApplication {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/requestuserattentiontype
     public enum RequestUserAttentionType: Int, Sendable, Equatable, Hashable {
@@ -295,4 +227,72 @@ extension NSApplication {
         // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
         // SKIPPED (constrained extension): var hashValue: Int { get }
     }
+}
+
+@available(macOS 26.0, *)
+extension NSApplication {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent
+    @available(macOS 26.0, *)
+    public struct ShouldBeginSuppressingHighDynamicRangeContent {
+        /// Converts a posted notification into this main actor message type for any observers.
+        /// 
+        /// To implement this method in your own `MainActorMessage` conformance, retrieve values from the ``Notification``'s ``Notification/userInfo`` and set them as properties on the message.
+        /// - Parameter notification: The posted ``Notification``.
+        /// - Returns: The converted `MainActorMessage` or `nil` if conversion is not possible.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/makemessage(_:)
+        @MainActor public static func makeMessage(_ notification: Notification) -> NSApplication.ShouldBeginSuppressingHighDynamicRangeContent? { unimplemented() }
+        /// Converts a posted main actor message into a notification for any observers.
+        /// 
+        /// To implement this method in your own `MainActorMessage` conformance, use the properties defined by the message to populate the ``Notification``'s ``Notification/userInfo``.
+        /// - Parameters:
+        ///   - message: The posted `MainActorMessage`.
+        /// - Returns: The converted ``Notification``.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/makenotification(_:)
+        @MainActor public static func makeNotification(_ message: NSApplication.ShouldBeginSuppressingHighDynamicRangeContent) -> Notification { unimplemented() }
+        /// A optional name corresponding to this type, used to interoperate with notification posters and observers.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/name
+        static public var name: Notification.Name { unimplemented() }
+    }
+
+}
+@available(macOS 26.0, *)
+extension NSApplication.ShouldBeginSuppressingHighDynamicRangeContent {
+    /// A type which you can optionally post and observe along with this `MainActorMessage`.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldbeginsuppressinghighdynamicrangecontent/subject
+    @available(macOS 26.0, *)
+    public typealias Subject = NSApplication
+}
+
+@available(macOS 26.0, *)
+extension NSApplication {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent
+    @available(macOS 26.0, *)
+    public struct ShouldEndSuppressingHighDynamicRangeContent {
+        /// Converts a posted notification into this main actor message type for any observers.
+        /// 
+        /// To implement this method in your own `MainActorMessage` conformance, retrieve values from the ``Notification``'s ``Notification/userInfo`` and set them as properties on the message.
+        /// - Parameter notification: The posted ``Notification``.
+        /// - Returns: The converted `MainActorMessage` or `nil` if conversion is not possible.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/makemessage(_:)
+        @MainActor public static func makeMessage(_ notification: Notification) -> NSApplication.ShouldEndSuppressingHighDynamicRangeContent? { unimplemented() }
+        /// Converts a posted main actor message into a notification for any observers.
+        /// 
+        /// To implement this method in your own `MainActorMessage` conformance, use the properties defined by the message to populate the ``Notification``'s ``Notification/userInfo``.
+        /// - Parameters:
+        ///   - message: The posted `MainActorMessage`.
+        /// - Returns: The converted ``Notification``.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/makenotification(_:)
+        @MainActor public static func makeNotification(_ message: NSApplication.ShouldEndSuppressingHighDynamicRangeContent) -> Notification { unimplemented() }
+        /// A optional name corresponding to this type, used to interoperate with notification posters and observers.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/name
+        static public var name: Notification.Name { unimplemented() }
+    }
+
+}
+@available(macOS 26.0, *)
+extension NSApplication.ShouldEndSuppressingHighDynamicRangeContent {
+    /// A type which you can optionally post and observe along with this `MainActorMessage`.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/shouldendsuppressinghighdynamicrangecontent/subject
+    @available(macOS 26.0, *)
+    public typealias Subject = NSApplication
 }
