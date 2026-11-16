@@ -170,11 +170,52 @@ final class WindowChromeTests: XCTestCase, @unchecked Sendable {
     }
 }
 
+extension WindowChromeTests {
+    /// FramelessWindow with the Backdrop checkbox off: the effect view is hidden and the
+    /// card paints an opaque fill, so a card pixel is exactly the fill colour (nothing of
+    /// the hidden material or the desktop behind it shows through) while the corners
+    /// outside the card stay at alpha 0. The PC measured ~7 % show-through with the old
+    /// 0.92 fill.
+    func testBackdropOffCardIsExactlyItsOpaqueFill() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+            defer { w.close() }
+            w.titlebarAppearsTransparent = true
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            let card = _RoundedCardView(frame: w.contentView!.bounds)
+            card.fill = NSColor(srgbRed: 41 / 255, green: 56 / 255, blue: 92 / 255, alpha: 1)
+            w.contentView = card
+            let effect = NSVisualEffectView(frame: card.bounds.insetBy(dx: 1, dy: 1))
+            effect.material = .hudWindow
+            effect.state = .active
+            effect.wantsLayer = true
+            effect.layer?.cornerRadius = 22
+            effect.layer?.masksToBounds = true
+            card.addSubview(effect)
+            w.makeKeyAndOrderFront(nil)
+            effect.isHidden = true                 // Backdrop off
+            XCTAssertEqual(host(w).chrome.backdrop, .none)
+            w.display()
+            let image = host(w).lastImage!
+            let data = _pixels(image)
+            let scale = image.width / 200
+            @MainActor func bgra(_ x: Int, _ y: Int) -> [UInt8] { let i = (y * scale) * image.bytesPerRow + (x * scale) * 4; return Array(data[i..<(i + 4)]) }
+            XCTAssertEqual(bgra(100, 60), [92, 56, 41, 255], "the card is its fill, opaque")
+            XCTAssertEqual(bgra(30, 100), [92, 56, 41, 255])
+            XCTAssertEqual(bgra(1, 1)[3], 0, "the corner outside the card stays clear")
+            XCTAssertEqual(bgra(198, 118)[3], 0)
+        }
+    }
+}
+
 /// FramelessWindow's CardView: a rounded translucent card, nothing outside it.
 private final class _RoundedCardView: NSView {
+    var fill = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92)
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92).setFill()
+        fill.setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 22, yRadius: 22).fill()
     }
 }

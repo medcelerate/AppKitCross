@@ -9,7 +9,9 @@ import AppKit
 /// Paints a rounded card with a border; everything outside the card stays clear, so the
 /// (non-opaque) window takes the card's shape.
 final class CardView: NSView {
-    static let solidTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92)
+    /// Fully opaque: with the backdrop off nothing behind the card shows through it (only
+    /// the corners outside it stay clear).
+    static let solidTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 1)
     static let glassTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.35)
     var cornerRadius: CGFloat = 22
     var tint: NSColor = CardView.glassTint
@@ -161,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         p.isMovableByWindowBackground = true
         p.isFloatingPanel = true
         let card = CardView(frame: NSRect(origin: .zero, size: p.frame.size))
-        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 0.95)   // the panel has no backdrop view
+        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 1)   // opaque: the panel has no backdrop view
         card.cornerRadius = 30
         p.contentView = card
         let label = NSTextField(labelWithString: "Borderless panel: no title bar, no buttons.")
@@ -185,7 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     }
 
     #if os(Windows)
-    static let backdropOnWording = "backdrop on (tint only: DWM's blur cannot follow rounded corners)"
+    // DWM's blur cannot follow the card's rounded corners (see the backdrop comment below).
+    static let backdropOnWording = "backdrop on (tint only)"
     #else
     static let backdropOnWording = "backdrop on"
     #endif
