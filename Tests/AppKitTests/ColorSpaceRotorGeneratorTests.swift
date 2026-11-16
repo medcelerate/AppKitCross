@@ -334,7 +334,9 @@ final class GeneratorDriftTests: XCTestCase {
             guard let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)), let r = Range(m.range(at: 1), in: s) else { return nil }
             return String(s[r])
         }
-        for line in text.components(separatedBy: "\n") {
+        // CRLF checkouts (core.autocrlf on Windows): "\r\n" is one Character in Swift, so a
+        // split on "\n" alone would see the whole file as a single line.
+        for line in text.components(separatedBy: .newlines) {
             let stripped = line.trimmingCharacters(in: .whitespaces)
             if stripped.hasPrefix("//") { continue }
             if depth == 0 { container = first(containerRE, stripped) }
