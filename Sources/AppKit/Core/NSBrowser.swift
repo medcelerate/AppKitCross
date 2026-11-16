@@ -139,7 +139,7 @@ internal final class _NSBrowserScroller: NSScroller {
             _delegate = newValue
             _contentMode = nil
             _isLoaded = false
-            if newValue != nil, window != nil { loadColumnZero() } else { needsDisplay = true }
+            if newValue != nil, window != nil { loadColumnZero() } else { needsDisplay = true; needsLayout = true }
         }
     }
     @MainActor open override var target: AnyObject? {
@@ -311,6 +311,12 @@ internal final class _NSBrowserScroller: NSScroller {
         if !_isLoaded, _delegate != nil { loadColumnZero() }
     }
 
+    /// Column zero is loaded in layout at the latest, before a natively hosted window builds
+    /// its layer scene (loaded only at draw time, the columns' layers would miss that commit).
+    @MainActor open override func layout() {
+        super.layout()
+        _ensureLoaded()
+    }
     @MainActor open override func viewWillDraw() {
         super.viewWillDraw()
         _ensureLoaded()

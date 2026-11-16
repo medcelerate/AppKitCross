@@ -7,8 +7,10 @@
 // The data source counts sections and items and makes an `NSCollectionViewItem` per
 // index path (through `makeItem(withIdentifier:for:)`, which reuses); the layout object
 // says where every element goes. Items and supplementary views exist only for the
-// elements in the visible rect and are placed in `viewWillDraw`, as AppKit does;
-// scrolling redraws the view, which recycles them. Selection, highlighting, the
+// elements in the visible rect and are placed in `layout()` (a reload or a layout
+// invalidation asks for layout), as AppKit does, so they exist before a natively hosted
+// window builds its layer scene; `viewWillDraw` and scrolling place them again, which
+// recycles the ones that left. Selection, highlighting, the
 // keyboard and batch updates are here; the layout invalidation cycle runs through
 // `_layoutDidInvalidate` (ADR-0020).
 
@@ -439,10 +441,14 @@ import CoreGraphics
             clip.scroll(to: NSPoint(x: o.x + context.contentOffsetAdjustment.x, y: o.y + context.contentOffsetAdjustment.y))
         }
         needsDisplay = true
+        needsLayout = true
     }
     private func _invalidateLayout() {
         _needsPrepare = true
         needsDisplay = true
+        // The elements are made in layout, before a natively hosted window builds its layer
+        // scene (made only at draw time, their layers would miss that frame's commit).
+        needsLayout = true
     }
 
     /// Runs `prepare()` when the layout is stale and sizes the view to the content.
@@ -478,6 +484,7 @@ import CoreGraphics
             layout.invalidateLayout(with: layout.invalidationContext(forBoundsChange: newBounds))
         }
         needsDisplay = true
+        needsLayout = true
     }
     internal override func _clipViewDidResize() { _boundsDidChange() }
     @MainActor open override func setFrameSize(_ newSize: NSSize) {
@@ -506,6 +513,12 @@ import CoreGraphics
         guard _layout != nil else { return }
         _updateVisibleElements()
         needsDisplay = true
+    }
+
+    /// Makes the visible elements' views, as AppKit's collection view does during layout.
+    @MainActor open override func layout() {
+        super.layout()
+        _updateVisibleElements()
     }
 
     @MainActor open override func viewWillDraw() {
@@ -642,6 +655,7 @@ import CoreGraphics
     internal func _dropDecorationViews(ofKind kind: String) {
         for (key, v) in _visibleDecorations where key.kind == kind { _recycleDecoration(v, key: key) }
         needsDisplay = true
+        needsLayout = true
     }
     private func _dropAllElements() {
         for (ip, item) in _visibleItems { _recycle(item, at: ip) }
