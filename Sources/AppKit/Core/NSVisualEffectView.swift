@@ -49,7 +49,7 @@ import Foundation
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsvisualeffectview/maskimage
     open var maskImage: NSImage? {
         get { _maskImage }
-        set { _maskImage = newValue; needsDisplay = true }
+        set { _maskImage = newValue; _applyBackdrop(); needsDisplay = true }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsvisualeffectview/interiorbackgroundstyle
@@ -67,24 +67,25 @@ import Foundation
         }
     }
 
+    /// The window whose backdrop this view last counted in (re-evaluated when it leaves).
+    private weak var _backdropWindow: NSWindow?
+
     private func _applyBackdrop() {
+        if let old = _backdropWindow, old !== window { old._updateBackdrop() }
+        _backdropWindow = window
         guard let w = window else { return }
-        // The strongest request among the window's effect views wins.
-        var best = PlatformWindowChrome.Backdrop.none
-        func visit(_ v: NSView) {
-            if let e = v as? NSVisualEffectView {
-                let b = e._backdrop
-                if b == .acrylic || (b == .mica && best == .none) { best = b }
-            }
-            for s in v.subviews { visit(s) }
-        }
-        if let c = w.contentView { visit(c) }
-        if w._backdrop != best { w._backdrop = best }
+        w._hasEffectViews = true
+        w._updateBackdrop()
     }
 
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         _applyBackdrop()
+    }
+
+    open override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if window != nil, _backdrop != .none { _applyBackdrop() }
     }
 
     /// Draws the material as a translucent tint; the real blur comes from the window's
@@ -106,5 +107,48 @@ import Foundation
         }
         base.withAlphaComponent(_blendingMode == .behindWindow ? alpha : min(1, alpha + 0.3)).setFill()
         NSBezierPath(rect: bounds).fill()
+    }
+}
+
+extension NSWindow {
+    /// Recomputes the system backdrop the window's visible behind-window effect views ask
+    /// for (the strongest wins: acrylic over mica) and their shape: whether one covers the
+    /// whole content area, and the corner radius layers clip them to. A backend whose
+    /// backdrop fills the window rectangle (DWM) uses the shape to keep a non-opaque window
+    /// transparent where its content leaves the rectangle uncovered.
+    internal func _updateBackdrop() {
+        var best = PlatformWindowChrome.Backdrop.none
+        var covers = false
+        var radius: CGFloat = 0
+        guard let content = contentView else {
+            _backdrop = .none; _backdropCoversWindow = true; _backdropCornerRadius = 0
+            return
+        }
+        let bounds = content.bounds
+        func clipRadius(_ v: NSView, own: Bool) -> CGFloat {
+            guard let l = v.layer, l.cornerRadius > 0, own || l.masksToBounds else { return 0 }
+            return l.cornerRadius
+        }
+        func visit(_ v: NSView, ancestorRadius: CGFloat) {
+            guard !v.isHidden else { return }
+            var inherited = ancestorRadius
+            if let e = v as? NSVisualEffectView {
+                let b = e._backdrop
+                if b != .none {
+                    if b == .acrylic || (b == .mica && best == .none) { best = b }
+                    let r = max(inherited, clipRadius(e, own: true))
+                    radius = max(radius, r)
+                    // Allow a point of inset each side (a card's border stroke).
+                    let rect = e.convert(e.bounds, to: content)
+                    if e.maskImage == nil, rect.insetBy(dx: -2, dy: -2).contains(bounds) { covers = true }
+                }
+            }
+            inherited = max(inherited, clipRadius(v, own: false))
+            for s in v.subviews { visit(s, ancestorRadius: inherited) }
+        }
+        visit(content, ancestorRadius: 0)
+        _backdrop = best
+        _backdropCoversWindow = best == .none || covers
+        _backdropCornerRadius = best == .none ? 0 : radius
     }
 }

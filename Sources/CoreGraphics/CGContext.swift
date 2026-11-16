@@ -293,11 +293,16 @@ public final class CGContext {
         strokePath()
     }
 
+    /// Sets the rect to transparent black (CGContextClearRect), whatever was there: a
+    /// Direct2D `Clear` inside an axis-aligned clip for the rect (in the current
+    /// transform; outer clips still apply). Filling with a clear colour blends source-over
+    /// and leaves the pixels unchanged.
     public func clear(_ rect: CGRect) {
-        let saved = state.fill
-        state.fill = .clear
-        fill(rect)
-        state.fill = saved
+        let r = rect.standardized
+        if let rec = _recorder { let p = CGMutablePath(); p.addRect(r); rec.recordFill(p, rule: .winding, color: .clear, alpha: state.alpha) }
+        cd2d_target_push_clip_rect(target, Float(r.minX), Float(r.minY), Float(r.maxX), Float(r.maxY), false)
+        cd2d_target_clear(target, 0, 0, 0, 0)
+        cd2d_target_pop_clip_rect(target)
     }
 
     // MARK: Clipping

@@ -9,7 +9,9 @@ import AppKit
 /// Paints a rounded card with a border; everything outside the card stays clear, so the
 /// (non-opaque) window takes the card's shape.
 final class CardView: NSView {
-    static let solidTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.92)
+    /// Fully opaque: with the backdrop off nothing behind the card shows through it (only
+    /// the corners outside it stay clear).
+    static let solidTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 1)
     static let glassTint = NSColor(calibratedRed: 0.16, green: 0.22, blue: 0.36, alpha: 0.35)
     var cornerRadius: CGFloat = 22
     var tint: NSColor = CardView.glassTint
@@ -46,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             backdrop.isHidden = (sender as? NSButton)?.state != .on
             card.tint = backdrop.isHidden ? CardView.solidTint : CardView.glassTint
             card.needsDisplay = true
-            report(backdrop.isHidden ? "backdrop off" : "backdrop on")
+            report(backdrop.isHidden ? "backdrop off" : AppDelegate.backdropOnWording)
             return true
         case Selector(("showPanel:")): showPanel(); return true
         case Selector(("closePanel:")): panel?.close(); panel = nil; return true
@@ -95,8 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         card.autoresizingMask = [.width, .height]
         window.contentView = card
 
-        // The system backdrop behind the window (DWM Mica/Acrylic on Windows 11, vibrancy on
-        // macOS, a tinted fill where there is none), clipped to the card's corners.
+        // The system backdrop behind the window (vibrancy on macOS, a tinted fill where there
+        // is none), clipped to the card's corners. On Windows, DWM's Mica/Acrylic always fills
+        // the window rectangle (rounded only to its own 8 pt), so for this non-opaque window
+        // with 22 pt corners the port leaves it off and shows the view's tint: the corners
+        // outside the card stay transparent either way. A window whose effect view covers it
+        // with square corners (HelloWindow's Glass window) gets the DWM backdrop.
         backdrop = NSVisualEffectView(frame: card.bounds.insetBy(dx: 1, dy: 1))
         backdrop.material = .hudWindow
         backdrop.blendingMode = .behindWindow
@@ -157,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         p.isMovableByWindowBackground = true
         p.isFloatingPanel = true
         let card = CardView(frame: NSRect(origin: .zero, size: p.frame.size))
-        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 0.95)   // the panel has no backdrop view
+        card.tint = NSColor(calibratedRed: 0.55, green: 0.2, blue: 0.3, alpha: 1)   // opaque: the panel has no backdrop view
         card.cornerRadius = 30
         p.contentView = card
         let label = NSTextField(labelWithString: "Borderless panel: no title bar, no buttons.")
@@ -179,6 +185,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         p.setFrameOrigin(origin)
         p.makeKeyAndOrderFront(nil)
     }
+
+    #if os(Windows)
+    // DWM's blur cannot follow the card's rounded corners (see the backdrop comment below).
+    static let backdropOnWording = "backdrop on (tint only)"
+    #else
+    static let backdropOnWording = "backdrop on"
+    #endif
 
     private func report(_ what: String) {
         let f = window.frame

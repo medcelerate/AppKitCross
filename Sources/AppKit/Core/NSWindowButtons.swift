@@ -121,9 +121,26 @@ final class _NSWindowButton: NSButton {
         glyph.stroke()
     }
 
-    /// Windows 11: a flat 46-wide cell; a subtle fill on hover (red for close), a lighter
+    /// Windows 11: a flat 46-wide cell; a translucent fill on hover (red for close), a lighter
     /// one while pressed; 10-point Fluent glyphs, grey when the window is inactive, lighter
     /// still when the button is disabled; the maximise glyph becomes "restore" once zoomed.
+    /// The minimise/maximise hover fill. Windows 11 lays a translucent white over a dark
+    /// backdrop (and a black one over a light one); 6 % was ~4 RGB levels on
+    /// FramelessWindow's dark card, so the overlay is 10 % white (7 % pressed) and 6 %
+    /// black (4 % pressed) on light chrome.
+    static func captionHoverFill(lighter: Bool, pressed: Bool) -> NSColor {
+        lighter ? NSColor(white: 1, alpha: pressed ? 0.07 : 0.10) : NSColor(white: 0, alpha: pressed ? 0.04 : 0.06)
+    }
+
+    /// The buttons sit over the app's own drawing rather than a system title bar: a
+    /// non-opaque window with a transparent title bar (FramelessWindow, glass windows),
+    /// whose content is typically a dark or translucent card. A darkening overlay is
+    /// invisible there, so hover lightens, as over Windows 11's dark backdrops.
+    private var drawsOverOwnContent: Bool {
+        guard let w = window else { return false }
+        return !w.isOpaque && w.titlebarAppearsTransparent
+    }
+
     private func drawCaptionButton() {
         let dark = effectiveAppearance.isDark
         let closeHot = kind == .closeButton && isEnabled && (isHovered || pressed)
@@ -132,7 +149,7 @@ final class _NSWindowButton: NSButton {
             if closeHot {
                 fill = NSColor(red: 0.769, green: 0.169, blue: 0.110, alpha: pressed ? 0.9 : 1)   // #C42B1C
             } else {
-                fill = NSColor(white: dark ? 1 : 0, alpha: pressed ? 0.04 : 0.06)
+                fill = _NSWindowButton.captionHoverFill(lighter: dark || drawsOverOwnContent, pressed: pressed)
             }
             fill.setFill()
             NSBezierPath(rect: bounds).fill()

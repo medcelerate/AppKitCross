@@ -318,6 +318,9 @@ final class HostWindow: PlatformWindow {
         }
         guard let ctx = surface else { return }
         ctx.saveGState()
+        // A non-opaque window starts each frame at alpha 0 where it repaints, as the Win32
+        // composition swap chain does, so pixels its content leaves alone stay transparent.
+        if chrome.isTransparent { ctx.clear(rect) }
         owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
         ctx.restoreGState()
         if let scene = hostedScene { composite(scene, into: ctx, height: content.height) }

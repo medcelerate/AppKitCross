@@ -461,7 +461,12 @@ import CoreText
     private var _appearance: NSAppearance? = nil
     private var _fieldEditor: NSTextView? = nil
     /// Backdrop requested by an NSVisualEffectView blending behind the window.
-    internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { _updateChrome() } }
+    internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { if _backdrop != oldValue { _updateChrome() } } }
+    /// The shape of the views asking for `_backdrop` (`NSWindow._updateBackdrop`).
+    internal var _backdropCoversWindow = true { didSet { if _backdropCoversWindow != oldValue { _updateChrome() } } }
+    internal var _backdropCornerRadius: CGFloat = 0 { didSet { if _backdropCornerRadius != oldValue { _updateChrome() } } }
+    /// An NSVisualEffectView has been in this window: hiding views re-evaluates the backdrop.
+    internal var _hasEffectViews = false
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
@@ -732,6 +737,8 @@ import CoreText
         c.hidesTitle = _titleVisibility == .hidden || !_styleMask.contains(.titled)
         c.transparentTitleBar = _titlebarAppearsTransparent
         c.backdrop = _backdrop
+        c.backdropCoversWindow = _backdropCoversWindow
+        c.backdropCornerRadius = _backdropCornerRadius
         c.isTransparent = !_isOpaque
         c.hasShadow = _hasShadow && _sheetSlide == nil
         c.movableByBackground = _isMovableByWindowBackground

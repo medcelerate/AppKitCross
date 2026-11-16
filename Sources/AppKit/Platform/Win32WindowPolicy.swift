@@ -42,6 +42,33 @@ public enum Win32WindowPolicy {
         return .none
     }
 
+    // MARK: Transparency and the DWM backdrop
+
+    /// The corner radius (points) DWM rounds a window to on Windows 11 (`DWMWCP_ROUND`).
+    public static let systemCornerRadius: CGFloat = 8
+
+    /// The `DWMWA_SYSTEMBACKDROP_TYPE` a window gets. DWM paints Mica and Acrylic over the
+    /// whole window rectangle (rounded only by `DWMWCP_ROUND`), behind every pixel the swap
+    /// chain leaves translucent, and has no way to follow the content's alpha. So a
+    /// non-opaque window whose effect views leave part of the rectangle uncovered, or clip
+    /// it to corners rounder than DWM's, gets no system backdrop: the uncovered pixels stay
+    /// at alpha 0 and show the desktop, as on macOS, and the effect views show their tint
+    /// without the blur. An opaque window covers the rectangle itself, so it keeps the
+    /// backdrop it asks for.
+    public static func systemBackdrop(for chrome: PlatformWindowChrome) -> PlatformWindowChrome.Backdrop {
+        guard chrome.isTransparent, chrome.backdrop != .none else { return chrome.backdrop }
+        if !chrome.backdropCoversWindow || chrome.backdropCornerRadius > systemCornerRadius { return .none }
+        return chrome.backdrop
+    }
+
+    /// Whether DWM's one-pixel border (`DWMWA_BORDER_COLOR`) is turned off: on borderless
+    /// windows (macOS draws none) and on non-opaque windows whose content covers the frame,
+    /// where the border would outline the rectangle around a shape the content draws.
+    public static func hidesBorder(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome) -> Bool {
+        if !styleMask.contains(.titled) { return true }
+        return chrome.isTransparent && (styleMask.contains(.fullSizeContentView) || chrome.extendsContentIntoTitleBar)
+    }
+
     // MARK: Non-client hit codes (WM_NCHITTEST)
 
     public static let HTCLIENT: Int32 = 1
