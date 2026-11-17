@@ -342,11 +342,21 @@ open class NSSpellChecker: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/dismisscorrectionindicator(for:)
     open func dismissCorrectionIndicator(for view: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/showcorrectionindicator(of:primarystring:alternativestrings:forstringin:view:)
-    open func showCorrectionIndicator(of type: NSSpellChecker.CorrectionIndicatorType, primaryString: String, alternativeStrings: [String], forStringIn rectOfTypedString: NSRect, view: NSView) async -> String? { unimplemented() }
+    open func showCorrectionIndicator(of type: NSSpellChecker.CorrectionIndicatorType, primaryString: String, alternativeStrings: [String], forStringIn rectOfTypedString: NSRect, view: NSView) async -> String? { unimplemented("NSSpellChecker.showCorrectionIndicator — the autocorrection bubble is macOS UI; the port corrects without an indicator") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/showinlineprediction(forcandidates:client:)
-    open func showInlinePrediction(forCandidates candidates: [NSTextCheckingResult], client: any NSTextInputClient) { unimplemented() }
+    open func showInlinePrediction(forCandidates candidates: [NSTextCheckingResult], client: any NSTextInputClient) { unimplemented("NSSpellChecker.showInlinePrediction — inline predictions are an Apple text-input service with no counterpart") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/menu(for:string:options:atlocation:in:)
-    open func menu(for result: NSTextCheckingResult, string checkedString: String, options: [NSSpellChecker.OptionKey : Any]? = nil, atLocation location: NSPoint, in view: NSView) -> NSMenu? { unimplemented() }
+    open func menu(for result: NSTextCheckingResult, string checkedString: String, options: [NSSpellChecker.OptionKey : Any]? = nil, atLocation location: NSPoint, in view: NSView) -> NSMenu? {
+        // The corrections for a spelling result (the guesses), else nil (macOS adds its
+        // grammar and data-detector items, which the port's checker does not produce).
+        guard result.resultType == .spelling else { return nil }
+        let word = (checkedString as NSString).substring(with: result.range)
+        let guesses = self.guesses(forWordRange: NSRange(location: 0, length: (word as NSString).length), in: word, language: nil, inSpellDocumentWithTag: 0) ?? []
+        guard !guesses.isEmpty else { return nil }
+        let menu = NSMenu(title: "")
+        for g in guesses { menu.addItem(NSMenuItem(title: g, action: Selector(("_correctSpellingFromMenu:")), keyEquivalent: "")) }
+        return menu
+    }
 
     // MARK: Panels
 

@@ -62,7 +62,13 @@ import CoreText
         super.init()
     }
     // Required by the superclass (NSCoding).
-    @MainActor public required init?(coder: NSCoder) { unimplemented() }
+    /// A drawer of no content size on the left edge (the port loads no nibs: nothing is decoded).
+    @MainActor public required init?(coder: NSCoder) {
+        _contentSize = .zero
+        _preferredEdge = .minX
+        _edge = .minX
+        super.init(coder: coder)
+    }
 
     // MARK: Opening and closing
 
@@ -479,7 +485,7 @@ private final class _NSDrawerSlide: NSAnimation, NSAnimationDelegate, @unchecked
         super.init(duration: duration, animationCurve: animationCurve)
         delegate = self
     }
-    required init?(coder: NSCoder) { unimplemented() }
+    required init?(coder: NSCoder) { unimplemented("_NSDrawerSlide — an internal helper; nothing archives it") }
 
     override var currentProgress: NSAnimation.Progress {
         get { super.currentProgress }

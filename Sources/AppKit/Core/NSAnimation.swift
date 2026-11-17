@@ -53,7 +53,15 @@ open class NSAnimation: NSObject, NSCopying, NSCoding {
     private struct _WeakAnimation { weak var value: NSAnimation? }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimation/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// AppKit's keys: duration, curve, frames per second, blocking mode and progress marks.
+    public required init?(coder: NSCoder) {
+        _duration = max(0, coder.decodeDouble(forKey: "NSAnimationDuration"))
+        _curve = NSAnimation.Curve(rawValue: coder.decodeInteger(forKey: "NSAnimationAnimationCurve")) ?? .easeInOut
+        super.init()
+        if coder.containsValue(forKey: "NSAnimationFramesPerSecond") { _frameRate = coder.decodeFloat(forKey: "NSAnimationFramesPerSecond") }
+        _blockingMode = NSAnimation.BlockingMode(rawValue: coder.decodeInteger(forKey: "NSAnimationAnimationBlockingMode")) ?? .blocking
+        _marks = ((coder._decodeObjectIfPresent(forKey: "NSAnimationProgressMarks") as? [NSNumber]) ?? []).map { $0.floatValue }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimation/init(duration:animationcurve:)
     public init(duration: TimeInterval, animationCurve: NSAnimation.Curve) {
         _duration = max(0, duration)
@@ -197,7 +205,13 @@ open class NSAnimation: NSObject, NSCopying, NSCoding {
         copy._progress = _progress
     }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) {
+        coder.encode(_duration, forKey: "NSAnimationDuration")
+        coder.encode(Int(_curve.rawValue), forKey: "NSAnimationAnimationCurve")
+        coder.encode(_frameRate, forKey: "NSAnimationFramesPerSecond")
+        coder.encode(Int(_blockingMode.rawValue), forKey: "NSAnimationAnimationBlockingMode")
+        coder.encode(_marks.map { NSNumber(value: $0) } as NSArray, forKey: "NSAnimationProgressMarks")
+    }
 
     // MARK: Curves
 

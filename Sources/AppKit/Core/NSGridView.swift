@@ -39,7 +39,8 @@ import CoreGraphics
         super.init(frame: frameRect)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgridview/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgridview/init(numberofcolumns:rows:)
     @MainActor public convenience init(numberOfColumns columnCount: Int, rows rowCount: Int) {
         self.init(frame: .zero)

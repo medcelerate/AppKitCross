@@ -34,6 +34,13 @@ import CoreText
     private var _sound: NSSound? = nil
     private var _periodicDelay: Float = 0.4
     private var _periodicInterval: Float = 0.075
+    private var _attributedAlternateTitle: NSAttributedString? = nil
+    private var _gradientType: NSButton.GradientType = .none
+    private var _keyEquivalentFont: NSFont? = nil
+    /// NSButton's image tint (`contentTintColor`), compression and image-hugging settings.
+    internal var _contentTintColor: NSColor? = nil
+    internal var _imageHugsTitle = false
+    internal var _hidesText = false, _hidesImage = false
 
     @MainActor internal override func _copyCellState(from other: NSCell) {
         super._copyCellState(from: other)
@@ -44,6 +51,8 @@ import CoreText
         _keyEquivalent = o._keyEquivalent; _keyEquivalentModifierMask = o._keyEquivalentModifierMask
         _imageDimsWhenDisabled = o._imageDimsWhenDisabled; _showsBorderOnlyWhileMouseInside = o._showsBorderOnlyWhileMouseInside
         _sound = o._sound; _periodicDelay = o._periodicDelay; _periodicInterval = o._periodicInterval
+        _attributedAlternateTitle = o._attributedAlternateTitle; _gradientType = o._gradientType; _keyEquivalentFont = o._keyEquivalentFont
+        _contentTintColor = o._contentTintColor; _imageHugsTitle = o._imageHugsTitle; _hidesText = o._hidesText; _hidesImage = o._hidesImage
     }
 
     /// True for checkbox and radio buttons: a state indicator with the title beside it.
@@ -93,16 +102,101 @@ import CoreText
         }
     }
 
-    @MainActor open override var cellSize: NSSize {
-        var s = stringValue.isEmpty ? NSSize(width: 0, height: _effectiveFont.ascender - _effectiveFont.descender) : stringValue.size(withAttributes: _textAttributes)
+    // MARK: Image and title layout
+
+    /// The image shown now: the alternate image while the state or highlight shows contents.
+    internal var _displayedImage: NSImage? {
+        let showsAlternate = (_state != .off && _showsStateBy.contains(.contentsCellMask)) || (_isHighlighted && _highlightsBy.contains(.contentsCellMask))
+        if showsAlternate, let alt = _alternateImage { return alt }
+        return _image
+    }
+    /// The position the cell lays out with: no image without one, image only without a
+    /// title, and the button's compression (hide text needs an image left, hide images a title).
+    internal func _layoutPosition(hidesText: Bool, hidesImage: Bool) -> NSControl.ImagePosition {
+        let hasImage = _displayedImage != nil, hasTitle = !stringValue.isEmpty
+        if !hasImage || _imagePosition == .noImage { return .noImage }
+        if hidesImage && hasTitle { return .noImage }
+        if !hasTitle || _imagePosition == .imageOnly { return .imageOnly }
+        if hidesText { return .imageOnly }
+        return _imagePosition
+    }
+    internal var _effectiveImagePosition: NSControl.ImagePosition { _layoutPosition(hidesText: _hidesText, hidesImage: _hidesImage) }
+    private static let _imageTitleGap: CGFloat = 4
+    private var _titleSize: NSSize {
+        stringValue.isEmpty ? NSSize(width: 0, height: _effectiveFont.ascender - _effectiveFont.descender) : stringValue.size(withAttributes: _textAttributes)
+    }
+    /// The content (image and title) size for a layout position.
+    internal func _contentSize(for position: NSControl.ImagePosition) -> NSSize {
+        let t = _titleSize, i = _displayedImage?.size ?? .zero, g = NSButtonCell._imageTitleGap
+        switch position {
+        case .noImage: return t
+        case .imageOnly: return i
+        case .imageOverlaps: return NSSize(width: max(t.width, i.width), height: max(t.height, i.height))
+        case .imageAbove, .imageBelow: return NSSize(width: max(t.width, i.width), height: t.height + g + i.height)
+        default: return NSSize(width: t.width + g + i.width, height: max(t.height, i.height))
+        }
+    }
+    /// The cell size with a layout position (NSButton's compressed sizes ask for others).
+    internal func _cellSize(for position: NSControl.ImagePosition) -> NSSize {
+        var s = _contentSize(for: position)
         if _isSwitchLike {
+            s = _titleSize
             s.width += _indicatorSize + 10
             s.height = max(s.height, _indicatorSize) + 4
+        } else if position == .imageOnly {
+            s.width += _isBordered ? 16 : 0
+            s.height += _isBordered ? 8 : 0
         } else {
             s.width += 28
             s.height += 8
         }
         return s
+    }
+    @MainActor open override var cellSize: NSSize { _cellSize(for: _effectiveImagePosition) }
+    /// The image and title rects inside `frame` for the current position (AppKit centres the
+    /// pair; `imageHugsTitle` keeps them together for leading/trailing positions too).
+    internal func _imageAndTitleRects(in frame: NSRect, flipped: Bool) -> (image: NSRect, title: NSRect) {
+        let position = _effectiveImagePosition
+        let t = _titleSize, g = NSButtonCell._imageTitleGap
+        var i = _displayedImage?.size ?? .zero
+        // Scale the image down (or to fit) into the frame as imageScaling asks.
+        let avail = frame.insetBy(dx: 2, dy: 2).size
+        switch _imageScaling {
+        case .scaleAxesIndependently: if position == .imageOnly { i = avail }
+        case .scaleProportionallyUpOrDown:
+            if position == .imageOnly, i.width > 0, i.height > 0 { let k = min(avail.width / i.width, avail.height / i.height); i = NSSize(width: i.width * k, height: i.height * k) }
+        case .scaleNone: break
+        default:
+            if i.width > avail.width || i.height > avail.height, i.width > 0, i.height > 0 {
+                let k = min(avail.width / i.width, avail.height / i.height); i = NSSize(width: i.width * k, height: i.height * k)
+            }
+        }
+        let leading = NSApp?.userInterfaceLayoutDirection == .rightToLeft ? NSControl.ImagePosition.imageRight : .imageLeft
+        var pos = position
+        if pos == .imageLeading { pos = leading } else if pos == .imageTrailing { pos = leading == .imageLeft ? .imageRight : .imageLeft }
+        func centered(_ size: NSSize, x: CGFloat? = nil, y: CGFloat? = nil) -> NSRect {
+            NSRect(x: (x ?? frame.midX - size.width / 2).rounded(), y: (y ?? frame.midY - size.height / 2).rounded(), width: size.width, height: size.height)
+        }
+        switch pos {
+        case .noImage: return (.zero, centered(t))
+        case .imageOnly: return (centered(i), .zero)
+        case .imageOverlaps: return (centered(i), centered(t))
+        case .imageAbove, .imageBelow:
+            let total = i.height + g + t.height
+            let top = frame.midY - total / 2
+            // "Above" is towards the top of the screen: the smaller y in a flipped view.
+            let imageFirst = (pos == .imageAbove) == flipped
+            let iy = imageFirst ? top : top + t.height + g
+            let ty = imageFirst ? top + i.height + g : top
+            return (centered(i, y: iy), centered(t, y: ty))
+        default:
+            let total = i.width + g + t.width
+            let left = frame.midX - total / 2
+            let imageLeft = pos == .imageLeft
+            let ix = imageLeft ? left : left + t.width + g
+            let tx = imageLeft ? left + i.width + g : left
+            return (centered(i, x: ix), centered(t, x: tx))
+        }
     }
     @MainActor open override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         _controlView = controlView
@@ -120,7 +214,21 @@ import CoreText
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         var frame = cellFrame
         if _isHighlighted && _highlightsBy.contains(.pushInCellMask) { frame = frame.offsetBy(dx: 0, dy: controlView.isFlipped ? 1 : -1) }
-        _ = drawTitle(attributedTitle, withFrame: frame, in: controlView)
+        let position = _effectiveImagePosition
+        let rects = _imageAndTitleRects(in: frame, flipped: controlView.isFlipped)
+        if position != .noImage, let image = _displayedImage { drawImage(image, withFrame: rects.image, in: controlView) }
+        if position != .imageOnly {
+            let titleFrame = position == .noImage || position == .imageOverlaps ? frame : NSRect(x: rects.title.minX, y: frame.minY, width: rects.title.width + 1, height: frame.height)
+            _ = drawTitle(attributedTitle, withFrame: titleFrame, in: controlView)
+        }
+    }
+    /// The colour a template image takes: `contentTintColor`, else the title's colour
+    /// (white on an accent bezel), dimmed when disabled.
+    private var _templateColor: NSColor {
+        let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
+        var c: NSColor = _contentTintColor ?? (((pressed || _isDefaultButton) && _isBordered) ? .white : .controlTextColor)
+        if !_isEnabled && _imageDimsWhenDisabled { c = NSColor.disabledControlTextColor }
+        return c
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/init(coder:)
     public required init(coder: NSCoder) { super.init(coder: coder) }
@@ -146,9 +254,18 @@ import CoreText
         set { _alternateTitle = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/attributedalternatetitle
+    /// The alternate title with the cell's font, control text colour and a centred,
+    /// tail-truncating paragraph style (macOS 15), or as set; empty without an alternate title.
     @MainActor open var attributedAlternateTitle: NSAttributedString {
-        get { unimplemented() }
-        set { unimplemented() }
+        get {
+            if let a = _attributedAlternateTitle, a.string == _alternateTitle { return a }
+            guard !_alternateTitle.isEmpty else { return NSAttributedString(string: "") }
+            let ps = NSMutableParagraphStyle()
+            ps.alignment = _alignment
+            ps.lineBreakMode = .byTruncatingTail
+            return NSAttributedString(string: _alternateTitle, attributes: [.font: _effectiveFont, .foregroundColor: NSColor.controlTextColor, .paragraphStyle: ps])
+        }
+        set { _attributedAlternateTitle = newValue; _alternateTitle = newValue.string; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/attributedtitle
     @MainActor open var attributedTitle: NSAttributedString {
@@ -187,7 +304,16 @@ import CoreText
         path.stroke()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/drawimage(_:withframe:in:)
-    @MainActor open func drawImage(_ image: NSImage, withFrame frame: NSRect, in controlView: NSView) { }   // NSImage drawing arrives with the image pipeline.
+    /// Draws the image into `frame`; a template image is tinted (`_templateColor`), and a
+    /// disabled cell dims a colour image when `imageDimsWhenDisabled`.
+    @MainActor open func drawImage(_ image: NSImage, withFrame frame: NSRect, in controlView: NSView) {
+        guard frame.width > 0, frame.height > 0 else { return }
+        if image.isTemplate, let tinted = image._tintedForTemplate(_templateColor, size: frame.size) {
+            tinted.draw(in: frame, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        } else {
+            image.draw(in: frame, from: .zero, operation: .sourceOver, fraction: (!_isEnabled && _imageDimsWhenDisabled) ? 0.5 : 1, respectFlipped: true, hints: nil)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/drawtitle(_:withframe:in:)
     @MainActor open func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
         let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
@@ -201,9 +327,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/getperiodicdelay(_:interval:)
     @MainActor open override func getPeriodicDelay(_ delay: UnsafeMutablePointer<Float>, interval: UnsafeMutablePointer<Float>) { delay.pointee = _periodicDelay; interval.pointee = _periodicInterval }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/gradienttype
+    /// Stored; unused, as on macOS since 10.12 (setting it has no effect on drawing).
     @MainActor open var gradientType: NSButton.GradientType {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _gradientType }
+        set { _gradientType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/highlightsby
     @MainActor open var highlightsBy: NSCell.StyleMask {
@@ -238,9 +365,11 @@ import CoreText
         set { _keyEquivalent = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/keyequivalentfont
+    /// The font a key equivalent would be drawn in: the cell's font unless set (macOS 15
+    /// answers the 13-point system font). Buttons do not draw their key equivalents.
     @MainActor open var keyEquivalentFont: NSFont? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _keyEquivalentFont ?? _effectiveFont }
+        set { _keyEquivalentFont = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/keyequivalentmodifiermask
     @MainActor open var keyEquivalentModifierMask: NSEvent.ModifierFlags {
@@ -271,7 +400,9 @@ import CoreText
         _changed()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/setkeyequivalentfont(_:size:)
-    @MainActor open func setKeyEquivalentFont(_ fontName: String, size fontSize: CGFloat) { unimplemented() }
+    @MainActor open func setKeyEquivalentFont(_ fontName: String, size fontSize: CGFloat) {
+        if let f = NSFont(name: fontName, size: fontSize) { _keyEquivalentFont = f }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/setperiodicdelay(_:interval:)
     @MainActor open func setPeriodicDelay(_ delay: Float, interval: Float) { _periodicDelay = delay; _periodicInterval = interval }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/showsborderonlywhilemouseinside

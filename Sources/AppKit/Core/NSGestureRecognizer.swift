@@ -135,7 +135,7 @@ import CoreGraphics
     @MainActor open var allowedTouchTypes: NSTouch.TouchTypeMask { get { _allowedTouchTypes } set { _allowedTouchTypes = newValue } }
     @available(macOS 10.11, *)
     @MainActor open var pressureConfiguration: NSPressureConfiguration {
-        get { guard let c = _pressureConfiguration else { unimplemented() }; return c }   // no pressure-sensitive input on these platforms
+        get { guard let c = _pressureConfiguration else { unimplemented("NSGestureRecognizer.pressureConfiguration — the default is an NSPressureConfiguration, a generated stub (no pressure-sensitive input on these platforms)") }; return c }
         set { _pressureConfiguration = newValue }
     }
 

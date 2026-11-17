@@ -30,6 +30,8 @@ open class NSWorkspace: NSObject {
     @MainActor private var _refreshing = false
     @MainActor private var _liveApplications: [NSRunningApplication] = []
     @MainActor private var _iconCache: [PlatformIconTarget: NSImage] = [:]
+    /// The options last given to `setDesktopImageURL(_:for:options:)`, by display index.
+    @MainActor private var _desktopImageOptions: [Int: [NSWorkspace.DesktopImageOptionKey: Any]] = [:]
     @MainActor internal var _currentApplication: NSRunningApplication?
 
     public override init() { super.init() }
@@ -240,7 +242,9 @@ open class NSWorkspace: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/notefilesystemchanged(_:)
     open func noteFileSystemChanged(_ path: String) { _onMain { _platform.noteFileSystemChanged(path) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/showsearchresults(forquerystring:)
-    open func showSearchResults(forQueryString queryString: String) -> Bool { unimplemented() }
+    /// Windows Search (`search-ms:`) on Windows; false on Linux, where no desktop-neutral
+    /// search entry point exists (macOS answers false when Spotlight cannot show results).
+    open func showSearchResults(forQueryString queryString: String) -> Bool { _onMain { _platform.showSearchResults(forQuery: queryString) } }
 
     // MARK: Icons
 
@@ -295,7 +299,7 @@ open class NSWorkspace: NSObject {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/seticon(_:forfile:options:)
-    open func setIcon(_ image: NSImage?, forFile fullPath: String, options: NSWorkspace.IconCreationOptions = []) -> Bool { unimplemented() }
+    open func setIcon(_ image: NSImage?, forFile fullPath: String, options: NSWorkspace.IconCreationOptions = []) -> Bool { unimplemented("NSWorkspace.setIcon(_:forFile:options:) — Windows and Linux files carry no custom icon (Windows lets only folders name an .ico through desktop.ini; GNOME keeps one in GVfs metadata that other desktops ignore)") }
 
     // MARK: Applications for files
 
@@ -491,10 +495,10 @@ open class NSWorkspace: NSObject {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/requestauthorization(to:)
     @available(macOS 10.14, *)
-    open func requestAuthorization(to type: NSWorkspace.AuthorizationType) async throws -> NSWorkspace.Authorization { unimplemented() }
+    open func requestAuthorization(to type: NSWorkspace.AuthorizationType) async throws -> NSWorkspace.Authorization { unimplemented("NSWorkspace.requestAuthorization(to:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/requestauthorization(to:completionhandler:)
     @available(macOS 10.14, *)
-    open func requestAuthorization(to type: NSWorkspace.AuthorizationType, completionHandler: @escaping @Sendable (NSWorkspace.Authorization?, (any Error)?) -> Void) { unimplemented() }
+    open func requestAuthorization(to type: NSWorkspace.AuthorizationType, completionHandler: @escaping @Sendable (NSWorkspace.Authorization?, (any Error)?) -> Void) { unimplemented("NSWorkspace.requestAuthorization(to:completionHandler:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
 
     // MARK: Volumes (no counterpart for removable media and ejecting; see the ADR)
 
@@ -503,15 +507,33 @@ open class NSWorkspace: NSObject {
         FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes])?.map { $0.path }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/mountedremovablemedia()
-    open func mountedRemovableMedia() -> [Any]? { unimplemented() }
+    /// The mount points of removable volumes: drive roots of removable and CD drives on
+    /// Windows, udisks mounts under /media and /run/media on Linux.
+    open func mountedRemovableMedia() -> [Any]? { _onMain { _platform.removableVolumePaths() } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/unmountandejectdevice(at:)
-    open func unmountAndEjectDevice(at url: URL) throws { unimplemented() }
+    /// Throws an NSError (NSOSStatusErrorDomain −36, macOS's answer for a path that is no
+    /// ejectable volume) when the platform refuses.
+    open func unmountAndEjectDevice(at url: URL) throws {
+        do { try _onMain { try _platform.ejectVolume(at: url) } }
+        catch { throw NSError(domain: "NSOSStatusErrorDomain", code: -36, userInfo: [NSURLErrorKey: url, NSLocalizedFailureReasonErrorKey: String(describing: error)]) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/unmountandejectdevice(atpath:)
-    open func unmountAndEjectDevice(atPath path: String) -> Bool { unimplemented() }
+    open func unmountAndEjectDevice(atPath path: String) -> Bool { (try? unmountAndEjectDevice(at: URL(fileURLWithPath: path))) != nil }
+    /// The file system's name as both description and type (macOS: "apfs", "apfs"), and
+    /// whether it is removable, writable and unmountable; false for a path that does not exist.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/getfilesysteminfo(forpath:isremovable:iswritable:isunmountable:description:type:)
-    open func getFileSystemInfo(forPath fullPath: String, isRemovable removableFlag: UnsafeMutablePointer<ObjCBool>?, isWritable writableFlag: UnsafeMutablePointer<ObjCBool>?, isUnmountable unmountableFlag: UnsafeMutablePointer<ObjCBool>?, description: AutoreleasingUnsafeMutablePointer<NSString?>?, type fileSystemType: AutoreleasingUnsafeMutablePointer<NSString?>?) -> Bool { unimplemented() }
+    open func getFileSystemInfo(forPath fullPath: String, isRemovable removableFlag: UnsafeMutablePointer<ObjCBool>?, isWritable writableFlag: UnsafeMutablePointer<ObjCBool>?, isUnmountable unmountableFlag: UnsafeMutablePointer<ObjCBool>?, description: AutoreleasingUnsafeMutablePointer<NSString?>?, type fileSystemType: AutoreleasingUnsafeMutablePointer<NSString?>?) -> Bool {
+        guard let info = _onMain({ _platform.fileSystemInfo(forPath: fullPath) }) else { return false }
+        removableFlag?.pointee = ObjCBool(info.isRemovable)
+        writableFlag?.pointee = ObjCBool(info.isWritable)
+        unmountableFlag?.pointee = ObjCBool(info.isUnmountable)
+        description?.pointee = info.type as NSString
+        fileSystemType?.pointee = info.type as NSString
+        return true
+    }
+    /// 0: no power-off delay is granted (macOS has answered 0 since 10.x; the call is deprecated).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/extendpoweroff(by:)
-    open func extendPowerOff(by requested: Int) -> Int { unimplemented() }
+    open func extendPowerOff(by requested: Int) -> Int { 0 }
 
     // MARK: Running applications
 
@@ -678,10 +700,19 @@ open class NSWorkspace: NSObject {
     open func desktopImageURL(for screen: NSScreen) -> URL? { _onMain { _platform.desktopImageURL(forDisplay: _displayIndex(of: screen)) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/setdesktopimageurl(_:for:options:)
     open func setDesktopImageURL(_ url: URL, for screen: NSScreen, options: [NSWorkspace.DesktopImageOptionKey : Any] = [:]) throws {
-        try _onMain { try _platform.setDesktopImageURL(url, forDisplay: _displayIndex(of: screen)) }
+        try _onMain {
+            let index = _displayIndex(of: screen)
+            try _platform.setDesktopImageURL(url, forDisplay: index)
+            _desktopImageOptions[index] = options
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/desktopimageoptions(for:)
-    open func desktopImageOptions(for screen: NSScreen) -> [NSWorkspace.DesktopImageOptionKey : Any]? { unimplemented() }
+    /// The options this process last set for the screen's picture; empty otherwise (macOS 15
+    /// answers an empty dictionary for a picture set elsewhere too: the platforms do not
+    /// report scaling in AppKit's terms).
+    open func desktopImageOptions(for screen: NSScreen) -> [NSWorkspace.DesktopImageOptionKey : Any]? {
+        _onMain { _desktopImageOptions[_displayIndex(of: screen)] ?? [:] }
+    }
     @MainActor private func _displayIndex(of screen: NSScreen) -> Int { NSScreen.screens.firstIndex { $0 === screen || $0.frame == screen.frame } ?? 0 }
 
     // MARK: File types (UniformTypeIdentifiers)
@@ -718,9 +749,16 @@ open class NSWorkspace: NSObject {
     // MARK: Finder labels (no counterpart; see the ADR)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/filelabelcolors
-    open var fileLabelColors: [NSColor] { unimplemented() }
+    /// macOS 15's Finder label colours (calibrated RGB), in `fileLabels` order. Neither
+    /// Explorer nor the Linux file managers have labels; these are the names and colours
+    /// an application shows for its own tags.
+    open var fileLabelColors: [NSColor] {
+        [(0, 0, 0), (0.65626, 0.65626, 0.65626), (0.699229, 0.83595, 0.265629), (0.746105, 0.546883, 0.843763),
+         (0.339849, 0.628916, 0.996109), (0.933608, 0.851575, 0.265629), (0.980484, 0.382818, 0.347662), (0.960952, 0.660166, 0.25391)]
+            .map { NSColor(calibratedRed: $0.0, green: $0.1, blue: $0.2, alpha: 1) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/filelabels
-    open var fileLabels: [String] { unimplemented() }
+    open var fileLabels: [String] { ["None", "Gray", "Green", "Purple", "Blue", "Yellow", "Red", "Orange"] }
 }
 
 // All state is main-actor isolated or immutable; the API is callable from any thread.

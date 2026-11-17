@@ -146,7 +146,7 @@ open class NSPasteboard: NSObject {
     ///     if let contentType = metadataResults.contentType {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata(for:)
     @available(macOS 15.4, *)
-    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>>) async throws -> NSPasteboard.DetectedMetadata { unimplemented() }
+    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>>) async throws -> NSPasteboard.DetectedMetadata { unimplemented("NSPasteboard.detectedMetadata — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether the first pasteboard item matches the specified patterns, without notifying the person using the app.
     /// 
     /// This method only gives an indication of whether the first pasteboard item matches a particular pattern, and doesn’t allow the app to access the item's contents. As a result, the system doesn’t notify the person using the app about reading the contents of the pasteboard.
@@ -161,7 +161,7 @@ open class NSPasteboard: NSObject {
     ///     } else {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedpatterns(for:)
     @available(macOS 15.4, *)
-    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented() }
+    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented("NSPasteboard.detectedPatterns — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether the first pasteboard item matches the specified patterns, reading the contents if it finds a match.
     /// 
     /// For details about the types returned for each pattern, see ``NSPasteboard/DetectedValues``.
@@ -176,7 +176,7 @@ open class NSPasteboard: NSObject {
     ///         print ("No links found in item.")
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues(for:)
     @available(macOS 15.4, *)
-    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> NSPasteboard.DetectedValues { unimplemented() }
+    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> NSPasteboard.DetectedValues { unimplemented("NSPasteboard.detectedValues — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/general
     class public var general: NSPasteboard {
         if let p = _named[.general] { return p }

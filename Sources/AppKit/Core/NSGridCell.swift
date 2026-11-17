@@ -78,7 +78,18 @@ import CoreGraphics
     }
 
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// AppKit's `NSGrid_` keys for the placements and alignment (the content view and the
+    /// owning row and column are the grid's to archive).
+    open func encode(with coder: NSCoder) {
+        coder.encode(_xPlacement.rawValue, forKey: "NSGrid_xPlacement")
+        coder.encode(_yPlacement.rawValue, forKey: "NSGrid_yPlacement")
+        coder.encode(_rowAlignment.rawValue, forKey: "NSGrid_alignment")
+    }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) {
+        super.init()
+        _xPlacement = NSGridCell.Placement(rawValue: coder.decodeInteger(forKey: "NSGrid_xPlacement")) ?? .inherited
+        _yPlacement = NSGridCell.Placement(rawValue: coder.decodeInteger(forKey: "NSGrid_yPlacement")) ?? .inherited
+        _rowAlignment = NSGridRow.Alignment(rawValue: coder.decodeInteger(forKey: "NSGrid_alignment")) ?? .inherited
+    }
 }

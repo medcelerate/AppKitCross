@@ -34,7 +34,16 @@ open class NSRulerMarker: NSObject, NSCopying, NSCoding {
     internal var _isDragging = false
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrulermarker/init(coder:)
-    public required init(coder: NSCoder) { unimplemented() }
+    /// A marker with no ruler (`NSLocation`, `NSImage`, `NSImageOrigin`, `NSMovable`, `NSRemovable`).
+    public required init(coder: NSCoder) {
+        _ruler = nil
+        _location = CGFloat(coder.decodeDouble(forKey: "NSLocation"))
+        _image = coder._decodeObjectIfPresent(forKey: "NSImage") as? NSImage ?? NSImage(size: .zero)
+        _imageOrigin = (coder._decodeObjectIfPresent(forKey: "NSImageOrigin") as? NSValue)?.pointValue ?? .zero
+        super.init()
+        if coder.containsValue(forKey: "NSMovable") { _isMovable = coder.decodeBool(forKey: "NSMovable") }
+        _isRemovable = coder.decodeBool(forKey: "NSRemovable")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrulermarker/init(rulerview:markerlocation:image:imageorigin:)
     public init(rulerView ruler: NSRulerView, markerLocation location: CGFloat, image: NSImage, imageOrigin: NSPoint) {
         _ruler = ruler
@@ -137,7 +146,13 @@ open class NSRulerMarker: NSObject, NSCopying, NSCoding {
         return c
     }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) {
+        coder.encode(Double(_location), forKey: "NSLocation")
+        coder.encode(_image, forKey: "NSImage")
+        coder.encode(NSValue(point: _imageOrigin), forKey: "NSImageOrigin")
+        coder.encode(_isMovable, forKey: "NSMovable")
+        coder.encode(_isRemovable, forKey: "NSRemovable")
+    }
 
     private func _redisplay() {
         guard let ruler = _ruler else { return }

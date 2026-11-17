@@ -12,7 +12,8 @@ open class NSController: NSObject, NSCoding, NSEditor, NSEditorRegistration {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroller/init()
     public override init() { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroller/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Nothing to decode (macOS writes no keys for a plain controller).
+    public required init?(coder: NSCoder) { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroller/commitediting()
     @MainActor open func commitEditing() -> Bool {
         for e in _editors where !e.commitEditing() { return false }
@@ -23,7 +24,11 @@ open class NSController: NSObject, NSCoding, NSEditor, NSEditorRegistration {
         let committed = commitEditing()
         // The callback is `editor:didCommit:contextInfo:`, a three-argument message that
         // target/action dispatch (one sender argument) cannot deliver without the runtime.
-        if delegate != nil, didCommitSelector != nil { _ = committed; unimplemented() }
+        // The callback is delivered through the target/action registry with the "did
+        // commit" answer as an NSNumber sender, as NSDocument's callbacks are.
+        if let sel = didCommitSelector, let target = delegate as AnyObject? {
+            _ = ActionRegistry.perform(sel, on: target, with: NSNumber(value: committed))
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontroller/discardediting()
     @MainActor open func discardEditing() {
@@ -45,7 +50,7 @@ open class NSController: NSObject, NSCoding, NSEditor, NSEditorRegistration {
     }
     // Requirement of NSCoding
     /// - SeeAlso: https://developer.apple.com/documentation/foundation/nscoding/encode(with:)
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { }
 
     /// Target/action without the runtime: the controller actions (add:, remove:, ...) a button
     /// or menu item sends to a controller. Subclasses add theirs; returns nil when not handled.
