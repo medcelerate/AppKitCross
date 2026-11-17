@@ -117,5 +117,65 @@ final class MTKViewTests: XCTestCase, @unchecked Sendable {
             w.close()
         }
     }
-}
+    /// Apple's three drawing modes: timed updates (the display link), draw notifications
+    /// (`enableSetNeedsDisplay`: a paint draws a frame) and explicit drawing (`isPaused`
+    /// alone: only `draw()` runs the delegate, a paint shows the last frame).
+    func testMTKViewDrawingModes() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            let view = MTKView(frame: NSRect(x: 10, y: 10, width: 50, height: 50), device: nil)
+            let renderer = Renderer()
+            view.delegate = renderer
+            view.isPaused = true
+            w.contentView!.addSubview(view)
+            w.makeKeyAndOrderFront(nil)
+            w.display()
+            XCTAssertEqual(renderer.frames, 0, "explicit drawing: a paint does not run the delegate")
+            view.draw()
+            XCTAssertEqual(renderer.frames, 1)
+            XCTAssertNotNil(view.presentedTexture)
+            view.needsDisplay = true
+            w.display()
+            XCTAssertEqual(renderer.frames, 1, "explicit drawing: the paint showed the last frame")
+            XCTAssertNotNil(view.presentedTexture)
+            // Draw notifications: marking the view draws a frame on the next paint.
+            view.enableSetNeedsDisplay = true
+            view.needsDisplay = true
+            w.display()
+            XCTAssertEqual(renderer.frames, 2, "draw notifications: the paint ran the delegate")
+            withExtendedLifetime(renderer) { w.close() }
+        }
+    }
 
+    /// `viewDidHide`/`viewDidUnhide` reach descendants when an ancestor is hidden or shown
+    /// (MTKView drops its native surface from them on Linux), but not a descendant that is
+    /// hidden itself, and not when a hidden ancestor already hides the subtree.
+    func testViewDidHideReachesDescendants() {
+        MainActor.assumeIsolated {
+            final class Probe: NSView {
+                var events: [String] = []
+                override func viewDidHide() { super.viewDidHide(); events.append("hide") }
+                override func viewDidUnhide() { super.viewDidUnhide(); events.append("unhide") }
+            }
+            let outer = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+            let middle = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 80))
+            let visible = Probe(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+            let hidden = Probe(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+            outer.addSubview(middle)
+            middle.addSubview(visible)
+            middle.addSubview(hidden)
+            hidden.isHidden = true
+            XCTAssertEqual(hidden.events, ["hide"])
+            middle.isHidden = true
+            XCTAssertEqual(visible.events, ["hide"])
+            XCTAssertEqual(hidden.events, ["hide"], "a hidden view's visibility did not change")
+            outer.isHidden = true
+            XCTAssertEqual(visible.events, ["hide"], "already hidden by its ancestor")
+            outer.isHidden = false
+            middle.isHidden = false
+            XCTAssertEqual(visible.events, ["hide", "unhide"])
+            XCTAssertEqual(hidden.events, ["hide"])
+        }
+    }
+}

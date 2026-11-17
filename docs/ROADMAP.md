@@ -16,7 +16,7 @@ are concrete and testable.
 | M4 Core Animation | done, verified on Windows; native layer hosting (ADR-0005) with DirectComposition visuals in PR #5, verified on Windows; 3D transforms with perspective render in the software compositor too (Cairo on Linux, the Direct2D canvas on Windows windows without composition, the host backend): projective layers are rasterised and drawn through a mesh of affine cells, hit-testing inverts the projection (2026-11-10, `LayerPerspectiveTests`) |
 | M5 Auto Layout and controllers | done, verified on Windows |
 | M6 SwiftUI hosting seam | done (tests on macOS; nothing visible to verify) |
-| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translations compiled through the shim's HLSL compiler by `MetalD3D12DeviceTests` on Windows; `MTKView` presents through a flip-model DXGI composition swap chain on DirectComposition-hosted windows, with `MetalD3D12ParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device); Linux Vulkan backend (ADR-0012): device, queues, buffers, textures, blits, compute, render pipelines with depth, stencil and blending, and `MTKView` presentation on X11 and Wayland through a `VkSwapchainKHR` on a native surface under the view (a child X window, a Wayland subsurface: `PlatformWindow.makePresentationSurface`, `MTLVulkanSwapChain`), with FIFO vsync (`displaySyncEnabled` picks MAILBOX/IMMEDIATE where offered), re-creation on resize and scale changes, and the readback path as the fallback for formats a surface refuses and for devices that cannot present; all verified on lavapipe in the container (`tools/linux/run.sh` and `run-wayland.sh` capture the Metal tab on both backends and count the presented clear colour's pixels), with `MetalVulkanParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device byte for byte and `MetalVulkanPresentationTests` checking the window's own pixels under Xvfb (and the path under sway) |
+| M7 Metal | done, verified on an RTX 2070 (D3D12 backend merged in PR #3; MSL → HLSL translations compiled through the shim's HLSL compiler by `MetalD3D12DeviceTests` on Windows; `MTKView` presents through a flip-model DXGI composition swap chain on DirectComposition-hosted windows, with `MetalD3D12ParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device); Linux Vulkan backend (ADR-0012): device, queues, buffers, textures, blits, compute, render pipelines with depth, stencil and blending, and `MTKView` presentation on X11 and Wayland through a `VkSwapchainKHR` on a native surface under the view (a child X window, a Wayland subsurface: `PlatformWindow.makePresentationSurface`, `MTLVulkanSwapChain`), with FIFO vsync (`displaySyncEnabled` picks MAILBOX/IMMEDIATE where offered), re-creation on resize and scale changes, and the readback path as the fallback for formats a surface refuses and for devices that cannot present; all verified on lavapipe in the container (`tools/linux/run.sh` and `run-wayland.sh` capture the Metal tab on both backends and count the presented clear colour's pixels), with `MetalVulkanParityTests` comparing clears, uploads, blits, fills and a presented frame against the reference device byte for byte and `MetalVulkanPresentationTests` checking the window's own pixels under Xvfb (and the path under sway); end to end (ADR-0042, 2026-11-17): hiding the view or an ancestor and moves without a resize take the native surface along even when no frame is drawn, Apple's three drawing modes (a paused view no longer draws on window paints), and `HelloWindow --metal-selftest` compares a presented frame against the reference device, through the swap chain under Xvfb in CI and the readback path headless; hand-run screenshots of the Metal tab on X11 and Wayland in `docs/screenshots/` |
 | M8 Linux | done for X11 and Wayland: HelloWindow renders under Xvfb and under a headless sway (screenshots in README), 98/98 tests pass in the `swift:6.2-noble` container |
 | M8 Wayland client-side decorations | first version (ADR-0015): xdg-decoration negotiated, server-side when granted; otherwise (and always under Mutter) the package decorates: a 28pt title band drawn by `NSWindow` with its standard buttons (the `fullSizeContentView` traffic lights reused, wired to `performClose:`/`performMiniaturize:`/`performZoom:`) and the title in the window's appearance, shadow margin and rounded corners by the backend, `xdg_surface.set_window_geometry` so the compositor places and sizes the frame, drag to move and 8 resize edges through `xdg_toplevel.move`/`.resize` with matching cursors, double-click to zoom, `styleMask` honoured (borderless and pop-ups get nothing, `fullSizeContentView` keeps the content under the band), maximised/tiled/full-screen states drop the margin; `ClientSideDecorationTests` (mode, geometry, hit-testing, band drawing) on every platform; `run-wayland.sh` screenshots it under sway and checks a compositor resize lands on the frame |
 | M9 CoreText and the text system | done on all three platforms: CoreText module (ADR-0007) with Pango/HarfBuzz and DirectWrite engines (PR #7, DrawGlyphRun parity in PR #8); NSTextStorage/NSLayoutManager/NSTextContainer over CTTypesetter, NSTextView on them; 98/98 tests on macOS, Linux and Windows |
@@ -367,7 +367,7 @@ swap chain) and implements it: hardware adapter (WARP fallback), fence-synchroni
 command lists with resource retention, CPU-mapped buffers, default-heap textures with
 upload/readback staging, dxc (shader model 6) with a d3dcompiler 5.1 fallback, PSOs over
 one shared root signature, render passes with clears, draws, copies, and an HWND flip
-swap chain (compiled, not yet exercised by MTKView). On Windows
+swap chain (at the time compiled but not yet used by MTKView; presentation is below). On Windows
 `MTLCreateSystemDefaultDevice()` returns the D3D12 device unless
 `APPKITWIN_METAL_REFERENCE=1`; HelloWindow's Metal tab draws an HLSL triangle on it
 (`HelloWindow --metal`, `--metal-selftest` for offscreen checks). Shaders: HLSL/DXIL
@@ -410,6 +410,29 @@ failures; HelloWindow's Metal tab presents through the swap chain on both monito
 edges; a real corner drag at 150% printed four new sizes during the drag with the
 triangle drawing throughout and no black flashes; `SetWindowPos` resizes at 100% and
 the DPI re-size on a cross-monitor move each rendered crisp at the new size.
+
+Linux presentation (2026-11-10, PR #35; ADR-0012, ADR-0042): the Vulkan device renders
+into a `VkSwapchainKHR` on a native surface the window places under the view, a child X
+window (`VK_KHR_xlib_surface`) or a desynchronised `wl_subsurface` given the window's buffer
+scale (`VK_KHR_wayland_surface`), through `PlatformWindow.makePresentationSurface(frame:)`
+and `MTLVulkanSwapChain`. `nextDrawable` acquires an image with a semaphore and a fence and
+moves it into `GENERAL`; the drawable's `present()` moves it to `PRESENT_SRC` signalling the
+image's semaphore, which `vkQueuePresentKHR` waits on; everything runs on the device's one
+queue. FIFO is vsync, `displaySyncEnabled = false` takes MAILBOX or IMMEDIATE where offered;
+resizes and backing-scale changes re-create the chain and draw at once, and out-of-date or
+suboptimal chains are re-created at the next acquire. A device that cannot present, a
+format the surface refuses (lavapipe and `rgba16Float` on some surfaces) or
+`APPKITWIN_METAL_READBACK=1` keep the readback path, naming the reason in
+`_presentationError`. ADR-0042 (2026-11-17) closed the gaps of views that do not draw every
+frame: `viewDidHide` (now also sent for a hidden ancestor, as on macOS) drops the surface,
+`setFrameOrigin` and window paints re-place it, a paused view no longer draws on paints
+(Apple's explicit-drawing mode, every platform), and `HelloWindow --metal-selftest` compares
+a presented frame against the reference device (through the chain under Xvfb in CI,
+readback headless). Verified in the container on lavapipe: X11 under Xvfb and Wayland under
+the headless sway, `MetalVulkanPresentationTests` and the Metal tab (screenshots in
+`docs/screenshots/`). Open: a view partly outside the content area gets a clipped surface
+while its chain stays `drawableSize` (X11 should get the unclipped child window, Wayland a
+`wp_viewporter` crop), and subviews of an `MTKView` composite under the surface on Linux.
 
 ## M8: Linux backend
 
