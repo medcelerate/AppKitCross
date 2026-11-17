@@ -221,6 +221,12 @@ final class CoreDepth3MenuTests: XCTestCase {
             p.performActionForItem(at: 1)
             XCTAssertEqual(p.item(at: 1)?.state, .on)
             XCTAssertEqual(changes, 1)
+            // Any number may be on; choosing one again turns it off.
+            p.performActionForItem(at: 0)
+            XCTAssertTrue(p.selectedItems.map(\.title) == ["Red", ""])
+            p.performActionForItem(at: 1)
+            XCTAssertEqual(p.item(at: 1)?.state, .off)
+            XCTAssertEqual(changes, 3)
         }
     }
     func testItems() {

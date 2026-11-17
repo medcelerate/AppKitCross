@@ -130,17 +130,31 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
     var monitors: [Any] = []
     var legacySheet: NSWindow?
     weak var paletteAnchor: NSButton?
+    weak var documentRoot: NSView?
+
+    /// Opens scrolled to the top once the tab has its real size.
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !scrolledToTop, let root = documentRoot, let scroll = view as? NSScrollView, scroll.contentSize.height > 0 else { return }
+        scrolledToTop = true
+        root.scroll(NSPoint(x: 0, y: max(0, root.frame.height - scroll.contentSize.height)))
+    }
+    private var scrolledToTop = false
 
     private func trace3(_ line: String) { FileHandle.standardError.write(Data("coredepth3 \(line)\n".utf8)) }
 
-    /// A palette menu popped up from code just below its button, item 0 under the point.
+    /// One palette menu for the tab's lifetime: its items keep their on/off state between
+    /// pop-ups (selectAny toggles the chosen item), so a second choice of a colour unticks it.
+    private lazy var paletteMenu: NSMenu = NSMenu.palette(colors: [.systemRed, .systemOrange, .systemGreen, .systemBlue], titles: ["Red", "Orange", "Green", "Blue"]) { [weak self] m in
+        let names = m.selectedItems.map(\.title).joined(separator: ", ")
+        self?.status.stringValue = "Palette selection: \(names.isEmpty ? "none" : names)"
+        self?.trace3("palette \(names)")
+    }
+
+    /// The palette popped up from code just below its button, item 0 under the point.
     private func popUpPalette() {
         guard let anchor = paletteAnchor else { return }
-        let menu = NSMenu.palette(colors: [.systemRed, .systemOrange, .systemGreen, .systemBlue], titles: ["Red", "Orange", "Green", "Blue"]) { [weak self] m in
-            let names = m.selectedItems.map(\.title).joined(separator: ", ")
-            self?.status.stringValue = "Palette selection: \(names.isEmpty ? "none" : names)"
-            self?.trace3("palette \(names)")
-        }
+        let menu = paletteMenu
         let chosen = menu.popUp(positioning: menu.item(at: 0), at: NSPoint(x: 0, y: -4), in: anchor)
         trace3("popUp returned \(chosen)")
     }
@@ -216,7 +230,18 @@ final class CoreDepthDemoViewController: NSViewController, NSSelectorHandling {
         status.frame = NSRect(x: 400, y: 16, width: 420, height: 18)
         status.textColor = .secondaryLabelColor
         root.addSubview(status)
-        view = root
+        // The tab is taller than the Layout Demo window's default size: scroll it, opening
+        // at the top (the ADR-0039 strip).
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 840, height: 270))
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.autoresizingMask = [.width, .height]
+        scroll.documentView = root
+        root.scroll(NSPoint(x: 0, y: root.frame.height - scroll.contentSize.height))
+        documentRoot = root
+        view = scroll
     }
 
     /// The nine-slice panel as it is drawn, at the window's backing scale.
