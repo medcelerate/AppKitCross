@@ -39,7 +39,15 @@ import CoreText
         drawsBackground = true
         bezelStyle = .roundedBezel
     }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        isEditable = true
+        isSelectable = true
+        isBezeled = true
+        drawsBackground = true
+        bezelStyle = .roundedBezel
+    }
 
     // SKIPPED (override type (any NSComboBoxDelegate)? differs from superclass (any NSTextFieldDelegate)?): @MainActor var delegate: (any NSComboBoxDelegate)? { get set }
     // The inherited `delegate` takes a combo box delegate (NSComboBoxDelegate refines

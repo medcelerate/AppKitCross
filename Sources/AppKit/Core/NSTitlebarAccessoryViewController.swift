@@ -104,8 +104,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstitlebaraccessoryviewcontroller/preferredscrolledgeeffectstyle
     @available(macOS 26.1, *)
     @MainActor open var preferredScrollEdgeEffectStyle: NSScrollEdgeEffectStyle {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { unimplemented("NSTitlebarAccessoryViewController.preferredScrollEdgeEffectStyle — NSScrollEdgeEffectStyle (macOS 26) is a generated stub with no styles to answer") }
+        set { unimplemented("NSTitlebarAccessoryViewController.preferredScrollEdgeEffectStyle — NSScrollEdgeEffectStyle (macOS 26) is a generated stub with no styles to answer") }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstitlebaraccessoryviewcontroller/viewdidappear()
     @MainActor open override func viewDidAppear() { super.viewDidAppear() }

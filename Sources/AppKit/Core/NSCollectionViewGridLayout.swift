@@ -117,6 +117,18 @@ import CoreGraphics
         return (columns, NSSize(width: w, height: h))
     }
 
+    /// Where the item at `index` (counting across sections) goes in a grid of `count` items
+    /// laid out `width` wide; zero past the last row (`frameForItem(at:withNumberOfItems:)`).
+    internal func _frame(forItemAt index: Int, count: Int, width: CGFloat, rightToLeft: Bool) -> NSRect {
+        guard index >= 0, index < count else { return .zero }
+        let (columns, cell) = _grid(forWidth: width)
+        let row = index / columns, col = index % columns
+        if _maximumNumberOfRows > 0 && row >= _maximumNumberOfRows { return .zero }
+        var x = _margins.left + CGFloat(col) * (cell.width + _minimumInteritemSpacing)
+        if rightToLeft { x = width - x - cell.width }
+        return NSRect(x: x, y: _margins.top + CGFloat(row) * (cell.height + _minimumLineSpacing), width: cell.width, height: cell.height)
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/prepare()
     @MainActor open override func prepare() {
         super.prepare()

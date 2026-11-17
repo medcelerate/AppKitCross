@@ -111,7 +111,23 @@ import CoreText
     @MainActor public convenience init(title: String, target: Any?, action: Selector?) { self.init(_title: title, type: .momentaryPushIn, target: target, action: action) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/activecompressionoptions
     @available(macOS 10.13, *)
-    @MainActor open var activeCompressionOptions: NSUserInterfaceCompressionOptions { unimplemented() }
+    @MainActor open var activeCompressionOptions: NSUserInterfaceCompressionOptions { _activeCompression }
+    private var _activeCompression = NSUserInterfaceCompressionOptions()
+    /// The options of `prioritized` that apply, in order (macOS 15: hiding text needs an
+    /// image to remain, hiding images needs a title; the metric options change nothing here).
+    private func _applicableCompression(_ prioritized: [NSUserInterfaceCompressionOptions]) -> (options: NSUserInterfaceCompressionOptions, hidesText: Bool, hidesImage: Bool) {
+        var applied = NSUserInterfaceCompressionOptions(), hidesText = false, hidesImage = false
+        let hasImage = image != nil && imagePosition != .noImage, hasTitle = !title.isEmpty
+        for option in prioritized {
+            if option.contains(.hideText), hasImage, hasTitle, !hidesImage, imagePosition != .imageOnly {
+                hidesText = true; applied = applied.union(.hideText)
+            }
+            if option.contains(.hideImages), hasImage, hasTitle, !hidesText {
+                hidesImage = true; applied = applied.union(.hideImages)
+            }
+        }
+        return (applied, hidesText, hidesImage)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/allowsmixedstate
     @MainActor open var allowsMixedState: Bool {
         get { _buttonCell?.allowsMixedState ?? false }
@@ -129,8 +145,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/attributedalternatetitle
     @MainActor open var attributedAlternateTitle: NSAttributedString {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _buttonCell?.attributedAlternateTitle ?? NSAttributedString(string: "") }
+        set { _buttonCell?.attributedAlternateTitle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/attributedtitle
     @MainActor open var attributedTitle: NSAttributedString {
@@ -150,27 +166,39 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/bordershape
     @available(macOS 26.0, *)
+    /// Stored (macOS 26); the port draws its own bezel shape for each bezel style.
     @MainActor open var borderShape: NSControl.BorderShape {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { NSControl.BorderShape(rawValue: _borderShapeRaw) ?? .automatic }
+        set { _borderShapeRaw = newValue.rawValue; needsDisplay = true }
     }
+    private var _borderShapeRaw = 0   // .automatic (stored raw: the type is macOS 26 only)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/compress(withprioritizedcompressionoptions:)
     @available(macOS 10.13, *)
-    @MainActor open func compress(withPrioritizedCompressionOptions prioritizedOptions: [NSUserInterfaceCompressionOptions]) { unimplemented() }
+    @MainActor open func compress(withPrioritizedCompressionOptions prioritizedOptions: [NSUserInterfaceCompressionOptions]) {
+        let c = _applicableCompression(prioritizedOptions)
+        _activeCompression = c.options
+        _buttonCell?._hidesText = c.hidesText
+        _buttonCell?._hidesImage = c.hidesImage
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/contenttintcolor
     @available(macOS 10.14, *)
+    /// Tints template images (and is stored for the title, which keeps the control text colour).
     @MainActor open var contentTintColor: NSColor? {
-        get { nil }
-        set { }
+        get { _buttonCell?._contentTintColor }
+        set { _buttonCell?._contentTintColor = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/getperiodicdelay(_:interval:)
     @MainActor open func getPeriodicDelay(_ delay: UnsafeMutablePointer<Float>, interval: UnsafeMutablePointer<Float>) { _buttonCell?.getPeriodicDelay(delay, interval: interval) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/hasdestructiveaction
     @available(macOS 11.0, *)
+    /// Stored; no platform styles destructive buttons differently.
     @MainActor open var hasDestructiveAction: Bool {
-        get { false }
-        set { }
+        get { _hasDestructiveAction }
+        set { _hasDestructiveAction = newValue }
     }
+    private var _hasDestructiveAction = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/highlight(_:)
     @MainActor open func highlight(_ flag: Bool) { _cell?.isHighlighted = flag; needsDisplay = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/image
@@ -180,9 +208,10 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/imagehugstitle
     @available(macOS 10.12, *)
+    /// Stored; the port always lays the image out next to the title, which is what hugging asks.
     @MainActor open var imageHugsTitle: Bool {
-        get { false }
-        set { }
+        get { _buttonCell?._imageHugsTitle ?? false }
+        set { _buttonCell?._imageHugsTitle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/imageposition
     @MainActor open var imagePosition: NSControl.ImagePosition {
@@ -201,10 +230,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/isspringloaded
     @available(macOS 10.10, *)
+    /// Stored; spring-loading needs force-click pressure, which no backend reports.
     @MainActor open var isSpringLoaded: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _isSpringLoaded }
+        set { _isSpringLoaded = newValue }
     }
+    private var _isSpringLoaded = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/istransparent
     @MainActor open var isTransparent: Bool {
         get { _buttonCell?.isTransparent ?? false }
@@ -222,13 +253,26 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/maxacceleratorlevel
     @available(macOS 10.10, *)
+    /// 1...5; other values are refused with a warning and leave the level as it was (macOS 15).
     @MainActor open var maxAcceleratorLevel: Int {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _maxAcceleratorLevel }
+        set {
+            guard (1...5).contains(newValue) else {
+                FileHandle.standardError.write(Data("Warning: NSButton's maxAcceleratorLevel may range from 1 to 5.  \(newValue) is not a valid value.\n".utf8))
+                return
+            }
+            _maxAcceleratorLevel = newValue
+        }
     }
+    private var _maxAcceleratorLevel = 1
+    /// The fitting size with the options that apply (`compress` would apply the same ones).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/minimumsize(withprioritizedcompressionoptions:)
     @available(macOS 10.13, *)
-    @MainActor open func minimumSize(withPrioritizedCompressionOptions prioritizedOptions: [NSUserInterfaceCompressionOptions]) -> NSSize { unimplemented() }
+    @MainActor open func minimumSize(withPrioritizedCompressionOptions prioritizedOptions: [NSUserInterfaceCompressionOptions]) -> NSSize {
+        guard let cell = _buttonCell else { return fittingSize }
+        let c = _applicableCompression(prioritizedOptions)
+        return cell._cellSize(for: cell._layoutPosition(hidesText: c.hidesText, hidesImage: c.hidesImage))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/performkeyequivalent(with:)
     @MainActor open override func performKeyEquivalent(with key: NSEvent) -> Bool {
         guard isEnabled, !isHiddenOrHasHiddenAncestor, !keyEquivalent.isEmpty else { return false }
@@ -261,16 +305,20 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/symbolconfiguration
     @available(macOS 11.0, *)
+    /// Stored; the port's symbol images do not apply configurations (NSImage.SymbolConfiguration).
     @MainActor open var symbolConfiguration: NSImage.SymbolConfiguration? {
-        get { nil }
-        set { }
+        get { _symbolConfiguration }
+        set { _symbolConfiguration = newValue; needsDisplay = true }
     }
+    private var _symbolConfiguration: NSImage.SymbolConfiguration? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/tintprominence
     @available(macOS 26.0, *)
+    /// Stored (macOS 26).
     @MainActor open var tintProminence: NSTintProminence {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { NSTintProminence(rawValue: _tintProminenceRaw) ?? .automatic }
+        set { _tintProminenceRaw = newValue.rawValue; needsDisplay = true }
     }
+    private var _tintProminenceRaw = 0   // .automatic
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/title
     @MainActor open var title: String {
         get { _cell?.title ?? "" }

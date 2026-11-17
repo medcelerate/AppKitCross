@@ -250,15 +250,20 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/allowswritingtools
     @available(macOS 15.2, *)
+    /// Stored, true by default (macOS 15.2); no Writing Tools service exists to offer.
     @MainActor open var allowsWritingTools: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsWritingTools }
+        set { _allowsWritingTools = newValue }
     }
+    private var _allowsWritingTools = true
+    private var _allowsWritingToolsAffordance = false
+    private var _resolvesNaturalAlignment = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/allowswritingtoolsaffordance
     @available(macOS 15.4, *)
+    /// Stored, false by default (macOS 15.4).
     @MainActor open var allowsWritingToolsAffordance: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsWritingToolsAffordance }
+        set { _allowsWritingToolsAffordance = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/backgroundcolor
     @MainActor open var backgroundColor: NSColor? {
@@ -331,9 +336,15 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderattributedstrings
     @available(macOS 26.0, *)
+    /// Placeholders in order of preference; the field shows the first that fits its width
+    /// (the last when none fits). Setting also makes the first the `placeholderAttributedString`.
     @MainActor open var placeholderAttributedStrings: [NSAttributedString] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _fieldCell?._placeholderCandidates ?? [] }
+        set {
+            _fieldCell?._placeholderCandidates = newValue
+            _fieldCell?.placeholderAttributedString = newValue.first
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderstring
     @available(macOS 10.10, *)
@@ -343,9 +354,14 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderstrings
     @available(macOS 26.0, *)
+    /// `placeholderAttributedStrings` as plain strings (setting gives them the field's attributes).
     @MainActor open var placeholderStrings: [String] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { placeholderAttributedStrings.map(\.string) }
+        set {
+            _fieldCell?._placeholderCandidates = newValue.map { NSAttributedString(string: $0) }
+            _fieldCell?.placeholderString = newValue.first
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/preferredmaxlayoutwidth
     @MainActor open var preferredMaxLayoutWidth: CGFloat {
@@ -354,9 +370,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/resolvesnaturalalignmentwithbasewritingdirection
     @available(macOS 26.0, *)
+    /// Stored (macOS 26; default unverified — no macOS 26 to probe, false assumed). Natural
+    /// alignment already follows the application's layout direction in the port.
     @MainActor open var resolvesNaturalAlignmentWithBaseWritingDirection: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _resolvesNaturalAlignment }
+        set { _resolvesNaturalAlignment = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/selecttext(_:)
     @MainActor open func selectText(_ sender: Any?) {

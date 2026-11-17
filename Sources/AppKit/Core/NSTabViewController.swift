@@ -114,13 +114,33 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewcontroller/toolbar(_:itemforitemidentifier:willbeinsertedintotoolbar:)
-    @MainActor open func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? { unimplemented() }
+    /// One toolbar item per tab (its label and image), selecting the tab when clicked: the
+    /// toolbar tab style's items. Identifiers are the tab items' identifiers as strings.
+    private func _toolbarIdentifier(_ item: NSTabViewItem) -> NSToolbarItem.Identifier {
+        NSToolbarItem.Identifier(item.identifier.map { "\($0)" } ?? item.label)
+    }
+    @MainActor open func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let index = tabViewItems.firstIndex(where: { _toolbarIdentifier($0) == itemIdentifier }) else { return nil }
+        let tab = tabViewItems[index]
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.label = tab.label
+        item.image = tab.image
+        item.toolTip = tab.toolTip
+        item.target = self
+        item.action = Selector(("_selectTabFromToolbar:"))
+        item.tag = index
+        setActionHandler(for: Selector(("_selectTabFromToolbar:"))) { [weak self] sender in
+            guard let self, let i = (sender as? NSToolbarItem)?.tag, self.tabViewItems.indices.contains(i) else { return }
+            self.selectedTabViewItemIndex = i
+        }
+        return item
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewcontroller/toolbaralloweditemidentifiers(_:)
-    @MainActor open func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [] }
+    @MainActor open func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { tabStyle == .toolbar ? tabViewItems.map(_toolbarIdentifier) : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewcontroller/toolbardefaultitemidentifiers(_:)
-    @MainActor open func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [] }
+    @MainActor open func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { tabStyle == .toolbar ? tabViewItems.map(_toolbarIdentifier) : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewcontroller/toolbarselectableitemidentifiers(_:)
-    @MainActor open func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [] }
+    @MainActor open func toolbarSelectableItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { tabStyle == .toolbar ? tabViewItems.map(_toolbarIdentifier) : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstabviewcontroller/transitionoptions
     @MainActor open var transitionOptions: NSViewController.TransitionOptions {
         get { _transitionOptions }

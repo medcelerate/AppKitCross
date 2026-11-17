@@ -46,6 +46,7 @@ public final class HostWorkspace: PlatformWorkspace {
     public func reset() {
         openedURLs.removeAll(); revealedURLs.removeAll(); launches.removeAll(); launchResolvesTo = nil; handlers.removeAll(); applicationsByIdentifier.removeAll()
         icons.removeAll(); iconRequests.removeAll(); dockTiles.removeAll(); fileSystemNotes.removeAll(); otherApplications.removeAll()
+        removableVolumes.removeAll(); ejectedVolumes.removeAll(); fileSystems.removeAll(); searchQueries.removeAll()
         activated.removeAll(); hidden.removeAll(); terminated.removeAll(); desktopImages.removeAll()
         opensSucceed = true
         accessibilityDisplayOptions = PlatformAccessibilityDisplayOptions()
@@ -112,6 +113,30 @@ public final class HostWorkspace: PlatformWorkspace {
     }
 
     public func noteFileSystemChanged(_ path: String) { fileSystemNotes.append(path) }
+
+    /// Test hooks for the volume members: the removable mount points, what ejecting was
+    /// asked for (an unlisted volume throws), file systems by path prefix, search queries.
+    public var removableVolumes: [String] = []
+    public private(set) var ejectedVolumes: [URL] = []
+    public var fileSystems: [String: PlatformFileSystemInfo] = [:]
+    public private(set) var searchQueries: [String] = []
+    public func removableVolumePaths() -> [String] { removableVolumes }
+    public func ejectVolume(at url: URL) throws {
+        guard let i = removableVolumes.firstIndex(of: url.path) else { throw PlatformWorkspaceError.fileOperationFailed("no removable volume at \(url.path)") }
+        removableVolumes.remove(at: i)
+        ejectedVolumes.append(url)
+    }
+    /// A registered file system (longest matching prefix), else "hostfs" and the path's own
+    /// writability, for any existing path.
+    public func fileSystemInfo(forPath path: String) -> PlatformFileSystemInfo? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        if let hit = fileSystems.keys.filter({ path == $0 || path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }).max(by: { $0.count < $1.count }) {
+            return fileSystems[hit]
+        }
+        let removable = removableVolumes.contains { path == $0 || path.hasPrefix($0 + "/") }
+        return PlatformFileSystemInfo(type: "hostfs", isRemovable: removable, isWritable: FileManager.default.isWritableFile(atPath: path), isUnmountable: removable)
+    }
+    public func showSearchResults(forQuery query: String) -> Bool { searchQueries.append(query); return opensSucceed }
 
     public var current: PlatformRunningApplication {
         let exe = URL(fileURLWithPath: CommandLine.arguments.first ?? ProcessInfo.processInfo.processName)

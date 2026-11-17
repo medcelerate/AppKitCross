@@ -166,7 +166,12 @@ import CoreGraphics
     private func _reloadCountsIfNeeded() {
         guard _needsReload else { return }
         _needsReload = false
-        guard let ds = _dataSource else { _itemCounts = []; return }
+        guard let ds = _dataSource else {
+            // The legacy content path: one section of `content`, items from `itemPrototype`.
+            _itemCounts = _itemPrototype != nil && !_content.isEmpty ? [_content.count] : []
+            _selection = _selection.filter(_isValid)
+            return
+        }
         let sections = max(0, ds.numberOfSections(in: self))
         _itemCounts = (0..<sections).map { max(0, ds.collectionView(self, numberOfItemsInSection: $0)) }
         _selection = _selection.filter(_isValid)
@@ -721,8 +726,14 @@ import CoreGraphics
     }
 
     private func _makeItem(at ip: IndexPath) -> NSCollectionViewItem? {
-        guard let ds = _dataSource else { return nil }
-        let item = ds.collectionView(self, itemForRepresentedObjectAt: ip)
+        let item: NSCollectionViewItem
+        if let ds = _dataSource {
+            item = ds.collectionView(self, itemForRepresentedObjectAt: ip)
+        } else if _itemPrototype != nil, ip.section == 0, _content.indices.contains(ip.item) {
+            item = newItem(forRepresentedObject: _content[ip.item])
+        } else {
+            return nil
+        }
         item._collectionView = self
         item.isSelected = _selection.contains(ip)
         item.highlightState = _highlightState(at: ip)
@@ -875,7 +886,11 @@ import CoreGraphics
     /// size when unset) fit the width, never more than the items (or
     /// `maxNumberOfColumns`), cells widened to share the width up to `maxItemSize`; rows
     /// follow without spacing, as AppKit's 10.5 layout places them.
+    /// With a grid layout set, that layout answers for the count.
     @MainActor open func frameForItem(at index: Int, withNumberOfItems numberOfItems: Int) -> NSRect {
+        if let grid = _layout as? NSCollectionViewGridLayout {
+            return grid._frame(forItemAt: index, count: numberOfItems, width: bounds.width, rightToLeft: userInterfaceLayoutDirection == .rightToLeft)
+        }
         let proto = _itemPrototype?.viewIfLoaded?.frame.size ?? .zero
         let minW = _minItemSize.width > 0 ? _minItemSize.width : proto.width
         let minH = _minItemSize.height > 0 ? _minItemSize.height : proto.height
@@ -1331,11 +1346,11 @@ import CoreGraphics
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/newitem(forrepresentedobject:)
     ///
-    /// A copy of `itemPrototype` representing `object` (see `NSCollectionViewItem.copy`).
+    /// A copy of `itemPrototype` (an empty item without one) representing `object` (see
+    /// `NSCollectionViewItem.copy`); the item is not attached to the collection view yet,
+    /// as in AppKit.
     @MainActor open func newItem(forRepresentedObject object: Any) -> NSCollectionViewItem {
-        guard let proto = _itemPrototype, let item = proto.copy() as? NSCollectionViewItem else {
-            preconditionFailure("NSCollectionView.newItem(forRepresentedObject:): no itemPrototype")
-        }
+        let item = (_itemPrototype?.copy() as? NSCollectionViewItem) ?? NSCollectionViewItem(nibName: nil, bundle: nil)
         item.representedObject = object
         return item
     }

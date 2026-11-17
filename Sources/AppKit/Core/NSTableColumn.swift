@@ -24,7 +24,22 @@ import CoreGraphics
     internal weak var _tableView: NSTableView?
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablecolumn/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// AppKit's keys (`NSIdentifier`, `NSWidth`, `NSMinWidth`, `NSMaxWidth`, `NSIsEditable`,
+    /// `NSHidden`, `NSResizingMask`, `NSHeaderToolTip`, the header cell's title as
+    /// `NSHeaderTitle` — the port does not archive cells).
+    public required init?(coder: NSCoder) {
+        _identifier = NSUserInterfaceItemIdentifier(coder._decodeObjectIfPresent(forKey: "NSIdentifier") as? String ?? "")
+        _headerCell = MainActor.assumeIsolated { NSTableHeaderCell(textCell: "") }
+        super.init()
+        if coder.containsValue(forKey: "NSWidth") { _width = CGFloat(coder.decodeDouble(forKey: "NSWidth")) }
+        if coder.containsValue(forKey: "NSMinWidth") { _minWidth = CGFloat(coder.decodeDouble(forKey: "NSMinWidth")) }
+        if coder.containsValue(forKey: "NSMaxWidth") { _maxWidth = CGFloat(coder.decodeDouble(forKey: "NSMaxWidth")) }
+        if coder.containsValue(forKey: "NSIsEditable") { _isEditable = coder.decodeBool(forKey: "NSIsEditable") }
+        _isHidden = coder.decodeBool(forKey: "NSHidden")
+        if coder.containsValue(forKey: "NSResizingMask") { _resizingMask = NSTableColumn.ResizingOptions(rawValue: UInt(coder.decodeInteger(forKey: "NSResizingMask"))) }
+        _headerToolTip = coder._decodeObjectIfPresent(forKey: "NSHeaderToolTip") as? String
+        if let t = coder._decodeObjectIfPresent(forKey: "NSHeaderTitle") as? String { _title = t; MainActor.assumeIsolated { _headerCell.stringValue = t } }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablecolumn/init(identifier:)
     @MainActor public init(identifier: NSUserInterfaceItemIdentifier) {
         _identifier = identifier
@@ -111,5 +126,15 @@ import CoreGraphics
     /// Sets the width without clamping or notifying (the table's own autoresizing).
     internal func _setWidthQuietly(_ w: CGFloat) { _width = min(max(w, _minWidth), _maxWidth) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablecolumn/encode(with:)
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) {
+        coder.encode(_identifier.rawValue, forKey: "NSIdentifier")
+        coder.encode(Double(_width), forKey: "NSWidth")
+        coder.encode(Double(_minWidth), forKey: "NSMinWidth")
+        coder.encode(Double(_maxWidth), forKey: "NSMaxWidth")
+        coder.encode(_isEditable, forKey: "NSIsEditable")
+        coder.encode(_isHidden, forKey: "NSHidden")
+        coder.encode(Int(_resizingMask.rawValue), forKey: "NSResizingMask")
+        if let t = _headerToolTip { coder.encode(t, forKey: "NSHeaderToolTip") }
+        coder.encode(_title, forKey: "NSHeaderTitle")
+    }
 }

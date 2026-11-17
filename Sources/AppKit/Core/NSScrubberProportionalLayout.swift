@@ -25,7 +25,15 @@ import CoreText
     private var _count = 0
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberproportionallayout/init(coder:)
-    public required init(coder: NSCoder) { unimplemented() }
+    /// macOS's key: `NSScrubberLayoutVisibleItems`.
+    public required init(coder: NSCoder) {
+        _numberOfVisibleItems = max(1, coder.decodeInteger(forKey: "NSScrubberLayoutVisibleItems"))
+        super.init(coder: coder)
+    }
+    open override func encode(with coder: NSCoder) {
+        super.encode(with: coder)
+        coder.encode(_numberOfVisibleItems, forKey: "NSScrubberLayoutVisibleItems")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberproportionallayout/init(numberofvisibleitems:)
     @MainActor public init(numberOfVisibleItems: Int) {
         _numberOfVisibleItems = max(1, numberOfVisibleItems)
