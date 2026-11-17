@@ -848,7 +848,7 @@ import UniformTypeIdentifiers
     // MARK: Versions, sharing, printing, PDF (not implemented)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/browseversions(_:)
-    @MainActor open func browseVersions(_ sender: Any?) { unimplemented("NSDocument.browseVersions — the Versions browser is a macOS system service (document versions are not stored)") }
+    @MainActor open func browseVersions(_ sender: Any?) { appleOnlyUnavailable("NSDocument.browseVersions — the Versions browser is a macOS system service (document versions are not stored)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/isbrowsingversions
     @MainActor open var isBrowsingVersions: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/stopbrowsingversions()

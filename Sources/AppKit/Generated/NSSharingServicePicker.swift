@@ -18,20 +18,20 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker
 open class NSSharingServicePicker: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/init(items:)
-    public init(items: [Any]) { unimplemented() }
+    public init(items: [Any]) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/close()
     @available(macOS 13.0, *)
-    open func close() { unimplemented() }
+    open func close() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/delegate
     open var delegate: (any NSSharingServicePickerDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/show(relativeto:of:preferrededge:)
-    open func show(relativeTo rect: NSRect, of view: NSView, preferredEdge: NSRectEdge) { unimplemented() }
+    open func show(relativeTo rect: NSRect, of view: NSView, preferredEdge: NSRectEdge) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/standardsharemenuitem
     @available(macOS 13.0, *)
-    open var standardShareMenuItem: NSMenuItem { unimplemented() }
+    open var standardShareMenuItem: NSMenuItem { appleOnlyUnavailable() }
 }
 
 @available(macOS 15.0, *)
@@ -40,32 +40,32 @@ extension NSSharingServicePicker {
     @available(macOS 15.0, *)
     open class CollaborationModeRestriction: NSObject, NSCopying {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/init(disabledmode:)
-        public init(disabledMode: NSSharingCollaborationMode) { unimplemented() }
+        public init(disabledMode: NSSharingCollaborationMode) { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/init(disabledmode:alerttitle:alertmessage:)
-        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String) { unimplemented() }
+        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String) { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/init(disabledmode:alerttitle:alertmessage:alertdismissbuttontitle:)
-        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String, alertDismissButtonTitle: String) { unimplemented() }
+        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String, alertDismissButtonTitle: String) { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/init(disabledmode:alerttitle:alertmessage:alertdismissbuttontitle:alertrecoverysuggestionbuttontitle:alertrecoverysuggestionbuttonlaunch:)
-        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String, alertDismissButtonTitle: String, alertRecoverySuggestionButtonTitle: String, alertRecoverySuggestionButtonLaunch alertRecoverySuggestionButtonLaunchURL: URL) { unimplemented() }
+        public init(disabledMode: NSSharingCollaborationMode, alertTitle: String, alertMessage: String, alertDismissButtonTitle: String, alertRecoverySuggestionButtonTitle: String, alertRecoverySuggestionButtonLaunch alertRecoverySuggestionButtonLaunchURL: URL) { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/alertdismissbuttontitle
-        open var alertDismissButtonTitle: String? { unimplemented() }
+        open var alertDismissButtonTitle: String? { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/alertmessage
-        open var alertMessage: String? { unimplemented() }
+        open var alertMessage: String? { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/alertrecoverysuggestionbuttonlaunchurl
-        open var alertRecoverySuggestionButtonLaunchURL: URL? { unimplemented() }
+        open var alertRecoverySuggestionButtonLaunchURL: URL? { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/alertrecoverysuggestionbuttontitle
-        open var alertRecoverySuggestionButtonTitle: String? { unimplemented() }
+        open var alertRecoverySuggestionButtonTitle: String? { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/alerttitle
-        open var alertTitle: String? { unimplemented() }
+        open var alertTitle: String? { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepicker/collaborationmoderestriction/disabledmode
-        open var disabledMode: NSSharingCollaborationMode { unimplemented() }
+        open var disabledMode: NSSharingCollaborationMode { appleOnlyUnavailable() }
         // Requirement of NSSecureCoding
-        class public var supportsSecureCoding: Bool { unimplemented() }
+        class public var supportsSecureCoding: Bool { appleOnlyUnavailable() }
         // Requirement of NSCoding
-        open func encode(with coder: NSCoder) { unimplemented() }
+        open func encode(with coder: NSCoder) { appleOnlyUnavailable() }
         // Requirement of NSCoding
-        public required init?(coder: NSCoder) { unimplemented() }
+        public required init?(coder: NSCoder) { appleOnlyUnavailable() }
         // Requirement of NSCopying
-        open func copy(with zone: NSZone? = nil) -> Any { unimplemented() }
+        open func copy(with zone: NSZone? = nil) -> Any { appleOnlyUnavailable() }
     }
 }

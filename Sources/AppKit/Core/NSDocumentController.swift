@@ -673,7 +673,7 @@ import UniformTypeIdentifiers
     @MainActor open var allowsAutomaticShareMenu: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocumentcontroller/standardsharemenuitem()
     @available(macOS 10.13, *)
-    @MainActor open func standardShareMenuItem() -> NSMenuItem { unimplemented("NSDocumentController.standardShareMenuItem — sharing services (NSSharingService) are macOS-only") }
+    @MainActor open func standardShareMenuItem() -> NSMenuItem { appleOnlyUnavailable("NSDocumentController.standardShareMenuItem — sharing services (NSSharingService) are macOS-only") }
 
     // MARK: Menu actions and validation
 

@@ -20,31 +20,31 @@ open class NSSpeechRecognizer: NSObject {
     // SKIPPED (failable init cannot override NSObject's non-failable init): init?()
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/blocksotherrecognizers
     open var blocksOtherRecognizers: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/commands
     open var commands: [String]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/delegate
     open var delegate: (any NSSpeechRecognizerDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/displayedcommandstitle
     open var displayedCommandsTitle: String? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/listensinforegroundonly
     open var listensInForegroundOnly: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/startlistening()
-    open func startListening() { unimplemented() }
+    open func startListening() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechrecognizer/stoplistening()
-    open func stopListening() { unimplemented() }
+    open func stopListening() { appleOnlyUnavailable() }
 }

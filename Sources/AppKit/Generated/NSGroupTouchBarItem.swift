@@ -20,43 +20,43 @@ import CoreText
 @MainActor open class NSGroupTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/init(alertstylewithidentifier:)
     @available(macOS 10.13, *)
-    @MainActor public convenience init(alertStyleWithIdentifier identifier: NSTouchBarItem.Identifier) { unimplemented() }
+    @MainActor public convenience init(alertStyleWithIdentifier identifier: NSTouchBarItem.Identifier) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/init(identifier:items:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, items: [NSTouchBarItem]) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, items: [NSTouchBarItem]) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/init(identifier:items:allowedcompressionoptions:)
     @available(macOS 10.13, *)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, items: [NSTouchBarItem], allowedCompressionOptions: NSUserInterfaceCompressionOptions) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, items: [NSTouchBarItem], allowedCompressionOptions: NSUserInterfaceCompressionOptions) { appleOnlyUnavailable() }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/effectivecompressionoptions
     @available(macOS 10.13, *)
-    @MainActor open var effectiveCompressionOptions: NSUserInterfaceCompressionOptions { unimplemented() }
+    @MainActor open var effectiveCompressionOptions: NSUserInterfaceCompressionOptions { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/grouptouchbar
     @MainActor open var groupTouchBar: NSTouchBar {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/groupuserinterfacelayoutdirection
     @available(macOS 10.13, *)
     @MainActor open var groupUserInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/preferreditemwidth
     @available(macOS 10.13, *)
     @MainActor open var preferredItemWidth: CGFloat {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/prefersequalwidths
     @available(macOS 10.13, *)
     @MainActor open var prefersEqualWidths: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgrouptouchbaritem/prioritizedcompressionoptions
     @available(macOS 10.13, *)
     @MainActor open var prioritizedCompressionOptions: [NSUserInterfaceCompressionOptions] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

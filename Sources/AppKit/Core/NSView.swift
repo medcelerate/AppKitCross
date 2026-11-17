@@ -2034,9 +2034,9 @@ import CoreText
     @MainActor open func shouldDrawColor() -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/showdefinition(for:at:)
     /// Out of scope (ADR-0036): the Dictionary lookup panel is a macOS service.
-    @MainActor open func showDefinition(for attrString: NSAttributedString?, at textBaselineOrigin: NSPoint) { unimplemented("NSView.showDefinition — no dictionary service on this platform") }
+    @MainActor open func showDefinition(for attrString: NSAttributedString?, at textBaselineOrigin: NSPoint) { appleOnlyUnavailable("NSView.showDefinition — no dictionary service on this platform") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/showdefinition(for:range:options:baselineoriginprovider:)
-    @MainActor open func showDefinition(for attrString: NSAttributedString?, range targetRange: NSRange, options: [NSView.DefinitionOptionKey : Any]? = nil, baselineOriginProvider originProvider: ((NSRange) -> NSPoint)? = nil) { unimplemented("NSView.showDefinition — no dictionary service on this platform") }
+    @MainActor open func showDefinition(for attrString: NSAttributedString?, range targetRange: NSRange, options: [NSView.DefinitionOptionKey : Any]? = nil, baselineOriginProvider originProvider: ((NSRange) -> NSPoint)? = nil) { appleOnlyUnavailable("NSView.showDefinition — no dictionary service on this platform") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/sortsubviews(_:context:)
     /// Reorders the subviews (and their drawing order) by `compare`; stable for ties.
     @MainActor open func sortSubviews(_ compare: (NSView, NSView, UnsafeMutableRawPointer?) -> ComparisonResult, context: UnsafeMutableRawPointer?) {

@@ -344,7 +344,7 @@ open class NSSpellChecker: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/showcorrectionindicator(of:primarystring:alternativestrings:forstringin:view:)
     open func showCorrectionIndicator(of type: NSSpellChecker.CorrectionIndicatorType, primaryString: String, alternativeStrings: [String], forStringIn rectOfTypedString: NSRect, view: NSView) async -> String? { unimplemented("NSSpellChecker.showCorrectionIndicator — the autocorrection bubble is macOS UI; the port corrects without an indicator") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/showinlineprediction(forcandidates:client:)
-    open func showInlinePrediction(forCandidates candidates: [NSTextCheckingResult], client: any NSTextInputClient) { unimplemented("NSSpellChecker.showInlinePrediction — inline predictions are an Apple text-input service with no counterpart") }
+    open func showInlinePrediction(forCandidates candidates: [NSTextCheckingResult], client: any NSTextInputClient) { appleOnlyUnavailable("NSSpellChecker.showInlinePrediction — inline predictions are an Apple text-input service with no counterpart") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspellchecker/menu(for:string:options:atlocation:in:)
     open func menu(for result: NSTextCheckingResult, string checkedString: String, options: [NSSpellChecker.OptionKey : Any]? = nil, atLocation location: NSPoint, in view: NSView) -> NSMenu? {
         // The corrections for a spelling result (the guesses), else nil (macOS adds its

@@ -19,71 +19,71 @@ import CoreText
 @available(macOS 10.15, *)
 @MainActor open class NSPickerTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/init(identifier:images:selectionmode:target:action:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, images: [NSImage], selectionMode: NSPickerTouchBarItem.SelectionMode, target: Any?, action: Selector?) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, images: [NSImage], selectionMode: NSPickerTouchBarItem.SelectionMode, target: Any?, action: Selector?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/init(identifier:labels:selectionmode:target:action:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, labels: [String], selectionMode: NSPickerTouchBarItem.SelectionMode, target: Any?, action: Selector?) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, labels: [String], selectionMode: NSPickerTouchBarItem.SelectionMode, target: Any?, action: Selector?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/action
     @MainActor open var action: Selector? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/collapsedrepresentationimage
     @MainActor open var collapsedRepresentationImage: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/collapsedrepresentationlabel
     @MainActor open var collapsedRepresentationLabel: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/controlrepresentation
     @MainActor open var controlRepresentation: NSPickerTouchBarItem.ControlRepresentation {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/image(at:)
-    @MainActor open func image(at index: Int) -> NSImage? { unimplemented() }
+    @MainActor open func image(at index: Int) -> NSImage? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/isenabled
     @MainActor open var isEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/isenabled(at:)
-    @MainActor open func isEnabled(at index: Int) -> Bool { unimplemented() }
+    @MainActor open func isEnabled(at index: Int) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/label(at:)
-    @MainActor open func label(at index: Int) -> String? { unimplemented() }
+    @MainActor open func label(at index: Int) -> String? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/numberofoptions
     @MainActor open var numberOfOptions: Int {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/selectedindex
     @MainActor open var selectedIndex: Int {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/selectioncolor
     @MainActor open var selectionColor: NSColor? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/selectionmode
     @MainActor open var selectionMode: NSPickerTouchBarItem.SelectionMode {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/setenabled(_:at:)
-    @MainActor open func setEnabled(_ enabled: Bool, at index: Int) { unimplemented() }
+    @MainActor open func setEnabled(_ enabled: Bool, at index: Int) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/setimage(_:at:)
-    @MainActor open func setImage(_ image: NSImage?, at index: Int) { unimplemented() }
+    @MainActor open func setImage(_ image: NSImage?, at index: Int) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/setlabel(_:at:)
-    @MainActor open func setLabel(_ label: String, at index: Int) { unimplemented() }
+    @MainActor open func setLabel(_ label: String, at index: Int) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspickertouchbaritem/target
     @MainActor open var target: AnyObject? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }
 

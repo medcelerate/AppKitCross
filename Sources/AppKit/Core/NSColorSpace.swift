@@ -82,7 +82,7 @@ open class NSColorSpace: NSObject, NSSecureCoding, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorspace/init(colorsyncprofile:)
     /// Out of scope (ADR-0037): ColorSync does not exist on Windows or Linux; use
     /// `init(iccProfileData:)` with the profile's bytes.
-    public init?(colorSyncProfile prof: UnsafeMutableRawPointer) { unimplemented("NSColorSpace.init(colorSyncProfile:) — ColorSync is macOS-only") }
+    public init?(colorSyncProfile prof: UnsafeMutableRawPointer) { appleOnlyUnavailable("NSColorSpace.init(colorSyncProfile:) — ColorSync is macOS-only") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorspace/init(iccprofiledata:)
     /// Reads RGB matrix/TRC and gray TRC profiles (ICC v2 and v4: `curv` and `para` curves,
     /// `desc` and `mluc` names) and CMYK headers. A profile describing one of the standard
@@ -163,7 +163,7 @@ open class NSColorSpace: NSObject, NSSecureCoding, NSCoding {
     open var colorSpaceModel: NSColorSpace.Model { _profile.model }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorspace/colorsyncprofile
     /// Out of scope (ADR-0037): ColorSync is macOS-only; `iccProfileData` has the bytes.
-    open var colorSyncProfile: UnsafeMutableRawPointer? { unimplemented("NSColorSpace.colorSyncProfile — ColorSync is macOS-only") }
+    open var colorSyncProfile: UnsafeMutableRawPointer? { appleOnlyUnavailable("NSColorSpace.colorSyncProfile — ColorSync is macOS-only") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorspace/iccprofiledata
     /// The bytes a space was made from, or a synthesised ICC v4 profile for the standard
     /// spaces. Device spaces have none (as in AppKit), nor do the CMYK spaces on the port.

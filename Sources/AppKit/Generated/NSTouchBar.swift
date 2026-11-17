@@ -19,63 +19,63 @@ import CoreText
 @available(macOS 10.12, *)
 @MainActor open class NSTouchBar: NSObject, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/init()
-    @MainActor public override init() { unimplemented() }
+    @MainActor public override init() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/init(coder:)
-    @MainActor public required init?(coder: NSCoder) { unimplemented() }
+    @MainActor public required init?(coder: NSCoder) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/customizationalloweditemidentifiers
     @MainActor open var customizationAllowedItemIdentifiers: [NSTouchBarItem.Identifier] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/customizationidentifier
     @MainActor open var customizationIdentifier: NSTouchBar.CustomizationIdentifier? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/customizationrequireditemidentifiers
     @MainActor open var customizationRequiredItemIdentifiers: [NSTouchBarItem.Identifier] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/defaultitemidentifiers
     @MainActor open var defaultItemIdentifiers: [NSTouchBarItem.Identifier] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/delegate
     @MainActor open var delegate: (any NSTouchBarDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/escapekeyreplacementitemidentifier
     @MainActor open var escapeKeyReplacementItemIdentifier: NSTouchBarItem.Identifier? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/isautomaticcustomizetouchbarmenuitemenabled
     @available(macOS 10.15, *)
     @MainActor class public var isAutomaticCustomizeTouchBarMenuItemEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/isvisible
-    @MainActor open var isVisible: Bool { unimplemented() }
+    @MainActor open var isVisible: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/item(foridentifier:)
-    @MainActor open func item(forIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? { unimplemented() }
+    @MainActor open func item(forIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/itemidentifiers
-    @MainActor open var itemIdentifiers: [NSTouchBarItem.Identifier] { unimplemented() }
+    @MainActor open var itemIdentifiers: [NSTouchBarItem.Identifier] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/principalitemidentifier
     @MainActor open var principalItemIdentifier: NSTouchBarItem.Identifier? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbar/templateitems
     @MainActor open var templateItems: Set<NSTouchBarItem> {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { appleOnlyUnavailable() }
 }
 
 @available(macOS 10.12, *)

@@ -10,7 +10,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | --- | ---: |
 | Top-level types in SDK | 541 |
 | Types handwritten | 201 |
-| Types generated | 338 |
+| Types generated | 305 |
+| Types apple-only | 33 |
 | Types pending | 2 |
 | Types skipped | 0 |
 | Members emitted | 10096 |
@@ -21,11 +22,24 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 271 |
+| Members unimplemented-calls | 241 |
+
+## Stub call sites
+
+Call sites on non-comment lines. **Still to do** counts `unimplemented()`; **Apple-only**
+counts `appleOnlyUnavailable()`, members that exist only on macOS and that the port does
+not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).
+
+| Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |
+| --- | ---: | ---: |
+| `Sources/AppKit/Generated` | 966 | 341 |
+| `Sources/AppKit/Core` | 73 | 30 |
+| Total | 1039 | 371 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
-**generated** compiles as a stub; **pending** is generated but excluded from the
+**generated** compiles as a stub; **apple-only** compiles as a stub whose members call
+`appleOnlyUnavailable()` (ADR-0044); **pending** is generated but excluded from the
 build (see reason); **blocked** members reference a type not yet available on Windows.
 
 ## Globals and Foundation extensions
@@ -37,546 +51,590 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 
 ## Types
 
-| Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| NSATSTypesetter | class | generated | 15 | 2 | 0 |  |
-| NSAccessibility | struct | handwritten | 339 | 0 | 13 | 1 |
-| NSAccessibilityAnnotationPosition | enum | generated | 3 | 0 | 0 |  |
-| NSAccessibilityButton | protocol | generated | 2 | 0 | 0 |  |
-| NSAccessibilityCheckBox | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityColor | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityContainsTransientUI | protocol | generated | 3 | 0 | 0 |  |
-| NSAccessibilityCustomAction | class | handwritten | 6 | 0 | 0 | 0 |
-| NSAccessibilityCustomRotor | class | handwritten | 39 | 0 | 4 | 0 |
-| NSAccessibilityCustomRotorItemSearchDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityDateTimeComponentsFlags | typealias | generated | 1 | 0 | 0 |  |
-| NSAccessibilityElement | class | handwritten | 4 | 0 | 0 | 0 |
-| NSAccessibilityElementLoading | protocol | generated | 2 | 0 | 0 |  |
-| NSAccessibilityElementProtocol | protocol | generated | 4 | 0 | 0 |  |
-| NSAccessibilityGroup | protocol | generated | 0 | 0 | 0 |  |
-| NSAccessibilityImage | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityLayoutArea | protocol | generated | 4 | 0 | 0 |  |
-| NSAccessibilityLayoutItem | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityList | protocol | generated | 0 | 0 | 0 |  |
-| NSAccessibilityLoadingToken | typealias | generated | 1 | 0 | 0 |  |
-| NSAccessibilityNavigableStaticText | protocol | generated | 4 | 0 | 0 |  |
-| NSAccessibilityOrientation | enum | generated | 3 | 0 | 0 |  |
-| NSAccessibilityOutline | protocol | generated | 0 | 0 | 0 |  |
-| NSAccessibilityPriorityLevel | enum | generated | 3 | 0 | 0 |  |
-| NSAccessibilityProgressIndicator | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityProtocol | protocol | generated | 274 | 0 | 0 |  |
-| NSAccessibilityRadioButton | protocol | generated | 1 | 0 | 0 |  |
-| NSAccessibilityRow | protocol | generated | 2 | 0 | 0 |  |
-| NSAccessibilityRulerMarkerType | enum | generated | 8 | 0 | 0 |  |
-| NSAccessibilitySearchKey | struct | handwritten | 42 | 0 | 0 | 0 |
-| NSAccessibilitySlider | protocol | generated | 4 | 0 | 0 |  |
-| NSAccessibilitySortDirection | enum | generated | 3 | 0 | 0 |  |
-| NSAccessibilityStaticText | protocol | generated | 3 | 0 | 0 |  |
-| NSAccessibilityStepper | protocol | generated | 4 | 0 | 0 |  |
-| NSAccessibilitySwitch | protocol | generated | 3 | 0 | 0 |  |
-| NSAccessibilityTable | protocol | generated | 13 | 0 | 0 |  |
-| NSAccessibilityUnits | enum | generated | 5 | 0 | 0 |  |
-| NSActionCell | class | handwritten | 3 | 0 | 0 | 2 |
-| NSAdaptiveImageGlyph | class | generated | 5 | 2 | 0 |  |
-| NSAlert | class | handwritten | 21 | 0 | 1 | 2 |
-| NSAlertDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSAlignmentFeedbackFilter | class | generated | 7 | 0 | 0 |  |
-| NSAlignmentFeedbackToken | protocol | generated | 0 | 0 | 0 |  |
-| NSAnimatablePropertyContainer | protocol | generated | 4 | 0 | 0 |  |
-| NSAnimatablePropertyKey | typealias | generated | 1 | 0 | 0 |  |
-| NSAnimation | class | handwritten | 30 | 0 | 3 | 1 |
-| NSAnimationContext | class | handwritten | 9 | 0 | 0 | 0 |
-| NSAnimationDelegate | protocol | generated | 5 | 0 | 0 |  |
-| NSAnimationEffect | enum | generated | 3 | 0 | 0 |  |
-| NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |
-| NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |
-| NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |
-| NSApplication | class | handwritten | 183 | 1 | 17 | 6 |
-| NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |
-| NSArrayController | class | handwritten | 38 | 1 | 0 | 0 |
-| NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |
-| NSBezierPath | class | handwritten | 75 | 2 | 4 | 3 |
-| NSBindingInfoKey | struct | generated | 3 | 0 | 0 |  |
-| NSBindingName | struct | generated | 79 | 0 | 0 |  |
-| NSBindingOption | struct | generated | 26 | 0 | 0 |  |
-| NSBindingSelectionMarker | class | handwritten | 5 | 0 | 0 | 0 |
-| NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 3 |
-| NSBorderType | enum | generated | 4 | 0 | 0 |  |
-| NSBox | class | handwritten | 29 | 0 | 2 | 1 |
-| NSBrowser | class | handwritten | 95 | 1 | 3 | 0 |
-| NSBrowserCell | class | handwritten | 12 | 0 | 0 | 0 |
-| NSBrowserDelegate | protocol | handwritten | 34 | 0 | 0 | 0 |
-| NSButton | class | handwritten | 77 | 0 | 3 | 2 |
-| NSButtonCell | class | handwritten | 32 | 1 | 0 | 2 |
-| NSButtonTouchBarItem | class | generated | 9 | 1 | 0 |  |
-| NSCIImageRep | class | generated | 0 | 2 | 0 |  |
-| NSCandidateListTouchBarItem | class | generated | 10 | 1 | 0 |  |
-| NSCandidateListTouchBarItemDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSCell | class | handwritten | 128 | 0 | 5 | 2 |
-| NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |
-| NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |
-| NSClickGestureRecognizer | class | handwritten | 3 | 0 | 0 | 0 |
-| NSClipView | class | handwritten | 15 | 0 | 0 | 2 |
-| NSCloudSharingServiceDelegate | protocol | generated | 1 | 3 | 0 |  |
-| NSCloudSharingValidation | protocol | generated | 0 | 1 | 0 |  |
-| NSCollectionElementCategory | enum | generated | 4 | 0 | 0 |  |
-| NSCollectionLayoutAnchor | class | generated | 7 | 0 | 0 |  |
-| NSCollectionLayoutBoundarySupplementaryItem | class | generated | 6 | 0 | 0 |  |
-| NSCollectionLayoutContainer | protocol | generated | 4 | 0 | 0 |  |
-| NSCollectionLayoutDecorationItem | class | generated | 3 | 0 | 0 |  |
-| NSCollectionLayoutDimension | class | generated | 9 | 0 | 0 |  |
-| NSCollectionLayoutEdgeSpacing | class | generated | 5 | 0 | 0 |  |
-| NSCollectionLayoutEnvironment | protocol | generated | 1 | 0 | 0 |  |
-| NSCollectionLayoutGroup | class | generated | 9 | 0 | 0 |  |
-| NSCollectionLayoutGroupCustomItem | class | generated | 4 | 0 | 0 |  |
-| NSCollectionLayoutGroupCustomItemProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSCollectionLayoutItem | class | generated | 6 | 0 | 0 |  |
-| NSCollectionLayoutSection | class | generated | 8 | 0 | 0 |  |
-| NSCollectionLayoutSectionOrthogonalScrollingBehavior | enum | generated | 6 | 0 | 0 |  |
-| NSCollectionLayoutSectionVisibleItemsInvalidationHandler | typealias | generated | 1 | 0 | 0 |  |
-| NSCollectionLayoutSize | class | generated | 3 | 0 | 0 |  |
-| NSCollectionLayoutSpacing | class | generated | 5 | 0 | 0 |  |
-| NSCollectionLayoutSupplementaryItem | class | generated | 6 | 0 | 0 |  |
-| NSCollectionLayoutVisibleItem | protocol | generated | 10 | 0 | 0 |  |
-| NSCollectionView | class | handwritten | 84 | 0 | 6 | 4 |
-| NSCollectionViewCompositionalLayout | class | generated | 5 | 0 | 0 |  |
-| NSCollectionViewCompositionalLayoutConfiguration | class | generated | 3 | 0 | 0 |  |
-| NSCollectionViewCompositionalLayoutSectionProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSCollectionViewDataSource | protocol | generated | 4 | 0 | 0 |  |
-| NSCollectionViewDelegate | protocol | generated | 29 | 0 | 0 |  |
-| NSCollectionViewDelegateFlowLayout | protocol | generated | 6 | 0 | 0 |  |
-| NSCollectionViewDiffableDataSource | class | handwritten | 13 | 0 | 2 | 0 |
-| NSCollectionViewDiffableDataSourceReference | class | generated | 6 | 0 | 0 |  |
-| NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSCollectionViewElement | protocol | generated | 5 | 0 | 0 |  |
-| NSCollectionViewFlowLayout | class | handwritten | 13 | 0 | 0 | 1 |
-| NSCollectionViewFlowLayoutInvalidationContext | class | handwritten | 2 | 0 | 0 | 1 |
-| NSCollectionViewGridLayout | class | handwritten | 8 | 0 | 0 | 1 |
-| NSCollectionViewItem | class | handwritten | 10 | 0 | 1 | 1 |
-| NSCollectionViewLayout | class | handwritten | 38 | 0 | 0 | 1 |
-| NSCollectionViewLayoutAttributes | class | handwritten | 12 | 0 | 0 | 1 |
-| NSCollectionViewLayoutInvalidationContext | class | handwritten | 10 | 0 | 0 | 1 |
-| NSCollectionViewPrefetching | protocol | generated | 2 | 0 | 0 |  |
-| NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
-| NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
-| NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 4 |
-| NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
-| NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
-| NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |
-| NSColorPicker | class | pending | 10 | 0 | 0 |  |
-| NSColorPickerTouchBarItem | class | generated | 11 | 1 | 0 |  |
-| NSColorPickingCustom | protocol | generated | 4 | 0 | 0 |  |
-| NSColorPickingDefault | protocol | generated | 10 | 0 | 0 |  |
-| NSColorRenderingIntent | enum | generated | 5 | 0 | 0 |  |
-| NSColorSampler | class | generated | 1 | 0 | 0 |  |
-| NSColorSpace | class | handwritten | 30 | 0 | 1 | 2 |
-| NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |
-| NSColorWell | class | handwritten | 17 | 0 | 1 | 0 |
-| NSComboBox | class | handwritten | 31 | 1 | 0 | 1 |
-| NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |
-| NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |
-| NSComboBoxDataSource | protocol | generated | 4 | 0 | 0 |  |
-| NSComboBoxDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSComboButton | class | generated | 9 | 1 | 1 |  |
-| NSCompositingOperation | enum | generated | 28 | 0 | 0 |  |
-| NSControl | class | handwritten | 80 | 0 | 4 | 2 |
-| NSControlTextEditingDelegate | protocol | generated | 10 | 0 | 0 |  |
-| NSControlTint | enum | generated | 4 | 0 | 0 |  |
-| NSController | class | handwritten | 8 | 0 | 0 | 0 |
-| NSCursor | class | handwritten | 76 | 0 | 9 | 2 |
-| NSCustomImageRep | class | generated | 5 | 0 | 0 |  |
-| NSCustomTouchBarItem | class | generated | 1 | 2 | 0 |  |
-| NSDataAsset | class | generated | 6 | 0 | 1 |  |
-| NSDatePicker | class | handwritten | 28 | 0 | 3 | 1 |
-| NSDatePickerCell | class | handwritten | 16 | 0 | 0 | 1 |
-| NSDatePickerCellDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSDeviceDescriptionKey | struct | generated | 6 | 0 | 0 |  |
-| NSDictionaryController | class | generated | 7 | 0 | 0 |  |
-| NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |
-| NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |
-| NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |
-| NSDirectionalEdgeInsets | struct | handwritten | 6 | 0 | 0 | 0 |
-| NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |
-| NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |
-| NSDockTile | class | handwritten | 6 | 0 | 0 | 0 |
-| NSDockTilePlugIn | protocol | generated | 2 | 0 | 0 |  |
-| NSDocument | class | handwritten | 149 | 9 | 2 | 3 |
-| NSDocumentController | class | handwritten | 44 | 0 | 0 | 3 |
-| NSDragOperation | struct | generated | 9 | 0 | 0 |  |
-| NSDraggingContext | enum | generated | 2 | 0 | 0 |  |
-| NSDraggingDestination | protocol | generated | 9 | 0 | 0 |  |
-| NSDraggingFormation | enum | generated | 5 | 0 | 0 |  |
-| NSDraggingImageComponent | class | handwritten | 4 | 0 | 0 | 1 |
-| NSDraggingInfo | protocol | generated | 16 | 0 | 0 |  |
-| NSDraggingItem | class | handwritten | 8 | 0 | 1 | 1 |
-| NSDraggingItemEnumerationOptions | struct | generated | 2 | 0 | 0 |  |
-| NSDraggingSession | class | handwritten | 7 | 0 | 0 | 1 |
-| NSDraggingSource | protocol | generated | 5 | 0 | 0 |  |
-| NSDrawer | class | handwritten | 26 | 0 | 1 | 2 |
-| NSDrawerDelegate | protocol | generated | 7 | 0 | 0 |  |
-| NSEPSImageRep | class | generated | 4 | 0 | 0 |  |
-| NSEditor | protocol | generated | 4 | 0 | 0 |  |
-| NSEditorRegistration | protocol | generated | 2 | 0 | 0 |  |
-| NSEvent | class | handwritten | 281 | 0 | 12 | 5 |
-| NSFilePromiseProvider | class | generated | 5 | 0 | 0 |  |
-| NSFilePromiseProviderDelegate | protocol | generated | 3 | 0 | 0 |  |
-| NSFilePromiseReceiver | class | generated | 4 | 0 | 0 |  |
-| NSFindPanelAction | enum | generated | 10 | 0 | 0 |  |
-| NSFindPanelSubstringMatchType | enum | generated | 4 | 0 | 0 |  |
-| NSFocusRingPlacement | enum | generated | 4 | 0 | 0 |  |
-| NSFocusRingType | enum | generated | 3 | 0 | 0 |  |
-| NSFont | class | handwritten | 90 | 4 | 4 | 7 |
-| NSFontAction | enum | generated | 8 | 0 | 0 |  |
-| NSFontAssetRequest | class | generated | 5 | 0 | 1 |  |
-| NSFontChanging | protocol | generated | 2 | 0 | 0 |  |
-| NSFontCollection | class | handwritten | 30 | 0 | 4 | 0 |
-| NSFontCollectionMatchingOptionKey | struct | generated | 3 | 0 | 0 |  |
-| NSFontCollectionOptions | struct | generated | 1 | 0 | 0 |  |
-| NSFontDescriptor | class | handwritten | 67 | 0 | 6 | 0 |
-| NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |
-| NSFontManager | class | handwritten | 47 | 0 | 0 | 0 |
-| NSFontPanel | class | handwritten | 19 | 0 | 1 | 0 |
-| NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |
-| NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |
-| NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |
-| NSForm | class | handwritten | 21 | 0 | 0 | 0 |
-| NSFormCell | class | handwritten | 13 | 0 | 0 | 0 |
-| NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |
-| NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |
-| NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |
-| NSGlassEffectView | class | generated | 6 | 0 | 1 |  |
-| NSGlyph | typealias | generated | 1 | 0 | 0 |  |
-| NSGlyphGenerator | class | generated | 2 | 0 | 0 |  |
-| NSGlyphInfo | class | generated | 7 | 2 | 0 |  |
-| NSGlyphStorage | protocol | generated | 4 | 0 | 0 |  |
-| NSGradient | class | handwritten | 17 | 0 | 1 | 1 |
-| NSGraphicsContext | class | handwritten | 27 | 1 | 2 | 4 |
-| NSGridCell | class | handwritten | 16 | 0 | 1 | 1 |
-| NSGridColumn | class | handwritten | 9 | 0 | 0 | 1 |
-| NSGridRow | class | handwritten | 14 | 0 | 1 | 1 |
-| NSGridView | class | handwritten | 27 | 0 | 0 | 1 |
-| NSGroupTouchBarItem | class | generated | 9 | 1 | 0 |  |
-| NSHapticFeedbackManager | class | generated | 7 | 0 | 2 |  |
-| NSHapticFeedbackPerformer | protocol | generated | 1 | 0 | 0 |  |
-| NSHelpManager | class | generated | 14 | 0 | 3 |  |
-| NSHorizontalDirection | enum | generated | 17 | 0 | 6 |  |
-| NSIgnoreMisspelledWords | protocol | generated | 1 | 0 | 0 |  |
-| NSImage | class | handwritten | 244 | 4 | 11 | 5 |
-| NSImageAlignment | enum | generated | 9 | 0 | 0 |  |
-| NSImageCell | class | handwritten | 3 | 0 | 0 | 2 |
-| NSImageDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSImageInterpolation | enum | generated | 5 | 0 | 0 |  |
-| NSImageRep | class | handwritten | 40 | 0 | 1 | 2 |
-| NSImageScaling | enum | generated | 7 | 0 | 0 |  |
-| NSImageView | class | handwritten | 18 | 8 | 1 | 2 |
-| NSInputServerMouseTracker | protocol | generated | 0 | 0 | 0 |  |
-| NSInputServiceProvider | protocol | generated | 0 | 0 | 0 |  |
-| NSItemBadge | struct | generated | 5 | 0 | 0 |  |
-| NSLayoutAnchor | class | handwritten | 10 | 0 | 0 | 0 |
-| NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |
-| NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |
-| NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |
-| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 9 |
-| NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |
-| NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
-| NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |
-| NSLevelIndicator | class | handwritten | 25 | 0 | 2 | 1 |
-| NSLevelIndicatorCell | class | handwritten | 11 | 0 | 0 | 1 |
-| NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |
-| NSMagnificationGestureRecognizer | class | handwritten | 1 | 0 | 0 | 0 |
-| NSMatrix | class | handwritten | 83 | 0 | 1 | 1 |
-| NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |
-| NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |
-| NSMenu | class | handwritten | 72 | 1 | 3 | 2 |
-| NSMenuDelegate | protocol | generated | 8 | 0 | 0 |  |
-| NSMenuItem | class | handwritten | 42 | 0 | 0 | 2 |
-| NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |
-| NSMenuItemCell | class | handwritten | 20 | 0 | 0 | 1 |
-| NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |
-| NSMenuToolbarItem | class | handwritten | 2 | 0 | 0 | 0 |
-| NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |
-| NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |
-| NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |
-| NSNib | class | generated | 4 | 0 | 1 |  |
-| NSObjectController | class | handwritten | 21 | 3 | 0 | 2 |
-| NSOpenGLContext | class | generated | 24 | 6 | 1 |  |
-| NSOpenGLGlobalOption | enum | generated | 4 | 1 | 0 |  |
-| NSOpenGLLayer | class | generated | 5 | 2 | 0 |  |
-| NSOpenGLPixelFormat | class | generated | 1 | 4 | 0 |  |
-| NSOpenGLPixelFormatAttribute | typealias | generated | 1 | 0 | 0 |  |
-| NSOpenGLView | class | generated | 10 | 0 | 0 |  |
-| NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |
-| NSOpenSavePanelDelegate | protocol | handwritten | 6 | 2 | 0 | 0 |
-| NSOutlineView | class | handwritten | 35 | 6 | 0 | 1 |
-| NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |
-| NSOutlineViewDelegate | protocol | generated | 39 | 0 | 0 |  |
-| NSPDFImageRep | class | generated | 5 | 0 | 0 |  |
-| NSPDFInfo | class | generated | 6 | 0 | 0 |  |
-| NSPDFPanel | class | generated | 7 | 0 | 1 |  |
-| NSPICTImageRep | class | generated | 3 | 0 | 0 |  |
-| NSPageController | class | handwritten | 14 | 0 | 2 | 1 |
-| NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |
-| NSPageLayout | class | handwritten | 10 | 0 | 1 | 1 |
-| NSPanGestureRecognizer | class | handwritten | 5 | 0 | 0 | 0 |
-| NSPanel | class | handwritten | 3 | 0 | 0 | 2 |
-| NSParagraphStyle | class | handwritten | 31 | 0 | 2 | 0 |
-| NSPasteboard | class | handwritten | 93 | 9 | 11 | 5 |
-| NSPasteboardItem | class | handwritten | 14 | 0 | 2 | 5 |
-| NSPasteboardItemDataProvider | protocol | generated | 2 | 0 | 0 |  |
-| NSPasteboardReading | protocol | generated | 3 | 0 | 0 |  |
-| NSPasteboardTypeOwner | protocol | generated | 2 | 0 | 0 |  |
-| NSPasteboardWriting | protocol | generated | 3 | 0 | 0 |  |
-| NSPathCell | class | handwritten | 16 | 0 | 0 | 1 |
-| NSPathCellDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSPathComponentCell | class | handwritten | 2 | 0 | 0 | 1 |
-| NSPathControl | class | handwritten | 18 | 0 | 1 | 1 |
-| NSPathControlDelegate | protocol | generated | 6 | 0 | 0 |  |
-| NSPathControlItem | class | handwritten | 4 | 0 | 0 | 1 |
-| NSPersistentDocument | class | generated | 5 | 2 | 0 |  |
-| NSPickerTouchBarItem | class | generated | 24 | 1 | 2 |  |
-| NSPopUpButton | class | handwritten | 42 | 0 | 1 | 1 |
-| NSPopUpButtonCell | class | handwritten | 40 | 0 | 0 | 1 |
-| NSPopover | class | handwritten | 29 | 0 | 3 | 2 |
-| NSPopoverDelegate | protocol | generated | 8 | 0 | 0 |  |
-| NSPopoverTouchBarItem | class | generated | 9 | 1 | 0 |  |
-| NSPredicateEditor | class | generated | 1 | 0 | 0 |  |
-| NSPredicateEditorRowTemplate | class | generated | 13 | 3 | 0 |  |
-| NSPressGestureRecognizer | class | handwritten | 4 | 0 | 0 | 0 |
-| NSPressureConfiguration | class | generated | 3 | 0 | 0 |  |
-| NSPreviewRepresentableActivityItem | protocol | generated | 2 | 2 | 0 |  |
-| NSPreviewRepresentingActivityItem | class | generated | 1 | 1 | 0 |  |
-| NSPrintInfo | class | handwritten | 73 | 0 | 6 | 7 |
-| NSPrintOperation | class | handwritten | 35 | 0 | 2 | 6 |
-| NSPrintPanel | class | handwritten | 28 | 0 | 4 | 1 |
-| NSPrintPanelAccessorizing | protocol | generated | 2 | 0 | 0 |  |
-| NSPrinter | class | handwritten | 12 | 0 | 3 | 1 |
-| NSProgressIndicator | class | handwritten | 17 | 0 | 1 | 1 |
-| NSRectAlignment | enum | generated | 9 | 0 | 0 |  |
-| NSResponder | class | handwritten | 69 | 2 | 0 | 3 |
-| NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |
-| NSRuleEditor | class | handwritten | 44 | 0 | 3 | 3 |
-| NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |
-| NSRulerMarker | class | handwritten | 14 | 0 | 0 | 1 |
-| NSRulerView | class | handwritten | 29 | 0 | 2 | 1 |
-| NSRunningApplication | class | handwritten | 22 | 2 | 0 | 1 |
-| NSSavePanel | class | handwritten | 24 | 4 | 0 | 1 |
-| NSScreen | class | handwritten | 30 | 0 | 0 | 3 |
-| NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |
-| NSScrollView | class | handwritten | 61 | 0 | 2 | 3 |
-| NSScroller | class | handwritten | 42 | 0 | 6 | 2 |
-| NSScrubber | class | handwritten | 35 | 0 | 2 | 2 |
-| NSScrubberArrangedView | class | handwritten | 3 | 0 | 0 | 1 |
-| NSScrubberDataSource | protocol | generated | 2 | 0 | 0 |  |
-| NSScrubberDelegate | protocol | generated | 6 | 0 | 0 |  |
-| NSScrubberFlowLayout | class | handwritten | 3 | 0 | 0 | 1 |
-| NSScrubberFlowLayoutDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSScrubberImageItemView | class | handwritten | 3 | 0 | 0 | 1 |
-| NSScrubberItemView | class | handwritten | 0 | 0 | 0 | 1 |
-| NSScrubberLayout | class | handwritten | 14 | 0 | 0 | 1 |
-| NSScrubberLayoutAttributes | class | handwritten | 4 | 0 | 0 | 1 |
-| NSScrubberProportionalLayout | class | handwritten | 3 | 0 | 0 | 1 |
-| NSScrubberSelectionStyle | class | handwritten | 5 | 0 | 0 | 1 |
-| NSScrubberSelectionView | class | handwritten | 0 | 0 | 0 | 1 |
-| NSScrubberTextItemView | class | handwritten | 2 | 0 | 0 | 1 |
-| NSSearchField | class | handwritten | 18 | 1 | 1 | 1 |
-| NSSearchFieldCell | class | handwritten | 15 | 0 | 0 | 1 |
-| NSSearchFieldDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSSearchToolbarItem | class | handwritten | 5 | 0 | 0 | 0 |
-| NSSecureTextField | class | generated | 0 | 0 | 0 |  |
-| NSSecureTextFieldCell | class | generated | 1 | 0 | 0 |  |
-| NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 1 |
-| NSSegmentedControl | class | handwritten | 54 | 0 | 3 | 1 |
-| NSSeguePerforming | protocol | generated | 3 | 0 | 0 |  |
-| NSSelectionAffinity | enum | generated | 2 | 0 | 0 |  |
-| NSSelectionGranularity | enum | generated | 3 | 0 | 0 |  |
-| NSServiceProviderName | typealias | generated | 1 | 0 | 0 |  |
-| NSServicesMenuRequestor | protocol | generated | 2 | 0 | 0 |  |
-| NSShadow | class | generated | 5 | 0 | 0 |  |
-| NSSharingCollaborationMode | enum | generated | 2 | 0 | 0 |  |
-| NSSharingService | class | generated | 44 | 0 | 3 |  |
-| NSSharingServiceDelegate | protocol | generated | 7 | 0 | 0 |  |
-| NSSharingServicePicker | class | generated | 15 | 0 | 1 |  |
-| NSSharingServicePickerDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSSharingServicePickerToolbarItem | class | generated | 1 | 0 | 0 |  |
-| NSSharingServicePickerToolbarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSharingServicePickerTouchBarItem | class | generated | 4 | 0 | 0 |  |
-| NSSharingServicePickerTouchBarItemDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSlider | class | handwritten | 25 | 0 | 2 | 2 |
-| NSSliderAccessory | class | generated | 5 | 0 | 1 |  |
-| NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |
-| NSSliderCell | class | handwritten | 21 | 0 | 0 | 2 |
-| NSSliderTouchBarItem | class | generated | 10 | 2 | 0 |  |
-| NSSound | class | handwritten | 24 | 2 | 3 | 0 |
-| NSSoundDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSpeechRecognizer | class | generated | 7 | 1 | 0 |  |
-| NSSpeechRecognizerDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSSpeechSynthesizer | class | generated | 81 | 0 | 12 |  |
-| NSSpeechSynthesizerDelegate | protocol | generated | 5 | 0 | 0 |  |
-| NSSpellChecker | class | handwritten | 75 | 3 | 3 | 2 |
-| NSSplitView | class | handwritten | 25 | 0 | 2 | 2 |
-| NSSplitViewController | class | handwritten | 17 | 0 | 0 | 2 |
-| NSSplitViewDelegate | protocol | generated | 12 | 0 | 0 |  |
-| NSSplitViewItem | class | handwritten | 36 | 0 | 2 | 2 |
-| NSSplitViewItemAccessoryViewController | class | generated | 7 | 0 | 0 |  |
-| NSSpringLoadingDestination | protocol | generated | 6 | 0 | 0 |  |
-| NSSpringLoadingHighlight | enum | generated | 3 | 0 | 0 |  |
-| NSSpringLoadingOptions | struct | generated | 4 | 0 | 0 |  |
-| NSStackView | class | handwritten | 43 | 0 | 3 | 0 |
-| NSStackViewDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSStandardKeyBindingResponding | protocol | generated | 96 | 0 | 0 |  |
-| NSStatusBar | class | handwritten | 5 | 0 | 0 | 0 |
-| NSStatusBarButton | class | handwritten | 1 | 0 | 0 | 0 |
-| NSStatusItem | class | handwritten | 26 | 0 | 2 | 0 |
-| NSStepper | class | handwritten | 5 | 0 | 0 | 1 |
-| NSStepperCell | class | handwritten | 5 | 0 | 0 | 1 |
-| NSStepperTouchBarItem | class | generated | 8 | 1 | 0 |  |
-| NSStoryboard | class | generated | 10 | 0 | 2 |  |
-| NSStoryboardSegue | class | generated | 7 | 0 | 1 |  |
-| NSStringDrawingContext | class | generated | 3 | 0 | 0 |  |
-| NSSuggestionItem | struct | generated | 9 | 0 | 0 |  |
-| NSSuggestionItemResponse | struct | generated | 18 | 0 | 4 |  |
-| NSSuggestionItemSection | struct | generated | 5 | 0 | 1 |  |
-| NSSwitch | class | handwritten | 1 | 0 | 0 | 1 |
-| NSTabView | class | handwritten | 44 | 0 | 3 | 2 |
-| NSTabViewController | class | handwritten | 22 | 0 | 1 | 2 |
-| NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSTabViewItem | class | handwritten | 17 | 0 | 1 | 2 |
-| NSTableCellView | class | handwritten | 6 | 0 | 0 | 1 |
-| NSTableColumn | class | handwritten | 19 | 0 | 1 | 1 |
-| NSTableHeaderCell | class | handwritten | 2 | 0 | 0 | 1 |
-| NSTableHeaderView | class | handwritten | 6 | 0 | 0 | 1 |
-| NSTableRowView | class | handwritten | 18 | 0 | 0 | 1 |
-| NSTableView | class | handwritten | 154 | 0 | 10 | 2 |
-| NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |
-| NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |
-| NSTableViewDiffableDataSource | class | handwritten | 14 | 0 | 3 | 0 |
-| NSTableViewDiffableDataSourceReference | class | generated | 11 | 0 | 0 |  |
-| NSTableViewDiffableDataSourceReferenceCellProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSTableViewDiffableDataSourceReferenceSectionHeaderViewProvider | typealias | generated | 1 | 0 | 0 |  |
-| NSTableViewRowAction | class | generated | 7 | 0 | 1 |  |
-| NSText | class | handwritten | 57 | 0 | 0 | 2 |
-| NSTextAlignment | enum | generated | 5 | 0 | 0 |  |
-| NSTextAlternatives | class | generated | 5 | 0 | 0 |  |
-| NSTextAttachment | class | handwritten | 14 | 0 | 0 | 0 |
-| NSTextAttachmentCell | class | handwritten | 0 | 0 | 0 | 0 |
-| NSTextAttachmentCellProtocol | protocol | generated | 12 | 0 | 0 |  |
-| NSTextAttachmentContainer | protocol | generated | 2 | 0 | 0 |  |
-| NSTextAttachmentLayout | protocol | generated | 3 | 0 | 0 |  |
-| NSTextAttachmentViewProvider | class | handwritten | 8 | 0 | 0 | 0 |
-| NSTextBlock | class | handwritten | 34 | 0 | 4 | 0 |
-| NSTextCheckingClient | protocol | generated | 8 | 0 | 0 |  |
-| NSTextCheckingController | class | generated | 18 | 1 | 0 |  |
-| NSTextContainer | class | handwritten | 18 | 1 | 0 | 0 |
-| NSTextContent | protocol | generated | 1 | 0 | 0 |  |
-| NSTextContentManager | class | generated | 15 | 0 | 1 |  |
-| NSTextContentManagerDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSTextContentStorage | class | generated | 7 | 1 | 0 |  |
-| NSTextContentStorageDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSTextContentType | struct | generated | 43 | 0 | 0 |  |
-| NSTextCursorAccessoryPlacement | enum | generated | 9 | 0 | 0 |  |
-| NSTextDelegate | protocol | generated | 5 | 0 | 0 |  |
-| NSTextElement | class | generated | 6 | 0 | 0 |  |
-| NSTextElementProvider | protocol | generated | 7 | 0 | 0 |  |
-| NSTextField | class | handwritten | 37 | 1 | 1 | 2 |
-| NSTextFieldCell | class | handwritten | 11 | 0 | 0 | 2 |
-| NSTextFieldDelegate | protocol | generated | 3 | 0 | 0 |  |
-| NSTextFinder | class | handwritten | 30 | 0 | 2 | 0 |
-| NSTextFinderBarContainer | protocol | generated | 4 | 0 | 0 |  |
-| NSTextFinderClient | protocol | generated | 16 | 0 | 0 |  |
-| NSTextInput | protocol | generated | 0 | 0 | 0 |  |
-| NSTextInputClient | protocol | generated | 21 | 0 | 0 |  |
-| NSTextInputContext | class | generated | 18 | 0 | 0 |  |
-| NSTextInputSourceIdentifier | typealias | generated | 1 | 0 | 0 |  |
-| NSTextInputTraitType | enum | generated | 3 | 0 | 0 |  |
-| NSTextInputTraits | protocol | generated | 14 | 0 | 0 |  |
-| NSTextInsertionIndicator | class | generated | 9 | 0 | 2 |  |
-| NSTextLayoutFragment | class | generated | 28 | 0 | 2 |  |
-| NSTextLayoutManager | class | generated | 40 | 0 | 2 |  |
-| NSTextLayoutManagerDelegate | protocol | generated | 3 | 0 | 0 |  |
-| NSTextLayoutOrientationProvider | protocol | generated | 1 | 0 | 0 |  |
-| NSTextLineFragment | class | generated | 11 | 0 | 0 |  |
-| NSTextList | class | handwritten | 27 | 0 | 2 | 0 |
-| NSTextListElement | class | generated | 6 | 2 | 0 |  |
-| NSTextLocation | protocol | generated | 1 | 0 | 0 |  |
-| NSTextMovement | enum | generated | 9 | 0 | 0 |  |
-| NSTextParagraph | class | generated | 4 | 0 | 0 |  |
-| NSTextPreview | class | generated | 5 | 0 | 0 |  |
-| NSTextRange | class | generated | 11 | 0 | 0 |  |
-| NSTextScalingType | enum | generated | 2 | 0 | 0 |  |
-| NSTextSelection | class | generated | 20 | 0 | 2 |  |
-| NSTextSelectionDataSource | protocol | generated | 10 | 0 | 0 |  |
-| NSTextSelectionNavigation | class | generated | 31 | 0 | 5 |  |
-| NSTextStorage | class | handwritten | 21 | 0 | 0 | 0 |
-| NSTextStorageDelegate | protocol | generated | 2 | 0 | 0 |  |
-| NSTextStorageEditActions | struct | generated | 2 | 0 | 0 |  |
-| NSTextStorageObserving | protocol | generated | 3 | 0 | 0 |  |
-| NSTextSuggestionsDelegate | protocol | pending | 1 | 8 | 3 |  |
-| NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |
-| NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |
-| NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 9 |
-| NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |
-| NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |
-| NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |
-| NSTintConfiguration | class | generated | 7 | 0 | 0 |  |
-| NSTintProminence | enum | generated | 4 | 0 | 0 |  |
-| NSTitlebarAccessoryViewController | class | handwritten | 8 | 0 | 0 | 3 |
-| NSTitlebarSeparatorStyle | enum | generated | 4 | 0 | 0 |  |
-| NSTokenField | class | handwritten | 10 | 1 | 1 | 1 |
-| NSTokenFieldCell | class | handwritten | 6 | 0 | 0 | 1 |
-| NSTokenFieldCellDelegate | protocol | generated | 10 | 0 | 0 |  |
-| NSTokenFieldDelegate | protocol | generated | 10 | 0 | 0 |  |
-| NSToolbar | class | handwritten | 39 | 0 | 3 | 0 |
-| NSToolbarDelegate | protocol | handwritten | 8 | 0 | 0 | 0 |
-| NSToolbarItem | class | handwritten | 47 | 0 | 3 | 0 |
-| NSToolbarItemGroup | class | handwritten | 14 | 0 | 2 | 0 |
-| NSToolbarItemValidation | protocol | generated | 1 | 0 | 0 |  |
-| NSToolbarUserInfoKey | struct | generated | 2 | 0 | 0 |  |
-| NSTouch | class | generated | 21 | 0 | 3 |  |
-| NSTouchBar | class | generated | 15 | 0 | 1 |  |
-| NSTouchBarDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSTouchBarItem | class | generated | 22 | 0 | 2 |  |
-| NSTouchBarProvider | protocol | generated | 1 | 0 | 0 |  |
-| NSTrackingArea | class | handwritten | 15 | 0 | 1 | 1 |
-| NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |
-| NSTreeController | class | handwritten | 36 | 0 | 0 | 0 |
-| NSTreeNode | class | handwritten | 9 | 0 | 0 | 3 |
-| NSTypesetter | class | generated | 53 | 2 | 0 |  |
-| NSTypesetterControlCharacterAction | struct | generated | 6 | 0 | 0 |  |
-| NSUnderlineStyle | struct | generated | 8 | 0 | 0 |  |
-| NSUserActivityRestoring | protocol | generated | 0 | 1 | 0 |  |
-| NSUserDefaultsController | class | handwritten | 11 | 0 | 0 | 0 |
-| NSUserInterfaceCompression | protocol | generated | 3 | 0 | 0 |  |
-| NSUserInterfaceCompressionOptions | class | handwritten | 14 | 0 | 0 | 0 |
-| NSUserInterfaceItemIdentification | protocol | generated | 1 | 0 | 0 |  |
-| NSUserInterfaceItemIdentifier | struct | generated | 0 | 0 | 0 |  |
-| NSUserInterfaceItemSearching | protocol | generated | 4 | 0 | 0 |  |
-| NSUserInterfaceLayoutDirection | enum | generated | 2 | 0 | 0 |  |
-| NSUserInterfaceLayoutOrientation | enum | generated | 2 | 0 | 0 |  |
-| NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |
-| NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |
-| NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 8 |
-| NSViewAnimation | class | handwritten | 8 | 0 | 2 | 1 |
-| NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |
-| NSViewController | class | handwritten | 56 | 1 | 2 | 2 |
-| NSViewControllerPresentationAnimator | protocol | generated | 2 | 0 | 0 |  |
-| NSViewInvalidating | protocol | handwritten | 6 | 0 | 0 | 0 |
-| NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |
-| NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |
-| NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |
-| NSWindow | class | handwritten | 391 | 3 | 20 | 10 |
-| NSWindowController | class | handwritten | 28 | 0 | 1 | 2 |
-| NSWindowDelegate | protocol | generated | 53 | 0 | 0 |  |
-| NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |
-| NSWindowTab | class | generated | 4 | 0 | 0 |  |
-| NSWindowTabGroup | class | generated | 8 | 0 | 0 |  |
-| NSWorkspace | class | handwritten | 127 | 7 | 7 | 5 |
-| NSWritingDirection | enum | generated | 3 | 0 | 0 |  |
-| NSWritingDirectionFormatType | enum | generated | 2 | 0 | 0 |  |
-| NSWritingToolsBehavior | enum | generated | 4 | 0 | 0 |  |
-| NSWritingToolsCoordinator | class | generated | 53 | 0 | 8 |  |
-| NSWritingToolsResultOptions | struct | generated | 5 | 0 | 0 |  |
+| Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) | Apple-only |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| NSATSTypesetter | class | generated | 15 | 2 | 0 |  |  |
+| NSAccessibility | struct | handwritten | 339 | 0 | 13 | 1 |  |
+| NSAccessibilityAnnotationPosition | enum | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityButton | protocol | generated | 2 | 0 | 0 |  |  |
+| NSAccessibilityCheckBox | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityColor | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityContainsTransientUI | protocol | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityCustomAction | class | handwritten | 6 | 0 | 0 | 0 |  |
+| NSAccessibilityCustomRotor | class | handwritten | 39 | 0 | 4 | 0 |  |
+| NSAccessibilityCustomRotorItemSearchDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityDateTimeComponentsFlags | typealias | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityElement | class | handwritten | 4 | 0 | 0 | 0 |  |
+| NSAccessibilityElementLoading | protocol | generated | 2 | 0 | 0 |  |  |
+| NSAccessibilityElementProtocol | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAccessibilityGroup | protocol | generated | 0 | 0 | 0 |  |  |
+| NSAccessibilityImage | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityLayoutArea | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAccessibilityLayoutItem | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityList | protocol | generated | 0 | 0 | 0 |  |  |
+| NSAccessibilityLoadingToken | typealias | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityNavigableStaticText | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAccessibilityOrientation | enum | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityOutline | protocol | generated | 0 | 0 | 0 |  |  |
+| NSAccessibilityPriorityLevel | enum | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityProgressIndicator | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityProtocol | protocol | generated | 274 | 0 | 0 |  |  |
+| NSAccessibilityRadioButton | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAccessibilityRow | protocol | generated | 2 | 0 | 0 |  |  |
+| NSAccessibilityRulerMarkerType | enum | generated | 8 | 0 | 0 |  |  |
+| NSAccessibilitySearchKey | struct | handwritten | 42 | 0 | 0 | 0 |  |
+| NSAccessibilitySlider | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAccessibilitySortDirection | enum | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityStaticText | protocol | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityStepper | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAccessibilitySwitch | protocol | generated | 3 | 0 | 0 |  |  |
+| NSAccessibilityTable | protocol | generated | 13 | 0 | 0 |  |  |
+| NSAccessibilityUnits | enum | generated | 5 | 0 | 0 |  |  |
+| NSActionCell | class | handwritten | 3 | 0 | 0 | 2 |  |
+| NSAdaptiveImageGlyph | class | generated | 5 | 2 | 0 |  |  |
+| NSAlert | class | handwritten | 21 | 0 | 1 | 2 |  |
+| NSAlertDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSAlignmentFeedbackFilter | class | generated | 7 | 0 | 0 |  |  |
+| NSAlignmentFeedbackToken | protocol | generated | 0 | 0 | 0 |  |  |
+| NSAnimatablePropertyContainer | protocol | generated | 4 | 0 | 0 |  |  |
+| NSAnimatablePropertyKey | typealias | generated | 1 | 0 | 0 |  |  |
+| NSAnimation | class | handwritten | 30 | 0 | 3 | 1 |  |
+| NSAnimationContext | class | handwritten | 9 | 0 | 0 | 0 |  |
+| NSAnimationDelegate | protocol | generated | 5 | 0 | 0 |  |  |
+| NSAnimationEffect | enum | generated | 3 | 0 | 0 |  |  |
+| NSAppKitVersion | struct | generated | 84 | 0 | 0 |  |  |
+| NSAppearance | class | handwritten | 18 | 0 | 1 | 0 |  |
+| NSAppearanceCustomization | protocol | generated | 2 | 0 | 0 |  |  |
+| NSApplication | class | handwritten | 183 | 1 | 17 | 6 |  |
+| NSApplicationDelegate | protocol | generated | 41 | 4 | 0 |  |  |
+| NSArrayController | class | handwritten | 38 | 1 | 0 | 0 |  |
+| NSBackgroundExtensionView | class | generated | 2 | 0 | 0 |  |  |
+| NSBezierPath | class | handwritten | 75 | 2 | 4 | 3 |  |
+| NSBindingInfoKey | struct | generated | 3 | 0 | 0 |  |  |
+| NSBindingName | struct | generated | 79 | 0 | 0 |  |  |
+| NSBindingOption | struct | generated | 26 | 0 | 0 |  |  |
+| NSBindingSelectionMarker | class | handwritten | 5 | 0 | 0 | 0 |  |
+| NSBitmapImageRep | class | handwritten | 81 | 1 | 5 | 3 |  |
+| NSBorderType | enum | generated | 4 | 0 | 0 |  |  |
+| NSBox | class | handwritten | 29 | 0 | 2 | 1 |  |
+| NSBrowser | class | handwritten | 95 | 1 | 3 | 0 |  |
+| NSBrowserCell | class | handwritten | 12 | 0 | 0 | 0 |  |
+| NSBrowserDelegate | protocol | handwritten | 34 | 0 | 0 | 0 |  |
+| NSButton | class | handwritten | 77 | 0 | 3 | 2 |  |
+| NSButtonCell | class | handwritten | 32 | 1 | 0 | 2 |  |
+| NSButtonTouchBarItem | class | apple-only | 9 | 1 | 0 |  | 15 |
+| NSCIImageRep | class | generated | 0 | 2 | 0 |  |  |
+| NSCandidateListTouchBarItem | class | apple-only | 10 | 1 | 0 |  | 16 |
+| NSCandidateListTouchBarItemDelegate | protocol | apple-only | 4 | 0 | 0 |  |  |
+| NSCell | class | handwritten | 128 | 0 | 5 | 2 |  |
+| NSChangeSpelling | protocol | generated | 1 | 0 | 0 |  |  |
+| NSCharacterCollection | enum | generated | 6 | 0 | 0 |  |  |
+| NSClickGestureRecognizer | class | handwritten | 3 | 0 | 0 | 0 |  |
+| NSClipView | class | handwritten | 15 | 0 | 0 | 2 |  |
+| NSCloudSharingServiceDelegate | protocol | apple-only | 1 | 3 | 0 |  |  |
+| NSCloudSharingValidation | protocol | apple-only | 0 | 1 | 0 |  |  |
+| NSCollectionElementCategory | enum | generated | 4 | 0 | 0 |  |  |
+| NSCollectionLayoutAnchor | class | generated | 7 | 0 | 0 |  |  |
+| NSCollectionLayoutBoundarySupplementaryItem | class | generated | 6 | 0 | 0 |  |  |
+| NSCollectionLayoutContainer | protocol | generated | 4 | 0 | 0 |  |  |
+| NSCollectionLayoutDecorationItem | class | generated | 3 | 0 | 0 |  |  |
+| NSCollectionLayoutDimension | class | generated | 9 | 0 | 0 |  |  |
+| NSCollectionLayoutEdgeSpacing | class | generated | 5 | 0 | 0 |  |  |
+| NSCollectionLayoutEnvironment | protocol | generated | 1 | 0 | 0 |  |  |
+| NSCollectionLayoutGroup | class | generated | 9 | 0 | 0 |  |  |
+| NSCollectionLayoutGroupCustomItem | class | generated | 4 | 0 | 0 |  |  |
+| NSCollectionLayoutGroupCustomItemProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSCollectionLayoutItem | class | generated | 6 | 0 | 0 |  |  |
+| NSCollectionLayoutSection | class | generated | 8 | 0 | 0 |  |  |
+| NSCollectionLayoutSectionOrthogonalScrollingBehavior | enum | generated | 6 | 0 | 0 |  |  |
+| NSCollectionLayoutSectionVisibleItemsInvalidationHandler | typealias | generated | 1 | 0 | 0 |  |  |
+| NSCollectionLayoutSize | class | generated | 3 | 0 | 0 |  |  |
+| NSCollectionLayoutSpacing | class | generated | 5 | 0 | 0 |  |  |
+| NSCollectionLayoutSupplementaryItem | class | generated | 6 | 0 | 0 |  |  |
+| NSCollectionLayoutVisibleItem | protocol | generated | 10 | 0 | 0 |  |  |
+| NSCollectionView | class | handwritten | 84 | 0 | 6 | 4 |  |
+| NSCollectionViewCompositionalLayout | class | generated | 5 | 0 | 0 |  |  |
+| NSCollectionViewCompositionalLayoutConfiguration | class | generated | 3 | 0 | 0 |  |  |
+| NSCollectionViewCompositionalLayoutSectionProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSCollectionViewDataSource | protocol | generated | 4 | 0 | 0 |  |  |
+| NSCollectionViewDelegate | protocol | generated | 29 | 0 | 0 |  |  |
+| NSCollectionViewDelegateFlowLayout | protocol | generated | 6 | 0 | 0 |  |  |
+| NSCollectionViewDiffableDataSource | class | handwritten | 13 | 0 | 2 | 0 |  |
+| NSCollectionViewDiffableDataSourceReference | class | generated | 6 | 0 | 0 |  |  |
+| NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSCollectionViewElement | protocol | generated | 5 | 0 | 0 |  |  |
+| NSCollectionViewFlowLayout | class | handwritten | 13 | 0 | 0 | 1 |  |
+| NSCollectionViewFlowLayoutInvalidationContext | class | handwritten | 2 | 0 | 0 | 1 |  |
+| NSCollectionViewGridLayout | class | handwritten | 8 | 0 | 0 | 1 |  |
+| NSCollectionViewItem | class | handwritten | 10 | 0 | 1 | 1 |  |
+| NSCollectionViewLayout | class | handwritten | 38 | 0 | 0 | 1 |  |
+| NSCollectionViewLayoutAttributes | class | handwritten | 12 | 0 | 0 | 1 |  |
+| NSCollectionViewLayoutInvalidationContext | class | handwritten | 10 | 0 | 0 | 1 |  |
+| NSCollectionViewPrefetching | protocol | generated | 2 | 0 | 0 |  |  |
+| NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |  |
+| NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |  |
+| NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |  |
+| NSColor | class | handwritten | 167 | 5 | 4 | 4 |  |
+| NSColorChanging | protocol | generated | 1 | 0 | 0 |  |  |
+| NSColorList | class | handwritten | 16 | 0 | 1 | 0 |  |
+| NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |  |
+| NSColorPicker | class | pending | 10 | 0 | 0 |  |  |
+| NSColorPickerTouchBarItem | class | apple-only | 11 | 1 | 0 |  | 18 |
+| NSColorPickingCustom | protocol | generated | 4 | 0 | 0 |  |  |
+| NSColorPickingDefault | protocol | generated | 10 | 0 | 0 |  |  |
+| NSColorRenderingIntent | enum | generated | 5 | 0 | 0 |  |  |
+| NSColorSampler | class | generated | 1 | 0 | 0 |  |  |
+| NSColorSpace | class | handwritten | 30 | 0 | 1 | 0 | 2 |
+| NSColorSpaceName | struct | generated | 9 | 0 | 0 |  |  |
+| NSColorWell | class | handwritten | 17 | 0 | 1 | 0 |  |
+| NSComboBox | class | handwritten | 31 | 1 | 0 | 1 |  |
+| NSComboBoxCell | class | handwritten | 28 | 0 | 0 | 1 |  |
+| NSComboBoxCellDataSource | protocol | generated | 4 | 0 | 0 |  |  |
+| NSComboBoxDataSource | protocol | generated | 4 | 0 | 0 |  |  |
+| NSComboBoxDelegate | protocol | generated | 4 | 0 | 0 |  |  |
+| NSComboButton | class | generated | 9 | 1 | 1 |  |  |
+| NSCompositingOperation | enum | generated | 28 | 0 | 0 |  |  |
+| NSControl | class | handwritten | 80 | 0 | 4 | 2 |  |
+| NSControlTextEditingDelegate | protocol | generated | 10 | 0 | 0 |  |  |
+| NSControlTint | enum | generated | 4 | 0 | 0 |  |  |
+| NSController | class | handwritten | 8 | 0 | 0 | 0 |  |
+| NSCursor | class | handwritten | 76 | 0 | 9 | 2 |  |
+| NSCustomImageRep | class | generated | 5 | 0 | 0 |  |  |
+| NSCustomTouchBarItem | class | apple-only | 1 | 2 | 0 |  | 2 |
+| NSDataAsset | class | generated | 6 | 0 | 1 |  |  |
+| NSDatePicker | class | handwritten | 28 | 0 | 3 | 1 |  |
+| NSDatePickerCell | class | handwritten | 16 | 0 | 0 | 1 |  |
+| NSDatePickerCellDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSDeviceDescriptionKey | struct | generated | 6 | 0 | 0 |  |  |
+| NSDictionaryController | class | generated | 7 | 0 | 0 |  |  |
+| NSDictionaryControllerKeyValuePair | class | generated | 4 | 0 | 0 |  |  |
+| NSDiffableDataSourceSnapshot | struct | handwritten | 25 | 0 | 0 | 0 |  |
+| NSDiffableDataSourceSnapshotReference | class | generated | 25 | 0 | 0 |  |  |
+| NSDirectionalEdgeInsets | struct | handwritten | 6 | 0 | 0 | 0 |  |
+| NSDirectionalRectEdge | struct | generated | 5 | 0 | 0 |  |  |
+| NSDisplayGamut | enum | generated | 2 | 0 | 0 |  |  |
+| NSDockTile | class | handwritten | 6 | 0 | 0 | 0 |  |
+| NSDockTilePlugIn | protocol | generated | 2 | 0 | 0 |  |  |
+| NSDocument | class | handwritten | 149 | 9 | 2 | 2 | 1 |
+| NSDocumentController | class | handwritten | 44 | 0 | 0 | 2 | 1 |
+| NSDragOperation | struct | generated | 9 | 0 | 0 |  |  |
+| NSDraggingContext | enum | generated | 2 | 0 | 0 |  |  |
+| NSDraggingDestination | protocol | generated | 9 | 0 | 0 |  |  |
+| NSDraggingFormation | enum | generated | 5 | 0 | 0 |  |  |
+| NSDraggingImageComponent | class | handwritten | 4 | 0 | 0 | 1 |  |
+| NSDraggingInfo | protocol | generated | 16 | 0 | 0 |  |  |
+| NSDraggingItem | class | handwritten | 8 | 0 | 1 | 1 |  |
+| NSDraggingItemEnumerationOptions | struct | generated | 2 | 0 | 0 |  |  |
+| NSDraggingSession | class | handwritten | 7 | 0 | 0 | 1 |  |
+| NSDraggingSource | protocol | generated | 5 | 0 | 0 |  |  |
+| NSDrawer | class | handwritten | 26 | 0 | 1 | 2 |  |
+| NSDrawerDelegate | protocol | generated | 7 | 0 | 0 |  |  |
+| NSEPSImageRep | class | generated | 4 | 0 | 0 |  |  |
+| NSEditor | protocol | generated | 4 | 0 | 0 |  |  |
+| NSEditorRegistration | protocol | generated | 2 | 0 | 0 |  |  |
+| NSEvent | class | handwritten | 281 | 0 | 12 | 3 | 2 |
+| NSFilePromiseProvider | class | generated | 5 | 0 | 0 |  |  |
+| NSFilePromiseProviderDelegate | protocol | generated | 3 | 0 | 0 |  |  |
+| NSFilePromiseReceiver | class | generated | 4 | 0 | 0 |  |  |
+| NSFindPanelAction | enum | generated | 10 | 0 | 0 |  |  |
+| NSFindPanelSubstringMatchType | enum | generated | 4 | 0 | 0 |  |  |
+| NSFocusRingPlacement | enum | generated | 4 | 0 | 0 |  |  |
+| NSFocusRingType | enum | generated | 3 | 0 | 0 |  |  |
+| NSFont | class | handwritten | 90 | 4 | 4 | 7 |  |
+| NSFontAction | enum | generated | 8 | 0 | 0 |  |  |
+| NSFontAssetRequest | class | generated | 5 | 0 | 1 |  |  |
+| NSFontChanging | protocol | generated | 2 | 0 | 0 |  |  |
+| NSFontCollection | class | handwritten | 30 | 0 | 4 | 0 |  |
+| NSFontCollectionMatchingOptionKey | struct | generated | 3 | 0 | 0 |  |  |
+| NSFontCollectionOptions | struct | generated | 1 | 0 | 0 |  |  |
+| NSFontDescriptor | class | handwritten | 67 | 0 | 6 | 0 |  |
+| NSFontFamilyClass | typealias | generated | 1 | 0 | 0 |  |  |
+| NSFontManager | class | handwritten | 47 | 0 | 0 | 0 |  |
+| NSFontPanel | class | handwritten | 19 | 0 | 1 | 0 |  |
+| NSFontRenderingMode | enum | generated | 4 | 0 | 0 |  |  |
+| NSFontSymbolicTraits | typealias | generated | 1 | 0 | 0 |  |  |
+| NSFontTraitMask | struct | generated | 12 | 0 | 0 |  |  |
+| NSForm | class | handwritten | 21 | 0 | 0 | 0 |  |
+| NSFormCell | class | handwritten | 13 | 0 | 0 | 0 |  |
+| NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |  |
+| NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |  |
+| NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |  |
+| NSGlassEffectView | class | generated | 6 | 0 | 1 |  |  |
+| NSGlyph | typealias | generated | 1 | 0 | 0 |  |  |
+| NSGlyphGenerator | class | generated | 2 | 0 | 0 |  |  |
+| NSGlyphInfo | class | generated | 7 | 2 | 0 |  |  |
+| NSGlyphStorage | protocol | generated | 4 | 0 | 0 |  |  |
+| NSGradient | class | handwritten | 17 | 0 | 1 | 1 |  |
+| NSGraphicsContext | class | handwritten | 27 | 1 | 2 | 2 | 2 |
+| NSGridCell | class | handwritten | 16 | 0 | 1 | 1 |  |
+| NSGridColumn | class | handwritten | 9 | 0 | 0 | 1 |  |
+| NSGridRow | class | handwritten | 14 | 0 | 1 | 1 |  |
+| NSGridView | class | handwritten | 27 | 0 | 0 | 1 |  |
+| NSGroupTouchBarItem | class | apple-only | 9 | 1 | 0 |  | 14 |
+| NSHapticFeedbackManager | class | generated | 7 | 0 | 2 |  |  |
+| NSHapticFeedbackPerformer | protocol | generated | 1 | 0 | 0 |  |  |
+| NSHelpManager | class | generated | 14 | 0 | 3 |  |  |
+| NSHorizontalDirection | enum | generated | 17 | 0 | 6 |  |  |
+| NSIgnoreMisspelledWords | protocol | generated | 1 | 0 | 0 |  |  |
+| NSImage | class | handwritten | 244 | 4 | 11 | 5 |  |
+| NSImageAlignment | enum | generated | 9 | 0 | 0 |  |  |
+| NSImageCell | class | handwritten | 3 | 0 | 0 | 2 |  |
+| NSImageDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSImageInterpolation | enum | generated | 5 | 0 | 0 |  |  |
+| NSImageRep | class | handwritten | 40 | 0 | 1 | 2 |  |
+| NSImageScaling | enum | generated | 7 | 0 | 0 |  |  |
+| NSImageView | class | handwritten | 18 | 8 | 1 | 2 |  |
+| NSInputServerMouseTracker | protocol | generated | 0 | 0 | 0 |  |  |
+| NSInputServiceProvider | protocol | generated | 0 | 0 | 0 |  |  |
+| NSItemBadge | struct | generated | 5 | 0 | 0 |  |  |
+| NSLayoutAnchor | class | handwritten | 10 | 0 | 0 | 0 |  |
+| NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |  |
+| NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |  |
+| NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |  |
+| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 9 |  |
+| NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |  |
+| NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |  |
+| NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |  |
+| NSLevelIndicator | class | handwritten | 25 | 0 | 2 | 1 |  |
+| NSLevelIndicatorCell | class | handwritten | 11 | 0 | 0 | 1 |  |
+| NSLineBreakMode | enum | generated | 6 | 0 | 0 |  |  |
+| NSMagnificationGestureRecognizer | class | handwritten | 1 | 0 | 0 | 0 |  |
+| NSMatrix | class | handwritten | 83 | 0 | 1 | 1 |  |
+| NSMatrixDelegate | protocol | generated | 0 | 0 | 0 |  |  |
+| NSMediaLibraryBrowserController | class | generated | 8 | 0 | 1 |  |  |
+| NSMenu | class | handwritten | 72 | 1 | 3 | 2 |  |
+| NSMenuDelegate | protocol | generated | 8 | 0 | 0 |  |  |
+| NSMenuItem | class | handwritten | 42 | 0 | 0 | 2 |  |
+| NSMenuItemBadge | class | generated | 14 | 0 | 1 |  |  |
+| NSMenuItemCell | class | handwritten | 20 | 0 | 0 | 1 |  |
+| NSMenuItemValidation | protocol | generated | 1 | 0 | 0 |  |  |
+| NSMenuToolbarItem | class | handwritten | 2 | 0 | 0 | 0 |  |
+| NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |  |
+| NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |  |
+| NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |  |
+| NSNib | class | generated | 4 | 0 | 1 |  |  |
+| NSObjectController | class | handwritten | 21 | 3 | 0 | 2 |  |
+| NSOpenGLContext | class | apple-only | 24 | 6 | 1 |  | 13 |
+| NSOpenGLGlobalOption | enum | generated | 4 | 1 | 0 |  |  |
+| NSOpenGLLayer | class | apple-only | 5 | 2 | 0 |  | 8 |
+| NSOpenGLPixelFormat | class | apple-only | 1 | 4 | 0 |  | 3 |
+| NSOpenGLPixelFormatAttribute | typealias | generated | 1 | 0 | 0 |  |  |
+| NSOpenGLView | class | apple-only | 10 | 0 | 0 |  | 15 |
+| NSOpenPanel | class | handwritten | 8 | 0 | 0 | 2 |  |
+| NSOpenSavePanelDelegate | protocol | handwritten | 6 | 2 | 0 | 0 |  |
+| NSOutlineView | class | handwritten | 35 | 6 | 0 | 1 |  |
+| NSOutlineViewDataSource | protocol | generated | 16 | 0 | 0 |  |  |
+| NSOutlineViewDelegate | protocol | generated | 39 | 0 | 0 |  |  |
+| NSPDFImageRep | class | generated | 5 | 0 | 0 |  |  |
+| NSPDFInfo | class | generated | 6 | 0 | 0 |  |  |
+| NSPDFPanel | class | generated | 7 | 0 | 1 |  |  |
+| NSPICTImageRep | class | generated | 3 | 0 | 0 |  |  |
+| NSPageController | class | handwritten | 14 | 0 | 2 | 1 |  |
+| NSPageControllerDelegate | protocol | generated | 7 | 0 | 0 |  |  |
+| NSPageLayout | class | handwritten | 10 | 0 | 1 | 1 |  |
+| NSPanGestureRecognizer | class | handwritten | 5 | 0 | 0 | 0 |  |
+| NSPanel | class | handwritten | 3 | 0 | 0 | 2 |  |
+| NSParagraphStyle | class | handwritten | 31 | 0 | 2 | 0 |  |
+| NSPasteboard | class | handwritten | 93 | 9 | 11 | 5 |  |
+| NSPasteboardItem | class | handwritten | 14 | 0 | 2 | 5 |  |
+| NSPasteboardItemDataProvider | protocol | generated | 2 | 0 | 0 |  |  |
+| NSPasteboardReading | protocol | generated | 3 | 0 | 0 |  |  |
+| NSPasteboardTypeOwner | protocol | generated | 2 | 0 | 0 |  |  |
+| NSPasteboardWriting | protocol | generated | 3 | 0 | 0 |  |  |
+| NSPathCell | class | handwritten | 16 | 0 | 0 | 1 |  |
+| NSPathCellDelegate | protocol | generated | 2 | 0 | 0 |  |  |
+| NSPathComponentCell | class | handwritten | 2 | 0 | 0 | 1 |  |
+| NSPathControl | class | handwritten | 18 | 0 | 1 | 1 |  |
+| NSPathControlDelegate | protocol | generated | 6 | 0 | 0 |  |  |
+| NSPathControlItem | class | handwritten | 4 | 0 | 0 | 1 |  |
+| NSPersistentDocument | class | generated | 5 | 2 | 0 |  |  |
+| NSPickerTouchBarItem | class | apple-only | 24 | 1 | 2 |  | 28 |
+| NSPopUpButton | class | handwritten | 42 | 0 | 1 | 1 |  |
+| NSPopUpButtonCell | class | handwritten | 40 | 0 | 0 | 1 |  |
+| NSPopover | class | handwritten | 29 | 0 | 3 | 2 |  |
+| NSPopoverDelegate | protocol | generated | 8 | 0 | 0 |  |  |
+| NSPopoverTouchBarItem | class | apple-only | 9 | 1 | 0 |  | 15 |
+| NSPredicateEditor | class | generated | 1 | 0 | 0 |  |  |
+| NSPredicateEditorRowTemplate | class | generated | 13 | 3 | 0 |  |  |
+| NSPressGestureRecognizer | class | handwritten | 4 | 0 | 0 | 0 |  |
+| NSPressureConfiguration | class | generated | 3 | 0 | 0 |  |  |
+| NSPreviewRepresentableActivityItem | protocol | generated | 2 | 2 | 0 |  |  |
+| NSPreviewRepresentingActivityItem | class | generated | 1 | 1 | 0 |  |  |
+| NSPrintInfo | class | handwritten | 73 | 0 | 6 | 2 | 5 |
+| NSPrintOperation | class | handwritten | 35 | 0 | 2 | 6 |  |
+| NSPrintPanel | class | handwritten | 28 | 0 | 4 | 1 |  |
+| NSPrintPanelAccessorizing | protocol | generated | 2 | 0 | 0 |  |  |
+| NSPrinter | class | handwritten | 12 | 0 | 3 | 1 |  |
+| NSProgressIndicator | class | handwritten | 17 | 0 | 1 | 1 |  |
+| NSRectAlignment | enum | generated | 9 | 0 | 0 |  |  |
+| NSResponder | class | handwritten | 69 | 2 | 0 | 2 | 1 |
+| NSRotationGestureRecognizer | class | handwritten | 2 | 0 | 0 | 0 |  |
+| NSRuleEditor | class | handwritten | 44 | 0 | 3 | 3 |  |
+| NSRuleEditorDelegate | protocol | generated | 5 | 0 | 0 |  |  |
+| NSRulerMarker | class | handwritten | 14 | 0 | 0 | 1 |  |
+| NSRulerView | class | handwritten | 29 | 0 | 2 | 1 |  |
+| NSRunningApplication | class | handwritten | 22 | 2 | 0 | 1 |  |
+| NSSavePanel | class | handwritten | 24 | 4 | 0 | 1 |  |
+| NSScreen | class | handwritten | 30 | 0 | 0 | 2 | 1 |
+| NSScrollEdgeEffectStyle | class | generated | 3 | 0 | 0 |  |  |
+| NSScrollView | class | handwritten | 61 | 0 | 2 | 3 |  |
+| NSScroller | class | handwritten | 42 | 0 | 6 | 2 |  |
+| NSScrubber | class | handwritten | 35 | 0 | 2 | 2 |  |
+| NSScrubberArrangedView | class | handwritten | 3 | 0 | 0 | 1 |  |
+| NSScrubberDataSource | protocol | generated | 2 | 0 | 0 |  |  |
+| NSScrubberDelegate | protocol | generated | 6 | 0 | 0 |  |  |
+| NSScrubberFlowLayout | class | handwritten | 3 | 0 | 0 | 1 |  |
+| NSScrubberFlowLayoutDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSScrubberImageItemView | class | handwritten | 3 | 0 | 0 | 1 |  |
+| NSScrubberItemView | class | handwritten | 0 | 0 | 0 | 1 |  |
+| NSScrubberLayout | class | handwritten | 14 | 0 | 0 | 1 |  |
+| NSScrubberLayoutAttributes | class | handwritten | 4 | 0 | 0 | 1 |  |
+| NSScrubberProportionalLayout | class | handwritten | 3 | 0 | 0 | 1 |  |
+| NSScrubberSelectionStyle | class | handwritten | 5 | 0 | 0 | 1 |  |
+| NSScrubberSelectionView | class | handwritten | 0 | 0 | 0 | 1 |  |
+| NSScrubberTextItemView | class | handwritten | 2 | 0 | 0 | 1 |  |
+| NSSearchField | class | handwritten | 18 | 1 | 1 | 1 |  |
+| NSSearchFieldCell | class | handwritten | 15 | 0 | 0 | 1 |  |
+| NSSearchFieldDelegate | protocol | generated | 2 | 0 | 0 |  |  |
+| NSSearchToolbarItem | class | handwritten | 5 | 0 | 0 | 0 |  |
+| NSSecureTextField | class | generated | 0 | 0 | 0 |  |  |
+| NSSecureTextFieldCell | class | generated | 1 | 0 | 0 |  |  |
+| NSSegmentedCell | class | handwritten | 27 | 0 | 0 | 1 |  |
+| NSSegmentedControl | class | handwritten | 54 | 0 | 3 | 1 |  |
+| NSSeguePerforming | protocol | generated | 3 | 0 | 0 |  |  |
+| NSSelectionAffinity | enum | generated | 2 | 0 | 0 |  |  |
+| NSSelectionGranularity | enum | generated | 3 | 0 | 0 |  |  |
+| NSServiceProviderName | typealias | generated | 1 | 0 | 0 |  |  |
+| NSServicesMenuRequestor | protocol | generated | 2 | 0 | 0 |  |  |
+| NSShadow | class | generated | 5 | 0 | 0 |  |  |
+| NSSharingCollaborationMode | enum | generated | 2 | 0 | 0 |  |  |
+| NSSharingService | class | apple-only | 44 | 0 | 3 |  | 20 |
+| NSSharingServiceDelegate | protocol | apple-only | 7 | 0 | 0 |  | 1 |
+| NSSharingServicePicker | class | apple-only | 15 | 0 | 1 |  | 20 |
+| NSSharingServicePickerDelegate | protocol | apple-only | 4 | 0 | 0 |  | 1 |
+| NSSharingServicePickerToolbarItem | class | apple-only | 1 | 0 | 0 |  | 2 |
+| NSSharingServicePickerToolbarItemDelegate | protocol | apple-only | 1 | 0 | 0 |  |  |
+| NSSharingServicePickerTouchBarItem | class | apple-only | 4 | 0 | 0 |  | 8 |
+| NSSharingServicePickerTouchBarItemDelegate | protocol | apple-only | 1 | 0 | 0 |  |  |
+| NSSlider | class | handwritten | 25 | 0 | 2 | 2 |  |
+| NSSliderAccessory | class | generated | 5 | 0 | 1 |  |  |
+| NSSliderAccessoryBehavior | class | generated | 6 | 0 | 0 |  |  |
+| NSSliderCell | class | handwritten | 21 | 0 | 0 | 2 |  |
+| NSSliderTouchBarItem | class | apple-only | 10 | 2 | 0 |  | 20 |
+| NSSound | class | handwritten | 24 | 2 | 3 | 0 |  |
+| NSSoundDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSSpeechRecognizer | class | apple-only | 7 | 1 | 0 |  | 12 |
+| NSSpeechRecognizerDelegate | protocol | apple-only | 1 | 0 | 0 |  |  |
+| NSSpeechSynthesizer | class | apple-only | 81 | 0 | 12 |  | 25 |
+| NSSpeechSynthesizerDelegate | protocol | apple-only | 5 | 0 | 0 |  |  |
+| NSSpellChecker | class | handwritten | 75 | 3 | 3 | 1 | 1 |
+| NSSplitView | class | handwritten | 25 | 0 | 2 | 2 |  |
+| NSSplitViewController | class | handwritten | 17 | 0 | 0 | 2 |  |
+| NSSplitViewDelegate | protocol | generated | 12 | 0 | 0 |  |  |
+| NSSplitViewItem | class | handwritten | 36 | 0 | 2 | 2 |  |
+| NSSplitViewItemAccessoryViewController | class | generated | 7 | 0 | 0 |  |  |
+| NSSpringLoadingDestination | protocol | generated | 6 | 0 | 0 |  |  |
+| NSSpringLoadingHighlight | enum | generated | 3 | 0 | 0 |  |  |
+| NSSpringLoadingOptions | struct | generated | 4 | 0 | 0 |  |  |
+| NSStackView | class | handwritten | 43 | 0 | 3 | 0 |  |
+| NSStackViewDelegate | protocol | generated | 2 | 0 | 0 |  |  |
+| NSStandardKeyBindingResponding | protocol | generated | 96 | 0 | 0 |  |  |
+| NSStatusBar | class | handwritten | 5 | 0 | 0 | 0 |  |
+| NSStatusBarButton | class | handwritten | 1 | 0 | 0 | 0 |  |
+| NSStatusItem | class | handwritten | 26 | 0 | 2 | 0 |  |
+| NSStepper | class | handwritten | 5 | 0 | 0 | 1 |  |
+| NSStepperCell | class | handwritten | 5 | 0 | 0 | 1 |  |
+| NSStepperTouchBarItem | class | apple-only | 8 | 1 | 0 |  | 14 |
+| NSStoryboard | class | generated | 10 | 0 | 2 |  |  |
+| NSStoryboardSegue | class | generated | 7 | 0 | 1 |  |  |
+| NSStringDrawingContext | class | generated | 3 | 0 | 0 |  |  |
+| NSSuggestionItem | struct | generated | 9 | 0 | 0 |  |  |
+| NSSuggestionItemResponse | struct | generated | 18 | 0 | 4 |  |  |
+| NSSuggestionItemSection | struct | generated | 5 | 0 | 1 |  |  |
+| NSSwitch | class | handwritten | 1 | 0 | 0 | 1 |  |
+| NSTabView | class | handwritten | 44 | 0 | 3 | 2 |  |
+| NSTabViewController | class | handwritten | 22 | 0 | 1 | 2 |  |
+| NSTabViewDelegate | protocol | generated | 4 | 0 | 0 |  |  |
+| NSTabViewItem | class | handwritten | 17 | 0 | 1 | 2 |  |
+| NSTableCellView | class | handwritten | 6 | 0 | 0 | 1 |  |
+| NSTableColumn | class | handwritten | 19 | 0 | 1 | 1 |  |
+| NSTableHeaderCell | class | handwritten | 2 | 0 | 0 | 1 |  |
+| NSTableHeaderView | class | handwritten | 6 | 0 | 0 | 1 |  |
+| NSTableRowView | class | handwritten | 18 | 0 | 0 | 1 |  |
+| NSTableView | class | handwritten | 154 | 0 | 10 | 2 |  |
+| NSTableViewDataSource | protocol | generated | 12 | 0 | 0 |  |  |
+| NSTableViewDelegate | protocol | generated | 31 | 0 | 0 |  |  |
+| NSTableViewDiffableDataSource | class | handwritten | 14 | 0 | 3 | 0 |  |
+| NSTableViewDiffableDataSourceReference | class | generated | 11 | 0 | 0 |  |  |
+| NSTableViewDiffableDataSourceReferenceCellProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSTableViewDiffableDataSourceReferenceRowProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSTableViewDiffableDataSourceReferenceSectionHeaderViewProvider | typealias | generated | 1 | 0 | 0 |  |  |
+| NSTableViewRowAction | class | generated | 7 | 0 | 1 |  |  |
+| NSText | class | handwritten | 57 | 0 | 0 | 2 |  |
+| NSTextAlignment | enum | generated | 5 | 0 | 0 |  |  |
+| NSTextAlternatives | class | generated | 5 | 0 | 0 |  |  |
+| NSTextAttachment | class | handwritten | 14 | 0 | 0 | 0 |  |
+| NSTextAttachmentCell | class | handwritten | 0 | 0 | 0 | 0 |  |
+| NSTextAttachmentCellProtocol | protocol | generated | 12 | 0 | 0 |  |  |
+| NSTextAttachmentContainer | protocol | generated | 2 | 0 | 0 |  |  |
+| NSTextAttachmentLayout | protocol | generated | 3 | 0 | 0 |  |  |
+| NSTextAttachmentViewProvider | class | handwritten | 8 | 0 | 0 | 0 |  |
+| NSTextBlock | class | handwritten | 34 | 0 | 4 | 0 |  |
+| NSTextCheckingClient | protocol | generated | 8 | 0 | 0 |  |  |
+| NSTextCheckingController | class | generated | 18 | 1 | 0 |  |  |
+| NSTextContainer | class | handwritten | 18 | 1 | 0 | 0 |  |
+| NSTextContent | protocol | generated | 1 | 0 | 0 |  |  |
+| NSTextContentManager | class | generated | 15 | 0 | 1 |  |  |
+| NSTextContentManagerDelegate | protocol | generated | 2 | 0 | 0 |  |  |
+| NSTextContentStorage | class | generated | 7 | 1 | 0 |  |  |
+| NSTextContentStorageDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSTextContentType | struct | generated | 43 | 0 | 0 |  |  |
+| NSTextCursorAccessoryPlacement | enum | generated | 9 | 0 | 0 |  |  |
+| NSTextDelegate | protocol | generated | 5 | 0 | 0 |  |  |
+| NSTextElement | class | generated | 6 | 0 | 0 |  |  |
+| NSTextElementProvider | protocol | generated | 7 | 0 | 0 |  |  |
+| NSTextField | class | handwritten | 37 | 1 | 1 | 2 |  |
+| NSTextFieldCell | class | handwritten | 11 | 0 | 0 | 2 |  |
+| NSTextFieldDelegate | protocol | generated | 3 | 0 | 0 |  |  |
+| NSTextFinder | class | handwritten | 30 | 0 | 2 | 0 |  |
+| NSTextFinderBarContainer | protocol | generated | 4 | 0 | 0 |  |  |
+| NSTextFinderClient | protocol | generated | 16 | 0 | 0 |  |  |
+| NSTextInput | protocol | generated | 0 | 0 | 0 |  |  |
+| NSTextInputClient | protocol | generated | 21 | 0 | 0 |  |  |
+| NSTextInputContext | class | generated | 18 | 0 | 0 |  |  |
+| NSTextInputSourceIdentifier | typealias | generated | 1 | 0 | 0 |  |  |
+| NSTextInputTraitType | enum | generated | 3 | 0 | 0 |  |  |
+| NSTextInputTraits | protocol | generated | 14 | 0 | 0 |  |  |
+| NSTextInsertionIndicator | class | generated | 9 | 0 | 2 |  |  |
+| NSTextLayoutFragment | class | generated | 28 | 0 | 2 |  |  |
+| NSTextLayoutManager | class | generated | 40 | 0 | 2 |  |  |
+| NSTextLayoutManagerDelegate | protocol | generated | 3 | 0 | 0 |  |  |
+| NSTextLayoutOrientationProvider | protocol | generated | 1 | 0 | 0 |  |  |
+| NSTextLineFragment | class | generated | 11 | 0 | 0 |  |  |
+| NSTextList | class | handwritten | 27 | 0 | 2 | 0 |  |
+| NSTextListElement | class | generated | 6 | 2 | 0 |  |  |
+| NSTextLocation | protocol | generated | 1 | 0 | 0 |  |  |
+| NSTextMovement | enum | generated | 9 | 0 | 0 |  |  |
+| NSTextParagraph | class | generated | 4 | 0 | 0 |  |  |
+| NSTextPreview | class | generated | 5 | 0 | 0 |  |  |
+| NSTextRange | class | generated | 11 | 0 | 0 |  |  |
+| NSTextScalingType | enum | generated | 2 | 0 | 0 |  |  |
+| NSTextSelection | class | generated | 20 | 0 | 2 |  |  |
+| NSTextSelectionDataSource | protocol | generated | 10 | 0 | 0 |  |  |
+| NSTextSelectionNavigation | class | generated | 31 | 0 | 5 |  |  |
+| NSTextStorage | class | handwritten | 21 | 0 | 0 | 0 |  |
+| NSTextStorageDelegate | protocol | generated | 2 | 0 | 0 |  |  |
+| NSTextStorageEditActions | struct | generated | 2 | 0 | 0 |  |  |
+| NSTextStorageObserving | protocol | generated | 3 | 0 | 0 |  |  |
+| NSTextSuggestionsDelegate | protocol | pending | 1 | 8 | 3 |  |  |
+| NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |  |
+| NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |  |
+| NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |  |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 5 | 4 |
+| NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |  |
+| NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |  |
+| NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |  |
+| NSTintConfiguration | class | generated | 7 | 0 | 0 |  |  |
+| NSTintProminence | enum | generated | 4 | 0 | 0 |  |  |
+| NSTitlebarAccessoryViewController | class | handwritten | 8 | 0 | 0 | 3 |  |
+| NSTitlebarSeparatorStyle | enum | generated | 4 | 0 | 0 |  |  |
+| NSTokenField | class | handwritten | 10 | 1 | 1 | 1 |  |
+| NSTokenFieldCell | class | handwritten | 6 | 0 | 0 | 1 |  |
+| NSTokenFieldCellDelegate | protocol | generated | 10 | 0 | 0 |  |  |
+| NSTokenFieldDelegate | protocol | generated | 10 | 0 | 0 |  |  |
+| NSToolbar | class | handwritten | 39 | 0 | 3 | 0 |  |
+| NSToolbarDelegate | protocol | handwritten | 8 | 0 | 0 | 0 |  |
+| NSToolbarItem | class | handwritten | 47 | 0 | 3 | 0 |  |
+| NSToolbarItemGroup | class | handwritten | 14 | 0 | 2 | 0 |  |
+| NSToolbarItemValidation | protocol | generated | 1 | 0 | 0 |  |  |
+| NSToolbarUserInfoKey | struct | generated | 2 | 0 | 0 |  |  |
+| NSTouch | class | generated | 21 | 0 | 3 |  |  |
+| NSTouchBar | class | apple-only | 15 | 0 | 1 |  | 24 |
+| NSTouchBarDelegate | protocol | apple-only | 1 | 0 | 0 |  |  |
+| NSTouchBarItem | class | apple-only | 22 | 0 | 2 |  | 10 |
+| NSTouchBarProvider | protocol | apple-only | 1 | 0 | 0 |  |  |
+| NSTrackingArea | class | handwritten | 15 | 0 | 1 | 1 |  |
+| NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |  |
+| NSTreeController | class | handwritten | 36 | 0 | 0 | 0 |  |
+| NSTreeNode | class | handwritten | 9 | 0 | 0 | 3 |  |
+| NSTypesetter | class | generated | 53 | 2 | 0 |  |  |
+| NSTypesetterControlCharacterAction | struct | generated | 6 | 0 | 0 |  |  |
+| NSUnderlineStyle | struct | generated | 8 | 0 | 0 |  |  |
+| NSUserActivityRestoring | protocol | generated | 0 | 1 | 0 |  |  |
+| NSUserDefaultsController | class | handwritten | 11 | 0 | 0 | 0 |  |
+| NSUserInterfaceCompression | protocol | generated | 3 | 0 | 0 |  |  |
+| NSUserInterfaceCompressionOptions | class | handwritten | 14 | 0 | 0 | 0 |  |
+| NSUserInterfaceItemIdentification | protocol | generated | 1 | 0 | 0 |  |  |
+| NSUserInterfaceItemIdentifier | struct | generated | 0 | 0 | 0 |  |  |
+| NSUserInterfaceItemSearching | protocol | generated | 4 | 0 | 0 |  |  |
+| NSUserInterfaceLayoutDirection | enum | generated | 2 | 0 | 0 |  |  |
+| NSUserInterfaceLayoutOrientation | enum | generated | 2 | 0 | 0 |  |  |
+| NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |  |
+| NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |  |
+| NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |  |
+| NSView | class | handwritten | 361 | 3 | 19 | 6 | 2 |
+| NSViewAnimation | class | handwritten | 8 | 0 | 2 | 1 |  |
+| NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |  |
+| NSViewController | class | handwritten | 56 | 1 | 2 | 2 |  |
+| NSViewControllerPresentationAnimator | protocol | generated | 2 | 0 | 0 |  |  |
+| NSViewInvalidating | protocol | handwritten | 6 | 0 | 0 | 0 |  |
+| NSViewLayerContentScaleDelegate | protocol | generated | 1 | 0 | 0 |  |  |
+| NSViewToolTipOwner | protocol | generated | 1 | 0 | 0 |  |  |
+| NSVisualEffectView | class | handwritten | 32 | 0 | 3 | 0 |  |
+| NSWindow | class | handwritten | 391 | 3 | 20 | 5 | 5 |
+| NSWindowController | class | handwritten | 28 | 0 | 1 | 2 |  |
+| NSWindowDelegate | protocol | generated | 53 | 0 | 0 |  |  |
+| NSWindowRestoration | protocol | generated | 1 | 0 | 0 |  |  |
+| NSWindowTab | class | generated | 4 | 0 | 0 |  |  |
+| NSWindowTabGroup | class | generated | 8 | 0 | 0 |  |  |
+| NSWorkspace | class | handwritten | 127 | 7 | 7 | 2 | 3 |
+| NSWritingDirection | enum | generated | 3 | 0 | 0 |  |  |
+| NSWritingDirectionFormatType | enum | generated | 2 | 0 | 0 |  |  |
+| NSWritingToolsBehavior | enum | generated | 4 | 0 | 0 |  |  |
+| NSWritingToolsCoordinator | class | apple-only | 53 | 0 | 8 |  | 34 |
+| NSWritingToolsResultOptions | struct | generated | 5 | 0 | 0 |  |  |
+
+## Apple-only (ADR-0044)
+
+Types and members listed under `appleOnly`. Their declarations match AppKit exactly so
+code that names them compiles; calling one stops with an "only on macOS" message.
+
+| Symbol | Stub sites | Reason |
+| --- | ---: | --- |
+| `NSTouchBar` | 24 | Touch Bar: the bar itself; Touch Bar hardware exists only on some MacBook Pro models and has no Windows or Linux counterpart |
+| `NSTouchBarItem` | 10 | Touch Bar: base class of every Touch Bar item; no Touch Bar hardware off macOS |
+| `NSTouchBarDelegate` | 0 | Touch Bar: makes items for a Touch Bar; no Touch Bar hardware off macOS |
+| `NSTouchBarProvider` | 0 | Touch Bar: supplies a responder's Touch Bar; no Touch Bar hardware off macOS |
+| `NSButtonTouchBarItem` | 15 | Touch Bar: button item; no Touch Bar hardware off macOS |
+| `NSCandidateListTouchBarItem` | 16 | Touch Bar: text-input candidate strip shown in the Touch Bar; no Touch Bar hardware off macOS (in-window candidates go through NSTextInputContext) |
+| `NSCandidateListTouchBarItemDelegate` | 0 | Touch Bar: delegate of the Touch Bar candidate strip; no Touch Bar hardware off macOS |
+| `NSColorPickerTouchBarItem` | 18 | Touch Bar: colour picker item; no Touch Bar hardware off macOS |
+| `NSCustomTouchBarItem` | 2 | Touch Bar: item hosting a view in the Touch Bar; no Touch Bar hardware off macOS |
+| `NSGroupTouchBarItem` | 14 | Touch Bar: group item; no Touch Bar hardware off macOS |
+| `NSPickerTouchBarItem` | 28 | Touch Bar: picker item; no Touch Bar hardware off macOS |
+| `NSPopoverTouchBarItem` | 15 | Touch Bar: popover item; no Touch Bar hardware off macOS |
+| `NSSharingServicePickerTouchBarItem` | 8 | Touch Bar: sharing-service picker item; no Touch Bar hardware off macOS |
+| `NSSharingServicePickerTouchBarItemDelegate` | 0 | Touch Bar: delegate of the sharing-service picker item; no Touch Bar hardware off macOS |
+| `NSSliderTouchBarItem` | 20 | Touch Bar: slider item; no Touch Bar hardware off macOS |
+| `NSStepperTouchBarItem` | 14 | Touch Bar: stepper item; no Touch Bar hardware off macOS |
+| `NSWritingToolsCoordinator` | 34 | Writing Tools: drives Apple Intelligence's Writing Tools service (on-device and Private Cloud Compute models), which has no counterpart off macOS |
+| `NSSpeechSynthesizer` | 25 | Speech: front end of the macOS speech engine (deprecated since macOS 14); voices, phonemes and speech dictionaries are that engine's own identifiers and formats |
+| `NSSpeechSynthesizerDelegate` | 0 | Speech: delegate of the macOS speech engine's synthesizer (deprecated since macOS 14) |
+| `NSSpeechRecognizer` | 12 | Speech: front end of macOS Speakable Items command recognition (deprecated since macOS 14), a macOS system service |
+| `NSSpeechRecognizerDelegate` | 0 | Speech: delegate of macOS Speakable Items command recognition (deprecated since macOS 14) |
+| `NSSharingService` | 20 | Sharing: each service is a macOS Sharing extension (AirDrop, Mail, Messages, Notes, iCloud collaboration) found through Launch Services |
+| `NSSharingServiceDelegate` | 1 | Sharing: delegate of a macOS Sharing extension |
+| `NSSharingServicePicker` | 20 | Sharing: menu of the macOS Sharing extensions that accept the items |
+| `NSSharingServicePickerDelegate` | 1 | Sharing: delegate of the macOS sharing-service menu; hands out NSSharingService objects |
+| `NSSharingServicePickerToolbarItem` | 2 | Sharing: toolbar item that opens the macOS sharing-service menu |
+| `NSSharingServicePickerToolbarItemDelegate` | 0 | Sharing: supplies items to the macOS sharing-service toolbar item |
+| `NSCloudSharingServiceDelegate` | 0 | Sharing: iCloud (CloudKit) collaboration through the cloud-sharing service |
+| `NSCloudSharingValidation` | 0 | Sharing: validates menu items for iCloud (CloudKit) shares |
+| `NSOpenGLView` | 15 | OpenGL: deprecated since macOS 10.14; wraps CGL contexts and pixel formats, and the port's GPU path is Metal (MTKView over D3D12 and Vulkan) |
+| `NSOpenGLContext` | 13 | OpenGL: a CGL context (deprecated since macOS 10.14); the port's GPU path is Metal |
+| `NSOpenGLPixelFormat` | 3 | OpenGL: a CGL pixel format (deprecated since macOS 10.14); the port's GPU path is Metal |
+| `NSOpenGLLayer` | 8 | OpenGL: a Core Animation layer drawn through CGL (deprecated since macOS 10.14); the port's GPU path is Metal |
+| `NSHelpManager.registerBooks(in:)` | 1 | Help: registers Apple Help Book bundles with the macOS Help Viewer |
+| `NSHelpManager.openHelpAnchor(_:inBook:)` | 1 | Help: opens an anchor of an Apple Help Book in the macOS Help Viewer |
+| `NSHelpManager.find(_:inBook:)` | 1 | Help: searches Apple Help Books in the macOS Help Viewer |

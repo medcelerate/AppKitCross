@@ -21,21 +21,21 @@ open class NSOpenGLLayer: CAOpenGLLayer {
     // SKIPPED (unknown module (CoreVideo CVTimeStamp)): func draw(in context: NSOpenGLContext, pixelFormat: NSOpenGLPixelFormat, forLayerTime t: CFTimeInterval, displayTime ts: UnsafePointer<CVTimeStamp>)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopengllayer/openglcontext
     open var openGLContext: NSOpenGLContext? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopengllayer/openglcontext(for:)
-    open func openGLContext(for pixelFormat: NSOpenGLPixelFormat) -> NSOpenGLContext { unimplemented() }
+    open func openGLContext(for pixelFormat: NSOpenGLPixelFormat) -> NSOpenGLContext { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopengllayer/openglpixelformat
     open var openGLPixelFormat: NSOpenGLPixelFormat? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopengllayer/openglpixelformat(fordisplaymask:)
-    open func openGLPixelFormat(forDisplayMask mask: UInt32) -> NSOpenGLPixelFormat { unimplemented() }
+    open func openGLPixelFormat(forDisplayMask mask: UInt32) -> NSOpenGLPixelFormat { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopengllayer/view
     open var view: NSView? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

@@ -18,13 +18,13 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpixelformat
 open class NSOpenGLPixelFormat: NSObject, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglpixelformat/init(attributes:)
-    public convenience init?(attributes attribs: UnsafePointer<NSOpenGLPixelFormatAttribute>) { unimplemented() }
+    public convenience init?(attributes attribs: UnsafePointer<NSOpenGLPixelFormatAttribute>) { appleOnlyUnavailable() }
     // SKIPPED (unknown module (CoreGraphics CGLPixelFormatObj)): init?(cglPixelFormatObj format: CGLPixelFormatObj)
     // SKIPPED (unknown module (CoreGraphics CGLPixelFormatObj)): var cglPixelFormatObj: CGLPixelFormatObj? { get }
     // SKIPPED (unknown module (? GLint)): func getValues(_ vals: UnsafeMutablePointer<GLint>, forAttribute attrib: NSOpenGLPixelFormatAttribute, forVirtualScreen screen: GLint)
     // SKIPPED (unknown module (? GLint)): var numberOfVirtualScreens: GLint { get }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { appleOnlyUnavailable() }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) { appleOnlyUnavailable() }
 }
