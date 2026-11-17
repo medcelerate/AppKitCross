@@ -494,7 +494,11 @@ final class CollectionViewTests: XCTestCase, @unchecked Sendable {
             // Two background colours stripe the rows.
             cv.backgroundColors = [.white, .black]
             let rep = render(cv)
-            let row0 = pixel(rep, 100, 20), row1 = pixel(rep, 100, 20 + Int(w0.height) + 10)
+            // Read in the gap between the first two columns, where the stripes show (rows
+            // top-down: the snapshot of a view in a clip view is upright since PR 86).
+            let first = cv.layoutAttributesForItem(at: ip(0))!.frame     // two columns now
+            let gapX = Int(first.maxX + 5)
+            let row0 = pixel(rep, gapX, Int(first.midY)), row1 = pixel(rep, gapX, Int(first.midY + first.height + 10))
             XCTAssertNotEqual(row0.r, row1.r, "rows alternate: \(row0) \(row1)")
             w.close()
         }

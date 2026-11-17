@@ -908,8 +908,16 @@ import CoreText
         let ctx = surface.context
         layoutSubtreeIfNeeded()
         ctx.saveGState()
-        // `_displayHierarchy` expects the superview's space; move `rect` to the origin.
-        ctx.translateBy(x: -(_frame.minX + rect.minX), y: -(_frame.minY + rect.minY))
+        // `_displayHierarchy` expects the superview's space: move `rect` (taken into that
+        // space) to the bitmap's origin, turning a flipped superview's y-down space the
+        // bitmap's way up (else every snapshot of an item in a collection view or a clip
+        // view came out upside down).
+        let sr = _rectInSuperviewSpace(rect)
+        if _superview?.isFlipped == true {
+            ctx.translateBy(x: 0, y: rect.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        ctx.translateBy(x: -sr.minX, y: -sr.minY)
         let previous = NSGraphicsContext.current
         let wasCaching = NSView._cachingDisplay
         NSView._cachingDisplay = true
@@ -917,7 +925,7 @@ import CoreText
         // view's appearance (a dark window stays dark in the bitmap).
         let previousAppearance = NSAppearance.current
         NSAppearance.current = _drawingAppearance
-        _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        _displayHierarchy(in: ctx, dirtyRect: sr)
         NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
         NSGraphicsContext.current = previous

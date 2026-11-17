@@ -282,7 +282,7 @@ final class CollectionViewDragDropTests: XCTestCase, @unchecked Sendable {
             let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds)!
             cv.cacheDisplay(in: cv.bounds, to: rep)
             let scale = max(1, rep.pixelsWide / max(1, Int(rep.size.width)))
-            let row = (Int(rep.size.height) - 25) * scale       // the bitmap's rows run bottom-up
+            let row = 25 * scale                                  // rows top-down, as the view shows them
             let bar = rep.colorAt(x: 115 * scale, y: row)!, beside = rep.colorAt(x: 112 * scale, y: row)!
             XCTAssertGreaterThan(bar.blueComponent, 0.6)
             XCTAssertLessThan(bar.redComponent, 0.5)
@@ -564,6 +564,31 @@ final class CollectionViewDragDropTests: XCTestCase, @unchecked Sendable {
             item3.view = NSView(frame: NSRect(x: 0, y: 0, width: 60, height: 40))
             XCTAssertEqual(item3.draggingImageComponents.map(\.frame), [NSRect(x: 0, y: 0, width: 60, height: 40)])
             XCTAssertEqual((item3.draggingImageComponents[0].contents as? NSImage)?.size, NSSize(width: 60, height: 40))
+        }
+    }
+
+    func testSnapshotsOfViewsInFlippedSuperviewsAreUpright() {
+        MainActor.assumeIsolated {
+            // A red band along the top of a y-up view, snapshotted inside a y-up and a flipped
+            // superview (an item in a collection view): the band stays at the top (PR 86 PC round).
+            final class Mark: NSView {
+                override func draw(_ r: NSRect) { NSColor.red.setFill(); NSBezierPath(rect: NSRect(x: 0, y: bounds.height - 10, width: bounds.width, height: 10)).fill() }
+            }
+            final class Flipped: NSView { override var isFlipped: Bool { true } }
+            for parent in [NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 200)), Flipped(frame: NSRect(x: 0, y: 0, width: 200, height: 200))] {
+                let m = Mark(frame: NSRect(x: 20, y: 30, width: 50, height: 50))
+                parent.addSubview(m)
+                let rep = m.bitmapImageRepForCachingDisplay(in: m.bounds)!
+                m.cacheDisplay(in: m.bounds, to: rep)
+                let s = rep.pixelsWide / 50
+                XCTAssertEqual(rep.colorAt(x: 25 * s, y: 3 * s)!.redComponent, 1, accuracy: 0.05, "top, flipped superview: \(parent.isFlipped)")
+                XCTAssertEqual(rep.colorAt(x: 25 * s, y: 47 * s)!.redComponent, 0, accuracy: 0.05, "bottom, flipped superview: \(parent.isFlipped)")
+                // A part of the view: its upper half holds the band at its top.
+                let half = m.bitmapImageRepForCachingDisplay(in: NSRect(x: 0, y: 25, width: 50, height: 25))!
+                m.cacheDisplay(in: NSRect(x: 0, y: 25, width: 50, height: 25), to: half)
+                XCTAssertEqual(half.colorAt(x: 25 * s, y: 3 * s)!.redComponent, 1, accuracy: 0.05)
+                XCTAssertEqual(half.colorAt(x: 25 * s, y: 20 * s)!.redComponent, 0, accuracy: 0.05)
+            }
         }
     }
 
