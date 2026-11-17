@@ -98,9 +98,28 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/automaticallyinsertswritingtoolsitems
     @available(macOS 15.2, *)
+    /// Stored, true by default (macOS 15.2); there is no Writing Tools service to insert items for.
     open var automaticallyInsertsWritingToolsItems: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _automaticallyInsertsWritingToolsItems }
+        set { _automaticallyInsertsWritingToolsItems = newValue }
+    }
+    private var _automaticallyInsertsWritingToolsItems = true
+    private var _menuChangedMessagesEnabled = false
+    private var _presentationStyle: NSMenu.PresentationStyle = .regular
+    private var _selectionMode: NSMenu.SelectionMode = .automatic
+    private var _paletteSelectionHandler: ((NSMenu) -> Void)? = nil
+    /// Choosing an item of a menu that manages selection (`selectOne`/`selectAny`, as a
+    /// palette does) updates the items' states before the action is sent.
+    internal func _applySelection(choosing item: NSMenuItem) {
+        switch _selectionMode {
+        case .selectOne:
+            for i in _items where i !== item && !i.isSeparatorItem { i.state = .off }
+            item.state = .on
+        case .selectAny:
+            item.state = item.state == .on ? .off : .on
+        default: return
+        }
+        _paletteSelectionHandler?(self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/canceltracking()
     open func cancelTracking() { MainActor.assumeIsolated { if _NSMenuTracker.current?.rootMenu === self || _NSMenuTracker.current?.levels.contains(where: { $0.menu === self }) == true { _NSMenuTracker.current?.cancel() } } }
@@ -129,7 +148,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         set { _font = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/helprequested(with:)
-    open func helpRequested(with eventPtr: NSEvent) { unimplemented() }
+    /// Context help for the menu. NSHelpManager registers no help on these platforms (it is a
+    /// stub), so there is never any to show and this does nothing, as macOS does for a menu
+    /// without help.
+    open func helpRequested(with eventPtr: NSEvent) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/highlighteditem
     open var highlightedItem: NSMenuItem? { MainActor.assumeIsolated { _NSMenuTracker.current?.levels.first { $0.menu === self }?.window.menuView.highlightedItem } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/index(of:)
@@ -187,9 +209,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/menubarvisible()
     public class func menuBarVisible() -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/menuchangedmessagesenabled
+    /// Stored, false by default (macOS 15); the port posts its change notifications regardless.
     open var menuChangedMessagesEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _menuChangedMessagesEnabled }
+        set { _menuChangedMessagesEnabled = newValue }
     }
     // SKIPPED (ObjectiveC.NSZone): class func menuZone() -> NSZone!
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/minimumwidth
@@ -209,11 +232,38 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     /// from the `selectedItems` property.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/palette(colors:titles:template:onselectionchange:)
     @available(macOS 14.0, *)
-    public static func palette(colors: [NSColor], titles: [String] = [], template: NSImage? = nil, onSelectionChange: ((NSMenu) -> Void)? = nil) -> NSMenu { unimplemented() }
+    /// One item per colour, titled from `titles` (empty past their end), in a menu with the
+    /// palette presentation and `selectAny` selection (macOS 14). macOS draws the swatches in
+    /// a private view and leaves the items' images nil; the port's menus draw item images, so
+    /// each item gets its swatch as its image: `template` tinted with the colour, or a circle.
+    public static func palette(colors: [NSColor], titles: [String] = [], template: NSImage? = nil, onSelectionChange: ((NSMenu) -> Void)? = nil) -> NSMenu {
+        MainActor.assumeIsolated {
+            let menu = NSMenu(title: "")
+            menu._presentationStyle = .palette
+            menu._selectionMode = .selectAny
+            menu._paletteSelectionHandler = onSelectionChange
+            for (i, color) in colors.enumerated() {
+                let item = NSMenuItem(title: i < titles.count ? titles[i] : "", action: nil, keyEquivalent: "")
+                let size = template?.size ?? NSSize(width: 14, height: 14)
+                item.image = NSImage(size: size, flipped: false) { rect in
+                    if let template, let tinted = template._tintedForTemplate(color, size: rect.size) {
+                        tinted.draw(in: rect)
+                    } else {
+                        color.setFill()
+                        NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                    }
+                    return true
+                }
+                menu.addItem(item)
+            }
+            return menu
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/performactionforitem(at:)
     open func performActionForItem(at index: Int) {
         guard let item = item(at: index), item.isEnabled, !item.isSeparatorItem else { return }
         MainActor.assumeIsolated {
+            _applySelection(choosing: item)
             NotificationCenter.default.post(name: NSMenu.willSendActionNotification, object: self, userInfo: ["MenuItem": item])
             if let action = item.action {
                 let handled = NSApplication.shared.sendAction(action, to: item.target, from: item)
@@ -278,9 +328,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/presentationstyle
     @available(macOS 14.0, *)
+    /// Stored; palette menus lay out like regular ones (with their swatch images) here.
     open var presentationStyle: NSMenu.PresentationStyle {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _presentationStyle }
+        set { _presentationStyle = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/propertiestoupdate
     open var propertiesToUpdate: NSMenu.Properties { [.propertyItemTitle, .propertyItemEnabled] }
@@ -301,15 +352,20 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/selecteditems
     @available(macOS 14.0, *)
+    /// The items whose state is on. Setting turns those on and the rest off; a `selectOne`
+    /// menu keeps only the last one (macOS 15).
     open var selectedItems: [NSMenuItem] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _items.filter { $0.state == .on } }
+        set {
+            let chosen = _selectionMode == .selectOne ? Array(newValue.suffix(1)) : newValue
+            for i in _items { i.state = chosen.contains { $0 === i } ? .on : .off }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/selectionmode
     @available(macOS 14.0, *)
     open var selectionMode: NSMenu.SelectionMode {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _selectionMode }
+        set { _selectionMode = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/setmenubarvisible(_:)
     public class func setMenuBarVisible(_ visible: Bool) { }

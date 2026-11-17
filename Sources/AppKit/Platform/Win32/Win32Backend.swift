@@ -113,12 +113,22 @@ final class Win32Backend: PlatformBackend {
             p.withMemoryRebound(to: WCHAR.self, capacity: 32) { String(decodingCString: $0, as: UTF16.self) }
         }
         let edr = extendedDynamicRange(for: hMonitor)
-        return PlatformDisplay(
+        var display = PlatformDisplay(
             frame: appKitRect(info.rcMonitor, scale: scale, primaryHeight: primaryHeight),
             visibleFrame: appKitRect(info.rcWork, scale: scale, primaryHeight: primaryHeight),
             backingScaleFactor: scale, localizedName: name,
             isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0,
             maximumEDRValue: edr.current, maximumPotentialEDRValue: edr.potential, maximumReferenceEDRValue: 0)
+        // The current mode's refresh rate (0 and 1 mean the hardware default). GDI reports
+        // 32 bits per pixel whatever the panel; with HDR on the output is 10 bits a sample.
+        var mode = DEVMODEW()
+        mode.dmSize = WORD(MemoryLayout<DEVMODEW>.size)
+        let gotMode = withUnsafePointer(to: &info.szDevice) { p in
+            p.withMemoryRebound(to: WCHAR.self, capacity: 32) { EnumDisplaySettingsW($0, DWORD(bitPattern: -1) /* ENUM_CURRENT_SETTINGS */, &mode) }
+        }
+        if gotMode, mode.dmDisplayFrequency > 1 { display.refreshRate = Double(mode.dmDisplayFrequency) }
+        if edr.current > 1 { display.bitsPerSample = 10 }
+        return display
     }
 
     /// What the monitor reports about HDR (DXGI output description, SDR white level and

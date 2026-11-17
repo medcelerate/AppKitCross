@@ -78,7 +78,8 @@ enum _NSOutlineItemKey: Hashable {
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsoutlineview/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) { super.init(frame: frameRect) }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
 
     /// The tree is dropped with the data source; the rows come back from the new one.
     @MainActor open override var dataSource: (any NSTableViewDataSource)? {

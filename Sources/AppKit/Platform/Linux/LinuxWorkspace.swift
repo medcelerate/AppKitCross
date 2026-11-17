@@ -749,6 +749,54 @@ final class LinuxWorkspace: PlatformWorkspace {
     /// Nothing caches file metadata outside the file manager here; nothing to tell.
     func noteFileSystemChanged(_ path: String) {}
 
+    // MARK: Volumes (ADR-0039)
+
+    /// /proc/mounts as (mount point, file system type, options), octal escapes decoded.
+    private func _mounts() -> [(point: String, type: String, options: [String])] {
+        guard let text = try? String(contentsOfFile: "/proc/mounts", encoding: .utf8) else { return [] }
+        func unescape(_ s: Substring) -> String {
+            var out = "", chars = Array(s), i = 0
+            while i < chars.count {
+                if chars[i] == "\\", i + 3 < chars.count, let v = Int(String(chars[(i + 1)...(i + 3)]), radix: 8), let u = UnicodeScalar(v) { out.unicodeScalars.append(u); i += 4 }
+                else { out.append(chars[i]); i += 1 }
+            }
+            return out
+        }
+        return text.split(whereSeparator: \.isNewline).compactMap { line in
+            let f = line.split(separator: " ")
+            guard f.count >= 4 else { return nil }
+            return (unescape(f[1]), String(f[2]), f[3].split(separator: ",").map(String.init))
+        }
+    }
+    /// Removable media are what udisks mounts for the user: under /media or /run/media.
+    private func _isRemovableMountPoint(_ p: String) -> Bool { p.hasPrefix("/media/") || p.hasPrefix("/run/media/") }
+    func removableVolumePaths() -> [String] { _mounts().map(\.point).filter(_isRemovableMountPoint) }
+    /// `gio mount --eject` (udisks underneath), which unmounts and powers the drive off.
+    func ejectVolume(at url: URL) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        p.arguments = ["gio", "mount", "--eject", url.path]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { throw PlatformWorkspaceError.fileOperationFailed("gio could not be started to eject \(url.path)") }
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { throw PlatformWorkspaceError.fileOperationFailed("gio could not eject \(url.path)") }
+    }
+    /// The mount with the longest mount point containing the path.
+    func fileSystemInfo(forPath path: String) -> PlatformFileSystemInfo? {
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let resolved = (path as NSString).resolvingSymlinksInPath
+        let mount = _mounts().filter { resolved == $0.point || resolved.hasPrefix($0.point == "/" ? "/" : $0.point + "/") }.max { $0.point.count < $1.point.count }
+        let removable = mount.map { _isRemovableMountPoint($0.point) } ?? false
+        let readOnly = mount?.options.contains("ro") ?? false
+        return PlatformFileSystemInfo(type: mount?.type ?? "unknown", isRemovable: removable,
+                                      isWritable: !readOnly && access(resolved, W_OK) == 0, isUnmountable: removable)
+    }
+    /// No desktop-neutral search entry point exists (GNOME, KDE and the others each have their
+    /// own, none with a documented way to start a query), so this answers false as macOS does
+    /// when Spotlight cannot show the results.
+    func showSearchResults(forQuery query: String) -> Bool { false }
+
     // MARK: Running applications
 
     var runningApplications: [PlatformRunningApplication] {

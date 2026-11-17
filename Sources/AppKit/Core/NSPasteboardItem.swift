@@ -48,7 +48,7 @@ open class NSPasteboardItem: NSObject, NSPasteboardWriting, NSPasteboardReading 
     ///     do {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/detectedmetadata(for:)
     @available(macOS 15.4, *)
-    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedMetadata>>) async throws -> NSPasteboardItem.DetectedMetadata { unimplemented() }
+    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedMetadata>>) async throws -> NSPasteboardItem.DetectedMetadata { unimplemented("NSPasteboardItem.detectedMetadata — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether the pasteboard item matches the specified patterns, without notifying the person using the app.
     /// 
     /// This method only gives an indication of whether a pasteboard item matches a particular pattern and doesn’t allow the app to access the contents. As a result, the system doesn’t notify the person using the app about reading the contents of the pasteboard.
@@ -63,7 +63,7 @@ open class NSPasteboardItem: NSObject, NSPasteboardWriting, NSPasteboardReading 
     ///         if patternResults.contains(\.calendarEvents) {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/detectedpatterns(for:)
     @available(macOS 15.4, *)
-    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboardItem.DetectedValues>> { unimplemented() }
+    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboardItem.DetectedValues>> { unimplemented("NSPasteboardItem.detectedPatterns — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether this pasteboard item matches the specified patterns, reading the contents if it finds a match.
     /// 
     /// For details about the types returned for each pattern, see ``NSPasteboard/DetectedValues``.
@@ -78,7 +78,7 @@ open class NSPasteboardItem: NSObject, NSPasteboardWriting, NSPasteboardReading 
     ///         let links = valueResults.links
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/detectedvalues(for:)
     @available(macOS 15.4, *)
-    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedValues>>) async throws -> NSPasteboardItem.DetectedValues { unimplemented() }
+    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboardItem.DetectedValues>>) async throws -> NSPasteboardItem.DetectedValues { unimplemented("NSPasteboardItem.detectedValues — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/propertylist(fortype:)
     open func propertyList(forType type: NSPasteboard.PasteboardType) -> Any? { _resolve(type).flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/setdata(_:fortype:)
@@ -98,5 +98,13 @@ open class NSPasteboardItem: NSObject, NSPasteboardWriting, NSPasteboardReading 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/types
     open var types: [NSPasteboard.PasteboardType] { Array(_entries.keys) + _providers.keys.filter { _entries[$0] == nil } }
     // Requirement of NSPasteboardReading
-    public required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
+    /// An item holding the property list for `type`: data as is, a string as UTF-8, other
+    /// property lists serialized (what `propertyList(forType:)` reads back).
+    public required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) {
+        super.init()
+        if let d = propertyList as? Data { _entries[type] = d }
+        else if let s = propertyList as? String { _entries[type] = Data(s.utf8) }
+        else if let d = try? PropertyListSerialization.data(fromPropertyList: propertyList, format: .xml, options: 0) { _entries[type] = d }
+        else { return nil }
+    }
 }

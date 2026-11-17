@@ -146,7 +146,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/hitpart
     @MainActor open var hitPart: NSScroller.Part { _hitPart }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/iscompatiblewithoverlayscrollers
-    @MainActor class public var isCompatibleWithOverlayScrollers: Bool { unimplemented() }
+    /// True for NSScroller itself and false for any subclass (macOS 15: even one that
+    /// overrides nothing), so subclasses opt in by overriding.
+    @MainActor class public var isCompatibleWithOverlayScrollers: Bool { self == NSScroller.self }
     /// Scrollers are not in the key loop (macOS puts them there only with Full Keyboard Access).
     @MainActor open override var acceptsFirstResponder: Bool { false }
 

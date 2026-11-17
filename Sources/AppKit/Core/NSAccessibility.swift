@@ -22,7 +22,26 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility
 public struct NSAccessibility {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/errorcodeexceptioninfo
-    static public var ErrorCodeExceptionInfo: String { unimplemented() }
+    static public var ErrorCodeExceptionInfo: String { "NSAccessibilityErrorCodeExceptionInfo" }
+    nonisolated(unsafe) private static var _mayContainProtectedContent = false
+    /// Ignored: not `isAccessibilityElement()` (an element that is not itself exposed).
+    private static func _isIgnored(_ e: Any) -> Bool {
+        guard let el = e as? NSAccessibilityProtocol else { return true }
+        return MainActor.assumeIsolated { !el.isAccessibilityElement() }
+    }
+    private static func _children(_ e: Any) -> [Any] {
+        MainActor.assumeIsolated {
+            if let el = e as? NSAccessibilityProtocol, let c = el.accessibilityChildren(), !c.isEmpty { return c }
+            if let v = e as? NSView { return v.subviews }
+            return []
+        }
+    }
+    private static func _parent(_ e: Any) -> Any? {
+        MainActor.assumeIsolated {
+            if let el = e as? NSAccessibilityProtocol, let p = el.accessibilityParent() { return p }
+            return (e as? NSView)?.superview
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/post(element:notification:)
     public static func post(element: Any, notification: NSAccessibility.Notification) { post(element: element, notification: notification, userInfo: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/post(element:notification:userinfo:)
@@ -48,7 +67,11 @@ public struct NSAccessibility {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/raisebadargumentexception(_:_:_:)
-    public static func raiseBadArgumentException(_ element: Any!, _ attribute: NSAccessibility.Attribute!, _ value: Any!) { unimplemented() }
+    /// AppKit raises NSAccessibilityException (error code −25201, kAXErrorIllegalArgument);
+    /// Swift cannot catch an exception, so the port stops with the same message.
+    public static func raiseBadArgumentException(_ element: Any!, _ attribute: NSAccessibility.Attribute!, _ value: Any!) {
+        fatalError("NSAccessibilityException: \"\(attribute.map { $0.rawValue } ?? "(null)")\" attribute used with bad argument (\(value.map { "\($0)" } ?? "(null)")) for element \(element.map { "\($0)" } ?? "(null)") [NSAccessibilityErrorCodeExceptionInfo = -25201]")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/screenpoint(fromview:point:)
     @available(macOS 10.10, *)
     public static func screenPoint(fromView parentView: NSView, point: NSPoint) -> NSPoint {
@@ -65,16 +88,33 @@ public struct NSAccessibility {
             return parentView.window?.convertToScreen(inWindow) ?? inWindow
         }
     }
+    /// Stored and accepted (true, as macOS 15). No backend's screen capture or assistive
+    /// API reads it: Windows and AT-SPI have no protected-content flag for accessibility.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/setmaycontainprotectedcontent(_:)
-    public static func setMayContainProtectedContent(_ flag: Bool) -> Bool { unimplemented() }
+    public static func setMayContainProtectedContent(_ flag: Bool) -> Bool { _mayContainProtectedContent = flag; return true }
+    /// The nearest ancestor (accessibility parent, else superview) that is an element. The
+    /// port exposes controls themselves (macOS exposes some through their cells, ADR-0013).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/unignoredancestor(of:)
-    public static func unignoredAncestor(of element: Any) -> Any? { unimplemented() }
+    public static func unignoredAncestor(of element: Any) -> Any? {
+        var p = _parent(element)
+        while let current = p { if !_isIgnored(current) { return current }; p = _parent(current) }
+        return nil
+    }
+    /// The children with each ignored one replaced by its own unignored children.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/unignoredchildren(from:)
-    public static func unignoredChildren(from originalChildren: [Any]) -> [Any] { unimplemented() }
+    public static func unignoredChildren(from originalChildren: [Any]) -> [Any] {
+        originalChildren.flatMap { _isIgnored($0) ? unignoredChildren(from: _children($0)) : [$0] }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/unignoredchildrenforonlychild(from:)
-    public static func unignoredChildrenForOnlyChild(from originalChild: Any) -> [Any] { unimplemented() }
+    public static func unignoredChildrenForOnlyChild(from originalChild: Any) -> [Any] {
+        _isIgnored(originalChild) ? unignoredChildren(from: _children(originalChild)) : [originalChild]
+    }
+    /// The element itself when it is not ignored, else the first unignored element below it.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibility/unignoreddescendant(of:)
-    public static func unignoredDescendant(of element: Any) -> Any? { unimplemented() }
+    public static func unignoredDescendant(of element: Any) -> Any? {
+        if !_isIgnored(element) { return element }
+        return unignoredChildren(from: _children(element)).first
+    }
 }
 
 extension NSString {

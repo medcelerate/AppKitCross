@@ -16,7 +16,8 @@ import CoreGraphics
     private weak var _textField: NSTextField?
 
     @MainActor public override init(frame frameRect: NSRect) { super.init(frame: frameRect) }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
 
     @MainActor open override var isFlipped: Bool { true }
 

@@ -19,7 +19,12 @@ open class NSObjectController: NSController {
     internal lazy var _selectionProxy = _NSControllerSelectionProxy(controller: self)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// No content; `NSAutomaticallyPreparesContent` and `NSEditable` read when present (macOS's keys).
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        _automaticallyPreparesContent = coder.decodeBool(forKey: "NSAutomaticallyPreparesContent")
+        if coder.containsValue(forKey: "NSEditable") { isEditable = coder.decodeBool(forKey: "NSEditable") }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/init(content:)
     public init(content: Any?) {
         super.init()
@@ -65,7 +70,7 @@ open class NSObjectController: NSController {
     }
     /// Core Data fetching is not part of the port.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/fetch(_:)
-    @MainActor open func fetch(_ sender: Any?) { unimplemented() }
+    @MainActor open func fetch(_ sender: Any?) { unimplemented("NSObjectController.fetch(_:) — Core Data is not part of the port") }
     // SKIPPED (unknown module (CoreData NSFetchRequest); unknown module (CoreData NSFetchRequestResult)): func fetch(with fetchRequest: NSFetchRequest<any NSFetchRequestResult>?, merge: Bool) throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/fetchpredicate
     open var fetchPredicate: NSPredicate? {
@@ -95,7 +100,7 @@ open class NSObjectController: NSController {
         #else
         // corelibs' NSObject.init() is not `required`, so a metatype cannot construct an
         // arbitrary class; override newObject() for model classes on these platforms.
-        unimplemented()
+        unimplemented("NSObjectController.newObject — corelibs' NSObject.init() is not required, so objectClass cannot be instantiated; override newObject()")
         #endif
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsobjectcontroller/objectclass

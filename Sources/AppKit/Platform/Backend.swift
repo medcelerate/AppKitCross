@@ -27,6 +27,11 @@ public struct PlatformDisplay: Sendable {
     public var maximumEDRValue: CGFloat
     public var maximumPotentialEDRValue: CGFloat
     public var maximumReferenceEDRValue: CGFloat
+    /// The display's refresh rate in hertz (`NSScreen.maximumFramesPerSecond` and the refresh
+    /// intervals) and its bits per colour sample (`NSScreen.depth`). 60 and 8 when the
+    /// platform does not say (X11 without RandR).
+    public var refreshRate: Double = 60
+    public var bitsPerSample: Int = 8
     public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool,
                 maximumEDRValue: CGFloat = 1, maximumPotentialEDRValue: CGFloat = 1, maximumReferenceEDRValue: CGFloat = 0) {
         self.frame = frame

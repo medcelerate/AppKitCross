@@ -186,7 +186,8 @@ internal func _rectsOverlap(_ a: NSRect, _ b: NSRect) -> Bool {
     internal func _numberOfItems(inSection s: Int) -> Int { _collectionView?._itemCount(inSection: s) ?? 0 }
 
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// The abstract layout has nothing to archive (its subclasses write their metrics).
+    open func encode(with coder: NSCoder) { }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) { super.init() }
 }

@@ -234,13 +234,19 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// Items created using this method are non-interactive and do not perform an action.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/sectionheader(title:)
     @available(macOS 14.0, *)
-    public static func sectionHeader(title: String) -> NSMenuItem { unimplemented() }
+    public static func sectionHeader(title: String) -> NSMenuItem { sectionHeader(withTitle: title) }
     /// Creates a menu item representing a section header with the provided title.
     /// Section header items are used to provide context to a grouping of menu items.
     /// Items created using this method are non-interactive and do not perform an action.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/sectionheader(withtitle:)
     @available(macOS 14.0, *)
-    public static func sectionHeader(withTitle title: String) -> NSMenuItem { unimplemented() }
+    /// A header item: `isSectionHeader`, no action, enabled (macOS 14); the platform menus
+    /// show it as a disabled label.
+    public static func sectionHeader(withTitle title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item._isSectionHeader = true
+        return item
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/separator()
     public class func separator() -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -249,7 +255,21 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         return item
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/settitlewithmnemonic(_:)
-    open func setTitleWithMnemonic(_ stringWithAmpersand: String) { unimplemented() }
+    /// Drops the mnemonic marker — the first `&` that is not part of a `&&` pair — and keeps
+    /// the rest as typed (macOS 15: "Sa&ve && Quit" → "Save && Quit"; menus show no mnemonics).
+    open func setTitleWithMnemonic(_ stringWithAmpersand: String) {
+        var chars = Array(stringWithAmpersand)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "&" {
+                if i + 1 < chars.count, chars[i + 1] == "&" { i += 2; continue }
+                chars.remove(at: i)
+                break
+            }
+            i += 1
+        }
+        title = String(chars)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/state
     open var state: NSControl.StateValue {
         get { _state }
@@ -292,7 +312,14 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         set { _toolTip = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/userkeyequivalent
-    open var userKeyEquivalent: String { unimplemented() }
+    /// The key the user assigned to this item's title in the `NSUserKeyEquivalents` defaults
+    /// (modifier marks `@$~^` dropped), when `usesUserKeyEquivalents`; else "" (macOS 15).
+    open var userKeyEquivalent: String {
+        guard NSMenuItem.usesUserKeyEquivalents,
+              let table = UserDefaults.standard.dictionary(forKey: "NSUserKeyEquivalents") as? [String: String],
+              let value = table[_title] else { return "" }
+        return String(value.drop { "@$~^".contains($0) })
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/usesuserkeyequivalents
     class public var usesUserKeyEquivalents: Bool {
         get { _usesUserKeyEquivalents }
@@ -311,7 +338,9 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/writingtoolsitems
     @available(macOS 15.2, *)
-    class public var writingToolsItems: [NSMenuItem] { unimplemented() }
+    /// None: Writing Tools is an Apple Intelligence service with no Windows or Linux
+    /// counterpart, so there are no items to offer (macOS 15.2 returns one submenu item).
+    class public var writingToolsItems: [NSMenuItem] { [] }
     // Requirement of NSCopying
     open func copy(with zone: NSZone? = nil) -> Any {
         let c = NSMenuItem(title: _title, action: _action, keyEquivalent: _keyEquivalent)

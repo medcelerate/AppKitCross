@@ -88,7 +88,8 @@ import CoreGraphics
     @MainActor public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
     }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// An empty collection view (the port reads no nib archives: nothing is decoded).
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
 
     @MainActor open override var isFlipped: Bool { true }
     @MainActor open override var acceptsFirstResponder: Bool { _isSelectable }
@@ -139,7 +140,12 @@ import CoreGraphics
     private func _reloadCountsIfNeeded() {
         guard _needsReload else { return }
         _needsReload = false
-        guard let ds = _dataSource else { _itemCounts = []; return }
+        guard let ds = _dataSource else {
+            // The legacy content path: one section of `content`, items from `itemPrototype`.
+            _itemCounts = _itemPrototype != nil && !_content.isEmpty ? [_content.count] : []
+            _selection = _selection.filter(_isValid)
+            return
+        }
         let sections = max(0, ds.numberOfSections(in: self))
         _itemCounts = (0..<sections).map { max(0, ds.collectionView(self, numberOfItemsInSection: $0)) }
         _selection = _selection.filter(_isValid)
@@ -600,8 +606,14 @@ import CoreGraphics
     }
 
     private func _makeItem(at ip: IndexPath) -> NSCollectionViewItem? {
-        guard let ds = _dataSource else { return nil }
-        let item = ds.collectionView(self, itemForRepresentedObjectAt: ip)
+        let item: NSCollectionViewItem
+        if let ds = _dataSource {
+            item = ds.collectionView(self, itemForRepresentedObjectAt: ip)
+        } else if _itemPrototype != nil, ip.section == 0, _content.indices.contains(ip.item) {
+            item = newItem(forRepresentedObject: _content[ip.item])
+        } else {
+            return nil
+        }
         item._collectionView = self
         item.isSelected = _selection.contains(ip)
         item.highlightState = _highlighted.contains(ip) ? .forSelection : .none
@@ -738,7 +750,15 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/frameforitem(at:)
     @MainActor open func frameForItem(at index: Int) -> NSRect { layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame ?? .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/frameforitem(at:withnumberofitems:)
-    @MainActor open func frameForItem(at index: Int, withNumberOfItems numberOfItems: Int) -> NSRect { unimplemented() }
+    /// The frame the item at `index` would have among `numberOfItems` (the legacy grid's
+    /// question): computed by a grid layout for that count; other layouts answer their own
+    /// frame for the index.
+    @MainActor open func frameForItem(at index: Int, withNumberOfItems numberOfItems: Int) -> NSRect {
+        if let grid = _layout as? NSCollectionViewGridLayout {
+            return grid._frame(forItemAt: index, count: numberOfItems, width: bounds.width, rightToLeft: userInterfaceLayoutDirection == .rightToLeft)
+        }
+        return index < numberOfItems ? frameForItem(at: index) : .zero
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/scrolltoitems(at:scrollposition:)
     @available(macOS 10.11, *)
@@ -1148,7 +1168,13 @@ import CoreGraphics
         set { _itemPrototype = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/newitem(forrepresentedobject:)
-    @MainActor open func newItem(forRepresentedObject object: Any) -> NSCollectionViewItem { unimplemented() }
+    /// A copy of `itemPrototype` (an empty item without one) representing `object`.
+    @MainActor open func newItem(forRepresentedObject object: Any) -> NSCollectionViewItem {
+        let item = (_itemPrototype?.copy() as? NSCollectionViewItem) ?? NSCollectionViewItem(nibName: nil, bundle: nil)
+        item.representedObject = object
+        item._collectionView = self
+        return item
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/minitemsize
     @MainActor open var minItemSize: NSSize {
         get { _minItemSize }
@@ -1178,9 +1204,19 @@ import CoreGraphics
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/draggingimageforitems(at:with:offset:)
     @available(macOS 10.11, *)
-    @MainActor open func draggingImageForItems(at indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    /// The items as drawn now, in one image covering their frames; the offset is zero (the
+    /// image is placed over the items).
+    @MainActor open func draggingImageForItems(at indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        dragImageOffset.pointee = .zero
+        let frames = indexPaths.compactMap { layoutAttributesForItem(at: $0)?.frame }.filter { !$0.isEmpty }
+        let union = frames.reduce(NSRect.null) { $0.union($1) }
+        guard !union.isNull else { return NSImage(size: .zero) }
+        return _snapshotImage(of: frames, in: union)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/draggingimageforitems(at:with:offset:)
-    @MainActor open func draggingImageForItems(at indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    @MainActor open func draggingImageForItems(at indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        draggingImageForItems(at: Set(indexes.map { IndexPath(item: $0, section: 0) }), with: event, offset: dragImageOffset)
+    }
     // NSDraggingSource
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsource/draggingsession(_:sourceoperationmaskfor:)
     @MainActor open func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
