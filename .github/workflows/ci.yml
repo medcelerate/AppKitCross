@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install packages (Azure Ubuntu mirror, with retries)
-        run: tools/ci/apt-install.sh pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev libhunspell-1.7-0 hunspell-en-us
+        run: tools/ci/apt-install.sh pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev libhunspell-1.7-0 hunspell-en-us dbus
       - run: swift build
       - name: Build every example
         shell: bash
@@ -148,6 +148,8 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 .build/debug/AudioPlayer --render audio-linux.wav && ls -la audio-linux.wav
       - name: Tests on the host backend
         run: APPKITWIN_HOST_BACKEND=1 swift test
+      - name: Linux notifications against a fake notification server on a private session bus (ADR-0043)
+        run: dbus-run-session -- swift test --filter FreedesktopNotifierTests
       - name: Third-party SwiftUI library compatibility example
         run: tools/library-compat.sh
 
