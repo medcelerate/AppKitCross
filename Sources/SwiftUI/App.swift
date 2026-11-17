@@ -348,9 +348,22 @@ public final class _AppRunner {
         let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar, pendingToolbarStyle = toolbarStyle
         let hosting = NSHostingView(rootView: content)
         let ideal = hosting.sizeThatFits(.unspecified)
-        var size = pendingDefaultSize ?? NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
-        size.width = max(size.width, ideal.width)
-        size.height = max(size.height, ideal.height)
+        var size: NSSize
+        if let given = pendingDefaultSize {
+            // `.defaultSize` is the window's size, grown only to the content's minimum (not
+            // its ideal: a scroll view's ideal is its whole document, which opened MD Vault's
+            // viewer 1460 points tall).
+            let least = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            size = NSSize(width: max(given.width, least.width), height: max(given.height, least.height))
+        } else {
+            size = NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
+        }
+        // A new window fits the screen's visible frame (less the title bar), as AppKit
+        // constrains a window's first frame.
+        if let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame, visible.width > 0, visible.height > 0 {
+            size.width = min(size.width, visible.width)
+            size.height = min(size.height, max(200, visible.height - 40))
+        }
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         if pendingHidesTitleBar { style.insert(.fullSizeContentView) }
         // `.contentSize`: the window's size range is the content's (its minimum and

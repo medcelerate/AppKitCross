@@ -375,10 +375,10 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(strings.contains("Plain codelink gone"), "\(strings)")
             XCTAssertTrue(strings.contains("A") && strings.contains("2"))
             let paragraph = allViews(h).compactMap { $0 as? _TextView }.first { $0.storage.string == "Plain codelink gone" }
-            #if !os(Windows)
-            // On Windows `Text(AttributedString)` draws the plain characters (the 6.2
-            // toolchain cannot link `AttributedString.runs`; AttributedText.swift), so the
-            // runs' attributes are not there: a known gap (docs/compatibility/swiftui-apps.md).
+            #if !os(Windows) || compiler(>=6.4)
+            // With Windows' 6.2 toolchain `Text(AttributedString)` draws the plain characters
+            // (it cannot link `AttributedString.runs`; AttributedText.swift), so the runs'
+            // attributes are not there: a known gap (docs/compatibility/swiftui-apps.md).
             XCTAssertNotNil(paragraph?.storage.attribute(.link, at: 10, effectiveRange: nil), "the link run")
             XCTAssertNotNil(paragraph?.storage.attribute(.strikethroughStyle, at: 16, effectiveRange: nil), "the struck run")
             #endif
@@ -522,6 +522,31 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(Win32Pasteboard.crlf("a\nb\r\nc"), "a\r\nb\r\nc")
     }
     #endif
+
+    /// A scene window opens at its `.defaultSize` even when its content's ideal size is a
+    /// long scroll view's whole document (the PC's sample.md opened 1460 points tall at
+    /// (0,0)), and a window without one still fits the screen.
+    func testSceneWindowSizeIgnoresAScrollViewsIdealHeight() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Long: View {
+                var body: some View {
+                    ScrollView { VStack { ForEach(0..<300) { i in Text("line \(i)") } } }
+                }
+            }
+            let runner = _AppRunner(name: "MD Vault")
+            runner.run(scene: WindowGroup { Long() }.defaultSize(width: 920, height: 720))
+            guard let w = runner.windows.last else { return XCTFail("no window") }
+            defer { w.close() }
+            XCTAssertEqual(w.contentRect(forFrameRect: w.frame).height, 720, accuracy: 1)
+            runner.run(scene: WindowGroup { VStack { ForEach(0..<300) { i in Text("line \(i)") } } })
+            guard let tall = runner.windows.last, tall !== w else { return XCTFail("no second window") }
+            defer { tall.close() }
+            if let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame, visible.height > 0 {
+                XCTAssertLessThanOrEqual(tall.frame.height, visible.height + 1, "fits the screen")
+            }
+        }
+    }
 
     #if !canImport(Darwin)
     /// `UTType(importedAs:)` returns the Info.plist's declaration (its extensions), as

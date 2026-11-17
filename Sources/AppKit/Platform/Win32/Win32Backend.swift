@@ -284,6 +284,12 @@ final class Win32Backend: PlatformBackend {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
                 return false
             }
+            // Before the next input event, the work the previous ones queued on the main
+            // queue runs (AppKit finishes each event's run-loop pass first): the undo
+            // manager closing the typing's group, so the document is marked edited before
+            // a click opens the File menu and validates Save (the PC saw it disabled when
+            // the menu was opened within ~50 ms of typing).
+            if Win32Backend.isInputMessage(msg.message) { _ = PlatformMainQueue.service(); lastService = GetTickCount64() }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
             fireFrameIfDue()
@@ -327,6 +333,16 @@ final class Win32Backend: PlatformBackend {
             if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1 }
         }
         return true
+    }
+    /// Keyboard and mouse-button messages (client and non-client): the events that start
+    /// a user action.
+    static func isInputMessage(_ m: UINT) -> Bool {
+        switch Int32(m) {
+        case WM_KEYDOWN, WM_SYSKEYDOWN, WM_CHAR, WM_SYSCHAR,
+             WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+             WM_NCLBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCMBUTTONDOWN: return true
+        default: return false
+        }
     }
     private var wakesQueue = 0, wakesInput = 0, wakesTimeout = 0
     private var serviceMs: UInt64 = 0
