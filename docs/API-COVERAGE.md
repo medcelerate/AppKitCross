@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 477 |
+| Members unimplemented-calls | 466 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -138,7 +138,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionLayoutSpacing | class | generated | 5 | 0 | 0 |  |
 | NSCollectionLayoutSupplementaryItem | class | generated | 6 | 0 | 0 |  |
 | NSCollectionLayoutVisibleItem | protocol | generated | 10 | 0 | 0 |  |
-| NSCollectionView | class | handwritten | 84 | 0 | 6 | 9 |
+| NSCollectionView | class | handwritten | 84 | 0 | 6 | 4 |
 | NSCollectionViewCompositionalLayout | class | generated | 5 | 0 | 0 |  |
 | NSCollectionViewCompositionalLayoutConfiguration | class | generated | 3 | 0 | 0 |  |
 | NSCollectionViewCompositionalLayoutSectionProvider | typealias | generated | 1 | 0 | 0 |  |
@@ -150,11 +150,11 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewDiffableDataSourceReferenceItemProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewDiffableDataSourceReferenceSupplementaryViewProvider | typealias | generated | 1 | 0 | 0 |  |
 | NSCollectionViewElement | protocol | generated | 5 | 0 | 0 |  |
-| NSCollectionViewFlowLayout | class | handwritten | 13 | 0 | 0 | 2 |
+| NSCollectionViewFlowLayout | class | handwritten | 13 | 0 | 0 | 1 |
 | NSCollectionViewFlowLayoutInvalidationContext | class | handwritten | 2 | 0 | 0 | 1 |
-| NSCollectionViewGridLayout | class | handwritten | 8 | 0 | 0 | 2 |
-| NSCollectionViewItem | class | handwritten | 10 | 0 | 1 | 3 |
-| NSCollectionViewLayout | class | handwritten | 38 | 0 | 0 | 3 |
+| NSCollectionViewGridLayout | class | handwritten | 8 | 0 | 0 | 1 |
+| NSCollectionViewItem | class | handwritten | 10 | 0 | 1 | 1 |
+| NSCollectionViewLayout | class | handwritten | 38 | 0 | 0 | 1 |
 | NSCollectionViewLayoutAttributes | class | handwritten | 12 | 0 | 0 | 1 |
 | NSCollectionViewLayoutInvalidationContext | class | handwritten | 10 | 0 | 0 | 1 |
 | NSCollectionViewPrefetching | protocol | generated | 2 | 0 | 0 |  |
