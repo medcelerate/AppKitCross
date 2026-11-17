@@ -41,6 +41,9 @@ import CoreText
     private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
+    /// `animator()` was asked for, layer or not: a view that animates something other than
+    /// its own geometry (a collection view's batch updates) takes this.
+    private var _animatorRequested = false
     private var _appearance: NSAppearance? = nil
     private var _registeredDraggedTypes: [NSPasteboard.PasteboardType] = []
     /// What `draggingEntered` returned, for the default `draggingUpdated` (AppKit's rule).
@@ -300,6 +303,14 @@ import CoreText
     private func _takeAnimator() -> Bool {
         let a = _animatorPending
         _animatorPending = false
+        _animatorRequested = false
+        return a
+    }
+    /// Takes the one-shot `animator()` request whether or not the view has a layer yet.
+    internal func _takeAnimatorRequest() -> Bool {
+        let a = _animatorRequested
+        _animatorPending = false
+        _animatorRequested = false
         return a
     }
 
@@ -582,6 +593,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimatablepropertycontainer/animator()
     @MainActor public func animator() -> Self {
         _animatorPending = _layer != nil
+        _animatorRequested = true
         return self
     }
 

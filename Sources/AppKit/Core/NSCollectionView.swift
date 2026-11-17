@@ -1,5 +1,6 @@
 // NSCollectionView (hand-written; seeded from the generated stub, see tools/apigen)
-// Members still marked unimplemented() are stubs awaiting implementation.
+// Members still marked unimplemented() are stubs awaiting implementation (the nib paths:
+// the port cannot load nibs).
 //
 // Every member is either implemented (hand-written types only), stubbed with
 // unimplemented(), or listed as SKIPPED with the reason it cannot compile on Windows yet.
@@ -65,6 +66,21 @@ import CoreGraphics
     // Batch updates
     private var _updateDepth = 0
     private var _pending = _NSCollectionViewPendingUpdates()
+    private var _batchAnimates = false
+    /// Deleted and reloaded items fading out after an animated update, removed when the
+    /// animation group completes (ADR-0041).
+    private var _disappearing: [ObjectIdentifier: NSCollectionViewItem] = [:]
+
+    // Dragging (ADR-0041)
+    private var _mouseDownEvent: NSEvent?
+    private var _pressPoint: NSPoint = .zero
+    private var _dragCandidate: IndexPath?           // the item the mouse went down on
+    private var _dragAttempted = false
+    private var _collapseOnMouseUp: IndexPath?
+    private var _draggedIndexPaths = Set<IndexPath>()
+    private var _dropTarget: (indexPath: IndexPath, operation: NSCollectionView.DropOperation)?
+    private var _dropHighlight: IndexPath?
+    private var _gapIndicator: NSView?
 
     // Legacy (10.5) API storage
     private var _content: [Any] = []
@@ -88,7 +104,18 @@ import CoreGraphics
     @MainActor public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
     }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Unarchives the settings AppKit archives (selection behaviour, background colours,
+    /// the dragging masks); the view's own geometry comes from `NSView`.
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        guard coder.allowsKeyedCoding else { return }
+        if coder.containsValue(forKey: "NSSelectable") { _isSelectable = coder.decodeBool(forKey: "NSSelectable") }
+        if coder.containsValue(forKey: "NSAllowsMultipleSelection") { _allowsMultipleSelection = coder.decodeBool(forKey: "NSAllowsMultipleSelection") }
+        if coder.containsValue(forKey: "NSAllowsEmptySelection") { _allowsEmptySelection = coder.decodeBool(forKey: "NSAllowsEmptySelection") }
+        if coder.containsValue(forKey: "NSBackgroundColors"), let colors = coder.decodeObject(forKey: "NSBackgroundColors") as? [NSColor], !colors.isEmpty { _backgroundColors = colors }
+        if coder.containsValue(forKey: "NSDraggingSourceMaskForLocal") { _dragMaskLocal = NSDragOperation(rawValue: UInt(truncatingIfNeeded: coder.decodeInteger(forKey: "NSDraggingSourceMaskForLocal"))) }
+        if coder.containsValue(forKey: "NSDraggingSourceMaskForNonLocal") { _dragMaskRemote = NSDragOperation(rawValue: UInt(truncatingIfNeeded: coder.decodeInteger(forKey: "NSDraggingSourceMaskForNonLocal"))) }
+    }
 
     @MainActor open override var isFlipped: Bool { true }
     @MainActor open override var acceptsFirstResponder: Bool { _isSelectable }
@@ -219,7 +246,7 @@ import CoreGraphics
         item._collectionView = self
         _ = item.view          // loaded, so the data source can fill its outlets
         item.isSelected = _selection.contains(indexPath)
-        item.highlightState = _highlighted.contains(indexPath) ? .forSelection : .none
+        item.highlightState = _highlightState(at: indexPath)
         return item
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/makesupplementaryview(ofkind:withidentifier:for:)
@@ -261,12 +288,20 @@ import CoreGraphics
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/performbatchupdates(_:completionhandler:)
     @available(macOS 10.11, *)
+    ///
+    /// Called on the `animator()` proxy (with a non-zero `NSAnimationContext` duration, in
+    /// a window on screen), inserted items fade in, deleted ones fade out and moved ones slide to their new
+    /// frames; the completion handler then runs when the animation ends. Otherwise the
+    /// update is instant and the handler runs before this returns.
     @MainActor open func performBatchUpdates(_ updates: (() -> Void)?, completionHandler: ((Bool) -> Void)? = nil) {
+        if _updateDepth == 0 { _batchAnimates = _takeAnimatedUpdateRequest() }
         _updateDepth += 1
         updates?()
         _updateDepth -= 1
-        if _updateDepth == 0 { _applyPendingUpdates() }
-        completionHandler?(true)
+        guard _updateDepth == 0 else { completionHandler?(true); return }
+        let animates = _batchAnimates
+        _batchAnimates = false
+        _applyPendingUpdates(animated: animates, completion: completionHandler)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/performbatchupdates(_:)
     @available(macOS 10.11, *)
@@ -304,7 +339,13 @@ import CoreGraphics
     /// Records one change; outside `performBatchUpdates` it is applied at once.
     private func _batch(_ record: () -> Void) {
         record()
-        if _updateDepth == 0 { _applyPendingUpdates() }
+        if _updateDepth == 0 { _applyPendingUpdates(animated: _takeAnimatedUpdateRequest(), completion: nil) }
+    }
+    /// Whether this update animates: asked through `animator()`, with a duration, on a
+    /// window on screen (the port advances layer animations only for trees on screen, so
+    /// an off-screen update is instant and its completion runs at once).
+    private func _takeAnimatedUpdateRequest() -> Bool {
+        _takeAnimatorRequest() && NSAnimationContext.current.duration > 0 && window?.isVisible == true
     }
 
     /// Applies the recorded changes: deletes and reloads address the old index paths,
@@ -312,11 +353,27 @@ import CoreGraphics
     /// The visible items, the selection and the anchor follow their elements to the
     /// new index paths; the counts must then match the data source's, as AppKit
     /// demands.
-    private func _applyPendingUpdates() {
+    ///
+    /// Animated, the layout's appearing and disappearing attributes give each item's start
+    /// (and a deleted item's end); the model frames are final at once, the views' layers
+    /// animate from there (ADR-0041).
+    private func _applyPendingUpdates(animated: Bool, completion: ((Bool) -> Void)?) {
         _reloadCountsIfNeeded()
         let pending = _pending
         _pending = _NSCollectionViewPendingUpdates()
-        guard !pending.isEmpty else { return }
+        guard !pending.isEmpty else { completion?(true); return }
+        if animated && layer == nil { _becomeLayerBacked() }
+        // What the old layout gave, for the layout's appearing queries, and where the
+        // live views are now (the fallback when the layout has no answer).
+        var previous: [IndexPath: NSCollectionViewLayoutAttributes] = [:]
+        var oldState: [ObjectIdentifier: (frame: NSRect, alpha: CGFloat)] = [:]
+        if animated {
+            _prepareLayoutIfNeeded()
+            if let layout = _layout {
+                for ip in _allIndexPaths() { if let a = layout.layoutAttributesForItem(at: ip)?.copy() as? NSCollectionViewLayoutAttributes { previous[ip] = a } }
+            }
+            for item in _visibleItems.values { if let v = item.viewIfLoaded { oldState[ObjectIdentifier(item)] = (v.frame, v.alphaValue) } }
+        }
 
         // Identity tokens: the old index path (sections: item NSNotFound).
         struct Token { var old: IndexPath?; var reload: Bool }
@@ -392,10 +449,14 @@ import CoreGraphics
         // Move the live items, supplementary views, the selection and the anchor.
         var items: [IndexPath: NSCollectionViewItem] = [:]
         var displayed = Set<IndexPath>()
+        var leaving: [(NSCollectionViewItem, IndexPath)] = []
         for (old, item) in _visibleItems {
             if let new = itemMap[old], !reloaded.contains(new) {
                 items[new] = item
                 if _displayed.contains(old) { displayed.insert(new) }
+            } else if animated {
+                _retire(item, at: old)
+                leaving.append((item, old))
             } else {
                 _recycle(item, at: old)
             }
@@ -420,13 +481,72 @@ import CoreGraphics
         _highlighted = Set(_highlighted.compactMap { itemMap[$0] })
         for (ip, item) in _visibleItems { item.isSelected = _selection.contains(ip) }
 
-        _layout?.prepare(forCollectionViewUpdates: updates)
+        // The layout prepares for the new data, hears the updates, answers the appearing
+        // and disappearing queries, then finalizes (UICollectionView's order).
+        var context = NSCollectionViewLayout._UpdateContext()
+        context.oldToNew = itemMap
+        for (o, n) in itemMap { context.newToOld[n] = o }
+        context.reloaded = reloaded
+        context.previous = previous
+        _layout?._updateContext = context
         _needsPrepare = true
         _prepareLayoutIfNeeded()
+        _layout?.prepare(forCollectionViewUpdates: updates)
         _updateVisibleElements()
+        if animated {
+            _animateUpdate(oldState: oldState, leaving: leaving, inserted: Set(pending.insertItems), completion: completion)
+        }
         _layout?.finalizeCollectionViewUpdates()
+        _layout?._updateContext = nil
         needsDisplay = true
         _accessibilityStructureChangedHere()
+        if !animated { completion?(true) }
+    }
+
+    /// Runs the animations of an update whose views are already at their final frames:
+    /// every visible item starts where the layout's appearing attributes (else its old
+    /// view state, else transparent for an inserted item) say; every leaving item goes
+    /// where the disappearing attributes say (else fades in place) and is removed when the
+    /// group ends.
+    private func _animateUpdate(oldState: [ObjectIdentifier: (frame: NSRect, alpha: CGFloat)], leaving: [(NSCollectionViewItem, IndexPath)], inserted: Set<IndexPath>, completion: ((Bool) -> Void)?) {
+        let layout = _layout
+        NSAnimationContext.beginGrouping()
+        let ids = leaving.map { ObjectIdentifier($0.0) }
+        for (item, _) in leaving { _disappearing[ObjectIdentifier(item)] = item }
+        NSAnimationContext.current.completionHandler = { [weak self] in
+            MainActor.assumeIsolated {
+                self?._finishDisappearing(ids)
+                completion?(true)
+            }
+        }
+        for (ip, item) in _visibleItems {
+            guard let view = item.viewIfLoaded else { continue }
+            let final = (frame: view.frame, alpha: view.alphaValue)
+            var from: (frame: NSRect, alpha: CGFloat)?
+            if let a = layout?.initialLayoutAttributesForAppearingItem(at: ip) { from = (a.frame, a.alpha) }
+            else if let old = oldState[ObjectIdentifier(item)] { from = old }
+            else if inserted.contains(ip) { from = (final.frame, 0) }
+            guard let start = from, start.frame != final.frame || start.alpha != final.alpha else { continue }
+            view.frame = start.frame
+            view.alphaValue = start.alpha
+            view.animator().frame = final.frame
+            view.animator().alphaValue = final.alpha
+        }
+        for (item, old) in leaving {
+            guard let view = item.viewIfLoaded else { continue }
+            let end = layout?.finalLayoutAttributesForDisappearingItem(at: old).map { (frame: $0.frame, alpha: $0.alpha) } ?? (frame: view.frame, alpha: 0)
+            if view.frame != end.frame { view.animator().frame = end.frame }
+            view.animator().alphaValue = end.alpha
+        }
+        NSAnimationContext.endGrouping()
+    }
+
+    /// Removes the items that faded out (now, or when their animation group ends).
+    private func _finishDisappearing(_ ids: [ObjectIdentifier]? = nil) {
+        for id in ids ?? Array(_disappearing.keys) {
+            guard let item = _disappearing.removeValue(forKey: id) else { continue }
+            _park(item)
+        }
     }
 
     // MARK: The layout cycle
@@ -575,6 +695,7 @@ import CoreGraphics
         _restack(placed)
         _placeBackgroundView()
         if let m = _marqueeView, subviews.last !== m { addSubview(m) }
+        if let g = _gapIndicator, subviews.last !== g { addSubview(g) }
         _refreshItemAccessibility()
         // Tell the delegate about the items now on screen.
         for ip in wantedItems.sorted() where !_displayed.contains(ip) {
@@ -604,20 +725,30 @@ import CoreGraphics
         let item = ds.collectionView(self, itemForRepresentedObjectAt: ip)
         item._collectionView = self
         item.isSelected = _selection.contains(ip)
-        item.highlightState = _highlighted.contains(ip) ? .forSelection : .none
+        item.highlightState = _highlightState(at: ip)
         _visibleItems[ip] = item
         let v = item.view
         if v.superview !== self { addSubview(v) }
         return item
     }
     private func _recycle(_ item: NSCollectionViewItem, at ip: IndexPath) {
+        _retire(item, at: ip)
+        _park(item)
+    }
+    /// The item stops representing `ip` (its view may stay a while to fade out).
+    private func _retire(_ item: NSCollectionViewItem, at ip: IndexPath) {
         _visibleItems[ip] = nil
         if _displayed.contains(ip) {
             _displayed.remove(ip)
             _delegate?.collectionView(self, didEndDisplaying: item, forRepresentedObjectAt: ip)
         }
-        item.viewIfLoaded?.removeFromSuperview()
+        if _dropHighlight == ip { _dropHighlight = nil }
         _clearItemAccessibility(item)
+    }
+    /// The item's view leaves and the item waits for reuse.
+    private func _park(_ item: NSCollectionViewItem) {
+        item.viewIfLoaded?.removeFromSuperview()
+        item.viewIfLoaded?.layer?.removeAllAnimations()
         if let id = item._reuseIdentifier, _spareItems[id, default: []].count < 32 {
             _spareItems[id, default: []].append(item)
         } else {
@@ -658,6 +789,7 @@ import CoreGraphics
         needsLayout = true
     }
     private func _dropAllElements() {
+        _finishDisappearing()
         for (ip, item) in _visibleItems { _recycle(item, at: ip) }
         _visibleItems = [:]
         for (key, v) in _visibleSupplementary { _recycleSupplementary(v, key: key) }
@@ -738,7 +870,24 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/frameforitem(at:)
     @MainActor open func frameForItem(at index: Int) -> NSRect { layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame ?? .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/frameforitem(at:withnumberofitems:)
-    @MainActor open func frameForItem(at index: Int, withNumberOfItems numberOfItems: Int) -> NSRect { unimplemented() }
+    ///
+    /// The legacy grid: as many columns as items of `minItemSize` (the prototype's view
+    /// size when unset) fit the width, never more than the items (or
+    /// `maxNumberOfColumns`), cells widened to share the width up to `maxItemSize`; rows
+    /// follow without spacing, as AppKit's 10.5 layout places them.
+    @MainActor open func frameForItem(at index: Int, withNumberOfItems numberOfItems: Int) -> NSRect {
+        let proto = _itemPrototype?.viewIfLoaded?.frame.size ?? .zero
+        let minW = _minItemSize.width > 0 ? _minItemSize.width : proto.width
+        let minH = _minItemSize.height > 0 ? _minItemSize.height : proto.height
+        guard minW > 0, minH > 0, numberOfItems > 0, index >= 0 else { return .zero }
+        let width = (superview as? NSClipView)?.bounds.width ?? bounds.width
+        var columns = max(1, min(numberOfItems, Int(width / minW)))
+        if _maxNumberOfColumns > 0 { columns = min(columns, _maxNumberOfColumns) }
+        let maxW = _maxItemSize.width > 0 ? max(_maxItemSize.width, minW) : .greatestFiniteMagnitude
+        let w = min(max(width / CGFloat(columns), minW), maxW)
+        let h = minH
+        return NSRect(x: CGFloat(index % columns) * w, y: CGFloat(index / columns) * h, width: w, height: h)
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/scrolltoitems(at:scrollposition:)
     @available(macOS 10.11, *)
@@ -866,6 +1015,11 @@ import CoreGraphics
         return true
     }
 
+    /// The highlight an item made for `ip` starts with.
+    private func _highlightState(at ip: IndexPath) -> NSCollectionViewItem.HighlightState {
+        ip == _dropHighlight ? .asDropTarget : (_highlighted.contains(ip) ? .forSelection : .none)
+    }
+
     /// Highlights items (while the mouse is down), through the delegate.
     private func _setHighlight(_ state: NSCollectionViewItem.HighlightState, for indexPaths: Set<IndexPath>) {
         guard !indexPaths.isEmpty else { return }
@@ -883,6 +1037,7 @@ import CoreGraphics
     /// which runs the selection; controls and editable fields keep them.
     @MainActor open override func hitTest(_ point: NSPoint) -> NSView? {
         guard let v = super.hitTest(point) else { return nil }
+        if v !== self, _disappearing.values.contains(where: { $0.viewIfLoaded.map { v.isDescendant(of: $0) } ?? false }) { return self }
         guard v !== self, _itemView(containing: v) != nil else { return v }
         if let f = v as? NSTextField { return f.isEditable || f.isSelectable ? v : self }
         if v is NSControl || v.acceptsFirstResponder { return v }
@@ -900,10 +1055,16 @@ import CoreGraphics
     private func _itemView(containing view: NSView) -> NSView? { _item(containing: view)?.1.viewIfLoaded }
 
     @MainActor open override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        _collapseOnMouseUp = nil
+        // A press on an item may become a drag (selectable or not, as in AppKit).
+        _mouseDownEvent = event
+        _pressPoint = p
+        _dragAttempted = false
+        _dragCandidate = indexPathForItem(at: p)
         guard _isSelectable else { super.mouseDown(with: event); return }
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
-        let p = convert(event.locationInWindow, from: nil)
-        let hit = indexPathForItem(at: p)
+        let hit = _dragCandidate
         _pressDidToggle = false
         _pressed = hit
         let flags = event.modifierFlags
@@ -936,12 +1097,25 @@ import CoreGraphics
         } else {
             _anchor = ip
             _setHighlight(.forSelection, for: [ip])
-            if !_selection.contains(ip) || _selection.count > 1 { _userSetSelection([ip]) }
+            // A press on one of several selected items keeps them (they may be dragged
+            // together); the click alone selects just it on mouse-up, as in AppKit.
+            if !_selection.contains(ip) { _userSetSelection([ip]) } else if _selection.count > 1 { _collapseOnMouseUp = ip }
         }
     }
     @MainActor open override func mouseDragged(with event: NSEvent) {
-        guard _isSelectable else { return }
         let p = convert(event.locationInWindow, from: nil)
+        if let start = _dragCandidate, !_dragAttempted, _marqueeStart == nil, abs(p.x - _pressPoint.x) > 3 || abs(p.y - _pressPoint.y) > 3 {
+            _dragAttempted = true
+            if _beginItemDrag(from: start, event: event) {
+                // The drag session has the mouse now: the press is over.
+                _pressed = nil
+                _dragCandidate = nil
+                _collapseOnMouseUp = nil
+                if !_highlighted.isEmpty { _setHighlight(.none, for: _highlighted) }
+                return
+            }
+        }
+        guard _isSelectable else { return }
         if let origin = _marqueeStart {
             // Rubber band: the items whose frames the rect touches join the base selection.
             let old = _marqueeRect
@@ -954,14 +1128,22 @@ import CoreGraphics
             return
         }
         guard let start = _pressed, _allowsMultipleSelection, !_pressDidToggle else { return }
-        guard let ip = indexPathForItem(at: p), ip != start || _selection.count > 1 else { return }
+        // Sweeping across items selects the range (once the pointer reaches another item).
+        guard let ip = indexPathForItem(at: p), ip != start || _collapseOnMouseUp == nil && _selection.count > 1 else { return }
+        _collapseOnMouseUp = nil
         let range = _indexPaths(between: start, and: ip)
         _userSetSelection(range)
     }
     @MainActor open override func mouseUp(with event: NSEvent) {
         let pressed = _pressed
         _pressed = nil
+        _dragCandidate = nil
+        _mouseDownEvent = nil
         guard _isSelectable else { super.mouseUp(with: event); return }
+        if let ip = _collapseOnMouseUp {
+            _collapseOnMouseUp = nil
+            _userSetSelection([ip])
+        }
         if _marqueeStart != nil {
             _marqueeStart = nil
             _marqueeRect = .zero
@@ -1148,7 +1330,15 @@ import CoreGraphics
         set { _itemPrototype = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/newitem(forrepresentedobject:)
-    @MainActor open func newItem(forRepresentedObject object: Any) -> NSCollectionViewItem { unimplemented() }
+    ///
+    /// A copy of `itemPrototype` representing `object` (see `NSCollectionViewItem.copy`).
+    @MainActor open func newItem(forRepresentedObject object: Any) -> NSCollectionViewItem {
+        guard let proto = _itemPrototype, let item = proto.copy() as? NSCollectionViewItem else {
+            preconditionFailure("NSCollectionView.newItem(forRepresentedObject:): no itemPrototype")
+        }
+        item.representedObject = object
+        return item
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/minitemsize
     @MainActor open var minItemSize: NSSize {
         get { _minItemSize }
@@ -1170,21 +1360,257 @@ import CoreGraphics
         set { _maxNumberOfColumns = newValue; (_layout as? NSCollectionViewGridLayout)?.maximumNumberOfColumns = newValue }
     }
 
-    // MARK: Dragging
+    // MARK: Dragging source (ADR-0041)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/setdraggingsourceoperationmask(_:forlocal:)
+    ///
+    /// Every operation within the application and none outside it until set, as in AppKit.
     @MainActor open func setDraggingSourceOperationMask(_ dragOperationMask: NSDragOperation, forLocal localDestination: Bool) {
         if localDestination { _dragMaskLocal = dragOperationMask } else { _dragMaskRemote = dragOperationMask }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/draggingimageforitems(at:with:offset:)
+    ///
+    /// The visible parts of the items' views, drawn where they sit, cropped to their
+    /// union; `dragImageOffset` is left at zero (the image centred under the pointer).
     @available(macOS 10.11, *)
-    @MainActor open func draggingImageForItems(at indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    @MainActor open func draggingImageForItems(at indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        _prepareLayoutIfNeeded()
+        var parts: [(NSRect, NSImage)] = []
+        for ip in indexPaths.sorted() {
+            guard let item = _visibleItems[ip], let v = item.viewIfLoaded else { continue }
+            let r = v.frame.intersection(visibleRect.isEmpty ? bounds : visibleRect)
+            guard !r.isNull, r.width > 0, r.height > 0 else { continue }
+            parts.append((r, _NSCollectionViewDragImages.snapshot(of: v, rect: v.convert(r, from: self))))
+        }
+        guard let union = parts.map({ $0.0 }).reduce(nil, { (u: NSRect?, r: NSRect) in u.map { $0.union(r) } ?? r }) else { return NSImage(size: .zero) }
+        // The parts are in this (flipped) view's space; the image draws bottom-up.
+        return NSImage(size: union.size, flipped: false) { _ in
+            for (r, image) in parts {
+                image.draw(in: NSRect(x: r.minX - union.minX, y: union.maxY - r.maxY, width: r.width, height: r.height))
+            }
+            return true
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionview/draggingimageforitems(at:with:offset:)
-    @MainActor open func draggingImageForItems(at indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    @MainActor open func draggingImageForItems(at indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        draggingImageForItems(at: Set(indexes.map { IndexPath(item: $0, section: 0) }), with: event, offset: dragImageOffset)
+    }
+
+    /// Starts a drag of the pressed item (with the rest of the selection when it is
+    /// selected): the delegate vets it, then provides a pasteboard writer per item (each
+    /// item drags its own image components from its frame) or, failing that, writes the
+    /// items to the drag pasteboard itself (one image for all).
+    private func _beginItemDrag(from pressed: IndexPath, event: NSEvent) -> Bool {
+        guard let d = _delegate else { return false }
+        _reloadCountsIfNeeded()
+        guard _isValid(pressed) else { return false }
+        let indexPaths: Set<IndexPath> = _selection.contains(pressed) ? _selection : [pressed]
+        let down = _mouseDownEvent ?? event
+        guard d.collectionView(self, canDragItemsAt: indexPaths, with: down) else { return false }
+        _prepareLayoutIfNeeded()
+        var dragItems: [NSDraggingItem] = []
+        var dragged = Set<IndexPath>()
+        for ip in indexPaths.sorted() {
+            guard let writer = d.collectionView(self, pasteboardWriterForItemAt: ip) else { continue }
+            let di = NSDraggingItem(pasteboardWriter: writer)
+            di.draggingFrame = _visibleItems[ip]?.viewIfLoaded?.frame ?? _layout?.layoutAttributesForItem(at: ip)?.frame ?? .zero
+            if let item = _visibleItems[ip] { di.imageComponentsProvider = { [item] in MainActor.assumeIsolated { item.draggingImageComponents } } }
+            dragItems.append(di)
+            dragged.insert(ip)
+        }
+        if dragItems.isEmpty {
+            let pb = NSPasteboard(name: NSPasteboard.Name(rawValue: "Apple CFPasteboard drag"))
+            pb.clearContents()
+            guard d.collectionView(self, writeItemsAt: indexPaths, to: pb) else { return false }
+            var offset = NSPoint.zero
+            let image = withUnsafeMutablePointer(to: &offset) { d.collectionView(self, draggingImageForItemsAt: indexPaths, with: down, offset: $0) }
+            // Centred under the pointer, moved by the offset (y up, as AppKit's is).
+            let size = image.size
+            let frame = NSRect(x: _pressPoint.x - size.width / 2 + offset.x, y: _pressPoint.y - size.height / 2 - offset.y, width: size.width, height: size.height)
+            for (i, pi) in (pb.pasteboardItems ?? []).enumerated() {
+                let di = NSDraggingItem(pasteboardWriter: pi)
+                if i == 0 { di.setDraggingFrame(frame, contents: image) } else { di.draggingFrame = frame }
+                dragItems.append(di)
+            }
+            guard !dragItems.isEmpty else { return false }
+            dragged = indexPaths
+        }
+        _draggedIndexPaths = dragged
+        _ = beginDraggingSession(with: dragItems, event: event, source: self)
+        return true
+    }
+
     // NSDraggingSource
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsource/draggingsession(_:sourceoperationmaskfor:)
     @MainActor open func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .withinApplication ? _dragMaskLocal : _dragMaskRemote
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsource/draggingsession(_:willbeginat:)
+    @MainActor open func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        _delegate?.collectionView(self, draggingSession: session, willBeginAt: screenPoint, forItemsAt: _draggedIndexPaths)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingsource/draggingsession(_:endedat:operation:)
+    @MainActor open func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        _delegate?.collectionView(self, draggingSession: session, endedAt: screenPoint, dragOperation: operation)
+        _draggedIndexPaths = []
+    }
+    /// A destination asked for the promised files (`NSDraggingInfo.namesOfPromisedFilesDropped(atDestination:)`):
+    /// the delegate creates them for the dragged items.
+    internal func _namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? {
+        guard let d = _delegate, !_draggedIndexPaths.isEmpty else { return nil }
+        return d.collectionView(self, namesOfPromisedFilesDroppedAtDestination: dropDestination, forDraggedItemsAt: _draggedIndexPaths)
+    }
+
+    // MARK: Drop destination (ADR-0041)
+    //
+    // With dragged types registered, the collection view proposes a target under the
+    // pointer from the layout's `layoutAttributesForDropTarget(at:)`: over an item, on it
+    // when the pointer is nearer the item's middle than its edges, else before it or the
+    // next one; over a gap, before the item after it. The delegate's `validateDrop` may
+    // retarget; the target shows as the item's `.asDropTarget` highlight (on) or the
+    // inter-item gap indicator (before), and `acceptDrop` gets it.
+
+    @MainActor open override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        _delegate?.collectionView(self, updateDraggingItemsForDrag: sender)
+        return _validateDrop(sender)
+    }
+    @MainActor open override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        _autoscrollForDrag(sender)
+        return _validateDrop(sender)
+    }
+    @MainActor open override func draggingExited(_ sender: (any NSDraggingInfo)?) { _clearDropTarget() }
+    @MainActor open override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool { _dropTarget != nil }
+    @MainActor open override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let target = _dropTarget, let d = _delegate else { return false }
+        return d.collectionView(self, acceptDrop: sender, indexPath: target.indexPath, dropOperation: target.operation)
+    }
+    @MainActor open override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) { _clearDropTarget() }
+    @MainActor open override func draggingEnded(_ sender: any NSDraggingInfo) { _clearDropTarget() }
+
+    /// The target AppKit proposes for a point (before validation).
+    internal func _proposedDropTarget(at p: NSPoint) -> (indexPath: IndexPath, operation: NSCollectionView.DropOperation, gap: NSCollectionViewLayoutAttributes?) {
+        _prepareLayoutIfNeeded()
+        let end: IndexPath = {
+            let s = max(0, _itemCounts.count - 1)
+            return IndexPath(item: _itemCounts.isEmpty ? 0 : _itemCounts[s], section: s)
+        }()
+        guard let layout = _layout, let a = layout.layoutAttributesForDropTarget(at: p), let ip = a.indexPath else { return (end, .before, nil) }
+        switch a.representedElementCategory {
+        case .item:
+            // Along the line: x, or y when lines run down (a horizontal flow).
+            let vertical = layout._linesRunVertically
+            let f = a.frame
+            let (lo, hi, v) = vertical ? (f.minY, f.maxY, p.y) : (f.minX, f.maxX, p.x)
+            let mid = (lo + hi) / 2
+            if abs(v - mid) < min(v - lo, hi - v) { return (ip, .on, nil) }
+            var trailing = v > mid
+            if !vertical && userInterfaceLayoutDirection == .rightToLeft { trailing.toggle() }
+            let target = trailing ? IndexPath(item: ip.item + 1, section: ip.section) : ip
+            return (target, .before, layout.layoutAttributesForInterItemGap(before: target))
+        case .interItemGap:
+            return (ip, .before, a)
+        default:
+            return (end, .before, nil)
+        }
+    }
+
+    private func _validateDrop(_ info: any NSDraggingInfo) -> NSDragOperation {
+        guard let d = _delegate, _layout != nil else { _clearDropTarget(); return [] }
+        let p = convert(info.draggingLocation, from: nil)
+        let proposal = _proposedDropTarget(at: p)
+        var path = NSIndexPath(indexes: [proposal.indexPath.section, proposal.indexPath.item], length: 2)
+        var operation = proposal.operation
+        let result = withUnsafeMutablePointer(to: &path) { pp in
+            withUnsafeMutablePointer(to: &operation) { op in
+                d.collectionView(self, validateDrop: info, proposedIndexPath: AutoreleasingUnsafeMutablePointer(pp), dropOperation: op)
+            }
+        }
+        let ip = path.length >= 2 ? IndexPath(item: path.index(atPosition: 1), section: path.index(atPosition: 0)) : proposal.indexPath
+        guard !result.isEmpty else { _clearDropTarget(); return [] }
+        let gap = ip == proposal.indexPath && operation == .before ? proposal.gap : nil
+        guard _showDropTarget(ip, operation: operation, gap: gap) else { _clearDropTarget(); return [] }
+        return result
+    }
+
+    /// Shows the drop target; false when the delegate refuses the item's drop highlight.
+    private func _showDropTarget(_ ip: IndexPath, operation: NSCollectionView.DropOperation, gap: NSCollectionViewLayoutAttributes?) -> Bool {
+        if operation == .on {
+            _hideGapIndicator()
+            if _dropHighlight != ip {
+                _clearDropHighlight()
+                var allowed: Set<IndexPath> = [ip]
+                if let d = _delegate { allowed = d.collectionView(self, shouldChangeItemsAt: [ip], to: .asDropTarget).intersection([ip]) }
+                guard !allowed.isEmpty else { return false }
+                _dropHighlight = ip
+                _visibleItems[ip]?.highlightState = .asDropTarget
+                _delegate?.collectionView(self, didChangeItemsAt: [ip], to: .asDropTarget)
+            }
+        } else {
+            _clearDropHighlight()
+            let frame = (gap ?? _layout?.layoutAttributesForInterItemGap(before: ip))?.frame
+            _showGapIndicator(at: ip, frame: frame)
+        }
+        _dropTarget = (ip, operation)
+        return true
+    }
+    private func _clearDropHighlight() {
+        guard let ip = _dropHighlight else { return }
+        _dropHighlight = nil
+        _visibleItems[ip]?.highlightState = _highlighted.contains(ip) ? .forSelection : .none
+        _delegate?.collectionView(self, didChangeItemsAt: [ip], to: .none)
+    }
+    private func _clearDropTarget() {
+        _dropTarget = nil
+        _clearDropHighlight()
+        _hideGapIndicator()
+    }
+
+    /// The inter-item gap indicator: the data source's view when a class or nib is
+    /// registered for `elementKindInterItemGapIndicator`, else a bar in the accent colour.
+    private func _showGapIndicator(at ip: IndexPath, frame: NSRect?) {
+        guard let frame, !frame.isNull else { _hideGapIndicator(); return }
+        let kind = NSCollectionView.elementKindInterItemGapIndicator
+        let registered = _supplementaryClasses.keys.contains { $0.hasPrefix(kind + "\u{1}") } || _supplementaryNibs.keys.contains { $0.hasPrefix(kind + "\u{1}") }
+        let v: NSView
+        if let g = _gapIndicator, registered == !(g is _NSCollectionViewGapIndicatorView) {
+            v = g
+        } else {
+            _gapIndicator?.removeFromSuperview()
+            if registered, let ds = _dataSource { v = ds.collectionView(self, viewForSupplementaryElementOfKind: kind, at: ip) }
+            else { v = _NSCollectionViewGapIndicatorView(frame: .zero) }
+            _gapIndicator = v
+        }
+        var f = frame
+        // A gap thinner than the bar still shows it, centred.
+        if f.width < 4 && f.width <= f.height { f = f.insetBy(dx: (f.width - 4) / 2, dy: 0) }
+        if f.height < 4 && f.height < f.width { f = f.insetBy(dx: 0, dy: (f.height - 4) / 2) }
+        if v.frame != f { v.frame = f }
+        v.isHidden = false
+        if subviews.last !== v { addSubview(v) }
+        v.needsDisplay = true
+    }
+    private func _hideGapIndicator() {
+        guard let g = _gapIndicator else { return }
+        g.removeFromSuperview()
+        _gapIndicator = nil
+    }
+    /// The drop target being shown, for tests and the demo.
+    internal var _currentDropTarget: (indexPath: IndexPath, operation: NSCollectionView.DropOperation)? { _dropTarget }
+    internal var _gapIndicatorView: NSView? { _gapIndicator }
+
+    /// Scrolls while a drag hovers within 16 points of the visible rect's edge.
+    private func _autoscrollForDrag(_ info: any NSDraggingInfo) {
+        guard let clip = superview as? NSClipView else { return }
+        let p = convert(info.draggingLocation, from: nil)
+        let v = visibleRect, margin: CGFloat = 16, step: CGFloat = 10
+        var o = clip.bounds.origin
+        if p.y < v.minY + margin { o.y -= step } else if p.y > v.maxY - margin { o.y += step }
+        if p.x < v.minX + margin { o.x -= step } else if p.x > v.maxX - margin { o.x += step }
+        o.x = max(0, min(o.x, frame.width - clip.bounds.width))
+        o.y = max(0, min(o.y, frame.height - clip.bounds.height))
+        guard o != clip.bounds.origin else { return }
+        clip.scroll(to: o)
+        (clip.superview as? NSScrollView)?.reflectScrolledClipView(clip)
     }
 
     // MARK: Accessibility (ADR-0013)
@@ -1274,6 +1700,35 @@ import CoreGraphics
         let p = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
         p.lineWidth = 1
         p.stroke()
+    }
+}
+
+/// The default inter-item gap indicator: a rounded bar along the gap's long side.
+@MainActor internal final class _NSCollectionViewGapIndicatorView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.controlAccentColor.setFill()
+        let b = bounds
+        let bar = b.height >= b.width
+            ? NSRect(x: b.midX - 1.5, y: b.minY, width: 3, height: b.height)
+            : NSRect(x: b.minX, y: b.midY - 1.5, width: b.width, height: 3)
+        NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5).fill()
+    }
+}
+
+/// Snapshots of item views for drag images.
+@MainActor internal enum _NSCollectionViewDragImages {
+    /// What `view` draws in `rect` (its own space), with its subviews.
+    static func snapshot(of view: NSView, rect: NSRect? = nil) -> NSImage {
+        let r = rect ?? view.bounds
+        let image = NSImage(size: r.size)
+        guard r.width > 0, r.height > 0, let rep = view.bitmapImageRepForCachingDisplay(in: r) else { return image }
+        view.cacheDisplay(in: r, to: rep)
+        image.addRepresentation(rep)
+        return image
     }
 }
 

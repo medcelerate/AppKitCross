@@ -15,7 +15,9 @@ open class CATransaction: NSObject {
         var completion: (() -> Void)? = nil
         var values: [String: Any] = [:]
         var pendingAnimations = 0
+        var token = 0
     }
+    private static var nextToken = 0
 
     static var stack: [Frame] = []
     static var implicit: Frame? = nil
@@ -32,6 +34,8 @@ open class CATransaction: NSObject {
         f.completion = nil
         f.pendingAnimations = 0
         f.values = [:]
+        nextToken += 1
+        f.token = nextToken
         stack.append(f)
     }
 
@@ -47,7 +51,7 @@ open class CATransaction: NSObject {
 
     private static func finish(_ f: Frame) {
         if let c = f.completion {
-            if f.pendingAnimations == 0 { c() } else { CATransactionCompletion.pending.append((f.pendingAnimations, c)) }
+            if f.pendingAnimations == 0 { c() } else { CATransactionCompletion.pending.append((f.token, f.pendingAnimations, c)) }
         }
     }
 
@@ -93,10 +97,12 @@ open class CATransaction: NSObject {
 
     /// Records that an animation was created under the current transaction so the
     /// completion block waits for it.
-    static func noteAnimationAdded() -> Bool {
-        guard current.completion != nil || !stack.isEmpty else { return false }
+    /// Returns the transaction's token (nil when nothing can wait on the animation).
+    static func noteAnimationAdded() -> Int? {
+        guard current.completion != nil || !stack.isEmpty else { return nil }
+        if current.token == 0 { nextToken += 1; current.token = nextToken }
         current.pendingAnimations += 1
-        return true
+        return current.token
     }
 }
 
@@ -108,14 +114,16 @@ public let kCATransactionCompletionBlock = "completionBlock"
 /// Completion blocks of committed transactions that still wait on running animations.
 @MainActor
 enum CATransactionCompletion {
-    static var pending: [(remaining: Int, block: () -> Void)] = []
+    static var pending: [(token: Int, remaining: Int, block: () -> Void)] = []
 
-    /// Called when an animation created under a transaction finishes.
-    static func animationFinished() {
-        guard !pending.isEmpty else { return }
-        pending[0].remaining -= 1
-        if pending[0].remaining <= 0 {
-            let b = pending.removeFirst().block
+    /// Called when an animation created under a transaction finishes: that transaction's
+    /// block runs once all of its animations have (other transactions' animations may
+    /// still be running, or never finish on a layer that is off screen).
+    static func animationFinished(token: Int) {
+        guard let i = pending.firstIndex(where: { $0.token == token }) else { return }
+        pending[i].remaining -= 1
+        if pending[i].remaining <= 0 {
+            let b = pending.remove(at: i).block
             b()
         }
     }

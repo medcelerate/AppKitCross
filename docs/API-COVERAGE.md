@@ -21,7 +21,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 479 |
+| Members unimplemented-calls | 477 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -161,7 +161,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCollectionViewSectionHeaderView | protocol | generated | 1 | 0 | 0 |  |
 | NSCollectionViewTransitionLayout | class | generated | 7 | 0 | 1 |  |
 | NSCollectionViewUpdateItem | class | handwritten | 3 | 0 | 0 | 1 |
-| NSColor | class | handwritten | 167 | 5 | 4 | 6 |
+| NSColor | class | handwritten | 167 | 5 | 4 | 4 |
 | NSColorChanging | protocol | generated | 1 | 0 | 0 |  |
 | NSColorList | class | handwritten | 16 | 0 | 1 | 0 |
 | NSColorPanel | class | handwritten | 35 | 0 | 2 | 0 |

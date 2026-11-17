@@ -31,7 +31,31 @@ import CoreGraphics
     private var _columns = 1
 
     public override init() { super.init() }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Unarchives the settings under AppKit's keys (absent keys keep the defaults).
+    public required init?(coder: NSCoder) {
+        super.init()
+        typealias L = NSCollectionViewLayout
+        if let v = L._decodeInsets(coder, "NSMargins") { _margins = v }
+        if let v = L._decodeDouble(coder, "NSMinimumInteritemSpacing") { _minimumInteritemSpacing = v }
+        if let v = L._decodeDouble(coder, "NSMinimumLineSpacing") { _minimumLineSpacing = v }
+        if let v = L._decodeInt(coder, "NSMaximumNumberOfRows") { _maximumNumberOfRows = v }
+        if let v = L._decodeInt(coder, "NSMaximumNumberOfColumns") { _maximumNumberOfColumns = v }
+        if let v = L._decodeSize(coder, "NSMinimumItemSize") { _minimumItemSize = v }
+        if let v = L._decodeSize(coder, "NSMaximumItemSize") { _maximumItemSize = v }
+        if coder.containsValue(forKey: "NSBackgroundColors"), let c = coder.decodeObject(forKey: "NSBackgroundColors") as? [NSColor] { _backgroundColors = c }
+    }
+    /// Archives the settings that differ from the defaults, under AppKit's keys.
+    open override func encode(with coder: NSCoder) {
+        super.encode(with: coder)
+        if _margins.top != 0 || _margins.left != 0 || _margins.bottom != 0 || _margins.right != 0 { coder.encode(NSValue(edgeInsets: _margins), forKey: "NSMargins") }
+        if _minimumInteritemSpacing != 0 { coder.encode(Double(_minimumInteritemSpacing), forKey: "NSMinimumInteritemSpacing") }
+        if _minimumLineSpacing != 0 { coder.encode(Double(_minimumLineSpacing), forKey: "NSMinimumLineSpacing") }
+        if _maximumNumberOfRows != 0 { coder.encode(_maximumNumberOfRows, forKey: "NSMaximumNumberOfRows") }
+        if _maximumNumberOfColumns != 0 { coder.encode(_maximumNumberOfColumns, forKey: "NSMaximumNumberOfColumns") }
+        if _minimumItemSize != .zero { coder.encode(NSValue(size: _minimumItemSize), forKey: "NSMinimumItemSize") }
+        if _maximumItemSize != .zero { coder.encode(NSValue(size: _maximumItemSize), forKey: "NSMaximumItemSize") }
+        if !_backgroundColors.isEmpty { coder.encode(_backgroundColors, forKey: "NSBackgroundColors") }
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewgridlayout/margins
     @MainActor open var margins: NSEdgeInsets {
@@ -149,9 +173,25 @@ import CoreGraphics
         return _items[indexPath.section][indexPath.item]
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesfordroptarget(at:)
+    ///
+    /// The item under the point, else the inter-item gap of the nearest row (ADR-0041).
     @MainActor open override func layoutAttributesForDropTarget(at pointInCollectionView: NSPoint) -> NSCollectionViewLayoutAttributes? {
-        _items.flatMap { $0 }.first { !$0.isHidden && $0.frame.contains(pointInCollectionView) }
+        _lineDropTarget(at: pointInCollectionView)
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesforinteritemgap(before:)
+    @MainActor open override func layoutAttributesForInterItemGap(before indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineInterItemGap(before: indexPath)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/initiallayoutattributesforappearingitem(at:)
+    @MainActor open override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineInitialAttributes(forAppearingItemAt: itemIndexPath)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/finallayoutattributesfordisappearingitem(at:)
+    @MainActor open override func finalLayoutAttributesForDisappearingItem(at itemIndexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineFinalAttributes(forDisappearingItemAt: itemIndexPath)
+    }
+    internal override var _lineItemAttributes: [[NSCollectionViewLayoutAttributes]] { _items }
+    internal override func _lineGapWidth(inSection section: Int) -> CGFloat { _minimumInteritemSpacing }
 
     /// The row bands (for the striped background) and the column count, after `prepare()`.
     internal var _rowStripes: [NSRect] { _rowRects }
