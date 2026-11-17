@@ -1889,8 +1889,61 @@ final class PagesDemoViewController: NSViewController, NSPageControllerDelegate,
 /// An `NSCollectionView` of colour swatches in two sections under a flow layout with
 /// section headers: click, Cmd and Shift select; arrows move; the header's button
 /// collapses its section. Insert, Delete, Move and Reload change the items (the Windows
-/// checklist for natively hosted windows: every swatch stays drawn after each).
+/// checklist for natively hosted windows: every swatch stays drawn after each); with
+/// Animate on, inserts fade in, deletes fade out and moves slide (ADR-0041).
+/// Drag swatches to reorder them (a bar marks the gap, a ring the swatch dropped on);
+/// drop text (from here or another application) on the grid to add a swatch; drag
+/// swatches to the well on the right, which takes text and the swatches' file promises.
 final class CollectionDemoViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout, NSSelectorHandling {
+    static let swatchType = NSPasteboard.PasteboardType("com.appkitcross.demo.swatch")
+    /// Takes text and file promises; shows what arrived.
+    final class DropWell: NSView {
+        let label = NSTextField(wrappingLabelWithString: "Drop text or swatches here")
+        var targeted = false { didSet { needsDisplay = true } }
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            label.alignment = .center
+            label.font = NSFont.systemFont(ofSize: 11)
+            label.preferredMaxLayoutWidth = 96
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            registerForDraggedTypes([.filePromise, .string])
+        }
+        required init?(coder: NSCoder) { nil }
+        override func draw(_ dirtyRect: NSRect) {
+            (targeted ? NSColor.controlAccentColor.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8).fill()
+            (targeted ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+            let p = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
+            p.lineWidth = targeted ? 3 : 1
+            p.setLineDash([6, 4], count: 2, phase: 0)
+            p.stroke()
+        }
+        override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { targeted = true; return .copy }
+        override func draggingExited(_ sender: (any NSDraggingInfo)?) { targeted = false }
+        override func draggingEnded(_ sender: any NSDraggingInfo) { targeted = false }
+        override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+            targeted = false
+            let pb = sender.draggingPasteboard
+            if pb.types?.contains(.filePromise) == true {
+                // The source writes the files here; read them back.
+                let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("AppKitCrossDrops")
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let names = sender.namesOfPromisedFilesDropped(atDestination: dir) ?? []
+                let contents = names.map { (try? String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) ?? "?" }
+                label.stringValue = names.isEmpty ? "No files arrived" : "Files: " + zip(names, contents).map { "\($0) (\($1))" }.joined(separator: ", ")
+                return !names.isEmpty
+            }
+            guard let text = pb.string(forType: .string) else { return false }
+            label.stringValue = "Text: \(text)"
+            return true
+        }
+    }
     final class SwatchItem: NSCollectionViewItem {
         final class SwatchView: NSView {
             weak var item: SwatchItem?
@@ -1904,6 +1957,13 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
                 }
                 color.setFill()
                 NSBezierPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), xRadius: 4, yRadius: 4).fill()
+                // The drop target ring (`.asDropTarget`, a drop "on" this swatch).
+                if item?.highlightState == .asDropTarget {
+                    NSColor.controlAccentColor.setStroke()
+                    let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+                    ring.lineWidth = 3
+                    ring.stroke()
+                }
             }
         }
         override func loadView() {
@@ -1949,14 +2009,17 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             NSBezierPath(rect: NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)).fill()
         }
     }
-    struct Swatch { let name: String; let color: NSColor }
+    struct Swatch { let name: String; let color: NSColor; var id = UUID() }
     var sections: [(String, [Swatch])] = [
         ("Warm", [Swatch(name: "Red", color: .systemRed), Swatch(name: "Orange", color: .systemOrange), Swatch(name: "Yellow", color: .systemYellow), Swatch(name: "Pink", color: .systemPink), Swatch(name: "Brown", color: .systemBrown)]),
         ("Cool", [Swatch(name: "Green", color: .systemGreen), Swatch(name: "Teal", color: .systemTeal), Swatch(name: "Blue", color: .systemBlue), Swatch(name: "Indigo", color: .systemIndigo), Swatch(name: "Purple", color: .systemPurple), Swatch(name: "Mint", color: .systemMint)]),
     ]
     let collection = NSCollectionView(frame: .zero)
-    let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move.")
+    let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move; drag to reorder.")
+    let well = DropWell(frame: .zero)
+    let animate = NSButton(checkboxWithTitle: "Animate", target: nil, action: nil)
     private var inserted = 0
+    private var dragged: [IndexPath] = []
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -1981,12 +2044,22 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         collection.isSelectable = true
         collection.allowsMultipleSelection = true
         collection.backgroundColors = [.controlBackgroundColor]
+        // Drags: swatches reorder within the grid (move) and copy out as text and file
+        // promises; text dropped on the grid becomes a swatch.
+        collection.registerForDraggedTypes([CollectionDemoViewController.swatchType, .string])
+        collection.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        collection.setDraggingSourceOperationMask(.copy, forLocal: false)
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         scroll.documentView = collection
         scroll.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(scroll)
+        well.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(well)
+        animate.state = .on
+        animate.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(animate)
         status.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(status)
         var buttons: [NSButton] = []
@@ -2000,8 +2073,14 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         var constraints = [
             scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scroll.trailingAnchor.constraint(equalTo: well.leadingAnchor, constant: -10),
             scroll.bottomAnchor.constraint(equalTo: buttons[0].topAnchor, constant: -8),
+            well.topAnchor.constraint(equalTo: scroll.topAnchor),
+            well.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+            well.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            well.widthAnchor.constraint(equalToConstant: 110),
+            animate.leadingAnchor.constraint(equalTo: buttons[buttons.count - 1].trailingAnchor, constant: 12),
+            animate.centerYAnchor.constraint(equalTo: buttons[0].centerYAnchor),
             buttons[0].leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             buttons[0].bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
@@ -2045,6 +2124,95 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         let names = collection.selectionIndexPaths.sorted().map { sections[$0.section].1[$0.item].name }
         status.stringValue = names.isEmpty ? "Nothing selected." : "Selected: " + names.joined(separator: ", ")
     }
+
+    // MARK: Drag and drop (ADR-0041)
+
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
+        let swatch = sections[indexPath.section].1[indexPath.item]
+        let item = NSPasteboardItem()
+        _ = item.setString(swatch.name, forType: .string)
+        _ = item.setString(swatch.id.uuidString, forType: CollectionDemoViewController.swatchType)
+        _ = item.setPropertyList(["txt"], forType: .filePromise)
+        return item
+    }
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) {
+        dragged = indexPaths.sorted()
+        status.stringValue = "Dragging " + dragged.map { sections[$0.section].1[$0.item].name }.joined(separator: ", ")
+    }
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+        if operation.isEmpty { status.stringValue = "Drag cancelled." }
+        dragged = []
+    }
+    func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        let fromHere = (draggingInfo.draggingSource as? NSCollectionView) === collection && !dragged.isEmpty
+        let p = proposedDropIndexPath.pointee
+        let where_ = "\(sections[p.index(atPosition: 0)].0) \(p.index(atPosition: 1))"
+        if fromHere {
+            // Reordering lands between swatches, never on one.
+            proposedDropOperation.pointee = .before
+            status.stringValue = "Move before \(where_)"
+            return .move
+        }
+        guard draggingInfo.draggingPasteboard.string(forType: .string) != nil else { return [] }
+        status.stringValue = proposedDropOperation.pointee == .on ? "Rename swatch \(where_)" : "Add a swatch before \(where_)"
+        return .copy
+    }
+    func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
+        let fromHere = (draggingInfo.draggingSource as? NSCollectionView) === collection && !dragged.isEmpty
+        if fromHere {
+            // Take the dragged swatches out, put them back at the target, and tell the
+            // collection view where each went.
+            let moving = dragged.map { sections[$0.section].1[$0.item] }
+            var target = indexPath
+            for ip in dragged.sorted(by: >) {
+                sections[ip.section].1.remove(at: ip.item)
+                if ip.section == target.section && ip.item < target.item { target.item -= 1 }
+            }
+            sections[target.section].1.insert(contentsOf: moving, at: target.item)
+            var newPaths: [UUID: IndexPath] = [:]
+            for (s, section) in sections.enumerated() { for (i, w) in section.1.enumerated() { newPaths[w.id] = IndexPath(item: i, section: s) } }
+            let moves = zip(dragged, moving).map { ($0, newPaths[$1.id]!) }
+            update { for (from, to) in moves where from != to { self.collection.moveItem(at: from, to: to) } }
+            status.stringValue = "Moved " + moving.map(\.name).joined(separator: ", ")
+            return true
+        }
+        guard let text = draggingInfo.draggingPasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return false }
+        let name = String(text.prefix(12))
+        if dropOperation == .on {
+            let old = sections[indexPath.section].1[indexPath.item]
+            sections[indexPath.section].1[indexPath.item] = Swatch(name: name, color: old.color)
+            update { self.collection.reloadItems(at: [indexPath]) }
+            status.stringValue = "Renamed \(old.name) to \(name)"
+        } else {
+            sections[indexPath.section].1.insert(Swatch(name: name, color: .systemGray), at: indexPath.item)
+            update { self.collection.insertItems(at: [indexPath]) }
+            status.stringValue = "Added \(name)"
+        }
+        return true
+    }
+    /// Writes a text file per dragged swatch for a destination that takes file promises.
+    nonisolated func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexPaths: Set<IndexPath>) -> [String] {
+        MainActor.assumeIsolated {
+            indexPaths.sorted().map { ip in
+                let swatch = sections[ip.section].1[ip.item]
+                let name = "\(swatch.name).txt"
+                try? "Swatch \(swatch.name) from section \(sections[ip.section].0)".write(to: dropURL.appendingPathComponent(name), atomically: true, encoding: .utf8)
+                return name
+            }
+        }
+    }
+
+    /// Runs a change as a batch update, animated when the checkbox is on.
+    private func update(_ changes: @escaping () -> Void) {
+        if animate.state == .on {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.35
+                collection.animator().performBatchUpdates(changes, completionHandler: nil)
+            }
+        } else {
+            collection.performBatchUpdates(changes, completionHandler: nil)
+        }
+    }
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch action.description {
         case "insertSwatch:":
@@ -2052,7 +2220,7 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             inserted += 1
             let grey = CGFloat(inserted % 4) * 0.2 + 0.2
             sections[0].1.insert(Swatch(name: "New \(inserted)", color: NSColor(white: grey, alpha: 1)), at: 0)
-            collection.insertItems(at: [IndexPath(item: 0, section: 0)])
+            update { self.collection.insertItems(at: [IndexPath(item: 0, section: 0)]) }
             status.stringValue = "Inserted New \(inserted) at the front of Warm."
             return true
         case "deleteSwatch:":
@@ -2061,14 +2229,15 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             if doomed.isEmpty, !sections[0].1.isEmpty { doomed = [IndexPath(item: 0, section: 0)] }
             guard !doomed.isEmpty else { return true }
             for ip in doomed.sorted(by: >) { sections[ip.section].1.remove(at: ip.item) }
-            collection.deleteItems(at: doomed)
+            update { self.collection.deleteItems(at: doomed) }
             status.stringValue = "Deleted \(doomed.count) swatch\(doomed.count == 1 ? "" : "es")."
             return true
         case "moveSwatch:":
             // The first of Warm to the end of Warm.
             guard sections[0].1.count > 1 else { return true }
             sections[0].1.append(sections[0].1.removeFirst())
-            collection.moveItem(at: IndexPath(item: 0, section: 0), to: IndexPath(item: sections[0].1.count - 1, section: 0))
+            let last = IndexPath(item: sections[0].1.count - 1, section: 0)
+            update { self.collection.moveItem(at: IndexPath(item: 0, section: 0), to: last) }
             status.stringValue = "Moved \(sections[0].1.last!.name) to the end of Warm."
             return true
         case "reloadSwatches:":

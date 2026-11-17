@@ -271,6 +271,15 @@ final class CollectionViewDragDropTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(cv.item(at: IndexPath(item: 2, section: 0))?.highlightState, NSCollectionViewItem.HighlightState.none)
             XCTAssertEqual(cv._gapIndicatorView?.frame, NSRect(x: 110, y: 0, width: 10, height: 50))
             XCTAssertTrue(cv._gapIndicatorView?.superview === cv)
+            // The bar is drawn in the accent colour in the middle of the gap.
+            let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds)!
+            cv.cacheDisplay(in: cv.bounds, to: rep)
+            let scale = max(1, rep.pixelsWide / max(1, Int(rep.size.width)))
+            let row = (Int(rep.size.height) - 25) * scale       // the bitmap's rows run bottom-up
+            let bar = rep.colorAt(x: 115 * scale, y: row)!, beside = rep.colorAt(x: 112 * scale, y: row)!
+            XCTAssertGreaterThan(bar.blueComponent, 0.6)
+            XCTAssertLessThan(bar.redComponent, 0.5)
+            XCTAssertGreaterThan(beside.redComponent, 0.8, "the bar is narrower than the gap")
             // Its right edge: before the next item.
             send(.leftMouseDragged, f.point(item: 2, dx: 47), in: f.window)
             XCTAssertEqual(ds.log.last, "validate 0,3 before")
