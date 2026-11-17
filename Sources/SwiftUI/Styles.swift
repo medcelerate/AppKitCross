@@ -78,6 +78,72 @@ public struct AnyShapeStyle: ShapeStyle {
     }
 }
 
+// MARK: HierarchicalShapeStyle
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/hierarchicalshapestyle
+/// The levels of the current foreground style. SwiftUI derives each level from the
+/// foreground style in effect; here a level is the matching AppKit label colour
+/// (`labelColor`, `secondaryLabelColor`, `tertiaryLabelColor`, `quaternaryLabelColor`,
+/// and the quaternary colour at half its alpha for `quinary`), or, under a custom
+/// `foregroundColor`, that colour at the label colours' falling opacities.
+public struct HierarchicalShapeStyle: ShapeStyle, Sendable, Equatable {
+    let level: Int
+    public static let primary = HierarchicalShapeStyle(level: 0)
+    public static let secondary = HierarchicalShapeStyle(level: 1)
+    public static let tertiary = HierarchicalShapeStyle(level: 2)
+    public static let quaternary = HierarchicalShapeStyle(level: 3)
+    public static let quinary = HierarchicalShapeStyle(level: 4)
+
+    /// The level as a colour in `environment`.
+    func _resolvedColor(_ environment: EnvironmentValues) -> Color {
+        if let custom = environment.foregroundColor, level > 0 {
+            let opacity: [Double] = [1, 0.55, 0.3, 0.18, 0.09]
+            return custom.opacity(opacity[min(level, 4)])
+        }
+        switch level {
+        case 0: return environment.foregroundColor ?? .primary
+        case 1: return Color(nsColor: .secondaryLabelColor)
+        case 2: return Color(nsColor: .tertiaryLabelColor)
+        case 3: return Color(nsColor: .quaternaryLabelColor)
+        default: return Color(nsColor: .quaternaryLabelColor).opacity(0.5)
+        }
+    }
+    @MainActor public func _fill(_ context: CGContext, path: CGPath, in rect: CGRect, environment: EnvironmentValues) {
+        _resolvedColor(environment)._fill(context, path: path, in: rect, environment: environment)
+    }
+    @MainActor public func _stroke(_ context: CGContext, path: CGPath, in rect: CGRect, style: StrokeStyle, environment: EnvironmentValues) {
+        _resolvedColor(environment)._stroke(context, path: path, in: rect, style: style, environment: environment)
+    }
+    @MainActor public func _color(at point: CGPoint, in rect: CGRect, environment: EnvironmentValues) -> CGColor? {
+        _resolvedColor(environment)._color(at: point, in: rect, environment: environment)
+    }
+}
+
+extension ShapeStyle where Self == HierarchicalShapeStyle {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle/primary
+    public static var primary: HierarchicalShapeStyle { .primary }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle/secondary
+    public static var secondary: HierarchicalShapeStyle { .secondary }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle/tertiary
+    public static var tertiary: HierarchicalShapeStyle { .tertiary }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle/quaternary
+    public static var quaternary: HierarchicalShapeStyle { .quaternary }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/shapestyle/quinary
+    public static var quinary: HierarchicalShapeStyle { .quinary }
+}
+
+/// The colour a foreground style sets for text and symbols: a colour as it is, a
+/// hierarchical level as its colour, an `AnyShapeStyle` as what it wraps; nil for the
+/// styles that are not one colour (gradients, materials), which leave the foreground as it was.
+func _foregroundColor(for style: any ShapeStyle, in environment: EnvironmentValues) -> Color? {
+    switch style {
+    case let c as Color: return c
+    case let h as HierarchicalShapeStyle: return h._resolvedColor(environment)
+    case let a as AnyShapeStyle: return _foregroundColor(for: a.style, in: environment)
+    default: return nil
+    }
+}
+
 // MARK: ScaledMetric
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/scaledmetric
