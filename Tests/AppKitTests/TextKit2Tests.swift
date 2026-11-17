@@ -511,7 +511,12 @@ final class TextKit2Tests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(tlm.textSelections.first?.textRanges.first?._nsRange, tv.selectedRange(), "the layout manager's selection follows")
             w.contentView?.layoutSubtreeIfNeeded()
             let lines = tv._layoutLines()
-            XCTAssertGreaterThan(lines.count, 3, "the first paragraph wraps")
+            // How many lines depends on the platform's font; that the first paragraph wraps
+            // (63 characters in a 200-point view) does not.
+            let breakAt = text.range(of: "\n").location
+            let firstParagraphLines = lines.filter { $0.range.location < breakAt }
+            XCTAssertGreaterThanOrEqual(firstParagraphLines.count, 2, "the first paragraph wraps")
+            XCTAssertEqual(lines.count, firstParagraphLines.count + 1, "the second paragraph is one line")
             XCTAssertGreaterThanOrEqual(tv.frame.height, lines.last!.y + tv._lineHeight - 1)
 
             tv.moveWordLeft(nil)
