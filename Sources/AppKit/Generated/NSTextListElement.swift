@@ -24,7 +24,8 @@ open class NSTextListElement: NSTextParagraph {
     public convenience init(contents: NSAttributedString, markerAttributes: [NSAttributedString.Key : Any]? = nil, textList: NSTextList, children: [NSTextListElement]?) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextlistelement/init(parent:textlist:contents:markerattributes:children:)
     public init(parent: NSTextListElement?, textList: NSTextList, contents: NSAttributedString?, markerAttributes: [NSAttributedString.Key : Any]? = nil, children: [NSTextListElement]?) { unimplemented() }
-    // INHERITED (identical redeclaration): var attributedString: NSAttributedString { get }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextlistelement/attributedstring
+    open override var attributedString: NSAttributedString { unimplemented() }
     // SKIPPED (override type [NSTextListElement] differs from superclass [NSTextElement]): var childElements: [NSTextListElement] { get }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextlistelement/contents
     open var contents: NSAttributedString? { unimplemented() }

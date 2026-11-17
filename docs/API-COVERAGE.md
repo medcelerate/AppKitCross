@@ -9,12 +9,12 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 201 |
-| Types generated | 305 |
+| Types handwritten | 214 |
+| Types generated | 292 |
 | Types apple-only | 33 |
 | Types pending | 2 |
 | Types skipped | 0 |
-| Members emitted | 10096 |
+| Members emitted | 10107 |
 | Members blocked | 175 |
 | Members unavailable | 0 |
 | Members synthesized | 1435 |
@@ -22,7 +22,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 241 |
+| Members unimplemented-calls | 245 |
 
 ## Stub call sites
 
@@ -32,9 +32,9 @@ not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).
 
 | Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |
 | --- | ---: | ---: |
-| `Sources/AppKit/Generated` | 966 | 341 |
-| `Sources/AppKit/Core` | 73 | 30 |
-| Total | 1039 | 371 |
+| `Sources/AppKit/Generated` | 705 | 341 |
+| `Sources/AppKit/Core` | 77 | 30 |
+| Total | 782 | 371 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -53,7 +53,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 
 | Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) | Apple-only |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| NSATSTypesetter | class | generated | 15 | 2 | 0 |  |  |
+| NSATSTypesetter | class | handwritten | 25 | 2 | 0 | 0 |  |
 | NSAccessibility | struct | handwritten | 339 | 0 | 13 | 1 |  |
 | NSAccessibilityAnnotationPosition | enum | generated | 3 | 0 | 0 |  |  |
 | NSAccessibilityButton | protocol | generated | 2 | 0 | 0 |  |  |
@@ -292,7 +292,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSLayoutConstraint | class | handwritten | 57 | 0 | 5 | 0 |  |
 | NSLayoutDimension | class | handwritten | 9 | 0 | 0 | 0 |  |
 | NSLayoutGuide | class | handwritten | 15 | 0 | 0 | 0 |  |
-| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 9 |  |
+| NSLayoutManager | class | handwritten | 144 | 8 | 4 | 7 |  |
 | NSLayoutManagerDelegate | protocol | generated | 12 | 1 | 0 |  |  |
 | NSLayoutXAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |  |
 | NSLayoutYAxisAnchor | class | handwritten | 4 | 0 | 0 | 0 |  |
@@ -485,14 +485,14 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextCheckingController | class | generated | 18 | 1 | 0 |  |  |
 | NSTextContainer | class | handwritten | 18 | 1 | 0 | 0 |  |
 | NSTextContent | protocol | generated | 1 | 0 | 0 |  |  |
-| NSTextContentManager | class | generated | 15 | 0 | 1 |  |  |
+| NSTextContentManager | class | handwritten | 15 | 0 | 1 | 3 |  |
 | NSTextContentManagerDelegate | protocol | generated | 2 | 0 | 0 |  |  |
-| NSTextContentStorage | class | generated | 7 | 1 | 0 |  |  |
+| NSTextContentStorage | class | handwritten | 7 | 1 | 0 | 0 |  |
 | NSTextContentStorageDelegate | protocol | generated | 1 | 0 | 0 |  |  |
 | NSTextContentType | struct | generated | 43 | 0 | 0 |  |  |
 | NSTextCursorAccessoryPlacement | enum | generated | 9 | 0 | 0 |  |  |
 | NSTextDelegate | protocol | generated | 5 | 0 | 0 |  |  |
-| NSTextElement | class | generated | 6 | 0 | 0 |  |  |
+| NSTextElement | class | handwritten | 6 | 0 | 0 | 0 |  |
 | NSTextElementProvider | protocol | generated | 7 | 0 | 0 |  |  |
 | NSTextField | class | handwritten | 37 | 1 | 1 | 2 |  |
 | NSTextFieldCell | class | handwritten | 11 | 0 | 0 | 2 |  |
@@ -507,22 +507,22 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextInputTraitType | enum | generated | 3 | 0 | 0 |  |  |
 | NSTextInputTraits | protocol | generated | 14 | 0 | 0 |  |  |
 | NSTextInsertionIndicator | class | generated | 9 | 0 | 2 |  |  |
-| NSTextLayoutFragment | class | generated | 28 | 0 | 2 |  |  |
-| NSTextLayoutManager | class | generated | 40 | 0 | 2 |  |  |
+| NSTextLayoutFragment | class | handwritten | 28 | 0 | 2 | 0 |  |
+| NSTextLayoutManager | class | handwritten | 40 | 0 | 2 | 0 |  |
 | NSTextLayoutManagerDelegate | protocol | generated | 3 | 0 | 0 |  |  |
 | NSTextLayoutOrientationProvider | protocol | generated | 1 | 0 | 0 |  |  |
-| NSTextLineFragment | class | generated | 11 | 0 | 0 |  |  |
+| NSTextLineFragment | class | handwritten | 11 | 0 | 0 | 0 |  |
 | NSTextList | class | handwritten | 27 | 0 | 2 | 0 |  |
-| NSTextListElement | class | generated | 6 | 2 | 0 |  |  |
+| NSTextListElement | class | generated | 7 | 2 | 0 |  |  |
 | NSTextLocation | protocol | generated | 1 | 0 | 0 |  |  |
 | NSTextMovement | enum | generated | 9 | 0 | 0 |  |  |
-| NSTextParagraph | class | generated | 4 | 0 | 0 |  |  |
+| NSTextParagraph | class | handwritten | 4 | 0 | 0 | 0 |  |
 | NSTextPreview | class | generated | 5 | 0 | 0 |  |  |
-| NSTextRange | class | generated | 11 | 0 | 0 |  |  |
+| NSTextRange | class | handwritten | 11 | 0 | 0 | 0 |  |
 | NSTextScalingType | enum | generated | 2 | 0 | 0 |  |  |
-| NSTextSelection | class | generated | 20 | 0 | 2 |  |  |
+| NSTextSelection | class | handwritten | 20 | 0 | 2 | 0 |  |
 | NSTextSelectionDataSource | protocol | generated | 10 | 0 | 0 |  |  |
-| NSTextSelectionNavigation | class | generated | 31 | 0 | 5 |  |  |
+| NSTextSelectionNavigation | class | handwritten | 31 | 0 | 5 | 0 |  |
 | NSTextStorage | class | handwritten | 21 | 0 | 0 | 0 |  |
 | NSTextStorageDelegate | protocol | generated | 2 | 0 | 0 |  |  |
 | NSTextStorageEditActions | struct | generated | 2 | 0 | 0 |  |  |
@@ -531,9 +531,9 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextTab | class | handwritten | 8 | 0 | 1 | 0 |  |
 | NSTextTable | class | handwritten | 9 | 0 | 1 | 0 |  |
 | NSTextTableBlock | class | handwritten | 6 | 0 | 0 | 0 |  |
-| NSTextView | class | handwritten | 182 | 6 | 0 | 5 | 4 |
+| NSTextView | class | handwritten | 182 | 6 | 0 | 4 | 4 |
 | NSTextViewDelegate | protocol | generated | 28 | 2 | 0 |  |  |
-| NSTextViewportLayoutController | class | generated | 8 | 0 | 0 |  |  |
+| NSTextViewportLayoutController | class | handwritten | 8 | 0 | 0 | 0 |  |
 | NSTextViewportLayoutControllerDelegate | protocol | generated | 4 | 0 | 0 |  |  |
 | NSTintConfiguration | class | generated | 7 | 0 | 0 |  |  |
 | NSTintProminence | enum | generated | 4 | 0 | 0 |  |  |
@@ -558,7 +558,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTrackingSeparatorToolbarItem | class | handwritten | 3 | 0 | 0 | 0 |  |
 | NSTreeController | class | handwritten | 36 | 0 | 0 | 0 |  |
 | NSTreeNode | class | handwritten | 9 | 0 | 0 | 3 |  |
-| NSTypesetter | class | generated | 53 | 2 | 0 |  |  |
+| NSTypesetter | class | handwritten | 53 | 2 | 0 | 4 |  |
 | NSTypesetterControlCharacterAction | struct | generated | 6 | 0 | 0 |  |  |
 | NSUnderlineStyle | struct | generated | 8 | 0 | 0 |  |  |
 | NSUserActivityRestoring | protocol | generated | 0 | 1 | 0 |  |  |

@@ -569,6 +569,9 @@ import CoreText
                 if newValue, let v = _findBarView, v.superview !== self { addSubview(v) }
                 if !newValue { _findBarView?.removeFromSuperview() }
                 tile()
+                // Shown from a menu or key equivalent: redraw now, not at the next event.
+                needsDisplay = true
+                _findBarView?.needsDisplay = true
             }
         }
     }

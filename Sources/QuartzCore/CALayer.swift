@@ -775,8 +775,11 @@ open class CALayer: NSObject, CAMediaTiming {
                 basic.fromValue = pendingOldValues[kp] ?? _presentationValue(forKeyPath: kp)
             }
         }
-        copy.countsForTransaction = CATransaction.noteAnimationAdded()
+        copy.transactionToken = CATransaction.noteAnimationAdded()
+        // An animation replaced under its key is over (its transaction stops waiting).
+        let replaced = animations.filter { $0.key == k }
         animations.removeAll { $0.key == k }
+        for (_, old) in replaced { _finish(old, finished: false) }
         animations.append((k, copy))
         hasPresentation = true
         CARuntime.noteAnimating(root: root)
@@ -802,7 +805,7 @@ open class CALayer: NSObject, CAMediaTiming {
     open func animation(forKey key: String) -> CAAnimation? { animations.first { $0.key == key }?.animation }
 
     private func _finish(_ a: CAAnimation, finished: Bool) {
-        if a.countsForTransaction { CATransactionCompletion.animationFinished() }
+        if let t = a.transactionToken { CATransactionCompletion.animationFinished(token: t) }
         a.delegate?.animationDidStop(a, finished: finished)
     }
 

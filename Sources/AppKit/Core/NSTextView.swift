@@ -30,9 +30,15 @@ import CoreText
     private var _isGrammarCheckingEnabled = false
     private var _isAutomaticSpellingCorrectionEnabled = false
     // The text system (ADR-0007): storage → layout manager → container, created with the view.
-    private var _storage: NSTextStorage
-    private var _layoutManager: NSLayoutManager
+    internal var _storage: NSTextStorage
+    internal var _layoutManager: NSLayoutManager
     private var _container: NSTextContainer
+    // TextKit 2 (ADR-0040): set while the view lays out with an NSTextLayoutManager.
+    internal var _textLayoutManager: NSTextLayoutManager?
+    internal var _textContentStorage: NSTextContentStorage?
+    internal lazy var _tk2 = _NSTextViewTextKit2State()
+    /// The engine `init(usingTextLayoutManager:)` asked for (read by the designated init).
+    @MainActor private static var _requestedTextKit2: Bool? = nil
 
     private var _viewDelegate: (any NSTextViewDelegate)? { _textDelegate as? NSTextViewDelegate }
     /// Find, spelling, substitution and the other editor settings (NSTextView+TextExtras).
@@ -105,14 +111,17 @@ import CoreText
     // MARK: Standard key-binding actions
 
     @MainActor open func moveLeft(_ sender: Any?) {
+        if _tk2Move(.left, .character, extending: false) { return }
         let sel = selectedRange
         _move(to: sel.length > 0 ? sel.location : max(0, sel.location - 1), extend: false)
     }
     @MainActor open func moveRight(_ sender: Any?) {
+        if _tk2Move(.right, .character, extending: false) { return }
         let sel = selectedRange
         _move(to: sel.length > 0 ? sel.location + sel.length : min(_length, sel.location + 1), extend: false)
     }
     @MainActor open func moveLeftAndModifySelection(_ sender: Any?) {
+        if _tk2Move(.left, .character, extending: true) { return }
         let sel = selectedRange
         let anchor = _selectionAnchor ?? sel.location + sel.length
         let head = anchor == sel.location ? sel.location + sel.length : sel.location
@@ -120,35 +129,37 @@ import CoreText
         _move(to: max(0, head - 1), extend: true)
     }
     @MainActor open func moveRightAndModifySelection(_ sender: Any?) {
+        if _tk2Move(.right, .character, extending: true) { return }
         let sel = selectedRange
         let anchor = _selectionAnchor ?? sel.location
         let head = anchor == sel.location ? sel.location + sel.length : sel.location
         _selectionAnchor = anchor
         _move(to: min(_length, head + 1), extend: true)
     }
-    @MainActor open func moveWordLeft(_ sender: Any?) { _move(to: _wordBoundaryLeft, extend: false) }
-    @MainActor open func moveWordRight(_ sender: Any?) { _move(to: _wordBoundaryRight, extend: false) }
-    @MainActor open func moveWordLeftAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _wordBoundaryLeft, extend: true) }
-    @MainActor open func moveWordRightAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _wordBoundaryRight, extend: true) }
-    @MainActor open func moveUp(_ sender: Any?) { _verticalMove(-1, extend: false) }
-    @MainActor open func moveDown(_ sender: Any?) { _verticalMove(1, extend: false) }
-    @MainActor open func moveUpAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _verticalMove(-1, extend: true) }
-    @MainActor open func moveDownAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _verticalMove(1, extend: true) }
-    @MainActor open func moveToBeginningOfLine(_ sender: Any?) { _move(to: _lineRange(at: selectedRange.location).location, extend: false) }
-    @MainActor open func moveToEndOfLine(_ sender: Any?) { let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: false) }
-    @MainActor open func moveToBeginningOfLineAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _lineRange(at: selectedRange.location).location, extend: true) }
-    @MainActor open func moveToEndOfLineAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: true) }
-    @MainActor open func moveToBeginningOfDocument(_ sender: Any?) { _move(to: 0, extend: false) }
-    @MainActor open func moveToEndOfDocument(_ sender: Any?) { _move(to: _length, extend: false) }
-    @MainActor open func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: 0, extend: true) }
-    @MainActor open func moveToEndOfDocumentAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _length, extend: true) }
-    @MainActor open func pageUp(_ sender: Any?) { _verticalMove(-max(1, Int(bounds.height / _lineHeight)), extend: false) }
-    @MainActor open func pageDown(_ sender: Any?) { _verticalMove(max(1, Int(bounds.height / _lineHeight)), extend: false) }
+    @MainActor open func moveWordLeft(_ sender: Any?) { if _tk2Move(.left, .word, extending: false) { return }; _move(to: _wordBoundaryLeft, extend: false) }
+    @MainActor open func moveWordRight(_ sender: Any?) { if _tk2Move(.right, .word, extending: false) { return }; _move(to: _wordBoundaryRight, extend: false) }
+    @MainActor open func moveWordLeftAndModifySelection(_ sender: Any?) { if _tk2Move(.left, .word, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _wordBoundaryLeft, extend: true) }
+    @MainActor open func moveWordRightAndModifySelection(_ sender: Any?) { if _tk2Move(.right, .word, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _wordBoundaryRight, extend: true) }
+    @MainActor open func moveUp(_ sender: Any?) { if _tk2Move(.up, .line, extending: false) { return }; _verticalMove(-1, extend: false) }
+    @MainActor open func moveDown(_ sender: Any?) { if _tk2Move(.down, .line, extending: false) { return }; _verticalMove(1, extend: false) }
+    @MainActor open func moveUpAndModifySelection(_ sender: Any?) { if _tk2Move(.up, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _verticalMove(-1, extend: true) }
+    @MainActor open func moveDownAndModifySelection(_ sender: Any?) { if _tk2Move(.down, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _verticalMove(1, extend: true) }
+    @MainActor open func moveToBeginningOfLine(_ sender: Any?) { if _tk2Move(.backward, .line, extending: false) { return }; _move(to: _lineRange(at: selectedRange.location).location, extend: false) }
+    @MainActor open func moveToEndOfLine(_ sender: Any?) { if _tk2Move(.forward, .line, extending: false) { return }; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: false) }
+    @MainActor open func moveToBeginningOfLineAndModifySelection(_ sender: Any?) { if _tk2Move(.backward, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _lineRange(at: selectedRange.location).location, extend: true) }
+    @MainActor open func moveToEndOfLineAndModifySelection(_ sender: Any?) { if _tk2Move(.forward, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: true) }
+    @MainActor open func moveToBeginningOfDocument(_ sender: Any?) { if _tk2Move(.backward, .document, extending: false) { return }; _move(to: 0, extend: false) }
+    @MainActor open func moveToEndOfDocument(_ sender: Any?) { if _tk2Move(.forward, .document, extending: false) { return }; _move(to: _length, extend: false) }
+    @MainActor open func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) { if _tk2Move(.backward, .document, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: 0, extend: true) }
+    @MainActor open func moveToEndOfDocumentAndModifySelection(_ sender: Any?) { if _tk2Move(.forward, .document, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _length, extend: true) }
+    @MainActor open func pageUp(_ sender: Any?) { if _tk2Page(down: false, extending: false) { return }; _verticalMove(-max(1, Int(bounds.height / _lineHeight)), extend: false) }
+    @MainActor open func pageDown(_ sender: Any?) { if _tk2Page(down: true, extending: false) { return }; _verticalMove(max(1, Int(bounds.height / _lineHeight)), extend: false) }
     @MainActor open func deleteBackward(_ sender: Any?) {
         guard isEditable else { return }
         _asTyping { _deleteBackward() }
     }
     private func _deleteBackward() {
+        if let r = _tk2DeletionRange(.backward, .character) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, "") } else if sel.location > 0 { _editReplace(NSRange(location: sel.location - 1, length: 1), "") }
     }
@@ -157,6 +168,7 @@ import CoreText
         _asTyping { _deleteForward() }
     }
     private func _deleteForward() {
+        if let r = _tk2DeletionRange(.forward, .character) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, "") } else if sel.location < _length { _editReplace(NSRange(location: sel.location, length: 1), "") }
     }
@@ -165,6 +177,7 @@ import CoreText
         _asTyping { _deleteWordBackward() }
     }
     private func _deleteWordBackward() {
+        if let r = _tk2DeletionRange(.backward, .word) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, ""); return }
         let b = _wordBoundaryLeft
@@ -175,6 +188,7 @@ import CoreText
         _asTyping { _deleteWordForward() }
     }
     private func _deleteWordForward() {
+        if let r = _tk2DeletionRange(.forward, .word) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, ""); return }
         let b = _wordBoundaryRight
@@ -207,15 +221,25 @@ import CoreText
         _selectionAnchor = nil
         selectedRange = NSRange(location: selectedRange.location + selectedRange.length, length: 0)
     }
-    @MainActor open func selectWord(_ sender: Any?) { selectedRange = _wordRange(at: selectedRange.location) }
-    @MainActor open func selectLine(_ sender: Any?) { selectedRange = _lineRange(at: selectedRange.location) }
-    @MainActor open func selectParagraph(_ sender: Any?) { selectLine(sender) }
+    @MainActor open func selectWord(_ sender: Any?) { if _tk2Select(.word) { return }; selectedRange = _wordRange(at: selectedRange.location) }
+    @MainActor open func selectLine(_ sender: Any?) { if _tk2Select(.line) { return }; selectedRange = _lineRange(at: selectedRange.location) }
+    @MainActor open func selectParagraph(_ sender: Any?) { if _tk2Select(.paragraph) { return }; selectLine(sender) }
 
     /// Replaces text after asking `shouldChangeText`, then reports the change.
     private func _editReplace(_ range: NSRange, _ text: String) {
         guard shouldChangeText(in: range, replacementString: text) else { return }
         _replace(range, with: text, notify: false)
         didChangeText()
+        _scrollToInsertionPoint()
+    }
+
+    /// After an edit the insertion point is scrolled into view, as AppKit's text view does
+    /// (a paste of many lines, typing on a new last line). The frame is fitted first so the
+    /// scroll is not clamped to the old height.
+    internal func _scrollToInsertionPoint() {
+        guard !isFieldEditor, enclosingScrollView != nil else { return }
+        if _textLayoutManager != nil { _tk2FitFrame() }
+        scrollRangeToVisible(NSRange(location: NSMaxRange(selectedRange), length: 0))
     }
 
     private static let _selectorDispatch: [String: (NSTextView, Any?) -> Void] = [
@@ -537,6 +561,7 @@ import CoreText
     }
 
     internal override func _selectionDidChange() {
+        _tk2SyncSelection()
         let n = Notification(name: NSTextView.didChangeSelectionNotification, object: self)
         NotificationCenter.default.post(n)
         _viewDelegate?.textViewDidChangeSelection(n)
@@ -570,12 +595,27 @@ import CoreText
         // AppKit's defaults: no smaller than the initial frame, as tall as the text needs.
         minSize = frameRect.size
         maxSize = NSSize(width: frameRect.width, height: 10_000_000)
+        // The engine (ADR-0040): a container with a text layout manager brings TextKit 2;
+        // `init(usingTextLayoutManager:)` chooses; otherwise `APPKITWIN_TEXTKIT` (TextKit 1
+        // by default in the port).
+        let requested = NSTextView._requestedTextKit2
+        NSTextView._requestedTextKit2 = nil
+        if let tlm = container?.textLayoutManager {
+            _wireTextKit2(layoutManager: tlm)
+        } else if container?.layoutManager == nil, requested ?? NSTextView._defaultEngineIsTextKit2 {
+            _wireTextKit2()
+        }
         _wireTextSystem()
     }
 
-    private func _wireTextSystem() {
+    /// TextKit 1 takes the storage and the container.
+    internal func _wireTextKit1() {
         if _layoutManager.textStorage !== _storage { _storage.addLayoutManager(_layoutManager) }
         if !_layoutManager.textContainers.contains(where: { $0 === _container }) { _layoutManager.addTextContainer(_container) }
+    }
+
+    private func _wireTextSystem() {
+        if _textLayoutManager == nil { _wireTextKit1() }
         _container.textView = self
         _container.widthTracksTextView = true
         _container.heightTracksTextView = false
@@ -642,6 +682,17 @@ import CoreText
         // A new frame reaches the layout through the container's size (which invalidates the
         // layout itself when the wrapping width changes); a height change keeps every line.
         if _fittingFrame || _resizingFrame { return }
+        if let tlm = _textLayoutManager {
+            // An empty document's line takes the typing font, which this may have changed.
+            if _storage.length == 0 { tlm.invalidateLayout(for: tlm.documentRange) }
+            // NSText calls this after every edit; edits reach TextKit 2 through the content
+            // storage and geometry through the container, so only fit and redisplay here
+            // (invalidating every fragment would put the text above the viewport back on
+            // estimates and move it).
+            needsLayout = true
+            needsDisplay = true
+            return
+        }
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
     }
 
@@ -660,9 +711,10 @@ import CoreText
                           height: isVerticallyResizable ? max(minSize.height, min(maxSize.height, content.height)) : frame.height)
         if size != frame.size { setFrameSize(size) }
     }
-    private var _fittingFrame = false
+    internal var _fittingFrame = false
 
     internal override func _layoutLines() -> [_Line] {
+        if _textLayoutManager != nil { return _tk2LayoutLines() }
         let origin = _drawOrigin
         var lines = _layoutManager._lineFragments.map { f in
             _Line(range: NSRange(location: f.charRange.location, length: f.charRange.length - f.newlineLength),
@@ -676,6 +728,7 @@ import CoreText
     }
 
     internal override func _caretRect(for offset: Int) -> NSRect {
+        if _textLayoutManager != nil { return _tk2CaretRect(for: offset) }
         let origin = _drawOrigin
         guard let c = _layoutManager._caret(forCharacter: offset) else {
             return NSRect(x: origin.x + _container.lineFragmentPadding, y: origin.y, width: 1, height: _lineHeight)
@@ -684,6 +737,7 @@ import CoreText
     }
 
     internal override func _offset(at point: NSPoint) -> Int {
+        if _textLayoutManager != nil { return _tk2Offset(at: point) }
         let origin = _drawOrigin
         var fraction: CGFloat = 0
         let p = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
@@ -694,6 +748,7 @@ import CoreText
     }
 
     internal override var _contentSize: NSSize {
+        if _textLayoutManager != nil { return _tk2ContentSize }
         let used = _layoutManager.usedRect(for: _container)
         let padding = isFieldEditor ? 0 : _container.lineFragmentPadding
         return NSSize(width: (used.width + 2 * padding + 2 * _textContainerInset.width).rounded(.up),
@@ -712,7 +767,23 @@ import CoreText
             NSBezierPath.fill(bounds)
         }
         let origin = _drawOrigin
-        let all = NSRange(location: 0, length: _storage.length)
+        if _textLayoutManager != nil {
+            _tk2Draw(dirtyRect)
+            if let m = _markedRange, m.length > 0 {
+                (textColor ?? .textColor).setFill()
+                for r in _tk2Rects(forCharacterRange: m) { NSBezierPath.fill(NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1)) }
+            }
+            let sel = selectedRange
+            if shouldDrawInsertionPoint && sel.length == 0 {
+                let caret = _caretRect(for: sel.location)
+                drawInsertionPoint(in: NSRect(x: caret.minX.rounded(), y: caret.minY, width: 1, height: caret.height), color: insertionPointColor, turnedOn: true)
+            }
+            return
+        }
+        // Only the lines in the dirty rect (drawing a long document whole on every keystroke
+        // made typing slow).
+        let dirty = dirtyRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let all = _layoutManager.glyphRange(forBoundingRect: dirty, in: _container)
         _layoutManager.drawBackground(forGlyphRange: all, at: origin)
         _drawTextHighlights()
         _drawFindHighlights(above: false)
@@ -745,18 +816,96 @@ import CoreText
                 clicked(onLink: link, at: i)
                 return
             }
-            if i < st.length, let a = st.attribute(.attachment, at: i, effectiveRange: nil) as? NSTextAttachment, let cell = a.attachmentCell,
-               let r = _layoutManager._attachmentRect(at: i) {
-                let frame = r.offsetBy(dx: _drawOrigin.x, dy: _drawOrigin.y)
-                if frame.contains(convert(event.locationInWindow, from: nil)) {
-                    super.mouseDown(with: event)
-                    if event.clickCount == 2 { _viewDelegate?.textView(self, doubleClickedOn: cell, in: frame, at: i) }
-                    else { _viewDelegate?.textView(self, clickedOn: cell, in: frame, at: i) }
-                    return
-                }
+            // A click on an attachment selects it, as AppKit's does (the caret position rounds
+            // to either side of the image, so both neighbours are tried).
+            let p = convert(event.locationInWindow, from: nil)
+            for k in [i, i - 1] where k >= 0 && k < st.length {
+                guard let a = st.attribute(.attachment, at: k, effectiveRange: nil) as? NSTextAttachment,
+                      let frame = _attachmentFrame(at: k), frame.contains(p) else { continue }
+                guard isSelectable || isEditable else { break }
+                if window?.firstResponder !== self { _ = window?.makeFirstResponder(self) }
+                _clickCount = 1
+                setSelectedRange(NSRange(location: k, length: 1))
+                _selectionAnchor = k
+                if let cell = a.attachmentCell { _viewDelegate?.textView(self, clickedOn: cell, in: frame, at: k) }
+                return
             }
         }
+        if _textLayoutManager != nil { _tk2MouseDown(with: event); return }
         super.mouseDown(with: event)
+    }
+
+    open override func mouseDragged(with event: NSEvent) {
+        if _textLayoutManager != nil { _tk2MouseDragged(with: event); return }
+        super.mouseDragged(with: event)
+    }
+
+    open override func mouseUp(with event: NSEvent) {
+        if _textLayoutManager != nil { _tk2MouseUp() }
+        super.mouseUp(with: event)
+    }
+
+    /// An attachment's frame in view coordinates, from the active engine.
+    internal func _attachmentFrame(at index: Int) -> NSRect? {
+        if _textLayoutManager != nil { return _tk2AttachmentFrame(at: index) }
+        return _layoutManager._attachmentRect(at: index)?.offsetBy(dx: _drawOrigin.x, dy: _drawOrigin.y)
+    }
+
+    /// Fitting to the text needs all of it laid out (TextKit 2 estimates what is not).
+    open override func sizeToFit() {
+        if let tlm = _textLayoutManager { tlm.ensureLayout(for: tlm.documentRange) }
+        super.sizeToFit()
+    }
+
+    /// TextKit 2 lays the viewport out here, before drawing, and fits the frame to it.
+    open override func layout() {
+        super.layout()
+        if _textLayoutManager != nil {
+            _syncContainerSize()
+            _tk2LayoutViewport()
+        }
+    }
+
+    open override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        _followClipViewWidth()
+        if _textLayoutManager != nil { _tk2ObserveClipView(); needsLayout = true }
+    }
+
+    /// A document view that wraps (not horizontally resizable) and resizes its width with
+    /// its superview stays exactly as wide as the clip view, whatever changes that width
+    /// (a scroller appearing, a legacy scroller's width taken out, a window resize), so
+    /// lines never run under the vertical scroller. Both engines.
+    private func _followClipViewWidth() {
+        guard let clip = superview as? NSClipView else { return }
+        if _extras.trackedClipView !== clip {
+            if let o = _extras.clipFrameObserver { NotificationCenter.default.removeObserver(o) }
+            _extras.trackedClipView = clip
+            clip.postsFrameChangedNotifications = true
+            _extras.clipFrameObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?._matchClipViewWidth() }
+            }
+        }
+        _matchClipViewWidth()
+    }
+
+    private func _matchClipViewWidth() {
+        guard let clip = superview as? NSClipView, !isHorizontallyResizable, !isFieldEditor, autoresizingMask.contains(.width) else { return }
+        let width = clip.bounds.width
+        guard width > 0, abs(frame.width - width) > 0.5 else { return }
+        setFrameSize(NSSize(width: width, height: frame.height))
+    }
+
+    internal override func _lineRange(at offset: Int) -> NSRange {
+        guard let tlm = _textLayoutManager else { return super._lineRange(at: offset) }
+        guard let r = tlm.textRange(for: .line, enclosing: _NSTextIndexLocation(max(0, min(offset, _length))))?._nsRange else { return NSRange(location: offset, length: 0) }
+        let s = _storage.string as NSString
+        var end = NSMaxRange(r)
+        if end > r.location, end <= s.length, [0x0A, 0x0D, 0x2028, 0x2029, 0x0C].contains(s.character(at: end - 1)) {
+            end -= 1
+            if end > r.location, s.character(at: end) == 0x0A, s.character(at: end - 1) == 0x0D { end -= 1 }
+        }
+        return NSRange(location: r.location, length: end - r.location)
     }
 
     open override func copy(_ sender: Any?) {
@@ -823,13 +972,18 @@ import CoreText
     /// Colours were resolved at layout time, so a theme change lays the text out again.
     open override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        _textLayoutManager?._restyleLaidOutFragments()
         _invalidateLayout()
         needsDisplay = true
     }
 
     open override var isFieldEditor: Bool {
         get { super.isFieldEditor }
-        set { super.isFieldEditor = newValue; _syncContainerSize() }
+        set {
+            // Field editors lay out with TextKit 1 in the port (ADR-0040).
+            if newValue, _textLayoutManager != nil { _switchToTextKit1() }
+            super.isFieldEditor = newValue; _syncContainerSize()
+        }
     }
     open override var isHorizontallyResizable: Bool {
         get { super.isHorizontallyResizable }
@@ -865,7 +1019,10 @@ import CoreText
     /// The port's text view always lays out with NSLayoutManager (TextKit 1), which is what
     /// `usingTextLayoutManager: false` asks for; true still gives that view (its
     /// `textLayoutManager` is nil, as for a TextKit 1 view on macOS).
-    @MainActor public convenience init(usingTextLayoutManager: Bool) { self.init(frame: .zero) }
+    @MainActor public convenience init(usingTextLayoutManager: Bool) {
+        NSTextView._requestedTextKit2 = usingTextLayoutManager
+        self.init(frame: .zero)
+    }
     // The drag types follow what the view accepts, as AppKit's NSTextView re-registers when
     // these change: a view made editable, rich or graphics-importing after init takes drops.
     open override var isEditable: Bool {
@@ -1070,7 +1227,19 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/drawtexthighlightbackground(for:origin:)
     @available(macOS 15.0, *)
-    @MainActor open func drawTextHighlightBackground(for textRange: NSTextRange, origin: NSPoint) { unimplemented("NSTextView.drawTextHighlightBackground(for:origin:) — NSTextRange (TextKit 2) is still a generated stub; the port draws highlights itself (highlight(_:))") }
+    /// Fills the highlight's segments (the text container's origin at `origin`) with the
+    /// highlight tint, as the view draws `NSTextHighlightStyle` runs.
+    @MainActor open func drawTextHighlightBackground(for textRange: NSTextRange, origin: NSPoint) {
+        let tint = (_extras.textHighlightAttributes[.foregroundColor] as? NSColor) ?? .controlAccentColor
+        tint.withAlphaComponent(0.2).setFill()
+        func fill(_ r: NSRect) { NSBezierPath(roundedRect: r.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -1, dy: 0), xRadius: 3, yRadius: 3).fill() }
+        if let tlm = _textLayoutManager {
+            tlm.enumerateTextSegments(in: textRange, type: .highlight, options: [.rangeNotRequired]) { _, r, _, _ in fill(r); return true }
+            return
+        }
+        guard let r = textRange._nsRange else { return }
+        _layoutManager.enumerateEnclosingRects(forGlyphRange: _clamped(r), withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: _container) { rect, _ in fill(rect) }
+    }
     // SKIPPED (Foundation.NSTextCheckingTypes not in corelibs): @MainActor var enabledTextCheckingTypes: NSTextCheckingTypes { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/fieldeditor()
     @available(macOS 10.14, *)
@@ -1199,11 +1368,19 @@ import CoreText
     @available(macOS 15.0, *)
     @MainActor open var isWritingToolsActive: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/layoutmanager
-    @MainActor open var layoutManager: NSLayoutManager? { _layoutManager }
+    /// Asking a TextKit 2 view for its layout manager switches it to TextKit 1 for good, as
+    /// AppKit's compatibility mode does (ADR-0040).
+    @MainActor open var layoutManager: NSLayoutManager? {
+        if _textLayoutManager != nil { _switchToTextKit1() }
+        return _layoutManager
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/linktextattributes
     @MainActor open var linkTextAttributes: [NSAttributedString.Key : Any]? {
         get { _extras.linkTextAttributes }
-        set { _extras.linkTextAttributes = newValue }
+        set {
+            _extras.linkTextAttributes = newValue
+            _textLayoutManager?._restyleLaidOutFragments()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/loosenkerning(_:)
     @MainActor open func loosenKerning(_ sender: Any?) { _adjustKern(by: 1) }
@@ -1465,8 +1642,7 @@ import CoreText
     @MainActor open func setSpellingState(_ value: Int, range charRange: NSRange) {
         let v = _viewDelegate?.textView(self, shouldSetSpellingState: value, range: charRange) ?? value
         let r = _clamped(charRange)
-        if v == 0 { layoutManager?.removeTemporaryAttribute(.spellingState, forCharacterRange: r) }
-        else { layoutManager?.addTemporaryAttribute(.spellingState, value: NSNumber(value: v), forCharacterRange: r) }
+        _setSpellingMark(v, range: r)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shouldchangetext(in:replacementstring:)
     /// The delegate's (`undoManager(for:)`), else the window's (ADR-0038).
@@ -1476,6 +1652,7 @@ import CoreText
         guard isEditable else { return false }
         guard _viewDelegate?.textView(self, shouldChangeTextIn: affectedCharRange, replacementString: replacementString) ?? true else { return false }
         _recordUndo(for: affectedCharRange, replacementString: replacementString)
+        _noteSpellingDirty(affectedCharRange, replacementLength: replacementString.map { ($0 as NSString).length } ?? affectedCharRange.length)
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shouldchangetext(inranges:replacementstrings:)
@@ -1526,6 +1703,14 @@ import CoreText
         get { _container }
         set {
             guard let c = newValue, c !== _container else { return }
+            if let tlm = _textLayoutManager {
+                _container.textView = nil
+                _container = c
+                tlm.textContainer = c
+                _wireTextSystem()
+                needsDisplay = true
+                return
+            }
             if let i = _layoutManager.textContainers.firstIndex(where: { $0 === _container }) { _layoutManager.removeTextContainer(at: i) }
             _container.textView = nil
             _container = c
@@ -1546,8 +1731,8 @@ import CoreText
     @MainActor open var textContainerOrigin: NSPoint { NSPoint(x: _textContainerInset.width, y: _textContainerInset.height) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontentstorage
     @available(macOS 12.0, *)
-    /// TextKit 1 text views have none.
-    @MainActor open var textContentStorage: NSTextContentStorage? { nil }
+    /// Nil for a TextKit 1 view (ADR-0040).
+    @MainActor open var textContentStorage: NSTextContentStorage? { _textContentStorage }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/texthighlightattributes
     @available(macOS 15.0, *)
     @MainActor open var textHighlightAttributes: [NSAttributedString.Key : Any] {
@@ -1556,8 +1741,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textlayoutmanager
     @available(macOS 12.0, *)
-    /// TextKit 1 text views have none.
-    @MainActor open var textLayoutManager: NSTextLayoutManager? { nil }
+    /// Nil for a TextKit 1 view (ADR-0040).
+    @MainActor open var textLayoutManager: NSTextLayoutManager? { _textLayoutManager }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textstorage
     @MainActor open var textStorage: NSTextStorage? { _storage }
     @MainActor internal override func _richContents() -> NSAttributedString { _storage }
@@ -1743,7 +1928,7 @@ import CoreText
         _finderReplace(r, with: word)
         setSelectedRange(NSRange(location: r.location, length: (word as NSString).length))
         didChangeText()
-        layoutManager?.removeTemporaryAttribute(.spellingState, forCharacterRange: NSRange(location: r.location, length: (word as NSString).length))
+        _setSpellingMark(0, range: NSRange(location: r.location, length: (word as NSString).length))
     }
     /// Ignores the word (the sender's string, or the selection) in this document.
     open override func ignoreSpelling(_ sender: Any?) {

@@ -52,7 +52,8 @@ open class CAAnimation: NSObject, CAMediaTiming, CAAction {
     var addedAt: CFTimeInterval = 0
     var layerKey: String = ""
     var didStart = false
-    var countsForTransaction = false
+    /// The transaction whose completion block waits for this animation, if any.
+    var transactionToken: Int?
 
     public required override init() { super.init() }
 

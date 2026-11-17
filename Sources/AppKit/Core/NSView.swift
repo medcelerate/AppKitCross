@@ -41,6 +41,9 @@ import CoreText
     private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
+    /// `animator()` was asked for, layer or not: a view that animates something other than
+    /// its own geometry (a collection view's batch updates) takes this.
+    private var _animatorRequested = false
     private var _appearance: NSAppearance? = nil
     private var _registeredDraggedTypes: [NSPasteboard.PasteboardType] = []
     /// What `draggingEntered` returned, for the default `draggingUpdated` (AppKit's rule).
@@ -300,6 +303,14 @@ import CoreText
     private func _takeAnimator() -> Bool {
         let a = _animatorPending
         _animatorPending = false
+        _animatorRequested = false
+        return a
+    }
+    /// Takes the one-shot `animator()` request whether or not the view has a layer yet.
+    internal func _takeAnimatorRequest() -> Bool {
+        let a = _animatorRequested
+        _animatorPending = false
+        _animatorRequested = false
         return a
     }
 
@@ -582,6 +593,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimatablepropertycontainer/animator()
     @MainActor public func animator() -> Self {
         _animatorPending = _layer != nil
+        _animatorRequested = true
         return self
     }
 
@@ -896,8 +908,16 @@ import CoreText
         let ctx = surface.context
         layoutSubtreeIfNeeded()
         ctx.saveGState()
-        // `_displayHierarchy` expects the superview's space; move `rect` to the origin.
-        ctx.translateBy(x: -(_frame.minX + rect.minX), y: -(_frame.minY + rect.minY))
+        // `_displayHierarchy` expects the superview's space: move `rect` (taken into that
+        // space) to the bitmap's origin, turning a flipped superview's y-down space the
+        // bitmap's way up (else every snapshot of an item in a collection view or a clip
+        // view came out upside down).
+        let sr = _rectInSuperviewSpace(rect)
+        if _superview?.isFlipped == true {
+            ctx.translateBy(x: 0, y: rect.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        ctx.translateBy(x: -sr.minX, y: -sr.minY)
         let previous = NSGraphicsContext.current
         let wasCaching = NSView._cachingDisplay
         NSView._cachingDisplay = true
@@ -905,7 +925,7 @@ import CoreText
         // view's appearance (a dark window stays dark in the bitmap).
         let previousAppearance = NSAppearance.current
         NSAppearance.current = _drawingAppearance
-        _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        _displayHierarchy(in: ctx, dirtyRect: sr)
         NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
         NSGraphicsContext.current = previous

@@ -24,6 +24,9 @@ final class HostBackend: PlatformBackend {
         let primaryHeight = primary.frame.height * primary.backingScaleFactor
         return CGPoint(x: d.frame.minX * d.backingScaleFactor, y: primaryHeight - d.frame.maxY * d.backingScaleFactor)
     }
+    /// Test hook: a window-system drag runner standing in for OLE or the Wayland data
+    /// device (nil: the tracker keeps the pointer, the host's normal behaviour).
+    var dragDrop: (any PlatformDragDrop)?
     private var running = false
     private var pending: [@MainActor () -> Void] = []
     var mouseLocation: NSPoint = .zero

@@ -74,12 +74,12 @@ extension NSCollectionViewDelegate {
     @MainActor public func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, index: Int, dropOperation: NSCollectionView.DropOperation) -> Bool { return false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:acceptdrop:indexpath:dropoperation:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool { return false }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool { return collectionView.numberOfSections == 1 && self.collectionView(collectionView, acceptDrop: draggingInfo, index: indexPath.item, dropOperation: dropOperation) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:candragitemsat:with:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool { return false }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool { return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, canDragItemsAt: IndexSet(indexPaths.map { $0.item }), with: event) : true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:candragitemsat:with:)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexes: IndexSet, with event: NSEvent) -> Bool { return false }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexes: IndexSet, with event: NSEvent) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:didchangeitemsat:to:)
     @available(macOS 10.11, *)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, didChangeItemsAt indexPaths: Set<IndexPath>, to highlightState: NSCollectionViewItem.HighlightState) { }
@@ -97,25 +97,25 @@ extension NSCollectionViewDelegate {
     @MainActor public func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:draggingimageforitemsat:with:offset:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingImageForItemsAt indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingImageForItemsAt indexPaths: Set<IndexPath>, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, draggingImageForItemsAt: IndexSet(indexPaths.map { $0.item }), with: event, offset: dragImageOffset) : collectionView.draggingImageForItems(at: indexPaths, with: event, offset: dragImageOffset) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:draggingimageforitemsat:with:offset:)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingImageForItemsAt indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingImageForItemsAt indexes: IndexSet, with event: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { return collectionView.draggingImageForItems(at: indexes, with: event, offset: dragImageOffset) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:draggingsession:endedat:dragoperation:)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:draggingsession:willbeginat:foritemsat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) { }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) { if collectionView.numberOfSections == 1 { self.collectionView(collectionView, draggingSession: session, willBeginAt: screenPoint, forItemsAt: IndexSet(indexPaths.map { $0.item })) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:draggingsession:willbeginat:foritemsat:)
     @available(macOS 10.10, *)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexes: IndexSet) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:namesofpromisedfilesdroppedatdestination:fordraggeditemsat:)
     @available(macOS 10.11, *)
-    public func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexPaths: Set<IndexPath>) -> [String] { unimplementedOptionalRequirement() }
+    public func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexPaths: Set<IndexPath>) -> [String] { return MainActor.assumeIsolated { collectionView.numberOfSections } == 1 ? self.collectionView(collectionView, namesOfPromisedFilesDroppedAtDestination: dropURL, forDraggedItemsAt: IndexSet(indexPaths.map { $0.item })) : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:namesofpromisedfilesdroppedatdestination:fordraggeditemsat:)
-    public func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexes: IndexSet) -> [String] { unimplementedOptionalRequirement() }
+    public func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexes: IndexSet) -> [String] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:pasteboardwriterforitemat:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? { return nil }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? { return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, pasteboardWriterForItemAt: indexPath.item) : nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:pasteboardwriterforitemat:)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt index: Int) -> (any NSPasteboardWriting)? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:shouldchangeitemsat:to:)
@@ -133,10 +133,10 @@ extension NSCollectionViewDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:updatedraggingitemsfordrag:)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, updateDraggingItemsForDrag draggingInfo: any NSDraggingInfo) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:validatedrop:proposedindex:dropoperation:)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndex proposedDropIndex: UnsafeMutablePointer<Int>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndex proposedDropIndex: UnsafeMutablePointer<Int>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:validatedrop:proposedindexpath:dropoperation:)
     @available(macOS 10.11, *)
-    @MainActor public func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation { unimplementedOptionalRequirement() }
+    @MainActor public func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation { guard collectionView.numberOfSections == 1 else { return [] }; var index = proposedDropIndexPath.pointee.index(atPosition: 1); let operation = withUnsafeMutablePointer(to: &index) { self.collectionView(collectionView, validateDrop: draggingInfo, proposedIndex: $0, dropOperation: proposedDropOperation) }; proposedDropIndexPath.pointee = NSIndexPath(indexes: [0, index], length: 2); return operation }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:willdisplay:forrepresentedobjectat:)
     @available(macOS 10.11, *)
     @MainActor public func collectionView(_ collectionView: NSCollectionView, willDisplay item: NSCollectionViewItem, forRepresentedObjectAt indexPath: IndexPath) { }
@@ -145,7 +145,7 @@ extension NSCollectionViewDelegate {
     @MainActor public func collectionView(_ collectionView: NSCollectionView, willDisplaySupplementaryView view: NSView, forElementKind elementKind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:writeitemsat:to:)
     @available(macOS 10.11, *)
-    public func collectionView(_ collectionView: NSCollectionView, writeItemsAt indexPaths: Set<IndexPath>, to pasteboard: NSPasteboard) -> Bool { return false }
+    public func collectionView(_ collectionView: NSCollectionView, writeItemsAt indexPaths: Set<IndexPath>, to pasteboard: NSPasteboard) -> Bool { return MainActor.assumeIsolated { collectionView.numberOfSections } == 1 && self.collectionView(collectionView, writeItemsAt: IndexSet(indexPaths.map { $0.item }), to: pasteboard) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewdelegate/collectionview(_:writeitemsat:to:)
     public func collectionView(_ collectionView: NSCollectionView, writeItemsAt indexes: IndexSet, to pasteboard: NSPasteboard) -> Bool { return false }
 }

@@ -777,6 +777,10 @@ class Generator:
                 return out, "emitted"
             if owner_kind == "protocol" and optional:
                 custom = self.config.get("optionalDefaults", {}).get(".".join(path))
+                if isinstance(custom, dict):
+                    # Overloads share a Swift name: the default is keyed by a fragment
+                    # of the declaration (a parameter type) that tells them apart.
+                    custom = next((v for k, v in custom.items() if k in decl), None)
                 body = ("{ %s }" % custom) if custom else self.default_body(decl)
                 attrs, decl = self.split_attrs(decl)
                 out.append("%s%s%s%s %s" % (indent, attrs, "public ", decl, body))

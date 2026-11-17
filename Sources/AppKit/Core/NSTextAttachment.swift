@@ -212,13 +212,15 @@ open class NSTextAttachment: NSObject, NSTextAttachmentLayout, NSSecureCoding, N
     }
 
     /// Draws the attachment into `rect` (flipped view coordinates).
-    @MainActor internal func _draw(in rect: NSRect, characterIndex: Int, layoutManager: NSLayoutManager, view: NSView?, selected: Bool) {
+    /// TextKit 2 fragments pass no layout manager, only their container.
+    @MainActor internal func _draw(in rect: NSRect, characterIndex: Int, layoutManager: NSLayoutManager?, textContainer: NSTextContainer? = nil, view: NSView?, selected: Bool) {
         if let cell = attachmentCell {
             cell.highlight(selected, withFrame: rect, in: view)
-            cell.draw(withFrame: rect, in: view, characterIndex: characterIndex, layoutManager: layoutManager)
+            if let layoutManager { cell.draw(withFrame: rect, in: view, characterIndex: characterIndex, layoutManager: layoutManager) }
+            else { cell.draw(withFrame: rect, in: view, characterIndex: characterIndex) }
             return
         }
-        guard let img = image(forBounds: rect, textContainer: layoutManager.textContainers.first, characterIndex: characterIndex) else { return }
+        guard let img = image(forBounds: rect, textContainer: textContainer ?? layoutManager?.textContainers.first, characterIndex: characterIndex) else { return }
         img.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         if selected {
             NSColor.selectedTextBackgroundColor.withAlphaComponent(0.45).setFill()

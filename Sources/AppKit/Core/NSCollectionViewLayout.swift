@@ -185,9 +185,183 @@ internal func _rectsOverlap(_ a: NSRect, _ b: NSRect) -> Bool {
     internal var _numberOfSections: Int { _collectionView?._sectionCount ?? 0 }
     internal func _numberOfItems(inSection s: Int) -> Int { _collectionView?._itemCount(inSection: s) ?? 0 }
 
+    // MARK: Drop targets (ADR-0041)
+    //
+    // The flow and grid layouts lay items out in lines. A point over an item targets the
+    // item; anywhere else it targets the inter-item gap of the nearest line, before the
+    // first item whose middle lies past the point (after the line's last item when none
+    // does). Gap frames sit between the neighbours, one spacing wide before the first
+    // item of a line and after the last, as AppKit's do.
+
+    /// The items in layout order, per section (subclasses that lay out lines answer).
+    internal var _lineItemAttributes: [[NSCollectionViewLayoutAttributes]] { [] }
+    /// Each section's extent, when the layout keeps one (flow), to pick the section a
+    /// point falls in; nil treats all the items as one run (grid).
+    internal var _lineSectionFrames: [NSRect]? { nil }
+    /// Whether lines run down (a horizontally scrolling flow) rather than across.
+    internal var _linesRunVertically: Bool { false }
+    /// The spacing between neighbours in a line of `section`.
+    internal func _lineGapWidth(inSection section: Int) -> CGFloat { 10 }
+
+    /// Rects in "line space": lines run along +x and stack along +y (mirrored for
+    /// right-to-left, transposed for vertical lines). The mapping is its own inverse.
+    private func _toLineSpace(_ r: NSRect) -> NSRect {
+        if _linesRunVertically { return NSRect(x: r.minY, y: r.minX, width: r.height, height: r.width) }
+        if _collectionView?.userInterfaceLayoutDirection == .rightToLeft { return NSRect(x: -r.maxX, y: r.minY, width: r.width, height: r.height) }
+        return r
+    }
+    private func _toLineSpace(_ p: NSPoint) -> NSPoint { _toLineSpace(NSRect(origin: p, size: .zero)).origin }
+
+    /// Groups visible items (already in order) into lines: an item starts a new line when
+    /// it does not share the current line's band.
+    private func _lines(_ items: [NSCollectionViewLayoutAttributes]) -> [[NSCollectionViewLayoutAttributes]] {
+        var lines: [[NSCollectionViewLayoutAttributes]] = []
+        var band: (lo: CGFloat, hi: CGFloat)? = nil
+        for a in items where !a.isHidden {
+            let r = _toLineSpace(a.frame)
+            if let b = band, r.minY < b.hi, r.maxY > b.lo {
+                lines[lines.count - 1].append(a)
+                band = (min(b.lo, r.minY), max(b.hi, r.maxY))
+            } else {
+                lines.append([a])
+                band = (r.minY, r.maxY)
+            }
+        }
+        return lines
+    }
+
+    private func _gapAttributes(before indexPath: IndexPath, lineSpaceFrame: NSRect) -> NSCollectionViewLayoutAttributes {
+        let a = NSCollectionViewLayoutAttributes(forInterItemGapBefore: indexPath)
+        a.frame = _toLineSpace(lineSpaceFrame)
+        return a
+    }
+    /// The gap attributes before item `k` of `line` (`k == line.count`: after the last).
+    private func _gap(in line: [NSCollectionViewLayoutAttributes], at k: Int) -> NSCollectionViewLayoutAttributes? {
+        guard let first = line.first, let fip = first.indexPath else { return nil }
+        let spacing = _lineGapWidth(inSection: fip.section)
+        if k < line.count {
+            let cur = _toLineSpace(line[k].frame)
+            guard let ip = line[k].indexPath else { return nil }
+            if k == 0 { return _gapAttributes(before: ip, lineSpaceFrame: NSRect(x: cur.minX - spacing, y: cur.minY, width: spacing, height: cur.height)) }
+            let prev = _toLineSpace(line[k - 1].frame)
+            let lo = min(prev.maxX, cur.minX), hi = max(prev.maxX, cur.minX)
+            return _gapAttributes(before: ip, lineSpaceFrame: NSRect(x: lo, y: min(prev.minY, cur.minY), width: hi - lo, height: max(prev.maxY, cur.maxY) - min(prev.minY, cur.minY)))
+        }
+        let last = line[line.count - 1]
+        guard let lip = last.indexPath else { return nil }
+        let r = _toLineSpace(last.frame)
+        return _gapAttributes(before: IndexPath(item: lip.item + 1, section: lip.section), lineSpaceFrame: NSRect(x: r.maxX, y: r.minY, width: spacing, height: r.height))
+    }
+
+    /// `layoutAttributesForDropTarget(at:)` for a layout of lines.
+    internal func _lineDropTarget(at point: NSPoint) -> NSCollectionViewLayoutAttributes? {
+        let sections = _lineItemAttributes
+        guard !sections.isEmpty else { return nil }
+        for s in sections { for a in s where !a.isHidden && a.frame.contains(point) { return a } }
+        // The section the point is in (or nearest to), else every item as one run.
+        var items: [NSCollectionViewLayoutAttributes]
+        var section = 0
+        if let frames = _lineSectionFrames, frames.count == sections.count {
+            let p = _toLineSpace(point)
+            func distance(_ f: NSRect) -> CGFloat { let r = _toLineSpace(f); return p.y < r.minY ? r.minY - p.y : (p.y >= r.maxY ? p.y - r.maxY : 0) }
+            section = frames.indices.min { distance(frames[$0]) < distance(frames[$1]) } ?? 0
+            items = sections[section]
+        } else {
+            items = sections.flatMap { $0 }
+        }
+        let lines = _lines(items)
+        guard !lines.isEmpty else {
+            // An empty section: before its first item.
+            let r = _lineSectionFrames.map { _toLineSpace($0[section]) } ?? .zero
+            return _gapAttributes(before: IndexPath(item: 0, section: section), lineSpaceFrame: NSRect(x: r.minX, y: r.minY, width: _lineGapWidth(inSection: section), height: r.height))
+        }
+        let p = _toLineSpace(point)
+        func distance(_ line: [NSCollectionViewLayoutAttributes]) -> CGFloat {
+            let lo = line.map { _toLineSpace($0.frame).minY }.min()!, hi = line.map { _toLineSpace($0.frame).maxY }.max()!
+            return p.y < lo ? lo - p.y : (p.y >= hi ? p.y - hi : 0)
+        }
+        let line = lines.min { distance($0) < distance($1) }!
+        let k = line.firstIndex { _toLineSpace($0.frame).midX > p.x } ?? line.count
+        return _gap(in: line, at: k)
+    }
+
+    /// `layoutAttributesForInterItemGap(before:)` for a layout of lines.
+    internal func _lineInterItemGap(before indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        let sections = _lineItemAttributes
+        guard indexPath.count == 2, sections.indices.contains(indexPath.section) else { return nil }
+        let items = sections[indexPath.section]
+        let lines = _lines(_lineSectionFrames == nil ? sections.flatMap { $0 } : items)
+        for line in lines {
+            if let k = line.firstIndex(where: { $0.indexPath == indexPath }) { return _gap(in: line, at: k) }
+        }
+        // One past the section's last laid-out item: the gap after it.
+        guard indexPath.item > 0, indexPath.item <= items.count, indexPath.item == items.count || items[indexPath.item].isHidden else { return nil }
+        let before = IndexPath(item: indexPath.item - 1, section: indexPath.section)
+        guard let line = lines.first(where: { $0.last?.indexPath == before }) else { return nil }
+        return _gap(in: line, at: line.count)
+    }
+
+    // MARK: Updates (ADR-0041)
+    //
+    // During a batch update the collection view tells the layout how old index paths map
+    // to new ones and, for an animated update, the item attributes the old layout gave.
+    // The flow and grid layouts answer the appearing/disappearing queries from them as
+    // AppKit's do: an inserted item starts at its new frame transparent, a deleted one
+    // ends at its old frame transparent, a surviving item travels from its old frame to
+    // its new one. Outside an update both answer the current attributes, transparent.
+
+    internal struct _UpdateContext {
+        var oldToNew: [IndexPath: IndexPath] = [:]
+        var newToOld: [IndexPath: IndexPath] = [:]
+        var reloaded = Set<IndexPath>()              // new index paths of reloaded items
+        var previous: [IndexPath: NSCollectionViewLayoutAttributes] = [:]   // by old index path
+    }
+    internal var _updateContext: _UpdateContext?
+
+    private func _transparent(_ a: NSCollectionViewLayoutAttributes?, at indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        guard let c = a?.copy() as? NSCollectionViewLayoutAttributes else { return nil }
+        c.indexPath = indexPath
+        c.alpha = 0
+        return c
+    }
+    internal func _lineInitialAttributes(forAppearingItemAt indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        guard let ctx = _updateContext else { return _transparent(layoutAttributesForItem(at: indexPath), at: indexPath) }
+        if let old = ctx.newToOld[indexPath], !ctx.reloaded.contains(indexPath) {
+            guard let c = (ctx.previous[old] ?? layoutAttributesForItem(at: indexPath))?.copy() as? NSCollectionViewLayoutAttributes else { return nil }
+            c.indexPath = indexPath
+            return c
+        }
+        return _transparent(layoutAttributesForItem(at: indexPath), at: indexPath)
+    }
+    internal func _lineFinalAttributes(forDisappearingItemAt indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        guard let ctx = _updateContext else { return _transparent(layoutAttributesForItem(at: indexPath), at: indexPath) }
+        if let new = ctx.oldToNew[indexPath], !ctx.reloaded.contains(new), let c = layoutAttributesForItem(at: new)?.copy() as? NSCollectionViewLayoutAttributes {
+            c.indexPath = indexPath
+            return c
+        }
+        return _transparent(ctx.previous[indexPath], at: indexPath)
+    }
+
     // Requirement of NSCoding
-    /// The abstract layout has nothing to archive (its subclasses write their metrics).
+    /// The base layout has no settings to archive (AppKit's writes no keys either).
     open func encode(with coder: NSCoder) { }
     // Requirement of NSCoding
     public required init?(coder: NSCoder) { super.init() }
+
+    /// Keyed-archive helpers for the concrete layouts (AppKit stores sizes and insets as
+    /// NSValues). A missing key leaves the default: corelibs' unarchiver aborts on reading one.
+    internal static func _decodeSize(_ coder: NSCoder, _ key: String) -> NSSize? {
+        coder.containsValue(forKey: key) ? (coder.decodeObject(forKey: key) as? NSValue)?.sizeValue : nil
+    }
+    internal static func _decodeInsets(_ coder: NSCoder, _ key: String) -> NSEdgeInsets? {
+        guard coder.containsValue(forKey: key) else { return nil }
+        if let v = coder.decodeObject(forKey: key) as? NSValue { return v.edgeInsetsValue }
+        return nil
+    }
+    internal static func _decodeDouble(_ coder: NSCoder, _ key: String) -> CGFloat? {
+        coder.containsValue(forKey: key) ? CGFloat(coder.decodeDouble(forKey: key)) : nil
+    }
+    internal static func _decodeInt(_ coder: NSCoder, _ key: String) -> Int? {
+        coder.containsValue(forKey: key) ? coder.decodeInteger(forKey: key) : nil
+    }
 }
