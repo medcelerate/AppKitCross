@@ -499,8 +499,10 @@ final class DocumentTests: XCTestCase, @unchecked Sendable {
             XCTAssertNil(answer)                          // the first document's sheet is up
             visibleAlertButton("Don\u{2019}t Save")!.performClick(nil)
             XCTAssertNil(answer)                          // then the second's
+            XCTAssertEqual(dc.documents.count, 1, "the discarded document closed before the next was asked about")
             visibleAlertButton("Don\u{2019}t Save")!.performClick(nil)
             XCTAssertEqual(answer, true)
+            XCTAssertTrue(dc.documents.isEmpty)
             for d in dc.documents { d.updateChangeCount(.changeCleared); d.close() }
         }
     }

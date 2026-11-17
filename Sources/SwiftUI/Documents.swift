@@ -335,17 +335,24 @@ public final class _HostingDocument: NSDocument {
         if let m = undoManager, m.isUndoing || m.isRedoing { return }
         guard !markScheduled else { return }
         markScheduled = true
-        // Two hops: the undo manager closes the event's group from the main queue (the port)
-        // or a run-loop observer (Foundation on macOS); the check runs after either.
-        DispatchQueue.main.async {
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.markScheduled = false
-                    if !self.isDocumentEdited { self.updateChangeCount(.changeDone) }
-                }
+        let check: @Sendable () -> Void = { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.markScheduled = false
+                if !self.isDocumentEdited { self.updateChangeCount(.changeDone) }
             }
         }
+        #if canImport(Darwin)
+        // Foundation's undo manager closes the event's group from a run-loop observer,
+        // after the main queue's blocks: the check waits one more pass.
+        DispatchQueue.main.async { DispatchQueue.main.async(execute: check) }
+        #else
+        // The port's undo manager closes it from a main-queue block queued when the step
+        // was registered, so a block queued now runs after it. One hop: the Win32 pump
+        // drains the queue once per wake, and a second hop waited for the next input (the
+        // File menu showed Save disabled right after typing).
+        DispatchQueue.main.async(execute: check)
+        #endif
     }
 
     // MARK: Windows

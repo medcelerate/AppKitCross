@@ -85,8 +85,16 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         let typed = event.charactersIgnoringModifiers ?? ""
         // An uppercase key equivalent implies Shift.
         if _keyEquivalent.count == 1, _keyEquivalent != _keyEquivalent.lowercased() { required.insert(.shift) }
-        guard event.modifierFlags.intersection(relevant) == required else { return false }
-        return typed.lowercased() == _keyEquivalent.lowercased()
+        let flags = event.modifierFlags.intersection(relevant)
+        if flags == required, typed.lowercased() == _keyEquivalent.lowercased() { return true }
+        // A symbol typed with Shift ("+" is Shift+= on most layouts) is its own key
+        // equivalent: the Shift that produced it is not one more modifier to require.
+        let isSymbol = _keyEquivalent.count == 1 && _keyEquivalent.lowercased() == _keyEquivalent.uppercased()
+        if isSymbol, flags == required.union(.shift), typed == _keyEquivalent { return true }
+        // "+" (zoom in) also answers the unshifted key it shares with "=", as Windows
+        // applications zoom with Ctrl+= as well as Ctrl+Plus.
+        if _keyEquivalent == "+", (typed == "=" || typed == "+"), flags == required || flags == required.union(.shift) { return true }
+        return false
     }
 
     /// Description for the platform menu bar.
