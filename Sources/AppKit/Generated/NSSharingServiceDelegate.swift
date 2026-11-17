@@ -35,7 +35,7 @@ extension NSSharingServiceDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicedelegate/sharingservice(_:didshareitems:)
     @MainActor public func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicedelegate/sharingservice(_:sourceframeonscreenforshareitem:)
-    @MainActor public func sharingService(_ sharingService: NSSharingService, sourceFrameOnScreenForShareItem item: Any) -> NSRect { unimplementedOptionalRequirement() }
+    @MainActor public func sharingService(_ sharingService: NSSharingService, sourceFrameOnScreenForShareItem item: Any) -> NSRect { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicedelegate/sharingservice(_:sourcewindowforshareitems:sharingcontentscope:)
     @MainActor public func sharingService(_ sharingService: NSSharingService, sourceWindowForShareItems items: [Any], sharingContentScope: UnsafeMutablePointer<NSSharingService.SharingContentScope>) -> NSWindow? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicedelegate/sharingservice(_:transitionimageforshareitem:contentrect:)

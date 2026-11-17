@@ -20,57 +20,57 @@ import CoreText
 @MainActor open class NSSliderTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/action
     @MainActor open var action: Selector? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/doublevalue
     @available(macOS 10.15, *)
     @MainActor open var doubleValue: Double {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/label
     @MainActor open var label: String? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/maximumsliderwidth
     @available(macOS 10.15, *)
     @MainActor open var maximumSliderWidth: CGFloat {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/maximumvalueaccessory
     @MainActor open var maximumValueAccessory: NSSliderAccessory? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/minimumsliderwidth
     @available(macOS 10.15, *)
     @MainActor open var minimumSliderWidth: CGFloat {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/minimumvalueaccessory
     @MainActor open var minimumValueAccessory: NSSliderAccessory? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/slider
     @MainActor open var slider: NSSlider {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/target
     @MainActor open var target: AnyObject? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidertouchbaritem/valueaccessorywidth
     @MainActor open var valueAccessoryWidth: NSSliderAccessory.Width {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type any NSView & NSUserInterfaceCompression differs from superclass NSView?): @MainActor var view: any NSView & NSUserInterfaceCompression { get }
 }

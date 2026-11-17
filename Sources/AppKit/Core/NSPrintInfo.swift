@@ -296,11 +296,11 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmpageformat()
-    open func pmPageFormat() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPageFormat — PMPageFormat is the macOS Core Printing API") }
+    open func pmPageFormat() -> UnsafeMutableRawPointer { appleOnlyUnavailable("NSPrintInfo.pmPageFormat — PMPageFormat is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmprintsession()
-    open func pmPrintSession() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPrintSession — PMPrintSession is the macOS Core Printing API") }
+    open func pmPrintSession() -> UnsafeMutableRawPointer { appleOnlyUnavailable("NSPrintInfo.pmPrintSession — PMPrintSession is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmprintsettings()
-    open func pmPrintSettings() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPrintSettings — PMPrintSettings is the macOS Core Printing API") }
+    open func pmPrintSettings() -> UnsafeMutableRawPointer { appleOnlyUnavailable("NSPrintInfo.pmPrintSettings — PMPrintSettings is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/printsettings
     open var printSettings: NSMutableDictionary { _printSettings }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/printer
@@ -346,9 +346,9 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         set { _topMargin = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/updatefrompmpageformat()
-    open func updateFromPMPageFormat() { unimplemented("NSPrintInfo.updateFromPMPageFormat — PMPageFormat is the macOS Core Printing API") }
+    open func updateFromPMPageFormat() { appleOnlyUnavailable("NSPrintInfo.updateFromPMPageFormat — PMPageFormat is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/updatefrompmprintsettings()
-    open func updateFromPMPrintSettings() { unimplemented("NSPrintInfo.updateFromPMPrintSettings — PMPrintSettings is the macOS Core Printing API") }
+    open func updateFromPMPrintSettings() { appleOnlyUnavailable("NSPrintInfo.updateFromPMPrintSettings — PMPrintSettings is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/verticalpagination
     open var verticalPagination: NSPrintInfo.PaginationMode {
         get { _verticalPagination }

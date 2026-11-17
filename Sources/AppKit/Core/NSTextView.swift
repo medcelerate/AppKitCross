@@ -1432,7 +1432,7 @@ import CoreText
         _NSListPanel.show(for: self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontsharingservicepicker(_:)
-    @MainActor open func orderFrontSharingServicePicker(_ sender: Any?) { unimplemented("NSTextView.orderFrontSharingServicePicker — sharing services are macOS system services") }
+    @MainActor open func orderFrontSharingServicePicker(_ sender: Any?) { appleOnlyUnavailable("NSTextView.orderFrontSharingServicePicker — sharing services are macOS system services") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontspacingpanel(_:)
     @MainActor open func orderFrontSpacingPanel(_ sender: Any?) { unimplemented("NSTextView.orderFrontSpacingPanel — the spacing panel is not built yet; line and paragraph spacing are set through the ruler and defaultParagraphStyle") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontsubstitutionspanel(_:)
@@ -1692,9 +1692,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/spellcheckerdocumenttag
     @MainActor open var spellCheckerDocumentTag: Int { _spellTag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/startspeaking(_:)
-    @MainActor open func startSpeaking(_ sender: Any?) { unimplemented("NSTextView.startSpeaking — needs a speech synthesis seam (NSSpeechSynthesizer is a generated stub)") }
+    @MainActor open func startSpeaking(_ sender: Any?) { appleOnlyUnavailable("NSTextView.startSpeaking — speaks through the macOS speech engine (NSSpeechSynthesizer, Apple-only)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/stopspeaking(_:)
-    @MainActor open func stopSpeaking(_ sender: Any?) { unimplemented("NSTextView.stopSpeaking — needs a speech synthesis seam (NSSpeechSynthesizer is a generated stub)") }
+    @MainActor open func stopSpeaking(_ sender: Any?) { appleOnlyUnavailable("NSTextView.stopSpeaking — speaks through the macOS speech engine (NSSpeechSynthesizer, Apple-only)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/stronglyreferencestextstorage
     @available(macOS 10.12, *)
     @MainActor class public var stronglyReferencesTextStorage: Bool { true }
@@ -1771,7 +1771,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglegrammarchecking(_:)
     @MainActor open func toggleGrammarChecking(_ sender: Any?) { isGrammarCheckingEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglequicklookpreviewpanel(_:)
-    @MainActor open func toggleQuickLookPreviewPanel(_ sender: Any?) { unimplemented("NSTextView.toggleQuickLookPreviewPanel — Quick Look is a macOS system service") }
+    @MainActor open func toggleQuickLookPreviewPanel(_ sender: Any?) { appleOnlyUnavailable("NSTextView.toggleQuickLookPreviewPanel — Quick Look is a macOS system service") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglesmartinsertdelete(_:)
     @MainActor open func toggleSmartInsertDelete(_ sender: Any?) { smartInsertDeleteEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggletraditionalcharactershape(_:)

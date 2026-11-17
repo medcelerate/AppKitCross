@@ -18,49 +18,49 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice
 open class NSSharingService: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/init(named:)
-    public init?(named serviceName: NSSharingService.Name) { unimplemented() }
+    public init?(named serviceName: NSSharingService.Name) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/init(title:image:alternateimage:handler:)
-    public init(title: String, image: NSImage, alternateImage: NSImage?, handler block: @escaping () -> Void) { unimplemented() }
+    public init(title: String, image: NSImage, alternateImage: NSImage?, handler block: @escaping () -> Void) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/accountname
-    open var accountName: String? { unimplemented() }
+    open var accountName: String? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/alternateimage
-    open var alternateImage: NSImage? { unimplemented() }
+    open var alternateImage: NSImage? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/attachmentfileurls
-    open var attachmentFileURLs: [URL]? { unimplemented() }
+    open var attachmentFileURLs: [URL]? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/canperform(withitems:)
-    open func canPerform(withItems items: [Any]?) -> Bool { unimplemented() }
+    open func canPerform(withItems items: [Any]?) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/delegate
     open var delegate: (any NSSharingServiceDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/image
-    open var image: NSImage { unimplemented() }
+    open var image: NSImage { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/menuitemtitle
     open var menuItemTitle: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/messagebody
-    open var messageBody: String? { unimplemented() }
+    open var messageBody: String? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/perform(withitems:)
-    open func perform(withItems items: [Any]) { unimplemented() }
+    open func perform(withItems items: [Any]) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/permanentlink
-    open var permanentLink: URL? { unimplemented() }
+    open var permanentLink: URL? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/recipients
     open var recipients: [String]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/sharingservices(foritems:)
-    public class func sharingServices(forItems items: [Any]) -> [NSSharingService] { unimplemented() }
+    public class func sharingServices(forItems items: [Any]) -> [NSSharingService] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/subject
     open var subject: String? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservice/title
-    open var title: String { unimplemented() }
+    open var title: String { appleOnlyUnavailable() }
 }
 
 @available(macOS 10.12, *)

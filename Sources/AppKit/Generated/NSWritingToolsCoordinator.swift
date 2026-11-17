@@ -19,51 +19,51 @@ import CoreText
 @available(macOS 15.2, *)
 @MainActor open class NSWritingToolsCoordinator: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/init(delegate:)
-    @MainActor public init(delegate: (any NSWritingToolsCoordinator.Delegate)?) { unimplemented() }
+    @MainActor public init(delegate: (any NSWritingToolsCoordinator.Delegate)?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/behavior
-    @MainActor open var behavior: NSWritingToolsBehavior { unimplemented() }
+    @MainActor open var behavior: NSWritingToolsBehavior { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/decorationcontainerview
     @MainActor open var decorationContainerView: NSView? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/delegate
-    @MainActor open var delegate: (any NSWritingToolsCoordinator.Delegate)? { unimplemented() }
+    @MainActor open var delegate: (any NSWritingToolsCoordinator.Delegate)? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/effectcontainerview
     @MainActor open var effectContainerView: NSView? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/includestextlistmarkers
     @available(macOS 26.0, *)
     @MainActor open var includesTextListMarkers: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/iswritingtoolsavailable
-    @MainActor class public var isWritingToolsAvailable: Bool { unimplemented() }
+    @MainActor class public var isWritingToolsAvailable: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/preferredbehavior
     @MainActor open var preferredBehavior: NSWritingToolsBehavior {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/preferredresultoptions
     @MainActor open var preferredResultOptions: NSWritingToolsResultOptions {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/resultoptions
-    @MainActor open var resultOptions: NSWritingToolsResultOptions { unimplemented() }
+    @MainActor open var resultOptions: NSWritingToolsResultOptions { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/state
-    @MainActor open var state: NSWritingToolsCoordinator.State { unimplemented() }
+    @MainActor open var state: NSWritingToolsCoordinator.State { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/stopwritingtools()
-    @MainActor open func stopWritingTools() { unimplemented() }
+    @MainActor open func stopWritingTools() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/updateforreflowedtextincontextwithidentifier(_:)
-    @MainActor open func updateForReflowedTextInContextWithIdentifier(_ contextID: UUID) { unimplemented() }
+    @MainActor open func updateForReflowedTextInContextWithIdentifier(_ contextID: UUID) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/updaterange(_:with:reason:forcontextwithidentifier:)
-    @MainActor open func updateRange(_ range: NSRange, with replacementText: NSAttributedString, reason: NSWritingToolsCoordinator.TextUpdateReason, forContextWithIdentifier contextID: UUID) { unimplemented() }
+    @MainActor open func updateRange(_ range: NSRange, with replacementText: NSAttributedString, reason: NSWritingToolsCoordinator.TextUpdateReason, forContextWithIdentifier contextID: UUID) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/view
-    @MainActor open var view: NSView? { unimplemented() }
+    @MainActor open var view: NSView? { appleOnlyUnavailable() }
 }
 
 @available(macOS 15.2, *)
@@ -73,17 +73,17 @@ extension NSWritingToolsCoordinator {
     open class AnimationParameters: NSObject {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/animationparameters/completionhandler
         open var completionHandler: (() -> Void)? {
-            get { unimplemented() }
-            set { unimplemented() }
+            get { appleOnlyUnavailable() }
+            set { appleOnlyUnavailable() }
         }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/animationparameters/delay
-        open var delay: CGFloat { unimplemented() }
+        open var delay: CGFloat { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/animationparameters/duration
-        open var duration: CGFloat { unimplemented() }
+        open var duration: CGFloat { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/animationparameters/progresshandler
         open var progressHandler: ((Float) -> Void)? {
-            get { unimplemented() }
-            set { unimplemented() }
+            get { appleOnlyUnavailable() }
+            set { appleOnlyUnavailable() }
         }
     }
 }
@@ -94,15 +94,15 @@ extension NSWritingToolsCoordinator {
     @available(macOS 15.2, *)
     open class Context: NSObject {
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/context/init(attributedstring:range:)
-        public init(attributedString: NSAttributedString, range: NSRange) { unimplemented() }
+        public init(attributedString: NSAttributedString, range: NSRange) { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/context/attributedstring
-        open var attributedString: NSAttributedString { unimplemented() }
+        open var attributedString: NSAttributedString { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/context/identifier
-        open var identifier: UUID { unimplemented() }
+        open var identifier: UUID { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/context/range
-        open var range: NSRange { unimplemented() }
+        open var range: NSRange { appleOnlyUnavailable() }
         /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/context/resolvedrange
-        open var resolvedRange: NSRange { unimplemented() }
+        open var resolvedRange: NSRange { appleOnlyUnavailable() }
     }
 }
 
@@ -160,11 +160,11 @@ extension NSWritingToolsCoordinator {
 @available(macOS 15.2, *)
 extension NSWritingToolsCoordinator.Delegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/delegate/writingtoolscoordinator(_:decorationcontainerviewfor:in:)
-    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, decorationContainerViewFor range: NSRange, in context: NSWritingToolsCoordinator.Context) async -> NSView { unimplementedOptionalRequirement() }
+    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, decorationContainerViewFor range: NSRange, in context: NSWritingToolsCoordinator.Context) async -> NSView { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/delegate/writingtoolscoordinator(_:rangeincontextwithidentifierfor:)
-    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, rangeInContextWithIdentifierFor point: NSPoint) async -> (NSRange, UUID) { unimplementedOptionalRequirement() }
+    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, rangeInContextWithIdentifierFor point: NSPoint) async -> (NSRange, UUID) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/delegate/writingtoolscoordinator(_:singlecontainersubrangesof:in:)
-    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, singleContainerSubrangesOf range: NSRange, in context: NSWritingToolsCoordinator.Context) async -> [NSValue] { unimplementedOptionalRequirement() }
+    public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, singleContainerSubrangesOf range: NSRange, in context: NSWritingToolsCoordinator.Context) async -> [NSValue] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswritingtoolscoordinator/delegate/writingtoolscoordinator(_:willchangeto:)
     public func writingToolsCoordinator(_ writingToolsCoordinator: NSWritingToolsCoordinator, willChangeTo newState: NSWritingToolsCoordinator.State) async { }
 }

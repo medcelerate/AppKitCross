@@ -140,7 +140,7 @@ open class NSScreen: NSObject {
     /// False: Windows virtual desktops and X11/Wayland workspaces span every monitor.
     class public var screensHaveSeparateSpaces: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/supportedwindowdepths
-    open var supportedWindowDepths: UnsafePointer<NSWindow.Depth> { unimplemented("NSScreen.supportedWindowDepths — a zero-terminated C list cannot be made of the port's NSWindow.Depth, a Swift enum with no 0 case whose storage is not its raw value") }
+    open var supportedWindowDepths: UnsafePointer<NSWindow.Depth> { appleOnlyUnavailable("NSScreen.supportedWindowDepths — the macOS window server's depth list; a zero-terminated C list cannot be made of the port's NSWindow.Depth, a Swift enum with no 0 case whose storage is not its raw value") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/visibleframe
     open var visibleFrame: NSRect { _display.visibleFrame }
 }

@@ -78,7 +78,7 @@ open class NSGraphicsContext: NSObject {
         self.init(cgContext: Unmanaged<CGContext>.fromOpaque(graphicsPort).takeUnretainedValue(), flipped: initialFlippedState)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/init(window:)
-    public init(window: NSWindow) { unimplemented("NSGraphicsContext(window:) — windows are drawn only by their views' display pass into the compositor's layers; there is no window-wide context to draw into outside it") }
+    public init(window: NSWindow) { appleOnlyUnavailable("NSGraphicsContext(window:) — a context on the macOS window server's backing store; the port's windows are drawn only by their views' display pass into the compositor's layers; there is no window-wide context to draw into outside it") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/attributes
     open var attributes: [NSGraphicsContext.AttributeKey : Any]? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/cgcontext
@@ -199,7 +199,7 @@ open class NSGraphicsContext: NSObject {
         _cg.saveGState()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/setgraphicsstate(_:)
-    public class func setGraphicsState(_ gState: Int) { unimplemented("NSGraphicsContext.setGraphicsState(_:) — gstate numbers came from the removed NSView/NSWindow gState; nothing hands them out") }
+    public class func setGraphicsState(_ gState: Int) { appleOnlyUnavailable("NSGraphicsContext.setGraphicsState(_:) — gstate numbers came from the removed NSView/NSWindow gState; nothing hands them out") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsgraphicscontext/shouldantialias
     open var shouldAntialias: Bool {
         get { _shouldAntialias }

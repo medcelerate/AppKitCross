@@ -19,38 +19,38 @@ import CoreText
 @available(macOS 10.15, *)
 @MainActor open class NSStepperTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/init(identifier:drawinghandler:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, drawingHandler: @escaping (NSRect, Double) -> Void) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, drawingHandler: @escaping (NSRect, Double) -> Void) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/init(identifier:formatter:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, formatter: Formatter) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, formatter: Formatter) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/action
     @MainActor open var action: Selector? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/increment
     @MainActor open var increment: Double {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/maxvalue
     @MainActor open var maxValue: Double {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/minvalue
     @MainActor open var minValue: Double {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/target
     @MainActor open var target: AnyObject? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssteppertouchbaritem/value
     @MainActor open var value: Double {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }
