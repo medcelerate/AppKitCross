@@ -548,7 +548,74 @@ final class SwiftUIDocumentAppTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The app's mode memory (ContentView.swift): the window's mode starts from @AppStorage
+    /// on appear and `onChange(of: mode)` writes it back, also when the View menu changes
+    /// the mode through the focused binding; a window opened next starts in that mode.
+    func testModeChangedThroughTheFocusedBindingIsRemembered() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let key = "SwiftUIDocumentAppTests.lastMode"
+            UserDefaults.standard.set("editor", forKey: key)
+            defer { UserDefaults.standard.removeObject(forKey: key) }
+            struct Content: View {
+                @AppStorage("SwiftUIDocumentAppTests.lastMode") private var stored: Mode = .viewer
+                @State private var mode: Mode = .viewer
+                var body: some View {
+                    Text("mode \(mode.rawValue)")
+                        .focusedSceneValue(\.testMode, $mode)
+                        .onAppear { mode = stored }
+                        .onChange(of: mode) { _, new in stored = new }
+                }
+            }
+            @MainActor func open() -> (NSWindow, NSHostingView<Content>) {
+                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 60), styleMask: [.titled], backing: .buffered, defer: false)
+                let h = NSHostingView(rootView: Content())
+                h.frame = w.contentView!.bounds
+                w.contentView!.addSubview(h)
+                w.makeKeyAndOrderFront(nil)
+                h.layoutSubtreeIfNeeded()
+                pump()
+                h.layoutSubtreeIfNeeded()
+                return (w, h)
+            }
+            let (a, ha) = open()
+            defer { a.close() }
+            XCTAssertTrue(texts(ha).contains("mode editor"), "starts in the stored mode: \(texts(ha))")
+            guard let binding = _FocusedValuesCenter.shared.current.testMode else { return XCTFail("no focused binding") }
+            binding.wrappedValue = .viewer                 // View > Viewer
+            ha.layoutSubtreeIfNeeded()
+            pump()
+            ha.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(ha).contains("mode viewer"))
+            XCTAssertEqual(UserDefaults.standard.string(forKey: key), "viewer", "onChange wrote the mode back")
+            let (b, hb) = open()
+            defer { b.close() }
+            XCTAssertTrue(texts(hb).contains("mode viewer"), "the next window opens in the opener's mode: \(texts(hb))")
+        }
+    }
+
     #if !canImport(Darwin)
+    /// The end of an input event closes the undo manager's event group at once (the Win32
+    /// pump calls this after dispatching key and mouse messages), so the document counts
+    /// the typing before the next event validates the File menu.
+    func testEndOfEventClosesTheUndoGroup() {
+        MainActor.assumeIsolated {
+            let manager = UndoManager()
+            final class Box { var v = 0 }
+            let box = Box()
+            final class Counter: @unchecked Sendable { var n = 0 }
+            let closed = Counter()
+            let token = NotificationCenter.default.addObserver(forName: .NSUndoManagerDidCloseUndoGroup, object: manager, queue: nil) { _ in closed.n += 1 }
+            defer { NotificationCenter.default.removeObserver(token) }
+            manager.registerUndo(withTarget: box) { $0.v = 1 }
+            XCTAssertEqual(manager.groupingLevel, 1, "the event's group is open")
+            UndoManager._endEventGroups()
+            XCTAssertEqual(manager.groupingLevel, 0)
+            XCTAssertEqual(closed.n, 1)
+            XCTAssertTrue(manager.canUndo)
+        }
+    }
+
     /// `UTType(importedAs:)` returns the Info.plist's declaration (its extensions), as
     /// Apple's does, instead of replacing it with a bare one.
     func testImportedTypeKeepsItsDeclaration() {

@@ -333,6 +333,15 @@ public final class _HostingDocument: NSDocument {
     /// unless an undo step closed in it (which counted the change already).
     func _contentDidChange() {
         if let m = undoManager, m.isUndoing || m.isRedoing { return }
+        #if !canImport(Darwin)
+        // No undo group open: nothing registered a step for this change, so it is marked
+        // now (a menu opened next validates against it). With a group open (a text view
+        // registered its step), the group's close at the end of the event counts it.
+        if (undoManager?.groupingLevel ?? 0) == 0 {
+            if !isDocumentEdited { updateChangeCount(.changeDone) }
+            return
+        }
+        #endif
         guard !markScheduled else { return }
         markScheduled = true
         let check: @Sendable () -> Void = { [weak self] in

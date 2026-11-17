@@ -284,14 +284,14 @@ final class Win32Backend: PlatformBackend {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
                 return false
             }
-            // Before the next input event, the work the previous ones queued on the main
-            // queue runs (AppKit finishes each event's run-loop pass first): the undo
-            // manager closing the typing's group, so the document is marked edited before
-            // a click opens the File menu and validates Save (the PC saw it disabled when
-            // the menu was opened within ~50 ms of typing).
-            if Win32Backend.isInputMessage(msg.message) { _ = PlatformMainQueue.service(); lastService = GetTickCount64() }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
+            // The end of an input event closes the undo manager's event groups, as AppKit's
+            // run loop does before the next event: a document is marked edited before a
+            // click on the File menu validates Save (the PC saw it disabled when the menu
+            // was opened within ~50 ms of typing). Only the groups close here; servicing the
+            // whole main queue before input messages broke the menu bar.
+            if Win32Backend.isInputMessage(msg.message) { UndoManager._endEventGroups() }
             fireFrameIfDue()
             // A window whose paint invalidates itself keeps WM_PAINT coming, and this loop
             // would never reach the main queue below (a DispatchQueue.main block, a Timer,
