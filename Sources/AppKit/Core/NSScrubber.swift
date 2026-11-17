@@ -77,11 +77,19 @@ import CoreText
     internal static let _arrowWidth: CGFloat = 20
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubber/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) {
+        _scrollView = _NSScrubberScrollView(frame: .zero)
+        super.init(coder: coder)
+        _setUpSubviews()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubber/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) {
         _scrollView = _NSScrubberScrollView(frame: NSRect(origin: .zero, size: frameRect.size))
         super.init(frame: frameRect)
+        _setUpSubviews()
+    }
+    private func _setUpSubviews() {
         _scrollView.drawsBackground = false
         _scrollView.hasHorizontalScroller = false
         _scrollView.hasVerticalScroller = false

@@ -195,6 +195,16 @@ public protocol PlatformWorkspace: AnyObject {
     /// `NSWorkspace.noteFileSystemChanged`: tells the shell a path changed.
     func noteFileSystemChanged(_ path: String)
 
+    // MARK: Volumes and search (ADR-0039)
+    /// The mount points (drive roots on Windows) of removable media, CDs and USB volumes.
+    func removableVolumePaths() -> [String]
+    /// Unmounts and ejects the volume mounted at `url`.
+    func ejectVolume(at url: URL) throws
+    /// The file system holding `path`; nil when the path does not exist.
+    func fileSystemInfo(forPath path: String) -> PlatformFileSystemInfo?
+    /// Opens the shell's search for `query` (Windows Search); false where there is none.
+    func showSearchResults(forQuery query: String) -> Bool
+
     // MARK: Running applications
     var runningApplications: [PlatformRunningApplication] { get }
     /// The process that owns the foreground window.
@@ -217,6 +227,26 @@ public protocol PlatformWorkspace: AnyObject {
 
     // MARK: The application's own tile
     func setDockTile(_ tile: PlatformDockTile)
+}
+
+/// `NSWorkspace.getFileSystemInfo(forPath:…)`'s answers.
+public struct PlatformFileSystemInfo: Sendable, Equatable {
+    /// The file system's name ("NTFS", "ext4", "apfs"): macOS answers it as both the
+    /// description and the type.
+    public var type: String
+    public var isRemovable: Bool
+    public var isWritable: Bool
+    public var isUnmountable: Bool
+    public init(type: String, isRemovable: Bool, isWritable: Bool, isUnmountable: Bool) {
+        self.type = type; self.isRemovable = isRemovable; self.isWritable = isWritable; self.isUnmountable = isUnmountable
+    }
+}
+
+extension PlatformWorkspace {
+    public func removableVolumePaths() -> [String] { [] }
+    public func ejectVolume(at url: URL) throws { throw PlatformWorkspaceError.unsupported("ejecting volumes") }
+    public func fileSystemInfo(forPath path: String) -> PlatformFileSystemInfo? { nil }
+    public func showSearchResults(forQuery query: String) -> Bool { false }
 }
 
 extension PlatformBackend {

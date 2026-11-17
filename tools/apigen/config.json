@@ -205,6 +205,7 @@
     "NSTreeNode",
     "NSTypesetter",
     "NSUserDefaultsController",
+    "NSUserInterfaceCompressionOptions",
     "NSView",
     "NSViewAnimation",
     "NSViewController",

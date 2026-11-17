@@ -462,7 +462,7 @@ internal final class _NSMatrixTextDelegate: NSObject, NSTextDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmatrix/sort(using:)
     /// Sorts with the cells' `compare(_:)`; other selectors need the Objective-C runtime.
     @MainActor open func sort(using comparator: Selector) {
-        guard NSStringFromSelector(comparator) == "compare:" else { unimplemented() }
+        guard NSStringFromSelector(comparator) == "compare:" else { unimplemented("NSMatrix.sort(using:) — a comparator selector other than compare: needs the Objective-C runtime; use sort(using:context:)") }
         _grid.sort { $0.compare($1) == .orderedAscending }
         _relayout()
     }

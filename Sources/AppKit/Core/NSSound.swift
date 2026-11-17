@@ -74,14 +74,28 @@ open class NSSound: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssound/init(pasteboard:)
-    public init?(pasteboard: NSPasteboard) { unimplemented() }
+    /// The sound on the pasteboard's `com.apple.cocoa.pasteboard.sound` type (its audio file bytes).
+    public convenience init?(pasteboard: NSPasteboard) {
+        guard let data = pasteboard.data(forType: .sound) else { return nil }
+        self.init(source: .data(data))
+    }
+    /// The audio file's bytes.
+    private var _audioData: Data? {
+        switch source {
+        case .url(let url): return try? Data(contentsOf: url)
+        case .data(let d): return d
+        }
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssound/beep()
     public static func beep() {
         if Thread.isMainThread { MainActor.assumeIsolated { Platform.backend.beep() } } else { DispatchQueue.main.async { Platform.backend.beep() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssound/caninit(with:)
-    public class func canInit(with pasteboard: NSPasteboard) -> Bool { false }
+    public class func canInit(with pasteboard: NSPasteboard) -> Bool { pasteboard.availableType(from: [.sound]) != nil }
+    public static func readableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.sound] }
+    public func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.sound] }
+    public func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? { type == .sound ? _audioData : nil }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssound/currenttime
     open var currentTime: TimeInterval {
@@ -152,7 +166,11 @@ open class NSSound: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         set { player.volume = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssound/write(to:)
-    open func write(to pasteboard: NSPasteboard) { unimplemented() }
+    /// Declares the sound type and writes the audio file's bytes.
+    open func write(to pasteboard: NSPasteboard) {
+        _ = pasteboard.declareTypes([.sound], owner: nil)
+        if let d = _audioData { _ = pasteboard.setData(d, forType: .sound) }
+    }
 
     fileprivate func _finished(successfully: Bool) {
         guard let delegate else { return }
@@ -174,11 +192,33 @@ open class NSSound: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     // Requirement of NSSecureCoding
     class public var supportsSecureCoding: Bool { true }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// AppKit's keys (`NSName`, `NSSoundShouldLoop`, `NSSoundVolume`) and, for a sound that is
+    /// not a named resource, its audio bytes as `NSSoundData` (macOS archives named sounds by name).
+    open func encode(with coder: NSCoder) {
+        if let n = _name { coder.encode(n, forKey: "NSName") }
+        coder.encode(_loops, forKey: "NSSoundShouldLoop")
+        coder.encode(volume, forKey: "NSSoundVolume")
+        if _name.flatMap({ NSSound._resourceURL(named: $0) }) == nil, let d = _audioData { coder.encode(d, forKey: "NSSoundData") }
+    }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required convenience init?(coder: NSCoder) {
+        if let d = coder._decodeObjectIfPresent(forKey: "NSSoundData") as? Data {
+            self.init(source: .data(d))
+            _name = coder._decodeObjectIfPresent(forKey: "NSName") as? String
+        } else if let n = coder._decodeObjectIfPresent(forKey: "NSName") as? String {
+            self.init(named: n)
+        } else {
+            return nil
+        }
+        loops = coder.decodeBool(forKey: "NSSoundShouldLoop")
+        if coder.containsValue(forKey: "NSSoundVolume") { volume = coder.decodeFloat(forKey: "NSSoundVolume") }
+    }
     // Requirement of NSPasteboardReading
-    public required init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) { unimplemented() }
+    /// The sound type's bytes (a Data property list).
+    public required convenience init?(pasteboardPropertyList propertyList: Any, ofType type: NSPasteboard.PasteboardType) {
+        guard type == .sound, let d = propertyList as? Data else { return nil }
+        self.init(source: .data(d))
+    }
 }
 
 /// Bridges the player's delegate (any thread) to the sound's main-actor delegate.

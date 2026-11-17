@@ -180,9 +180,12 @@ public enum CARuntime {
     /// One animation frame: fire display links, then invalidate every layer tree whose
     /// animations are still running (their hosts redraw them). Requests another frame when
     /// work remains. Hosts call this from the timer `frameRequester` set up.
+    /// When the last frame tick ran (the media clock; 0 before the first).
+    public private(set) static var lastTickTime: CFTimeInterval = 0
     public static func tick() {
         framePending = false
         let t = now()
+        lastTickTime = t
         for box in displayLinks { box.value?._fire(at: t) }
         displayLinks.removeAll { $0.value == nil || $0.value!.isInvalidated }
         var remaining: [CAWeak<CALayer>] = []

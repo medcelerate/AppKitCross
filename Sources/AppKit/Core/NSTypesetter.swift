@@ -287,7 +287,7 @@ open class NSTypesetter: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/layoutparagraph(at:)
     open func layoutParagraph(at lineFragmentOrigin: NSPointPointer) -> Int { unimplemented("NSTypesetter.layoutParagraph(at:) — \(NSTypesetter._glyphStorageReason)") }
 
-    // MARK: Glyph storage (not modelled)
+    // MARK: Glyph storage (set values last until the next layout pass; editing glyphs is not modelled)
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setattachmentsize(_:forglyphrange:)
     open func setAttachmentSize(_ attachmentSize: NSSize, forGlyphRange glyphRange: NSRange) { _layoutManager?.setAttachmentSize(attachmentSize, forGlyphRange: glyphRange) }
@@ -304,13 +304,38 @@ open class NSTypesetter: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/substituteglyphs(in:withglyphs:)
     open func substituteGlyphs(in glyphRange: NSRange, withGlyphs glyphs: UnsafeMutablePointer<NSGlyph>!) { unimplemented("NSTypesetter.substituteGlyphs — \(NSTypesetter._glyphStorageReason)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setbidilevels(_:forglyphrange:)
-    open func setBidiLevels(_ levels: UnsafePointer<UInt8>!, forGlyphRange glyphRange: NSRange) { unimplemented("NSTypesetter.setBidiLevels — CoreText resolves bidi levels; \(NSTypesetter._glyphStorageReason)") }
+    /// Recorded as each glyph's bidi-level attribute; drawing follows CoreText's own levels.
+    open func setBidiLevels(_ levels: UnsafePointer<UInt8>!, forGlyphRange glyphRange: NSRange) {
+        guard let lm = _layoutManager, let levels else { return }
+        for i in 0..<glyphRange.length { lm.setIntAttribute(2, value: Int(levels[i]), forGlyphAt: glyphRange.location + i) }   // NSGlyphAttributeBidiLevel
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setdrawsoutsidelinefragment(_:forglyphrange:)
-    open func setDrawsOutsideLineFragment(_ flag: Bool, forGlyphRange glyphRange: NSRange) { unimplemented("NSTypesetter.setDrawsOutsideLineFragment — \(NSTypesetter._glyphStorageReason)") }
+    open func setDrawsOutsideLineFragment(_ flag: Bool, forGlyphRange glyphRange: NSRange) {
+        guard let lm = _layoutManager else { return }
+        for i in 0..<glyphRange.length { lm.setDrawsOutsideLineFragment(flag, forGlyphAt: glyphRange.location + i) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setlinefragmentrect(_:forglyphrange:usedrect:baselineoffset:)
-    open func setLineFragmentRect(_ fragmentRect: NSRect, forGlyphRange glyphRange: NSRange, usedRect: NSRect, baselineOffset: CGFloat) { unimplemented("NSTypesetter.setLineFragmentRect — \(NSTypesetter._glyphStorageReason); override willSetLineFragmentRect to adjust rects") }
+    /// Replaces the laid-out rects of the line holding the range until the next layout pass
+    /// (the baseline moves with the rect); override `willSetLineFragmentRect` to change them
+    /// while laying out.
+    open func setLineFragmentRect(_ fragmentRect: NSRect, forGlyphRange glyphRange: NSRange, usedRect: NSRect, baselineOffset: CGFloat) {
+        _layoutManager?.setLineFragmentRect(fragmentRect, forGlyphRange: glyphRange, usedRect: usedRect)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setlocation(_:withadvancements:forstartofglyphrange:)
-    open func setLocation(_ location: NSPoint, withAdvancements advancements: UnsafePointer<CGFloat>!, forStartOfGlyphRange glyphRange: NSRange) { unimplemented("NSTypesetter.setLocation(_:withAdvancements:) — \(NSTypesetter._glyphStorageReason)") }
+    /// The glyphs' locations, from `location` along the advancements, until the next layout
+    /// pass (drawing follows the CoreText lines).
+    open func setLocation(_ location: NSPoint, withAdvancements advancements: UnsafePointer<CGFloat>!, forStartOfGlyphRange glyphRange: NSRange) {
+        guard let lm = _layoutManager else { return }
+        var p = location
+        for i in 0..<max(1, glyphRange.length) {
+            lm.setLocation(p, forStartOfGlyphRange: NSRange(location: glyphRange.location + i, length: 1))
+            guard let advancements, i < glyphRange.length else { break }
+            p.x += advancements[i]
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/setnotshownattribute(_:forglyphrange:)
-    open func setNotShownAttribute(_ flag: Bool, forGlyphRange glyphRange: NSRange) { unimplemented("NSTypesetter.setNotShownAttribute — \(NSTypesetter._glyphStorageReason)") }
+    open func setNotShownAttribute(_ flag: Bool, forGlyphRange glyphRange: NSRange) {
+        guard let lm = _layoutManager else { return }
+        for i in 0..<glyphRange.length { lm.setNotShownAttribute(flag, forGlyphAt: glyphRange.location + i) }
+    }
 }

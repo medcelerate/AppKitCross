@@ -31,7 +31,33 @@ import CoreGraphics
     private var _columns = 1
 
     public override init() { super.init() }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// AppKit's keys (`NSMaximumNumberOfColumns`, `NSMinimumItemSize`, …) and the background
+    /// colours.
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        if let m = coder._decodeObjectIfPresent(forKey: "NSMargins") as? [NSNumber], m.count == 4 {
+            _margins = NSEdgeInsets(top: CGFloat(m[0].doubleValue), left: CGFloat(m[1].doubleValue), bottom: CGFloat(m[2].doubleValue), right: CGFloat(m[3].doubleValue))
+        }
+        _minimumInteritemSpacing = CGFloat(coder.decodeDouble(forKey: "NSMinimumInteritemSpacing"))
+        _minimumLineSpacing = CGFloat(coder.decodeDouble(forKey: "NSMinimumLineSpacing"))
+        _maximumNumberOfRows = coder.decodeInteger(forKey: "NSMaximumNumberOfRows")
+        _maximumNumberOfColumns = coder.decodeInteger(forKey: "NSMaximumNumberOfColumns")
+        if let v = coder._decodeObjectIfPresent(forKey: "NSMinimumItemSize") as? NSValue { _minimumItemSize = v.sizeValue }
+        if let v = coder._decodeObjectIfPresent(forKey: "NSMaximumItemSize") as? NSValue { _maximumItemSize = v.sizeValue }
+        _backgroundColors = coder._decodeObjectIfPresent(forKey: "NSBackgroundColors") as? [NSColor] ?? []
+    }
+    open override func encode(with coder: NSCoder) {
+        super.encode(with: coder)
+        let m = _margins
+        coder.encode([m.top, m.left, m.bottom, m.right].map { NSNumber(value: Double($0)) } as NSArray, forKey: "NSMargins")
+        coder.encode(Double(_minimumInteritemSpacing), forKey: "NSMinimumInteritemSpacing")
+        coder.encode(Double(_minimumLineSpacing), forKey: "NSMinimumLineSpacing")
+        coder.encode(_maximumNumberOfRows, forKey: "NSMaximumNumberOfRows")
+        coder.encode(_maximumNumberOfColumns, forKey: "NSMaximumNumberOfColumns")
+        coder.encode(NSValue(size: _minimumItemSize), forKey: "NSMinimumItemSize")
+        coder.encode(NSValue(size: _maximumItemSize), forKey: "NSMaximumItemSize")
+        if !_backgroundColors.isEmpty { coder.encode(_backgroundColors as NSArray, forKey: "NSBackgroundColors") }
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewgridlayout/margins
     @MainActor open var margins: NSEdgeInsets {
@@ -91,6 +117,18 @@ import CoreGraphics
         w = min(max(w, minW), maxW)
         let h = min(max(w * (minH / minW), minH), maxH)
         return (columns, NSSize(width: w, height: h))
+    }
+
+    /// Where the item at `index` (counting across sections) goes in a grid of `count` items
+    /// laid out `width` wide; zero past the last row (`frameForItem(at:withNumberOfItems:)`).
+    internal func _frame(forItemAt index: Int, count: Int, width: CGFloat, rightToLeft: Bool) -> NSRect {
+        guard index >= 0, index < count else { return .zero }
+        let (columns, cell) = _grid(forWidth: width)
+        let row = index / columns, col = index % columns
+        if _maximumNumberOfRows > 0 && row >= _maximumNumberOfRows { return .zero }
+        var x = _margins.left + CGFloat(col) * (cell.width + _minimumInteritemSpacing)
+        if rightToLeft { x = width - x - cell.width }
+        return NSRect(x: x, y: _margins.top + CGFloat(row) * (cell.height + _minimumLineSpacing), width: cell.width, height: cell.height)
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/prepare()

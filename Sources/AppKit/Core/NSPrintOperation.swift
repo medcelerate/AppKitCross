@@ -113,11 +113,11 @@ import CoreText
         _document = nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/epsoperation(with:inside:to:)
-    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, to data: NSMutableData?) -> NSPrintOperation { unimplemented() }
+    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, to data: NSMutableData?) -> NSPrintOperation { unimplemented("NSPrintOperation.epsOperation — no PostScript writer (as NSView.dataWithEPS); use pdfOperation") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/epsoperation(with:inside:to:printinfo:)
-    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, to data: NSMutableData, printInfo: NSPrintInfo) -> NSPrintOperation { unimplemented() }
+    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, to data: NSMutableData, printInfo: NSPrintInfo) -> NSPrintOperation { unimplemented("NSPrintOperation.epsOperation — no PostScript writer (as NSView.dataWithEPS); use pdfOperation") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/epsoperation(with:inside:topath:printinfo:)
-    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, toPath path: String, printInfo: NSPrintInfo) -> NSPrintOperation { unimplemented() }
+    @MainActor public class func epsOperation(with view: NSView, inside rect: NSRect, toPath path: String, printInfo: NSPrintInfo) -> NSPrintOperation { unimplemented("NSPrintOperation.epsOperation — no PostScript writer (as NSView.dataWithEPS); use pdfOperation") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/iscopyingoperation
     @MainActor open var isCopyingOperation: Bool { _isCopying }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/jobtitle
@@ -161,8 +161,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/pdfpanel
     @MainActor open var pdfPanel: NSPDFPanel {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { unimplemented("NSPrintOperation.pdfPanel — NSPDFPanel is a generated stub (the port's print panel saves PDFs itself)") }
+        set { unimplemented("NSPrintOperation.pdfPanel — NSPDFPanel is a generated stub (the port's print panel saves PDFs itself)") }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintoperation/preferredrenderingquality
     @MainActor open var preferredRenderingQuality: NSPrintOperation.RenderingQuality { .best }

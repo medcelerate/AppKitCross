@@ -67,7 +67,23 @@ import CoreGraphics
     }
 
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// AppKit's `NSGrid_` keys (height, paddings, hidden, placement, alignment).
+    open func encode(with coder: NSCoder) {
+        coder.encode(Double(_height), forKey: "NSGrid_height")
+        coder.encode(Double(_topPadding), forKey: "NSGrid_topPadding")
+        coder.encode(Double(_bottomPadding), forKey: "NSGrid_bottomPadding")
+        coder.encode(_isHidden, forKey: "NSGrid_hidden")
+        coder.encode(_yPlacement.rawValue, forKey: "NSGrid_yPlacement")
+        coder.encode(_rowAlignment.rawValue, forKey: "NSGrid_alignment")
+    }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) {
+        super.init()
+        if coder.containsValue(forKey: "NSGrid_height") { _height = CGFloat(coder.decodeDouble(forKey: "NSGrid_height")) }
+        _topPadding = CGFloat(coder.decodeDouble(forKey: "NSGrid_topPadding"))
+        _bottomPadding = CGFloat(coder.decodeDouble(forKey: "NSGrid_bottomPadding"))
+        _isHidden = coder.decodeBool(forKey: "NSGrid_hidden")
+        _yPlacement = NSGridCell.Placement(rawValue: coder.decodeInteger(forKey: "NSGrid_yPlacement")) ?? .inherited
+        _rowAlignment = NSGridRow.Alignment(rawValue: coder.decodeInteger(forKey: "NSGrid_alignment")) ?? .inherited
+    }
 }

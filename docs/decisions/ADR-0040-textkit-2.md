@@ -176,11 +176,13 @@ convenience surface is real: `layoutCharacters(in:for:maximumNumberOfLineFragmen
 `actionForControlCharacter`, `textTab(forGlyphLocation:…)`, `getLineFragmentRect(…)` (the
 container's proposal), `baselineOffset(in:glyphIndex:)`, `substituteFont`,
 `attributesForExtraLineFragment`, `boundingBox(forControlGlyphAt:…)` and
-`printingAdjustment` (zero: the port lays out with printer metrics). What would let a subclass
-place glyphs itself (`setLineFragmentRect`, `setLocation(_:withAdvancements:…)`, `insertGlyph`,
-`substituteGlyphs`, bidi levels, `layoutParagraph(at:)` overrides driving the layout) stays
-`unimplemented()` with the reason: the port's NSLayoutManager lays out CoreText lines, not glyph
-storage.
+`printingAdjustment` (zero: the port lays out with printer metrics). The glyph setters
+(`setLineFragmentRect`, `setLocation(_:withAdvancements:…)`, `setNotShownAttribute`,
+`setDrawsOutsideLineFragment`, `setBidiLevels`) forward to the layout manager's manual-layout
+setters (ADR-0039): the value replaces the laid-out one until the next layout pass. What
+would edit glyphs (`insertGlyph`, `deleteGlyphs`, `substituteGlyphs`) or drive layout from a
+`layoutParagraph(at:)` override stays `unimplemented()` with the reason: the port's
+NSLayoutManager lays out CoreText lines, not glyph storage.
 
 ## Consequences
 
