@@ -5,6 +5,18 @@ import XCTest
 @testable import AppKit
 
 final class TextEditingTests: XCTestCase, @unchecked Sendable {
+    // These tests drive the Mac key bindings (Option for words, End for the document); the PC
+    // bindings Windows and Linux default to have their own test (TextKit2Tests).
+    private var savedStyle: NSResponder._KeyBindingStyle = .mac
+    override func setUp() {
+        super.setUp()
+        savedStyle = NSResponder._keyBindingStyle
+        NSResponder._keyBindingStyle = .mac
+    }
+    override func tearDown() {
+        NSResponder._keyBindingStyle = savedStyle
+        super.tearDown()
+    }
     @MainActor private func key(_ w: NSWindow, _ chars: String, flags: NSEvent.ModifierFlags = [], plain: String? = nil) {
         let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: w.windowNumber, context: nil,
                                  characters: chars, charactersIgnoringModifiers: plain ?? chars, isARepeat: false, keyCode: 0)!
