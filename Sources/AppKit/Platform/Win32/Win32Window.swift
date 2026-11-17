@@ -378,6 +378,9 @@ final class Win32Window: PlatformWindow {
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+    /// Whether a system key message (Alt held, or F10) is the menu bar's: the window carries
+    /// the native menu bar and Ctrl is not down.
+    private var ownsMenuKeyboard: Bool { hasMenuBar && GetKeyState(VK_CONTROL) >= 0 }
 
     // MARK: Sheets (ADR-0019)
 
@@ -1534,10 +1537,20 @@ final class Win32Window: PlatformWindow {
             if let input = owner?.platformWindowTextInput(), input.hasMarkedText() { input.unmarkText() }
             return 0
         case WM_KEYDOWN, WM_SYSKEYDOWN:
+            // Keyboard access to the native menu bar: Alt+letter (the mnemonics), F10, an
+            // Alt tap, Alt+F4 and Alt+Space are DefWindowProc's (it starts the menu loop from
+            // WM_SYSKEYDOWN / WM_SYSCHAR / WM_SYSKEYUP), as in every Windows application.
+            // Ctrl+Alt combinations stay AppKit key events. The Alt key itself still reaches
+            // AppKit for its modifier flags.
+            if Int32(msg) == WM_SYSKEYDOWN, ownsMenuKeyboard {
+                if Int32(truncatingIfNeeded: wParam) == VK_MENU { key(.keyDown, wParam, lParam) }
+                return nil
+            }
             key(.keyDown, wParam, lParam)
             return 0
         case WM_KEYUP, WM_SYSKEYUP:
             key(.keyUp, wParam, lParam)
+            if Int32(msg) == WM_SYSKEYUP, ownsMenuKeyboard { return nil }
             return 0
         default:
             return nil
