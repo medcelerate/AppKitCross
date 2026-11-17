@@ -662,7 +662,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 // `HelloWindow --metal-selftest` checks the Metal device offscreen and exits with the
 // number of failed checks (the test target needs the host backend, so this is how the
 // Direct3D 12 device is verified on Windows).
-if CommandLine.arguments.contains("--metal-selftest") { exit(MetalSelfTest.run()) }
+if CommandLine.arguments.contains("--metal-selftest") {
+    let failures = MetalSelfTest.run()
+    #if os(Linux)
+    MetalSelfTest.checkPresentedFrame()   // exits with the offscreen and presented-frame failures
+    #endif
+    exit(failures)
+}
 
 let delegate = AppDelegate()
 let app = NSApplication.shared
@@ -889,6 +895,103 @@ enum MetalSelfTest {
             } catch { check("\(error)".contains("undefined_symbol"), "broken shader diagnostics: \(error)") }
         }
     }
+
+    #if os(Linux)
+    static let presentedClearColor = MTLClearColorMake(0.2, 0.6, 0.9, 1)
+
+    /// Draws one cleared frame for a presented-frame comparison and keeps its drawable.
+    final class PresentedFrameRenderer: MTKViewDelegate {
+        var drawable: (any MTLTexture)?
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+        func draw(in view: MTKView) {
+            view.clearColor = MetalSelfTest.presentedClearColor
+            guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable, let texture = view.currentTexture, let cb = view.device?.makeCommandQueue()?.makeCommandBuffer() else { return }
+            cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+            cb.present(drawable)
+            cb.commit()
+            cb.waitUntilCompleted()
+            self.drawable = texture
+        }
+    }
+
+    static func bytes(_ texture: any MTLTexture) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        texture.getBytes(&out, bytesPerRow: texture.width * 4, from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+        return out
+    }
+
+    /// The same clear on the reference device, `width` x `height` BGRA.
+    static func referenceFrame(width: Int, height: Int) -> [UInt8]? {
+        let device = MTLReferenceDevice()
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        td.usage = [.renderTarget, .shaderRead]
+        guard let texture = device.makeTexture(descriptor: td), let cb = device.makeCommandQueue()?.makeCommandBuffer() else { return nil }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = presentedClearColor
+        cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        return bytes(texture)
+    }
+
+    /// A presented MTKView frame against the reference device's (ADR-0042), as
+    /// `MetalD3D12ParityTests` does on Windows: with a window system (X11 or Wayland) and a
+    /// presentable Vulkan device the frame must go through the swap chain and the chain's
+    /// image is read back after the present; headless (lavapipe in CI) the readback path's
+    /// drawable is compared. Exits with the failures of both parts.
+    @MainActor
+    static func checkPresentedFrame() -> Never {
+        let env = ProcessInfo.processInfo.environment
+        let windowSystem = env["APPKITWIN_HOST_BACKEND"] != "1" && (env["WAYLAND_DISPLAY"] != nil || env["DISPLAY"] != nil)
+        // Without a display the window goes to the headless host backend (the readback path);
+        // nothing has asked for the platform backend yet, so it is chosen from this.
+        if !windowSystem { setenv("APPKITWIN_HOST_BACKEND", "1", 1) }
+        guard let device = MTLCreateSystemDefaultDevice() else { check(false, "presented frame: no device"); exit(failures) }
+        let presentable = (device as? MTLVulkanDevice).map { !$0.isHeadless } ?? false
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 96, height: 72), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Metal self-test"
+        let view = MTKView(frame: NSRect(x: 16, y: 12, width: 64, height: 48), device: device)
+        let renderer = PresentedFrameRenderer()
+        view.delegate = renderer
+        view.isPaused = true   // explicit drawing: only the check's draw() runs a frame
+        window.contentView!.addSubview(view)
+        window.makeKeyAndOrderFront(nil)
+        func finish() -> Never {
+            renderer.drawable = nil
+            view.draw()
+            let path = view._presentsThroughSwapChain ? "swap chain" : "readback"
+            print("presented frame: \(device.name) window system=\(windowSystem) presentable=\(presentable) path=\(path)\(view._presentationError.isEmpty ? "" : " error=\(view._presentationError)")")
+            if windowSystem && presentable && env["APPKITWIN_METAL_READBACK"] != "1" {
+                check(view._presentsThroughSwapChain, "presented frame goes through the swap chain (\(view._presentationError))")
+                check(view._swapChainPresentCount >= 1, "the swap chain presented \(view._swapChainPresentCount) frame(s)")
+            }
+            if let texture = renderer.drawable {
+                check(texture.width == Int(view.drawableSize.width) && texture.height == Int(view.drawableSize.height) && texture.pixelFormat == view.colorPixelFormat,
+                      "the drawable is \(texture.width)x\(texture.height) \(texture.pixelFormat), the view's drawableSize \(view.drawableSize) and colorPixelFormat")
+                let frame = bytes(texture)
+                if let reference = referenceFrame(width: texture.width, height: texture.height) {
+                    var worst = 0
+                    for (a, b) in zip(frame, reference) { worst = max(worst, abs(Int(a) - Int(b))) }
+                    check(frame.count == reference.count && worst <= 1, "presented \(path) frame matches the reference device within one level (worst \(worst), centre \(Array(frame[(texture.height / 2 * texture.width + texture.width / 2) * 4..<(texture.height / 2 * texture.width + texture.width / 2) * 4 + 4])))")
+                } else { check(false, "reference frame") }
+            } else { check(false, "presented frame: no drawable (\(view._presentationError))") }
+            withExtendedLifetime(renderer) { window.close() }
+            print("presented-frame check done")
+            fflush(nil)
+            exit(failures)
+        }
+        guard windowSystem else { finish() }
+        // Wayland shows a subsurface's frames once the window is mapped (the compositor's
+        // configure, a committed parent buffer): run the event loop briefly first.
+        nonisolated(unsafe) let finishOnMain = finish   // the timer fires on the main thread
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in MainActor.assumeIsolated { () -> Void in finishOnMain() } }
+        NSApplication.shared.run()
+        exit(failures)
+    }
+    #endif
 }
 
 

@@ -43,18 +43,29 @@ final class _AppStorageBox<Value> {
     let write: (Value, UserDefaults, String) -> Void
     weak var node: _ViewNode?
     var observer: NSObjectProtocol?
+    var writeObserver: NSObjectProtocol?
     init(key: String, store: UserDefaults, initial: Value, read: @escaping (UserDefaults, String) -> Value?, write: @escaping (Value, UserDefaults, String) -> Void) {
         self.key = key; self.store = store; self.initial = initial; self.read = read; self.write = write
     }
-    deinit { if let o = observer { NotificationCenter.default.removeObserver(o) } }
+    deinit {
+        if let o = observer { NotificationCenter.default.removeObserver(o) }
+        if let o = writeObserver { NotificationCenter.default.removeObserver(o) }
+    }
     var value: Value {
         get { read(store, key) ?? initial }
         set {
             write(newValue, store, key)
             MainActor.assumeIsolated { node?.setNeedsUpdate() }
+            // Every other @AppStorage of the key (a command writing what a window shows)
+            // updates too: swift-corelibs-foundation does not post
+            // `UserDefaults.didChangeNotification` for a set, as Foundation on macOS does.
+            NotificationCenter.default.post(name: _AppStorageBoxDidWrite, object: store, userInfo: ["key": key])
         }
     }
 }
+
+/// Posted by an @AppStorage write, with the key, so the views reading that key update.
+let _AppStorageBoxDidWrite = Notification.Name("SwiftUI._AppStorageBoxDidWrite")
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/appstorage
 @propertyWrapper
@@ -85,6 +96,11 @@ public struct AppStorage<Value>: DynamicProperty {
         box.node = node
         if box.observer == nil {
             box.observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: box.store, queue: nil) { [weak box] _ in
+                MainActor.assumeIsolated { box?.node?.setNeedsUpdate() }
+            }
+            let key = box.key
+            box.writeObserver = NotificationCenter.default.addObserver(forName: _AppStorageBoxDidWrite, object: box.store, queue: nil) { [weak box] n in
+                guard (n.userInfo?["key"] as? String) == key else { return }
                 MainActor.assumeIsolated { box?.node?.setNeedsUpdate() }
             }
         }

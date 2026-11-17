@@ -25,6 +25,17 @@ final class Win32Pasteboard: PlatformPasteboard {
 
     var changeCount: Int { Int(GetClipboardSequenceNumber()) }
 
+    /// Clipboard text as AppKit sees it: CR LF and lone CR line ends become LF (a CR LF
+    /// pair is one `Character` in Swift, so code that counts "\n" saw no lines at all).
+    nonisolated static func lf(_ text: String) -> String {
+        guard text.utf8.contains(13) else { return text }
+        return text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    }
+    /// Text for the Windows clipboard: LF line ends become CR LF.
+    nonisolated static func crlf(_ text: String) -> String {
+        lf(text).replacingOccurrences(of: "\n", with: "\r\n")
+    }
+
     func write(_ entries: [PlatformPasteboardEntry]) {
         guard openClipboard() else { return }
         defer { CloseClipboard() }
@@ -32,7 +43,9 @@ final class Win32Pasteboard: PlatformPasteboard {
         for e in entries {
             let bytes: [UInt8]
             if e.type == Win32Pasteboard.textType {
-                let text = String(decoding: e.data, as: UTF8.self)
+                // Windows text on the clipboard ends its lines with CR LF (Notepad and the
+                // edit controls expect it); AppKit text uses LF.
+                let text = Win32Pasteboard.crlf(String(decoding: e.data, as: UTF8.self))
                 var u = Array(text.utf16); u.append(0)
                 bytes = u.withUnsafeBytes { Array($0) }
             } else {
@@ -97,7 +110,7 @@ final class Win32Pasteboard: PlatformPasteboard {
         }
         var result: [PlatformPasteboardEntry] = []
         if IsClipboardFormatAvailable(UINT(CF_UNICODETEXT)), let h = GetClipboardData(UINT(CF_UNICODETEXT)), let p = GlobalLock(h) {
-            let text = String(decodingCString: p.assumingMemoryBound(to: UInt16.self), as: UTF16.self)
+            let text = Win32Pasteboard.lf(String(decodingCString: p.assumingMemoryBound(to: UInt16.self), as: UTF16.self))
             GlobalUnlock(h)
             result.append(PlatformPasteboardEntry(type: Win32Pasteboard.textType, data: Data(text.utf8)))
         }
