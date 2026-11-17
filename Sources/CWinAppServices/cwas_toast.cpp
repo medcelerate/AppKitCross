@@ -9,6 +9,12 @@
 //
 // Plain COM over the WinRT ABI headers (no WRL, no C++/WinRT): the three event handlers are
 // small hand-written agile objects.
+//
+// Every WinRT call runs on one thread the shim owns, which joins the multithreaded apartment.
+// The Swift side calls in from the main thread (a single-threaded apartment, since the Win32
+// backend initializes OLE for drag and drop), from the notification center's queue and from
+// trigger timers. A notifier created in one of those apartments and used from another fails
+// with RPC_E_WRONG_THREAD, so none of them touches WinRT directly.
 #if defined(_WIN32)
 #include "cwas.h"
 
@@ -25,6 +31,10 @@
 #include <windows.ui.notifications.h>
 #include <cstdio>
 #include <cstring>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <thread>
 #include <map>
 #include <mutex>
 #include <string>
@@ -89,6 +99,80 @@ static std::wstring liveKey(const std::wstring &tag, const std::wstring &group) 
 
 static void ensureMTA() {
     if (!g_mtaCookie) CoIncrementMTAUsage(&g_mtaCookie);
+}
+
+/// The toast thread's work queue. Allocated once and never freed, so process exit cannot
+/// destroy it under the waiting thread.
+struct ToastThread {
+    std::mutex lock;
+    std::condition_variable ready;
+    std::deque<std::function<void()>> jobs;
+    std::thread::id id;
+};
+static ToastThread *g_toastThread = nullptr;
+static std::once_flag g_toastThreadOnce;
+
+static void toastThreadMain(ToastThread *t) {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    for (;;) {
+        std::function<void()> job;
+        {
+            std::unique_lock<std::mutex> l(t->lock);
+            t->ready.wait(l, [t] { return !t->jobs.empty(); });
+            job = std::move(t->jobs.front());
+            t->jobs.pop_front();
+        }
+        job();
+    }
+}
+
+/// Runs `work` on the toast thread and waits for it (inline when already there).
+static void onToastThread(const std::function<void()> &work) {
+    std::call_once(g_toastThreadOnce, [] {
+        ToastThread *t = new ToastThread();
+        std::thread thread(toastThreadMain, t);
+        t->id = thread.get_id();
+        thread.detach();
+        g_toastThread = t;
+    });
+    ToastThread *t = g_toastThread;
+    if (std::this_thread::get_id() == t->id) { work(); return; }
+    std::mutex doneLock;
+    std::condition_variable doneReady;
+    bool done = false;
+    {
+        std::lock_guard<std::mutex> l(t->lock);
+        t->jobs.push_back([&] {
+            work();
+            std::lock_guard<std::mutex> d(doneLock);
+            done = true;
+            doneReady.notify_one();
+        });
+    }
+    t->ready.notify_one();
+    std::unique_lock<std::mutex> d(doneLock);
+    doneReady.wait(d, [&] { return done; });
+}
+
+static const char *apartmentName() {
+    APTTYPE type;
+    APTTYPEQUALIFIER qualifier;
+    if (FAILED(CoGetApartmentType(&type, &qualifier))) return "none";
+    switch (type) {
+    case APTTYPE_MTA: return "MTA";
+    case APTTYPE_STA: return "STA";
+    case APTTYPE_MAINSTA: return "main STA";
+    case APTTYPE_NA: return "NA";
+    default: return "other";
+    }
+}
+
+/// One line on stderr naming the calling thread and the toast thread, so a call that ever
+/// lands in the wrong apartment again says where it came from.
+static void traceThread(const char *what, const char *detail, DWORD caller, HRESULT hr) {
+    fprintf(stderr, "UserNotifications: %s%s%s on toast thread %lu (%s), called from thread %lu, HRESULT 0x%08lx\n",
+            what, detail && *detail ? " " : "", detail ? detail : "",
+            (unsigned long)GetCurrentThreadId(), apartmentName(), (unsigned long)caller, (unsigned long)hr);
 }
 
 static std::wstring tagOf(IToastNotification *toast, std::wstring *group) {
@@ -266,8 +350,8 @@ static void registerAumid(const std::wstring &aumid, const std::wstring &name, c
     RegCloseKey(key);
 }
 
-extern "C" int32_t cwas_toast_init(const char *aumid, const char *display_name, const char *icon_path,
-                                   cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context) {
+static int32_t toastInit(const char *aumid, const char *display_name, const char *icon_path,
+                         cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context) {
     std::lock_guard<std::mutex> guard(g_lock);
     if (g_notifier) return S_OK;
     ensureMTA();
@@ -298,7 +382,7 @@ extern "C" int32_t cwas_toast_init(const char *aumid, const char *display_name, 
     return hr;
 }
 
-extern "C" int cwas_toast_setting(void) {
+static int toastSetting(void) {
     IToastNotifier *notifier = nullptr;
     {
         std::lock_guard<std::mutex> guard(g_lock);
@@ -309,10 +393,15 @@ extern "C" int cwas_toast_setting(void) {
     NotificationSetting setting = NotificationSetting_Enabled;
     HRESULT hr = notifier->get_Setting(&setting);
     notifier->Release();
+    // An AppUserModelID that has never shown a toast has no notification settings entry yet,
+    // and get_Setting fails with ERROR_NOT_FOUND. Windows creates the entry, enabled, on the
+    // first toast, so that is "enabled". Only the Disabled… values mean the user, policy or the
+    // manifest turned the app off.
+    if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) return (int)NotificationSetting_Enabled;
     return SUCCEEDED(hr) ? (int)setting : -1;
 }
 
-extern "C" int32_t cwas_toast_show(const char *xml, const char *tag, const char *group, int suppress_popup, const char *input_ids) {
+static int32_t toastShow(const char *xml, const char *tag, const char *group, int suppress_popup, const char *input_ids) {
     IToastNotifier *notifier = nullptr;
     {
         std::lock_guard<std::mutex> guard(g_lock);
@@ -388,7 +477,7 @@ extern "C" int32_t cwas_toast_show(const char *xml, const char *tag, const char 
     return hr;
 }
 
-extern "C" void cwas_toast_remove(const char *tag, const char *group) {
+static void toastRemove(const char *tag, const char *group) {
     std::wstring wtag = widen(tag), wgroup = widen(group);
     IToastNotificationHistory *history = nullptr;
     {
@@ -404,7 +493,7 @@ extern "C" void cwas_toast_remove(const char *tag, const char *group) {
     forget(nullptr, wtag, wgroup);
 }
 
-extern "C" void cwas_toast_clear(void) {
+static void toastClear(void) {
     IToastNotificationHistory *history = nullptr;
     std::map<std::wstring, LiveToast> live;
     {
@@ -419,6 +508,48 @@ extern "C" void cwas_toast_clear(void) {
         history->Release();
     }
     for (auto &entry : live) release(entry.second.toast);
+}
+
+// The entry points: each runs its work on the toast thread (see the top of the file).
+
+extern "C" int32_t cwas_toast_init(const char *aumid, const char *display_name, const char *icon_path,
+                                   cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context) {
+    DWORD caller = GetCurrentThreadId();
+    int32_t hr = E_UNEXPECTED;
+    onToastThread([&] {
+        bool created = false;
+        {
+            std::lock_guard<std::mutex> guard(g_lock);
+            created = g_notifier != nullptr;
+        }
+        hr = toastInit(aumid, display_name, icon_path, activated, dismissed, context);
+        if (!created) traceThread("toast notifier for", aumid, caller, hr);
+    });
+    return hr;
+}
+
+extern "C" int cwas_toast_setting(void) {
+    int setting = -1;
+    onToastThread([&] { setting = toastSetting(); });
+    return setting;
+}
+
+extern "C" int32_t cwas_toast_show(const char *xml, const char *tag, const char *group, int suppress_popup, const char *input_ids) {
+    DWORD caller = GetCurrentThreadId();
+    int32_t hr = E_UNEXPECTED;
+    onToastThread([&] {
+        hr = toastShow(xml, tag, group, suppress_popup, input_ids);
+        if (FAILED(hr) || GetEnvironmentVariableA("APPKITWIN_TRACE_TOASTS", nullptr, 0) > 0) traceThread("show toast", tag, caller, hr);
+    });
+    return hr;
+}
+
+extern "C" void cwas_toast_remove(const char *tag, const char *group) {
+    onToastThread([&] { toastRemove(tag, group); });
+}
+
+extern "C" void cwas_toast_clear(void) {
+    onToastThread([&] { toastClear(); });
 }
 
 #endif

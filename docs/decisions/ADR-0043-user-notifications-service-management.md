@@ -26,8 +26,13 @@ package's build directory would shadow Apple's for every macOS target.
 `Sources/CWinAppServices` (Windows only) is the C++ shim for both: WinRT toasts, AUMID
 registration, the Run key, the Startup-folder shortcut and `ShellExecute`. It is plain COM over
 the WinRT ABI headers, with no WRL or C++/WinRT. It never initializes COM on the caller's
-thread: `CoIncrementMTAUsage` keeps the multithreaded apartment alive, so calls from the main
-thread do not change the apartment the Win32 backend's OLE drag and drop needs. Linux uses the
+thread, so calls from the main thread do not change the apartment the Win32 backend's OLE drag
+and drop needs. Every toast call runs on one thread the shim owns, in the multithreaded
+apartment, and the caller waits for it. The notifier is created once and called from the main
+thread, the center's queue and trigger timers; a WinRT object used outside the apartment that
+created it fails with `RPC_E_WRONG_THREAD` (found on the PC). The shim traces the toast thread,
+its apartment and the calling thread when it creates the notifier and when a toast fails
+(every toast with `APPKITWIN_TRACE_TOASTS` set). Linux uses the
 existing `CDBus` system library.
 
 ### UserNotifications: the center owns the state
@@ -44,8 +49,11 @@ test build and the tests' fakes). The Windows toast XML (`ToastXML`) and the fre
 until the app calls `requestAuthorization` (the requested options are kept in the app's user
 defaults). After that it is `authorized`, or `provisional` when `.provisional` was requested,
 while the platform lets the app notify, and `denied` while it does not. On Windows "does not"
-means the toast notifier's `NotificationSetting` is off: the user turned the app or all
-notifications off, or policy did. On Linux it means no notification server answers on the
+means the toast notifier's `NotificationSetting` is one of the disabled values: the user
+turned the app or all notifications off, or policy or the manifest did. An AppUserModelID that
+has never shown a toast has no settings entry yet, and the setting read fails with
+`ERROR_NOT_FOUND`; Windows creates the entry, enabled, with the first toast, so that counts as
+allowed. On Linux it means no notification server answers on the
 session bus. `add` fails with `UNError.notificationsNotAllowed` unless the status is authorized
 or provisional, as Apple's does. Settings report sound, badge and alert per the requested
 options; lock screen, CarPlay, critical and time-sensitive are `.notSupported`.
