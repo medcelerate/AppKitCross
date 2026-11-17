@@ -166,6 +166,12 @@ private final class CollectionFixture {
         window.makeKeyAndOrderFront(nil)
         scroll.layoutSubtreeIfNeeded()
     }
+    /// The window goes with the fixture: its animated applies (ADR-0041) would otherwise
+    /// keep layer animations on screen into later tests.
+    deinit {
+        let w = window
+        MainActor.assumeIsolated { w.close() }
+    }
 
     /// The label of each visible item by index path, as [section][item].
     func shown() -> [[String]] {
