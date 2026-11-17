@@ -244,9 +244,10 @@ import UniformTypeIdentifiers
     @MainActor open var isLocked: Bool { _isLocked }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/readabletypes
-    @MainActor class public var readableTypes: [String] { NSDocumentController.shared._readableTypes(forDocumentClass: self) }
+    /// Overridable, as on macOS (a subclass lists its own types).
+    @MainActor open class var readableTypes: [String] { NSDocumentController.shared._readableTypes(forDocumentClass: self) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/writabletypes
-    @MainActor class public var writableTypes: [String] { NSDocumentController.shared._writableTypes(forDocumentClass: self) }
+    @MainActor open class var writableTypes: [String] { NSDocumentController.shared._writableTypes(forDocumentClass: self) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/writabletypes(for:)
     /// The class's writable types; a save (not save-as) of a document of a non-native
     /// type keeps that type.
@@ -258,7 +259,7 @@ import UniformTypeIdentifiers
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/isnativetype(_:)
-    @MainActor public class func isNativeType(_ type: String) -> Bool {
+    @MainActor open class func isNativeType(_ type: String) -> Bool {
         readableTypes.contains(type) && writableTypes.contains(type)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/filenameextension(fortype:saveoperation:)
@@ -266,7 +267,7 @@ import UniformTypeIdentifiers
         MainActor.assumeIsolated { NSDocumentController.shared._fileNameExtension(forType: typeName) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/canconcurrentlyreaddocuments(oftype:)
-    @MainActor public class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { false }
+    @MainActor open class func canConcurrentlyReadDocuments(ofType typeName: String) -> Bool { false }
 
     // MARK: Reading
 
@@ -644,13 +645,13 @@ import UniformTypeIdentifiers
     // MARK: Autosaving
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/autosavesinplace
-    @MainActor class public var autosavesInPlace: Bool { false }
+    @MainActor open class var autosavesInPlace: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/autosavesdrafts
-    @MainActor class public var autosavesDrafts: Bool { false }
+    @MainActor open class var autosavesDrafts: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/preservesversions
-    @MainActor class public var preservesVersions: Bool { false }
+    @MainActor open class var preservesVersions: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/usesubiquitousstorage
-    @MainActor class public var usesUbiquitousStorage: Bool { false }
+    @MainActor open class var usesUbiquitousStorage: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/autosavingfiletype
     @MainActor open var autosavingFileType: String? { _fileType }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/autosavedcontentsfileurl
@@ -1010,7 +1011,7 @@ import UniformTypeIdentifiers
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/allowedclasses(forrestorablestatekeypath:)
     @available(macOS 12.0, *)
-    @MainActor public class func allowedClasses(forRestorableStateKeyPath keyPath: String) -> [AnyClass] { [] }
+    @MainActor open class func allowedClasses(forRestorableStateKeyPath keyPath: String) -> [AnyClass] { [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/encoderestorablestate(with:)
     @MainActor open func encodeRestorableState(with coder: NSCoder) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/encoderestorablestate(with:backgroundqueue:)
@@ -1018,7 +1019,7 @@ import UniformTypeIdentifiers
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/invalidaterestorablestate()
     @MainActor open func invalidateRestorableState() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/restorablestatekeypaths
-    @MainActor class public var restorableStateKeyPaths: [String] { [] }
+    @MainActor open class var restorableStateKeyPaths: [String] { [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/restorestate(with:)
     @MainActor open func restoreState(with coder: NSCoder) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocument/restorewindow(withidentifier:state:)

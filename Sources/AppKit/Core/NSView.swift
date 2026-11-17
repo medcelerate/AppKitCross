@@ -1326,6 +1326,11 @@ import CoreText
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
+            // As on macOS, descendants that are not hidden themselves hear about it too,
+            // when the change is visible (no hidden ancestor above this view).
+            if !(_superview?.isHiddenOrHasHiddenAncestor ?? false) {
+                for s in _subviews { s._ancestorHiddenDidChange(newValue) }
+            }
             // A hidden effect view no longer asks for the system backdrop (nor do those
             // under a hidden ancestor).
             if let w = _window, w._hasEffectViews { w._updateBackdrop() }
@@ -1334,6 +1339,15 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishiddenorhashiddenancestor
     @MainActor open var isHiddenOrHasHiddenAncestor: Bool { _isHidden || (_superview?.isHiddenOrHasHiddenAncestor ?? false) }
+
+    /// `viewDidHide`/`viewDidUnhide` for a view whose ancestor was hidden or shown ("either
+    /// directly, or in response to an ancestor being hidden"); a hidden view's own subtree
+    /// does not change visibility, so it stops there.
+    @MainActor private func _ancestorHiddenDidChange(_ hidden: Bool) {
+        guard !_isHidden else { return }
+        if hidden { viewDidHide() } else { viewDidUnhide() }
+        for s in _subviews { s._ancestorHiddenDidChange(hidden) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishorizontalcontentsizeconstraintactive
     @available(macOS 10.15, *)
     /// When false the layout engine ignores the horizontal intrinsic size.

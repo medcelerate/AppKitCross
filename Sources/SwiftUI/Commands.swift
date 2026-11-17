@@ -7,7 +7,7 @@ import Foundation
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/commands
 public protocol Commands {
     associatedtype Body: Commands
-    @CommandsBuilder var body: Self.Body { get }
+    @CommandsBuilder @MainActor var body: Self.Body { get }
 }
 
 extension Never: Commands {}
@@ -148,11 +148,23 @@ public final class _MenuBarBuilder {
             Group(name: "printItem", items: []),
         ]))
         menus[1].groups[0].items[0].keyEquivalent = "n"
+        if runner._hasDocumentGroups {
+            // A DocumentGroup's File menu, as on macOS: the actions reach the document
+            // controller (New, Open, Open Recent) and the key window's document (Save, Save
+            // As, Revert) through the responder chain.
+            let recent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+            let recentMenu = NSMenu(title: "Open Recent")
+            recentMenu.addItem(item("Clear Menu", "clearRecentDocuments:"))
+            recent.submenu = recentMenu
+            menus[1].groups[0].items = [item("New", "newDocument:", "n"), item("Open\u{2026}", "openDocument:", "o"), recent]
+            menus[1].groups[2].items = [item("Save", "saveDocument:", "s"), item("Save As\u{2026}", "saveDocumentAs:", "s", mods: [.command, .shift]),
+                                        item("Revert to Saved", "revertDocumentToSaved:")]
+        }
         menus.append(MenuSpec(title: "Edit", groups: [
             Group(name: "undoRedo", items: [item("Undo", "undo:", "z"), item("Redo", "redo:", "z", mods: [.command, .shift])]),
             Group(name: "pasteboard", items: [item("Cut", "cut:", "x"), item("Copy", "copy:", "c"), item("Paste", "paste:", "v"),
                                               item("Delete", "delete:"), item("Select All", "selectAll:", "a")]),
-            Group(name: "textEditing", items: []),
+            Group(name: "textEditing", items: [_MenuBarBuilder.findMenu()]),
         ]))
         menus.append(MenuSpec(title: "View", groups: [Group(name: "toolbar", items: []), Group(name: "sidebar", items: [])]))
         menus.append(MenuSpec(title: "Window", groups: [
@@ -161,6 +173,30 @@ public final class _MenuBarBuilder {
             Group(name: "windowList", items: []),
         ]))
         menus.append(MenuSpec(title: "Help", groups: [Group(name: "help", items: [item("\(appName) Help", "showHelp:", "?")])]))
+    }
+
+    /// Edit > Find, as SwiftUI's standard Edit menu has it (in the `.textEditing` group):
+    /// the text finder actions by tag, through the responder chain to the focused text
+    /// view (its find bar). "Use Selection for Find" has no key equivalent here: an app's
+    /// own Cmd-E command (MD Vault's Toggle Editor / Viewer) would never be reached.
+    static func findMenu() -> NSMenuItem {
+        let menu = NSMenu(title: "Find")
+        let entries: [(String, String, NSEvent.ModifierFlags, NSTextFinder.Action)] = [
+            ("Find\u{2026}", "f", [.command], .showFindInterface),
+            ("Find and Replace\u{2026}", "f", [.command, .option], .showReplaceInterface),
+            ("Find Next", "g", [.command], .nextMatch),
+            ("Find Previous", "g", [.command, .shift], .previousMatch),
+            ("Use Selection for Find", "", [.command], .setSearchString),
+        ]
+        for (title, key, mods, action) in entries {
+            let i = NSMenuItem(title: title, action: Selector(("performTextFinderAction:")), keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods
+            i.tag = action.rawValue
+            menu.addItem(i)
+        }
+        let item = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
     }
 
     func apply(_ commands: any Commands) {

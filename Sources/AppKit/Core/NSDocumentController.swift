@@ -635,6 +635,10 @@ import UniformTypeIdentifiers
                 remaining.removeFirst()
                 doc._canClose { ok in
                     guard ok else { completion(false); return }
+                    // A reviewed document (saved, or its changes discarded) closes before
+                    // the next one is asked about, as on macOS; Don't Save left it open
+                    // and still edited behind the next alert.
+                    doc.close()
                     next()
                 }
             }
