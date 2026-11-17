@@ -221,6 +221,13 @@ narrows the clip view can leave lines under the scroller.
   link runs take the text view's `linkTextAttributes` (or `linkRenderingAttributes` without a
   view) rather than asking the delegate per link; `renderingAttributes(forLink:at:)` answers
   with the delegate's attributes for callers.
+- Known limit, TextKit 1: NSLayoutManager still lays the whole document out again after
+  every edit (one CoreText conversion and typesetter for the whole text, which its tables and
+  text blocks rely on). At 3000 lines that is about 15 ms per keystroke on the Mac and about
+  2 s on the Windows PC (a 3000-line paste: 13.5 s there, against 8.5 s for TextKit 2).
+  TextKit 2 is the incremental engine (under 0.5 s for three keystrokes on the same PC);
+  making TextKit 1 incremental means per-paragraph typesetting in NSLayoutManager and is
+  left for later.
 - Not done: multiple text containers in TextKit 2 (Apple's TextKit 2 has one per layout
   manager too), vertical layout orientation, `NSTextAttachmentViewProvider` views in fragments
   (attachments draw their image or cell), `layoutQueue` (layout is synchronous; the property
