@@ -28,7 +28,7 @@ public protocol NSTextContentManagerDelegate: NSObjectProtocol {
 @available(macOS 12.0, *)
 extension NSTextContentManagerDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontentmanagerdelegate/textcontentmanager(_:shouldenumerate:options:)
-    public func textContentManager(_ textContentManager: NSTextContentManager, shouldEnumerate textElement: NSTextElement, options: NSTextContentManager.EnumerationOptions) -> Bool { return false }
+    public func textContentManager(_ textContentManager: NSTextContentManager, shouldEnumerate textElement: NSTextElement, options: NSTextContentManager.EnumerationOptions) -> Bool { return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontentmanagerdelegate/textcontentmanager(_:textelementat:)
     public func textContentManager(_ textContentManager: NSTextContentManager, textElementAt location: any NSTextLocation) -> NSTextElement? { return nil }
 }

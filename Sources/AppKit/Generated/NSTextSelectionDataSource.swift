@@ -44,8 +44,8 @@ public protocol NSTextSelectionDataSource: NSObjectProtocol {
 @available(macOS 12.0, *)
 extension NSTextSelectionDataSource {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextselectiondatasource/enumeratecontainerboundaries(from:reverse:using:)
-    public func enumerateContainerBoundaries(from location: any NSTextLocation, reverse: Bool, using block: (any NSTextLocation, UnsafeMutablePointer<ObjCBool>) -> Void) { unimplementedOptionalRequirement() }
+    public func enumerateContainerBoundaries(from location: any NSTextLocation, reverse: Bool, using block: (any NSTextLocation, UnsafeMutablePointer<ObjCBool>) -> Void) { return }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextselectiondatasource/textlayoutorientation(at:)
-    public func textLayoutOrientation(at location: any NSTextLocation) -> NSTextSelectionNavigation.LayoutOrientation { unimplementedOptionalRequirement() }
+    public func textLayoutOrientation(at location: any NSTextLocation) -> NSTextSelectionNavigation.LayoutOrientation { return .horizontal }
 }
 

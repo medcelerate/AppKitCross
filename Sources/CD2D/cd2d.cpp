@@ -2170,7 +2170,9 @@ uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t
         BITMAPINFO bi = {};
         bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         bi.bmiHeader.biWidth = (LONG)width;
-        bi.bmiHeader.biHeight = -(LONG)height;
+        // Bottom-up rows: the shell's drag image helper draws a top-down DIB upside down
+        // (PR 86 PC round), so the top-down pixels are stored last row first below.
+        bi.bmiHeader.biHeight = (LONG)height;
         bi.bmiHeader.biPlanes = 1;
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
@@ -2179,7 +2181,10 @@ uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t
         HBITMAP bitmap = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
         ReleaseDC(nullptr, dc);
         if (bitmap && bits) {
-            memcpy(bits, imageBGRA, (size_t)width * height * 4);
+            const size_t rowBytes = (size_t)width * 4;
+            for (uint32_t y = 0; y < height; y++) {
+                memcpy((uint8_t *)bits + (size_t)(height - 1 - y) * rowBytes, imageBGRA + (size_t)y * rowBytes, rowBytes);
+            }
             IDragSourceHelper *helper = nullptr;
             if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&helper))) && helper) {
                 SHDRAGIMAGE image = {};

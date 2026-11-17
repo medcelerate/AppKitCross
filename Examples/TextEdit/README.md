@@ -36,6 +36,12 @@ Each edit calls `updateChangeCount(.changeDone)` from the text view's change not
 the port's `NSTextView` does not register undo actions yet, so the document's undo manager
 (which would otherwise drive the change count, as on macOS) has nothing to count.
 
+Text engines (ADR-0040): documents open with TextKit 1 unless `APPKITWIN_TEXTKIT=2` is set,
+which opens them with TextKit 2 (`NSTextLayoutManager`, `NSTextContentStorage`, viewport
+layout, selection navigation). Format > Use TextKit 1 / Use TextKit 2 moves the front
+document to the other engine, so both can be compared on the same text; both draw the same
+pixels. Documents with tables always use TextKit 1, as on macOS.
+
 Run it:
 
 ```bash
@@ -43,6 +49,7 @@ swift run TextEdit
 swift run TextEdit notes.txt                 # opens the file
 swift run TextEdit --roundtrip out.rtf       # headless: make, write, reopen a document
 APPKITWIN_FILE_DIALOG=package swift run TextEdit --show-save-panel   # the package-drawn panel
+APPKITWIN_TEXTKIT=2 swift run TextEdit                                # documents open with TextKit 2
 ```
 
 On Windows the panels are the common item dialogs; on Linux the xdg-desktop-portal

@@ -139,7 +139,9 @@ final class TextDocument: NSDocument {
         let scroll = NSScrollView(frame: window.contentView!.bounds)
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
-        let tv = NSTextView(frame: scroll.bounds)
+        // As wide as the clip view, not the scroll view: a legacy scroller (Windows) takes
+        // its width out of the content, and the text must wrap before it.
+        let tv = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
         tv.autoresizingMask = [.width, .height]
         TextDocument.configure(tv, rich: isRichText)
         tv.font = NSFont.userFont(ofSize: 13)
@@ -190,6 +192,38 @@ final class TextDocument: NSDocument {
         updateChangeCount(.changeDone)
     }
 
+    // MARK: Text engine (ADR-0040)
+
+    /// Format > Use TextKit 1 / Use TextKit 2: the same document under the other engine, to
+    /// compare them. TextKit 2 to 1 is AppKit's own switch (asking for the layout manager);
+    /// TextKit 1 to 2 builds a new TextKit 2 view with the document's text and selection.
+    func switchTextEngine() {
+        guard let old = textView, let scroll = old.enclosingScrollView, let window = old.window else { return }
+        if old.textLayoutManager != nil { _ = old.layoutManager; old.needsDisplay = true; return }
+        let tv = NSTextView(usingTextLayoutManager: true)
+        tv.minSize = old.minSize
+        tv.maxSize = old.maxSize
+        tv.isVerticallyResizable = old.isVerticallyResizable
+        tv.isHorizontallyResizable = old.isHorizontallyResizable
+        tv.frame = old.frame
+        tv.autoresizingMask = old.autoresizingMask
+        TextDocument.configure(tv, rich: isRichText)
+        tv.font = old.font
+        if let text = old.textStorage?.copy() as? NSAttributedString { tv.textStorage?.setAttributedString(text) }
+        tv.setSelectedRange(old.selectedRange())
+        // The new view has not checked the text yet; show the same misspellings now.
+        if tv.isContinuousSpellCheckingEnabled { tv.checkTextInDocument(nil) }
+        tv.setAccessibilityLabel("Document text")
+        if let o = changeObserver { NotificationCenter.default.removeObserver(o) }
+        changeObserver = NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: tv, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.convertToRTFDIfNeeded() }
+        }
+        scroll.documentView = tv
+        window.initialFirstResponder = tv
+        _ = window.makeFirstResponder(tv)
+        textView = tv
+    }
+
     // MARK: Printing (ADR-0022)
 
     /// File > Print…, Page Setup… and Export as PDF… end here: the text view is the printed
@@ -223,15 +257,20 @@ final class TextDocument: NSDocument {
 
     override func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         if NSStringFromSelector(action) == "toggleRichText:" { toggleRichText(); return true }
+        if NSStringFromSelector(action) == "switchTextEngine:" { switchTextEngine(); return true }
         return super.performSelectorAction(action, with: sender)
     }
     override func respondsToSelectorAction(_ action: Selector) -> Bool {
-        NSStringFromSelector(action) == "toggleRichText:" || super.respondsToSelectorAction(action)
+        ["toggleRichText:", "switchTextEngine:"].contains(NSStringFromSelector(action)) || super.respondsToSelectorAction(action)
     }
     override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action.map(NSStringFromSelector) == "toggleRichText:" {
             menuItem.title = isRichText ? "Make Plain Text" : "Make Rich Text"
             return true
+        }
+        if menuItem.action.map(NSStringFromSelector) == "switchTextEngine:" {
+            menuItem.title = textView?.textLayoutManager != nil ? "Use TextKit 1" : "Use TextKit 2"
+            return textView != nil
         }
         return super.validateMenuItem(menuItem)
     }
@@ -306,6 +345,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let format = NSMenu(title: "Format")
         let rich = format.addItem(withTitle: "Make Rich Text", action: Selector(("toggleRichText:")), keyEquivalent: "t")
         rich.keyEquivalentModifierMask = [.command, .shift]
+        // Compare the text engines on the same document (ADR-0040; APPKITWIN_TEXTKIT=2 opens
+        // documents with TextKit 2).
+        format.addItem(withTitle: ProcessInfo.processInfo.environment["APPKITWIN_TEXTKIT"] == "2" ? "Use TextKit 1" : "Use TextKit 2",
+                       action: Selector(("switchTextEngine:")), keyEquivalent: "")
         format.addItem(NSMenuItem.separator())
         format.addItem(submenu("Style", [
             item("Underline", "underline:", "u"), item("Outline", "outline:"), item("Highlight", "highlight:"),

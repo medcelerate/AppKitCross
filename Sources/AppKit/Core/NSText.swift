@@ -170,8 +170,9 @@ import CoreText
         let lines = _layoutLines()
         for (i, l) in lines.enumerated() {
             let end = l.range.location + l.range.length
-            if offset < end || (offset == end && (l.endsWithNewline == false || i == lines.count - 1)) { return i }
-            if offset == end && !l.endsWithNewline { return i }
+            // A line's range stops before its newline: the caret right before the newline is
+            // still on the line (it used to fall to the next line, so Home there went wrong).
+            if offset <= end { return i }
         }
         return max(0, lines.count - 1)
     }
