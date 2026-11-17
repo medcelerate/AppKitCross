@@ -79,14 +79,51 @@ import CoreText
     internal enum _KeyBinding: Equatable { case command(String), text(String) }
     /// The standard key bindings (StandardKeyBinding.dict's editing keys): a command selector
     /// name, the text a printable key inserts, or nil (key equivalents belong to menus).
+    /// Which conventions the text navigation keys follow: macOS's (Command for line and
+    /// document, Option for words, Home/End for the document) or the PC's (Windows and Linux:
+    /// Ctrl for words, Home/End for the line, Ctrl+Home/End for the document, Ctrl+Backspace
+    /// and Ctrl+Delete for words). The backends report Ctrl as Command, so on a PC the Mac
+    /// table would turn Ctrl+Right into "end of line". `APPKITWIN_KEY_BINDINGS=mac|pc` overrides.
+    internal enum _KeyBindingStyle { case mac, pc }
+    nonisolated(unsafe) internal static var _keyBindingStyle: _KeyBindingStyle = {
+        switch ProcessInfo.processInfo.environment["APPKITWIN_KEY_BINDINGS"] {
+        case "mac": return .mac
+        case "pc": return .pc
+        default:
+            #if os(macOS)
+            return .mac
+            #else
+            return .pc
+            #endif
+        }
+    }()
+
+    /// The PC conventions' navigation and deletion selectors (nil for other keys, or on a Mac).
+    private static func _pcNavigationSelector(_ plain: String, _ flags: NSEvent.ModifierFlags) -> String? {
+        guard _keyBindingStyle == .pc else { return nil }
+        let shift = flags.contains(.shift)
+        let ctrl = flags.contains(.command) || flags.contains(.control)
+        let word = ctrl || flags.contains(.option)
+        func pick(_ name: String) -> String { shift ? name + "AndModifySelection:" : name + ":" }
+        switch plain {
+        case "\u{F702}": return pick(word ? "moveWordLeft" : "moveLeft")
+        case "\u{F703}": return pick(word ? "moveWordRight" : "moveRight")
+        case "\u{F729}": return pick(ctrl ? "moveToBeginningOfDocument" : "moveToBeginningOfLine")
+        case "\u{F72B}": return pick(ctrl ? "moveToEndOfDocument" : "moveToEndOfLine")
+        case "\u{7F}", "\u{8}": return word ? "deleteWordBackward:" : "deleteBackward:"
+        case "\u{F728}": return word ? "deleteWordForward:" : "deleteForward:"
+        default: return nil
+        }
+    }
+
     internal static func _standardKeyBinding(for event: NSEvent) -> _KeyBinding? {
         let flags = event.modifierFlags
         let shift = flags.contains(.shift)
         let option = flags.contains(.option)
         let command = flags.contains(.command) || flags.contains(.control)
         let plain = event.charactersIgnoringModifiers ?? ""
-        var selector: String? = nil
-        switch plain {
+        var selector: String? = _pcNavigationSelector(plain, flags)
+        if selector == nil { switch plain {
         case "\r", "\u{3}": selector = "insertNewline:"
         case "\t": selector = shift ? "insertBacktab:" : "insertTab:"
         case "\u{1B}": selector = option ? "complete:" : "cancelOperation:"
@@ -102,7 +139,7 @@ import CoreText
         case "\u{F72C}": selector = "pageUp:"
         case "\u{F72D}": selector = "pageDown:"
         default: break
-        }
+        } }
         if selector == nil && command {
             switch plain.lowercased() {
             case "a": selector = "selectAll:"

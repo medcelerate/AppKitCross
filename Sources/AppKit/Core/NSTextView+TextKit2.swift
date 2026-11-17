@@ -19,6 +19,8 @@ import CoreGraphics
     /// A fit of the frame is scheduled (drawing laid out fragments it had not).
     var fitScheduled = false
     var switching = false
+    /// The layout manager's content generation the table check last ran at.
+    var checkedGeneration = -1
     weak var observedClipView: NSView?
     nonisolated(unsafe) var clipObserver: NSObjectProtocol?
     deinit { if let token = clipObserver { NotificationCenter.default.removeObserver(token) } }
@@ -119,7 +121,11 @@ extension NSTextView {
     /// Content or layout changed (an edit, a geometry change): redisplay, and fit the frame
     /// on the next layout pass.
     internal func _tk2DidInvalidate() {
-        if !_tk2.switching, _storageNeedsTextKit1 { _switchToTextKit1(); return }
+        // Only content edits can bring a table in (not rendering attributes or layout).
+        if !_tk2.switching, let tlm = _textLayoutManager, tlm._contentGeneration != _tk2.checkedGeneration {
+            _tk2.checkedGeneration = tlm._contentGeneration
+            if _storageNeedsTextKit1 { _switchToTextKit1(); return }
+        }
         needsLayout = true
         needsDisplay = true
     }

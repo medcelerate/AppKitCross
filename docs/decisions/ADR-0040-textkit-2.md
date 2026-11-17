@@ -184,6 +184,21 @@ would edit glyphs (`insertGlyph`, `deleteGlyphs`, `substituteGlyphs`) or drive l
 `layoutParagraph(at:)` override stays `unimplemented()` with the reason: the port's
 NSLayoutManager lays out CoreText lines, not glyph storage.
 
+### Windows PC round
+
+The first PC run found, besides engine parity, shared editing gaps that this change fixes for
+both engines: edits scroll the insertion point into view (after fitting the frame, so a long
+paste is not clamped to the old height); a click on an attachment selects it; continuous
+spelling checks only the paragraphs edits touched (the whole text on every keystroke made a
+3000-line paste take seconds); the caret just before a newline belongs to its line (Home and
+End used the next line); the find bar redraws when shown; and the text navigation keys follow
+the platform: macOS's table on the Mac, the PC's on Windows and Linux (Ctrl+arrows and
+Ctrl+Backspace by word, Home/End by line, Ctrl+Home/End by document), where the backends
+report Ctrl as Command (`APPKITWIN_KEY_BINDINGS=mac|pc` overrides). TextKit 2 adds rendering
+attributes in document order without rebuilding the run list, and looks for text tables only
+after content edits. TextEdit sizes its text view from the scroll view's content size, so a
+legacy (Windows) scroller no longer covers the end of each line.
+
 ## Consequences
 
 - Both engines share one typesetter, so TextKit 2 fragment frames match TextKit 1 line rects

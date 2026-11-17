@@ -720,4 +720,86 @@ final class TextKit2Tests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(differing, 0, "both engines draw the same pixels")
         }
     }
+
+    // MARK: Windows PC round
+
+    /// Pasting many lines and typing on the new last line scroll the insertion point into
+    /// view (both engines), and the TextKit 2 spelling pass stays incremental.
+    func testEditsScrollTheInsertionPointIntoView() {
+        for textKit2 in [false, true] {
+            MainActor.assumeIsolated {
+                let (w, scroll, tv) = textView(textKit2: textKit2)
+                tv.isContinuousSpellCheckingEnabled = true
+                w.makeKeyAndOrderFront(nil)
+                _ = w.makeFirstResponder(tv)
+                let big = (0..<1500).map { "Line \($0) with some wrods in it" }.joined(separator: "\n")
+                tv.insertText(big, replacementRange: NSRange(location: NSNotFound, length: 0))
+                w.contentView?.layoutSubtreeIfNeeded()
+                let caret = tv._caretRect(for: tv.selectedRange().location)
+                XCTAssertTrue(scroll.contentView.documentVisibleRect.intersects(caret), "textKit2 \(textKit2): the caret after the paste is visible")
+                tv.insertNewline(nil)
+                tv.insertText("x")
+                let caret2 = tv._caretRect(for: tv.selectedRange().location)
+                XCTAssertTrue(scroll.contentView.documentVisibleRect.intersects(caret2), "textKit2 \(textKit2): typing on a new last line stays visible")
+                XCTAssertEqual(tv.textLayoutManager != nil, textKit2)
+            }
+        }
+    }
+
+    /// A click on an inline image selects the attachment character (both engines).
+    func testClickOnAnAttachmentSelectsIt() {
+        for textKit2 in [false, true] {
+            MainActor.assumeIsolated {
+                let (w, _, tv) = textView(textKit2: textKit2)
+                w.makeKeyAndOrderFront(nil)
+                let wrapper = FileWrapper(regularFileWithContents: pngImage(NSSize(width: 40, height: 30)))
+                wrapper.preferredFilename = "pic.png"
+                let text = NSMutableAttributedString(string: "ab", attributes: [.font: TextKit2Tests.font])
+                text.insert(NSAttributedString(attachment: NSTextAttachment(fileWrapper: wrapper)), at: 1)
+                tv.textStorage?.setAttributedString(text)
+                w.display()
+                let frame = try! XCTUnwrap(tv._attachmentFrame(at: 1))
+                for x in [frame.minX + 5, frame.maxX - 5] {
+                    tv.setSelectedRange(NSRange(location: 0, length: 0))
+                    tv.mouseDown(with: mouse(.leftMouseDown, at: NSPoint(x: x, y: frame.midY), in: tv))
+                    tv.mouseUp(with: mouse(.leftMouseUp, at: NSPoint(x: x, y: frame.midY), in: tv))
+                    XCTAssertEqual(tv.selectedRange(), NSRange(location: 1, length: 1), "textKit2 \(textKit2), x \(x - frame.minX)")
+                }
+            }
+        }
+    }
+
+    /// Windows and Linux follow the PC's text keys: Ctrl+arrows by word, Home/End by line,
+    /// Ctrl+Home/End by document, Ctrl+Backspace by word (the backends report Ctrl as Command).
+    func testPCKeyBindings() {
+        MainActor.assumeIsolated {
+            let saved = NSResponder._keyBindingStyle
+            NSResponder._keyBindingStyle = .pc
+            defer { NSResponder._keyBindingStyle = saved }
+            for textKit2 in [false, true] {
+                let (w, _, tv) = textView(textKit2: textKit2)
+                w.makeKeyAndOrderFront(nil)
+                _ = w.makeFirstResponder(tv)
+                tv.string = "alpha beta gamma\nsecond line"
+                @MainActor func key(_ chars: String, _ flags: NSEvent.ModifierFlags = []) {
+                    let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: w.windowNumber, context: nil,
+                                             characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0)!
+                    tv.keyDown(with: e)
+                }
+                tv.setSelectedRange(NSRange(location: 0, length: 0))
+                key("\u{F703}", .command)
+                XCTAssertEqual(tv.selectedRange().location, 5, "textKit2 \(textKit2): Ctrl+Right moves by word")
+                key("\u{F72B}")
+                XCTAssertEqual(tv.selectedRange().location, 16, "textKit2 \(textKit2): End goes to the end of the line")
+                key("\u{F729}")
+                XCTAssertEqual(tv.selectedRange().location, 0, "textKit2 \(textKit2): Home goes to the start of the line")
+                key("\u{F72B}", .command)
+                XCTAssertEqual(tv.selectedRange().location, 28, "textKit2 \(textKit2): Ctrl+End goes to the end of the document")
+                key("\u{7F}", .command)
+                XCTAssertEqual(tv.string, "alpha beta gamma\nsecond ", "textKit2 \(textKit2): Ctrl+Backspace deletes a word")
+                key("\u{F729}", [.command, .shift])
+                XCTAssertEqual(tv.selectedRange(), NSRange(location: 0, length: 24), "textKit2 \(textKit2): Ctrl+Shift+Home selects to the start")
+            }
+        }
+    }
 }

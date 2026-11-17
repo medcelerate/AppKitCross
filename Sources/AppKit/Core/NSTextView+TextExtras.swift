@@ -24,6 +24,7 @@ extension NSTextView {
         if selectAfter { setSelectedRange(NSRange(location: r.location + text.length, length: 0)) }
         didChangeText()
         needsDisplay = true
+        if selectAfter { _scrollToInsertionPoint() }
         return true
     }
 
@@ -125,18 +126,30 @@ extension NSTextView {
         (string as NSString).paragraphRange(for: _clamped(r))
     }
 
-    /// After an edit: check again soon (coalesced), not flagging the word being typed.
+    /// After an edit: check again soon (coalesced), not flagging the word being typed. Only
+    /// the paragraphs the edits touched are checked (the whole text when an edit did not come
+    /// through `shouldChangeText`): checking a long document on every keystroke made typing
+    /// and pasting slow.
     internal func _spellingAfterEdit() {
-        guard isContinuousSpellCheckingEnabled, !isFieldEditor else { return }
+        guard isContinuousSpellCheckingEnabled, !isFieldEditor else { _extras.spellDirty = nil; return }
         guard !_extras.spellCheckPending else { return }
         _extras.spellCheckPending = true
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self._extras.spellCheckPending = false
-                self._markSpelling(skippingWordAtInsertionPoint: true)
+                let dirty = self._extras.spellDirty
+                self._extras.spellDirty = nil
+                self._markSpelling(in: dirty.map { self._clamped($0) }, skippingWordAtInsertionPoint: true)
             }
         }
+    }
+
+    /// Notes the text an approved edit puts at `range` for the next spelling pass.
+    internal func _noteSpellingDirty(_ range: NSRange, replacementLength: Int) {
+        guard isContinuousSpellCheckingEnabled else { return }
+        let r = NSRange(location: range.location, length: replacementLength)
+        _extras.spellDirty = _extras.spellDirty.map { NSUnionRange($0, r) } ?? r
     }
 
     /// Learned or ignored words change what is misspelt everywhere in the view.
@@ -739,6 +752,7 @@ extension NSTextView {
     var usesFindPanel = false
     var spellTag = 0
     var spellCheckPending = false
+    var spellDirty: NSRange?
     var completionPartial: String?
     /// The style of an empty last paragraph (no character carries it yet).
     var pendingParagraphStyle: (location: Int, style: NSParagraphStyle)?

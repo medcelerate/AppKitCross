@@ -121,7 +121,11 @@ open class NSTextLayoutManager: NSObject, NSSecureCoding, NSCoding, NSTextSelect
 
     /// The content manager reports edits: (old range, new range) pairs, or nil for a
     /// change of the whole document.
+    /// Counts content changes (the text view re-checks for text tables only after one).
+    internal var _contentGeneration = 0
+
     internal func _contentDidChange(edits: [(old: NSRange, new: NSRange)]?) {
+        _contentGeneration &+= 1
         if let edits {
             // Rendering attributes follow the text they decorate.
             for e in edits {
@@ -582,6 +586,12 @@ open class NSTextLayoutManager: NSObject, NSSecureCoding, NSCoding, NSTextSelect
         let r = _clamp(r0)
         guard r.length > 0 else { return }
         guard let value else { removeRenderingAttribute(renderingAttribute, for: textRange); return }
+        // Marks usually arrive in document order (a spelling pass): append after the last run.
+        if _rendering.last.map({ r.location >= NSMaxRange($0.range) }) ?? true {
+            _rendering.append((r, [renderingAttribute: value]))
+            _renderingChanged(r, keys: [renderingAttribute])
+            return
+        }
         // Split the runs at the range's edges, then add to every run inside it.
         var pieces: [(range: NSRange, attrs: [NSAttributedString.Key: Any])] = []
         var covered: [NSRange] = []

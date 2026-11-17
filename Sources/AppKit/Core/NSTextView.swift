@@ -230,6 +230,16 @@ import CoreText
         guard shouldChangeText(in: range, replacementString: text) else { return }
         _replace(range, with: text, notify: false)
         didChangeText()
+        _scrollToInsertionPoint()
+    }
+
+    /// After an edit the insertion point is scrolled into view, as AppKit's text view does
+    /// (a paste of many lines, typing on a new last line). The frame is fitted first so the
+    /// scroll is not clamped to the old height.
+    internal func _scrollToInsertionPoint() {
+        guard !isFieldEditor, enclosingScrollView != nil else { return }
+        if _textLayoutManager != nil { _tk2FitFrame() }
+        scrollRangeToVisible(NSRange(location: NSMaxRange(selectedRange), length: 0))
     }
 
     private static let _selectorDispatch: [String: (NSTextView, Any?) -> Void] = [
@@ -803,14 +813,19 @@ import CoreText
                 clicked(onLink: link, at: i)
                 return
             }
-            if i < st.length, let a = st.attribute(.attachment, at: i, effectiveRange: nil) as? NSTextAttachment, let cell = a.attachmentCell,
-               let frame = _attachmentFrame(at: i) {
-                if frame.contains(convert(event.locationInWindow, from: nil)) {
-                    super.mouseDown(with: event)
-                    if event.clickCount == 2 { _viewDelegate?.textView(self, doubleClickedOn: cell, in: frame, at: i) }
-                    else { _viewDelegate?.textView(self, clickedOn: cell, in: frame, at: i) }
-                    return
-                }
+            // A click on an attachment selects it, as AppKit's does (the caret position rounds
+            // to either side of the image, so both neighbours are tried).
+            let p = convert(event.locationInWindow, from: nil)
+            for k in [i, i - 1] where k >= 0 && k < st.length {
+                guard let a = st.attribute(.attachment, at: k, effectiveRange: nil) as? NSTextAttachment,
+                      let frame = _attachmentFrame(at: k), frame.contains(p) else { continue }
+                guard isSelectable || isEditable else { break }
+                if window?.firstResponder !== self { _ = window?.makeFirstResponder(self) }
+                _clickCount = 1
+                setSelectedRange(NSRange(location: k, length: 1))
+                _selectionAnchor = k
+                if let cell = a.attachmentCell { _viewDelegate?.textView(self, clickedOn: cell, in: frame, at: k) }
+                return
             }
         }
         if _textLayoutManager != nil { _tk2MouseDown(with: event); return }
@@ -1609,6 +1624,7 @@ import CoreText
         guard isEditable else { return false }
         guard _viewDelegate?.textView(self, shouldChangeTextIn: affectedCharRange, replacementString: replacementString) ?? true else { return false }
         _recordUndo(for: affectedCharRange, replacementString: replacementString)
+        _noteSpellingDirty(affectedCharRange, replacementLength: replacementString.map { ($0 as NSString).length } ?? affectedCharRange.length)
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shouldchangetext(inranges:replacementstrings:)

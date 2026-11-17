@@ -139,7 +139,9 @@ final class TextDocument: NSDocument {
         let scroll = NSScrollView(frame: window.contentView!.bounds)
         scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
-        let tv = NSTextView(frame: scroll.bounds)
+        // As wide as the clip view, not the scroll view: a legacy scroller (Windows) takes
+        // its width out of the content, and the text must wrap before it.
+        let tv = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
         tv.autoresizingMask = [.width, .height]
         TextDocument.configure(tv, rich: isRichText)
         tv.font = NSFont.userFont(ofSize: 13)
@@ -209,6 +211,8 @@ final class TextDocument: NSDocument {
         tv.font = old.font
         if let text = old.textStorage?.copy() as? NSAttributedString { tv.textStorage?.setAttributedString(text) }
         tv.setSelectedRange(old.selectedRange())
+        // The new view has not checked the text yet; show the same misspellings now.
+        if tv.isContinuousSpellCheckingEnabled { tv.checkTextInDocument(nil) }
         tv.setAccessibilityLabel("Document text")
         if let o = changeObserver { NotificationCenter.default.removeObserver(o) }
         changeObserver = NotificationCenter.default.addObserver(forName: NSText.didChangeNotification, object: tv, queue: nil) { [weak self] _ in
