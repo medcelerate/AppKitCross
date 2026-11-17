@@ -285,8 +285,10 @@ let combineTestDependencies: [Target.Dependency] = ["Combine"]
 // Examples/DailyTodo imports UserNotifications and ServiceManagement without naming them:
 // they come with AppKit, as on macOS.
 let dailyTodoPlatformDependencies: [Target.Dependency] = ["Combine"]
+let mdVaultDependencies: [Target.Dependency] = ["UniformTypeIdentifiers"]
 #else
 let dailyTodoPlatformDependencies: [Target.Dependency] = []
+let mdVaultDependencies: [Target.Dependency] = []
 let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
@@ -341,6 +343,11 @@ targets += [
     .target(name: "DailyTodoCore", path: "Examples/DailyTodo/Sources/DailyTodoCore", swiftSettings: [.swiftLanguageMode(.v5)]),
     .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoPlatformDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
     .executableTarget(name: "DailyTodoChecks", dependencies: ["DailyTodoCore"], path: "Examples/DailyTodo/Sources/DailyTodoChecks", swiftSettings: [.swiftLanguageMode(.v5)]),
+    // The second real app, document-based: MD Vault (MIT, Examples/MDVault/README.md), its
+    // `Sources/` vendored unmodified. Upstream builds with plain `swiftc` (Swift 5 mode); its
+    // Info.plist (document types, the Markdown UTI, the app name) stays in
+    // Examples/MDVault/Resources, which `APPKITWIN_INFO_PLIST` can name at launch.
+    .executableTarget(name: "MDVault", dependencies: ["AppKit", "SwiftUI"] + mdVaultDependencies, path: "Examples/MDVault/Sources/MDVault", swiftSettings: [.swiftLanguageMode(.v5)]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,

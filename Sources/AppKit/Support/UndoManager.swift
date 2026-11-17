@@ -131,6 +131,7 @@ open class UndoManager: NSObject {
     private func ensureEventGroup() {
         guard groupsByEvent, openGroup == nil else { return }
         beginUndoGrouping()
+        UndoManager._eventGroupOwners.append(_WeakUndoManager(manager: self))
         guard !eventGroupScheduled else { return }
         eventGroupScheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -138,6 +139,21 @@ open class UndoManager: NSObject {
             self.eventGroupScheduled = false
             self.closeEventGroupIfOpen()
         }
+    }
+
+    private struct _WeakUndoManager { weak var manager: UndoManager? }
+    /// Managers whose event group is open (main thread only, as event groups are).
+    nonisolated(unsafe) private static var _eventGroupOwners: [_WeakUndoManager] = []
+
+    /// The end of an input event: every event group still open closes now, as AppKit's
+    /// run loop closes them before the next event is handled. The backends call this after
+    /// dispatching a key or mouse event, so a document is marked edited before the next
+    /// event (a click on the File menu) validates Save.
+    internal static func _endEventGroups() {
+        guard !_eventGroupOwners.isEmpty else { return }
+        let owners = _eventGroupOwners
+        _eventGroupOwners = []
+        for o in owners { o.manager?.closeEventGroupIfOpen() }
     }
 
     private func closeEventGroupIfOpen() {

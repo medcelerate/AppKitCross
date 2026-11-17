@@ -296,6 +296,12 @@ final class Win32Backend: PlatformBackend {
             }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
+            // The end of an input event closes the undo manager's event groups, as AppKit's
+            // run loop does before the next event: a document is marked edited before a
+            // click on the File menu validates Save (the PC saw it disabled when the menu
+            // was opened within ~50 ms of typing). Only the groups close here; servicing the
+            // whole main queue before input messages broke the menu bar.
+            if Win32Backend.isInputMessage(msg.message) { UndoManager._endEventGroups() }
             fireFrameIfDue()
             // A window whose paint invalidates itself keeps WM_PAINT coming, and this loop
             // would never reach the main queue below (a DispatchQueue.main block, a Timer,
@@ -337,6 +343,16 @@ final class Win32Backend: PlatformBackend {
             if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1 }
         }
         return true
+    }
+    /// Keyboard and mouse-button messages (client and non-client): the events that start
+    /// a user action.
+    static func isInputMessage(_ m: UINT) -> Bool {
+        switch Int32(m) {
+        case WM_KEYDOWN, WM_SYSKEYDOWN, WM_CHAR, WM_SYSCHAR,
+             WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+             WM_NCLBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCMBUTTONDOWN: return true
+        default: return false
+        }
     }
     private var wakesQueue = 0, wakesInput = 0, wakesTimeout = 0
     private var serviceMs: UInt64 = 0

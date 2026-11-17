@@ -88,6 +88,13 @@ echo "presented clear-colour pixels on screen: $METAL_PIXELS"
 if grep -q "presentation=swap chain" /tmp/hellowindow-wayland-metal.log && [ "$METAL_PIXELS" -lt 10000 ]; then
     echo "FAIL: the swap chain presented but the screenshot does not show the clear colour"; kill $SWAY; exit 1
 fi
+# The Metal self-test with a window system (ADR-0042): after the offscreen checks one
+# MTKView frame must go through the swap chain and read back equal to the reference device.
+echo "== HelloWindow --metal-selftest with a window (presented frame vs the reference device)"
+if ! timeout 60 ./.build/debug/HelloWindow --metal-selftest >/tmp/metal-selftest-wayland.log 2>&1; then
+    echo "FAIL: the Metal self-test failed"; grep -E "^FAIL|presented" /tmp/metal-selftest-wayland.log; kill $SWAY; exit 1
+fi
+grep -E "^presented frame|presented .* frame" /tmp/metal-selftest-wayland.log
 # The presentation tests on the Wayland backend (the test binary swift test built; this
 # user cannot write to .build): the swap chain on a subsurface, resize, the format fallback.
 echo "== Metal presentation tests on the Wayland backend"
