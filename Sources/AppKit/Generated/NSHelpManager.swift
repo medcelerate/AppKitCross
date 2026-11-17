@@ -24,16 +24,16 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/contexthelpmodediddeactivatenotification
     static public var contextHelpModeDidDeactivateNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSContextHelpModeDidDeactivateNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/find(_:inbook:)
-    @MainActor open func find(_ query: String, inBook book: NSHelpManager.BookName?) { unimplemented() }
+    @MainActor open func find(_ query: String, inBook book: NSHelpManager.BookName?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/iscontexthelpmodeactive
     @MainActor class public var isContextHelpModeActive: Bool {
         get { unimplemented() }
         set { unimplemented() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/openhelpanchor(_:inbook:)
-    @MainActor open func openHelpAnchor(_ anchor: NSHelpManager.AnchorName, inBook book: NSHelpManager.BookName?) { unimplemented() }
+    @MainActor open func openHelpAnchor(_ anchor: NSHelpManager.AnchorName, inBook book: NSHelpManager.BookName?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/registerbooks(in:)
-    @MainActor open func registerBooks(in bundle: Bundle) -> Bool { unimplemented() }
+    @MainActor open func registerBooks(in bundle: Bundle) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/removecontexthelp(for:)
     @MainActor open func removeContextHelp(for object: Any) { unimplemented() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nshelpmanager/setcontexthelp(_:for:)

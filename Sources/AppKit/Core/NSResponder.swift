@@ -259,7 +259,7 @@ import CoreText
     @MainActor open func showContextHelp(_ sender: Any?) { nextResponder?.showContextHelp(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/showwritingtools(_:)
     @available(macOS 15.2, *)
-    @MainActor open func showWritingTools(_ sender: Any?) { unimplemented("NSResponder.showWritingTools — Writing Tools is an Apple Intelligence service with no counterpart on Windows or Linux") }
+    @MainActor open func showWritingTools(_ sender: Any?) { appleOnlyUnavailable("NSResponder.showWritingTools — Writing Tools is an Apple Intelligence service with no counterpart on Windows or Linux") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/smartmagnify(with:)
     @MainActor open func smartMagnify(with event: NSEvent) { nextResponder?.smartMagnify(with: event) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/supplementaltarget(foraction:sender:)

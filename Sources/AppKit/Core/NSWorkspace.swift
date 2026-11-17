@@ -299,7 +299,7 @@ open class NSWorkspace: NSObject {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/seticon(_:forfile:options:)
-    open func setIcon(_ image: NSImage?, forFile fullPath: String, options: NSWorkspace.IconCreationOptions = []) -> Bool { unimplemented("NSWorkspace.setIcon(_:forFile:options:) — Windows and Linux files carry no custom icon (Windows lets only folders name an .ico through desktop.ini; GNOME keeps one in GVfs metadata that other desktops ignore)") }
+    open func setIcon(_ image: NSImage?, forFile fullPath: String, options: NSWorkspace.IconCreationOptions = []) -> Bool { appleOnlyUnavailable("NSWorkspace.setIcon(_:forFile:options:) — Windows and Linux files carry no custom icon (Windows lets only folders name an .ico through desktop.ini; GNOME keeps one in GVfs metadata that other desktops ignore)") }
 
     // MARK: Applications for files
 
@@ -495,10 +495,10 @@ open class NSWorkspace: NSObject {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/requestauthorization(to:)
     @available(macOS 10.14, *)
-    open func requestAuthorization(to type: NSWorkspace.AuthorizationType) async throws -> NSWorkspace.Authorization { unimplemented("NSWorkspace.requestAuthorization(to:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
+    open func requestAuthorization(to type: NSWorkspace.AuthorizationType) async throws -> NSWorkspace.Authorization { appleOnlyUnavailable("NSWorkspace.requestAuthorization(to:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsworkspace/requestauthorization(to:completionhandler:)
     @available(macOS 10.14, *)
-    open func requestAuthorization(to type: NSWorkspace.AuthorizationType, completionHandler: @escaping @Sendable (NSWorkspace.Authorization?, (any Error)?) -> Void) { unimplemented("NSWorkspace.requestAuthorization(to:completionHandler:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
+    open func requestAuthorization(to type: NSWorkspace.AuthorizationType, completionHandler: @escaping @Sendable (NSWorkspace.Authorization?, (any Error)?) -> Void) { appleOnlyUnavailable("NSWorkspace.requestAuthorization(to:completionHandler:) — authorizations are for FileManager(authorization:), a macOS-only privileged file manager") }
 
     // MARK: Volumes (no counterpart for removable media and ejecting; see the ADR)
 

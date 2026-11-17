@@ -19,38 +19,38 @@ import CoreText
 open class NSOpenGLContext: NSObject {
     // SKIPPED (unknown module (CoreGraphics CGLContextObj)): init?(cglContextObj context: CGLContextObj)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/init(format:share:)
-    public init?(format: NSOpenGLPixelFormat, share: NSOpenGLContext?) { unimplemented() }
+    public init?(format: NSOpenGLPixelFormat, share: NSOpenGLContext?) { appleOnlyUnavailable() }
     // SKIPPED (unknown module (CoreGraphics CGLContextObj)): var cglContextObj: CGLContextObj? { get }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/clearcurrentcontext()
-    public class func clearCurrentContext() { unimplemented() }
+    public class func clearCurrentContext() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/cleardrawable()
-    open func clearDrawable() { unimplemented() }
+    open func clearDrawable() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/current
-    class public var current: NSOpenGLContext? { unimplemented() }
+    class public var current: NSOpenGLContext? { appleOnlyUnavailable() }
     // SKIPPED (unknown module (? GLint)): var currentVirtualScreen: GLint { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/flushbuffer()
-    open func flushBuffer() { unimplemented() }
+    open func flushBuffer() { appleOnlyUnavailable() }
     // SKIPPED (unknown module (? GLint)): func getValues(_ vals: UnsafeMutablePointer<GLint>, for param: NSOpenGLContext.Parameter)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/makecurrentcontext()
-    open func makeCurrentContext() { unimplemented() }
+    open func makeCurrentContext() { appleOnlyUnavailable() }
     // SKIPPED (unknown module (? GLint)): static var openGLVersion: (major: GLint, minor: GLint) { get }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/pixelformat
     @available(macOS 10.10, *)
-    open var pixelFormat: NSOpenGLPixelFormat { unimplemented() }
+    open var pixelFormat: NSOpenGLPixelFormat { appleOnlyUnavailable() }
     // SKIPPED (unknown module (? GLint)): func setValues(_ vals: UnsafePointer<GLint>, for param: NSOpenGLContext.Parameter)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/update()
-    @MainActor open func update() { unimplemented() }
+    @MainActor open func update() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglcontext/view
     @MainActor open var view: NSView? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // Requirement of NSLocking
-    open func withLock<R>(_ body: () throws -> R) rethrows -> R { unimplemented() }
+    open func withLock<R>(_ body: () throws -> R) rethrows -> R { appleOnlyUnavailable() }
     // Requirement of NSLocking
-    open func lock() { unimplemented() }
+    open func lock() { appleOnlyUnavailable() }
     // Requirement of NSLocking
-    open func unlock() { unimplemented() }
+    open func unlock() { appleOnlyUnavailable() }
 }
 
 extension NSOpenGLContext {

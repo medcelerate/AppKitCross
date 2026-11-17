@@ -20,47 +20,47 @@ import CoreText
 @MainActor open class NSColorPickerTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/action
     @MainActor open var action: Selector? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/allowedcolorspaces
     @available(macOS 10.13, *)
     @MainActor open var allowedColorSpaces: [NSColorSpace]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/color
     @MainActor open var color: NSColor {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/colorlist
     @MainActor open var colorList: NSColorList! {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/colorpicker(withidentifier:)
-    @MainActor public class func colorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { unimplemented() }
+    @MainActor public class func colorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/colorpicker(withidentifier:buttonimage:)
-    @MainActor public class func colorPicker(withIdentifier identifier: NSTouchBarItem.Identifier, buttonImage image: NSImage) -> Self { unimplemented() }
+    @MainActor public class func colorPicker(withIdentifier identifier: NSTouchBarItem.Identifier, buttonImage image: NSImage) -> Self { appleOnlyUnavailable() }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/isenabled
     @MainActor open var isEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/showsalpha
     @MainActor open var showsAlpha: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/strokecolorpicker(withidentifier:)
-    @MainActor public class func strokeColorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { unimplemented() }
+    @MainActor public class func strokeColorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/target
     @MainActor open var target: AnyObject? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolorpickertouchbaritem/textcolorpicker(withidentifier:)
-    @MainActor public class func textColorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { unimplemented() }
+    @MainActor public class func textColorPicker(withIdentifier identifier: NSTouchBarItem.Identifier) -> Self { appleOnlyUnavailable() }
 }

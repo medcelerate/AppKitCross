@@ -20,41 +20,41 @@ import CoreText
 @MainActor open class NSCandidateListTouchBarItem<CandidateType>: NSTouchBarItem where CandidateType : AnyObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/allowscollapsing
     @MainActor open var allowsCollapsing: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/allowstextinputcontextcandidates
     @MainActor open var allowsTextInputContextCandidates: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/attributedstringforcandidate
     @MainActor open var attributedStringForCandidate: ((CandidateType, Int) -> NSAttributedString)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/candidates
-    @MainActor open var candidates: [CandidateType] { unimplemented() }
+    @MainActor open var candidates: [CandidateType] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/client
     @MainActor open var client: (any NSView & NSTextInputClient)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/delegate
     @MainActor open var delegate: (any NSCandidateListTouchBarItemDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/iscandidatelistvisible
-    @MainActor open var isCandidateListVisible: Bool { unimplemented() }
+    @MainActor open var isCandidateListVisible: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/iscollapsed
     @MainActor open var isCollapsed: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/setcandidates(_:forselectedrange:in:)
-    @MainActor open func setCandidates(_ candidates: [CandidateType], forSelectedRange selectedRange: NSRange, in originalString: String?) { unimplemented() }
+    @MainActor open func setCandidates(_ candidates: [CandidateType], forSelectedRange selectedRange: NSRange, in originalString: String?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscandidatelisttouchbaritem/update(withinsertionpointvisibility:)
-    @MainActor open func update(withInsertionPointVisibility isVisible: Bool) { unimplemented() }
+    @MainActor open func update(withInsertionPointVisibility isVisible: Bool) { appleOnlyUnavailable() }
 }

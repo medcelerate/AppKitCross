@@ -22,7 +22,7 @@ import CoreText
     // SKIPPED (override type NSView differs from superclass NSView?): @MainActor var view: NSView { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscustomtouchbaritem/viewcontroller
     @MainActor open override var viewController: NSViewController? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

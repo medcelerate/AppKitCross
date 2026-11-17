@@ -1051,7 +1051,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/init(windowref:)
     /// Out of scope (ADR-0036): Carbon window references exist only on macOS.
-    @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { unimplemented("NSWindow(windowRef:) — Carbon WindowRef is macOS-only") }
+    @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { appleOnlyUnavailable("NSWindow(windowRef:) — Carbon WindowRef is macOS-only") }
     /// The end of the `cursorUpdate(with:)` chain: nothing above set a cursor, so the arrow shows.
     @MainActor open override func cursorUpdate(with event: NSEvent) { NSCursor.arrow.set() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/acceptsmousemovedevents
@@ -2298,11 +2298,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/requestsharingofwindow(_:)
     @available(macOS 15.0, *)
-    @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws { unimplemented("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
+    @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws { appleOnlyUnavailable("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/requestsharingofwindow(usingpreview:title:)
     @available(macOS 15.0, *)
-    @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws { unimplemented("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
+    @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws { appleOnlyUnavailable("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resetcursorrects()
     @MainActor open func resetCursorRects() { discardCursorRects() }
@@ -2809,7 +2809,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/transferwindowsharing(to:)
     @available(macOS 13.3, *)
-    @MainActor open func transferWindowSharing(to window: NSWindow) async throws { unimplemented("NSWindow.transferWindowSharing — window sharing is a macOS service") }
+    @MainActor open func transferWindowSharing(to window: NSWindow) async throws { appleOnlyUnavailable("NSWindow.transferWindowSharing — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func transferWindowSharing(to window: NSWindow) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/trytoperform(_:with:)
     @MainActor open override func tryToPerform(_ action: Selector, with object: Any?) -> Bool { super.tryToPerform(action, with: object) }
@@ -2897,7 +2897,7 @@ import CoreText
         NSApplication.shared.orderedWindows.map { NSNumber(value: $0.windowNumber) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowref
-    @MainActor open var windowRef: UnsafeMutableRawPointer { unimplemented("NSWindow.windowRef — Carbon WindowRef is macOS-only") }
+    @MainActor open var windowRef: UnsafeMutableRawPointer { appleOnlyUnavailable("NSWindow.windowRef — Carbon WindowRef is macOS-only") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowtitlebarlayoutdirection
     @available(macOS 10.12, *)
     @MainActor open var windowTitlebarLayoutDirection: NSUserInterfaceLayoutDirection { _contentView?.userInterfaceLayoutDirection ?? NSApplication._resolvedLayoutDirection }

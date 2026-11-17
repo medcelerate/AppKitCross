@@ -18,38 +18,38 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview
 @MainActor open class NSOpenGLView: NSView {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/init(frame:pixelformat:)
-    @MainActor public init?(frame frameRect: NSRect, pixelFormat format: NSOpenGLPixelFormat?) { unimplemented() }
+    @MainActor public init?(frame frameRect: NSRect, pixelFormat format: NSOpenGLPixelFormat?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/clearglcontext()
-    @MainActor open func clearGLContext() { unimplemented() }
+    @MainActor open func clearGLContext() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/defaultpixelformat()
-    @MainActor public class func defaultPixelFormat() -> NSOpenGLPixelFormat { unimplemented() }
+    @MainActor public class func defaultPixelFormat() -> NSOpenGLPixelFormat { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/openglcontext
     @MainActor open var openGLContext: NSOpenGLContext? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/pixelformat
     @MainActor open var pixelFormat: NSOpenGLPixelFormat? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/prepareopengl()
-    @MainActor open func prepareOpenGL() { unimplemented() }
+    @MainActor open func prepareOpenGL() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/reshape()
-    @MainActor open func reshape() { unimplemented() }
+    @MainActor open func reshape() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/update()
-    @MainActor open func update() { unimplemented() }
+    @MainActor open func update() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/wantsbestresolutionopenglsurface
     @MainActor open override var wantsBestResolutionOpenGLSurface: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsopenglview/wantsextendeddynamicrangeopenglsurface
     @available(macOS 10.11, *)
     @MainActor open override var wantsExtendedDynamicRangeOpenGLSurface: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // Required by the superclass (NSCoding).
-    @MainActor public required init?(coder: NSCoder) { unimplemented() }
+    @MainActor public required init?(coder: NSCoder) { appleOnlyUnavailable() }
 }

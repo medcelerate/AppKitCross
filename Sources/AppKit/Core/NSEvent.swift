@@ -217,9 +217,9 @@ open class NSEvent: NSObject, NSCopying, NSCoding {
         "NSEvent: type=\(_type) loc=(\(_location.x),\(_location.y)) time=\(_timestamp) flags=\(_modifierFlags.rawValue) win=\(_windowNumber)"
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/init(cgevent:)
-    public init?(cgEvent: CGEvent) { unimplemented("NSEvent.init(cgEvent:) — Quartz event services are macOS-only; the port's CGEvent carries no event record") }
+    public init?(cgEvent: CGEvent) { appleOnlyUnavailable("NSEvent.init(cgEvent:) — Quartz event services are macOS-only; the port's CGEvent carries no event record") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/init(eventref:)
-    public init?(eventRef: UnsafeRawPointer) { unimplemented("NSEvent.init(eventRef:) — Carbon EventRef is macOS-only") }
+    public init?(eventRef: UnsafeRawPointer) { appleOnlyUnavailable("NSEvent.init(eventRef:) — Carbon EventRef is macOS-only") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/absolutex
     open var absoluteX: Int { _require(_isMouseOrTablet); return _absolute.x }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsevent/absolutey

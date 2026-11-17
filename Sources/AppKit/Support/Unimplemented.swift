@@ -15,3 +15,14 @@ public func unimplemented(_ symbol: String = #function, file: StaticString = #fi
 public func unimplementedOptionalRequirement(_ symbol: String = #function, file: StaticString = #fileID, line: UInt = #line) -> Never {
     fatalError("AppKitCross: optional requirement `\(symbol)` has no default yet", file: file, line: line)
 }
+
+/// Body of every AppKit member that exists only on macOS (ADR-0044): Touch Bar, Writing
+/// Tools, the macOS speech engine, Sharing extensions, OpenGL, Help Books and the like.
+/// The declaration matches AppKit exactly so code that names it compiles, but the feature
+/// depends on Apple hardware, an Apple service or a macOS-only engine, and the port does
+/// not plan to implement it. Generated stubs list these in `appleOnly` in
+/// tools/apigen/config.json; Core passes a reason the same way it does to `unimplemented`.
+@inline(never)
+public func appleOnlyUnavailable(_ symbol: String = #function, file: StaticString = #fileID, line: UInt = #line) -> Never {
+    fatalError("AppKitCross: `\(symbol)` exists only on macOS (Apple hardware, service or engine); it is not available on this platform", file: file, line: line)
+}
