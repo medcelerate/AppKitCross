@@ -66,30 +66,26 @@ import CoreGraphics
         set { _textField = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewitem/draggingimagecomponents
-    /// The image view's picture as the icon and the text field's text as the label, each
-    /// at its frame in the item's view (AppKit's components for an item with those outlets);
-    /// the whole view as the icon when the item has neither.
+    ///
+    /// As AppKit's: a component of the image view (keyed `.icon`) and one of the text field
+    /// (`.label`, or `.icon` when there is no image view), each a snapshot of that view at
+    /// its frame in the item's view measured from the bottom-left; with neither, one `.icon`
+    /// of the whole view (ADR-0041).
     @MainActor open var draggingImageComponents: [NSDraggingImageComponent] {
-        let v = view
+        let root = view
         var out: [NSDraggingImageComponent] = []
-        if let iv = imageView, iv.isDescendant(of: v) {
-            let c = NSDraggingImageComponent(key: .icon)
-            c.frame = v.convert(iv.bounds, from: iv)
-            c.contents = iv._snapshotImage(of: [iv.bounds], in: iv.bounds)
+        func add(_ v: NSView) {
+            guard v === root || v.isDescendant(of: root) else { return }
+            let c = NSDraggingImageComponent(key: out.isEmpty ? .icon : .label)
+            var f = v === root ? root.bounds : root.convert(v.bounds, from: v)
+            if root.isFlipped { f.origin.y = root.bounds.height - f.maxY }
+            c.frame = f
+            c.contents = _NSCollectionViewDragImages.snapshot(of: v)
             out.append(c)
         }
-        if let tf = textField, tf.isDescendant(of: v) {
-            let c = NSDraggingImageComponent(key: .label)
-            c.frame = v.convert(tf.bounds, from: tf)
-            c.contents = tf._snapshotImage(of: [tf.bounds], in: tf.bounds)
-            out.append(c)
-        }
-        if out.isEmpty {
-            let c = NSDraggingImageComponent(key: .icon)
-            c.frame = v.bounds
-            c.contents = v._snapshotImage(of: [v.bounds], in: v.bounds)
-            out.append(c)
-        }
+        if let iv = imageView { add(iv) }
+        if let tf = textField { add(tf) }
+        if out.isEmpty { add(root) }
         return out
     }
 
@@ -110,13 +106,18 @@ import CoreGraphics
     @MainActor open func didTransition(from oldLayout: NSCollectionViewLayout, to newLayout: NSCollectionViewLayout) { }
 
     // Requirement of NSCopying (the legacy `itemPrototype` path)
-    /// A new item of the same class and nib with the same represented object. macOS copies
-    /// by archiving the view; the port archives no views, so the copy's view comes from its
-    /// own `loadView` (or nib) rather than duplicating a view set on the prototype.
+    /// A new item of the same class and nib with the same represented object. AppKit
+    /// copies the view by archiving it; the port cannot archive views, so the copy loads
+    /// its own view (`loadView()`, as a subclass building its view in code does) at the
+    /// original view's size (ADR-0041).
     open func copy(with zone: NSZone? = nil) -> Any {
         MainActor.assumeIsolated {
             let c = type(of: self).init(nibName: nibName, bundle: nibBundle)
             c.representedObject = representedObject
+            if let v = viewIfLoaded {
+                let size = v.frame.size
+                if c.view.frame.size == .zero { c.view.setFrameSize(size) }
+            }
             return c
         }
     }

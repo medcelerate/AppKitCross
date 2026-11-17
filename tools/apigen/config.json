@@ -462,6 +462,34 @@
     "NSCollectionViewDelegate.collectionView(_:shouldSelectItemsAt:)": "return indexPaths",
     "NSCollectionViewDelegate.collectionView(_:shouldDeselectItemsAt:)": "return indexPaths",
     "NSCollectionViewDelegate.collectionView(_:shouldChangeItemsAt:to:)": "return indexPaths",
+    "NSCollectionViewDelegate.collectionView(_:canDragItemsAt:with:)": {
+      "Set<IndexPath>": "return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, canDragItemsAt: IndexSet(indexPaths.map { $0.item }), with: event) : true",
+      "IndexSet": "return true"
+    },
+    "NSCollectionViewDelegate.collectionView(_:writeItemsAt:to:)": {
+      "Set<IndexPath>": "return MainActor.assumeIsolated { collectionView.numberOfSections } == 1 && self.collectionView(collectionView, writeItemsAt: IndexSet(indexPaths.map { $0.item }), to: pasteboard)",
+      "IndexSet": "return false"
+    },
+    "NSCollectionViewDelegate.collectionView(_:pasteboardWriterForItemAt:)": {
+      "IndexPath": "return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, pasteboardWriterForItemAt: indexPath.item) : nil",
+      "Int": "return nil"
+    },
+    "NSCollectionViewDelegate.collectionView(_:draggingSession:willBeginAt:forItemsAt:)": {
+      "Set<IndexPath>": "if collectionView.numberOfSections == 1 { self.collectionView(collectionView, draggingSession: session, willBeginAt: screenPoint, forItemsAt: IndexSet(indexPaths.map { $0.item })) }",
+      "IndexSet": ""
+    },
+    "NSCollectionViewDelegate.collectionView(_:namesOfPromisedFilesDroppedAtDestination:forDraggedItemsAt:)": {
+      "Set<IndexPath>": "return MainActor.assumeIsolated { collectionView.numberOfSections } == 1 ? self.collectionView(collectionView, namesOfPromisedFilesDroppedAtDestination: dropURL, forDraggedItemsAt: IndexSet(indexPaths.map { $0.item })) : []",
+      "IndexSet": "return []"
+    },
+    "NSCollectionViewDelegate.collectionView(_:draggingImageForItemsAt:with:offset:)": {
+      "Set<IndexPath>": "return collectionView.numberOfSections == 1 ? self.collectionView(collectionView, draggingImageForItemsAt: IndexSet(indexPaths.map { $0.item }), with: event, offset: dragImageOffset) : collectionView.draggingImageForItems(at: indexPaths, with: event, offset: dragImageOffset)",
+      "IndexSet": "return collectionView.draggingImageForItems(at: indexes, with: event, offset: dragImageOffset)"
+    },
+    "NSCollectionViewDelegate.collectionView(_:validateDrop:proposedIndexPath:dropOperation:)": "guard collectionView.numberOfSections == 1 else { return [] }; var index = proposedDropIndexPath.pointee.index(atPosition: 1); let operation = withUnsafeMutablePointer(to: &index) { self.collectionView(collectionView, validateDrop: draggingInfo, proposedIndex: $0, dropOperation: proposedDropOperation) }; proposedDropIndexPath.pointee = NSIndexPath(indexes: [0, index], length: 2); return operation",
+    "NSCollectionViewDelegate.collectionView(_:validateDrop:proposedIndex:dropOperation:)": "return []",
+    "NSCollectionViewDelegate.collectionView(_:acceptDrop:indexPath:dropOperation:)": "return collectionView.numberOfSections == 1 && self.collectionView(collectionView, acceptDrop: draggingInfo, index: indexPath.item, dropOperation: dropOperation)",
+    "NSCollectionViewDelegate.collectionView(_:acceptDrop:index:dropOperation:)": "return false",
     "NSCollectionViewDelegateFlowLayout.collectionView(_:layout:sizeForItemAt:)": "return (collectionViewLayout as? NSCollectionViewFlowLayout)?.itemSize ?? .zero",
     "NSCollectionViewDelegateFlowLayout.collectionView(_:layout:insetForSectionAt:)": "return (collectionViewLayout as? NSCollectionViewFlowLayout)?.sectionInset ?? NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)",
     "NSCollectionViewDelegateFlowLayout.collectionView(_:layout:minimumLineSpacingForSectionAt:)": "return (collectionViewLayout as? NSCollectionViewFlowLayout)?.minimumLineSpacing ?? 0",

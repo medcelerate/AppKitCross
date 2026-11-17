@@ -63,7 +63,11 @@ final class _NSDraggingInfo: NSObject, NSDraggingInfo {
     func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey : Any], using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {
         session.enumerateDraggingItems(options: enumOpts, for: view, classes: classArray, searchOptions: searchOptions, using: block)
     }
-    nonisolated func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    /// The source makes the promised files: a collection view asks its delegate (AppKit's
+    /// legacy file promise path); other sources promise none.
+    nonisolated func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? {
+        MainActor.assumeIsolated { (source as? NSCollectionView)?._namesOfPromisedFilesDropped(atDestination: dropDestination) }
+    }
     var numberOfValidItemsForDrop: Int {
         get { _numberOfValidItems }
         set { _numberOfValidItems = newValue }
@@ -281,13 +285,28 @@ final class _NSDragTracker: PlatformDragSource {
         // The image: the leader item's first component, or a placeholder of its frame.
         let leader = session._items.indices.contains(session.draggingLeaderIndex) ? session._items[session.draggingLeaderIndex] : session._items.first
         let frameInView = leader?.draggingFrame ?? NSRect(x: -8, y: -8, width: 16, height: 16)
-        image = leader?.imageComponents?.first?.contents as? NSImage
+        image = _NSDragTracker.compositeImage(of: leader)
         imageSize = frameInView.size == .zero ? NSSize(width: 16, height: 16) : frameInView.size
         // Where the pointer sits inside the frame (frames are in the source view's space).
         let frameInWindow = view.convert(frameInView, to: nil)
         let pointerInWindow = event.locationInWindow
         imageOffset = NSPoint(x: frameInWindow.minX - pointerInWindow.x, y: frameInWindow.minY - pointerInWindow.y)
         if frameInView.size == .zero { imageOffset = NSPoint(x: -8, y: -8) }
+    }
+
+    /// The item's image: its components drawn at their frames (measured from the dragging
+    /// frame's bottom-left), so a component smaller than the frame (an item's label) keeps
+    /// its size and place instead of being stretched over the frame.
+    static func compositeImage(of item: NSDraggingItem?) -> NSImage? {
+        guard let item, let components = item.imageComponents, !components.isEmpty else { return nil }
+        let size = item.draggingFrame.size
+        guard size.width > 0, size.height > 0 else { return components[0].contents as? NSImage }
+        if components.count == 1, components[0].frame == NSRect(origin: .zero, size: size) { return components[0].contents as? NSImage }
+        let parts = components.compactMap { c in (c.contents as? NSImage).map { (c.frame, $0) } }
+        return NSImage(size: size, flipped: false) { _ in
+            for (frame, image) in parts { image.draw(in: frame) }
+            return true
+        }
     }
 
     private func start(event: NSEvent, view: NSView) {
