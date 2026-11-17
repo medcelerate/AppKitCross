@@ -780,7 +780,10 @@ import CoreText
             }
             return
         }
-        let all = NSRange(location: 0, length: _storage.length)
+        // Only the lines in the dirty rect (drawing a long document whole on every keystroke
+        // made typing slow).
+        let dirty = dirtyRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let all = _layoutManager.glyphRange(forBoundingRect: dirty, in: _container)
         _layoutManager.drawBackground(forGlyphRange: all, at: origin)
         _drawTextHighlights()
         _drawFindHighlights(above: false)
@@ -865,7 +868,32 @@ import CoreText
 
     open override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
+        _followClipViewWidth()
         if _textLayoutManager != nil { _tk2ObserveClipView(); needsLayout = true }
+    }
+
+    /// A document view that wraps (not horizontally resizable) and resizes its width with
+    /// its superview stays exactly as wide as the clip view, whatever changes that width
+    /// (a scroller appearing, a legacy scroller's width taken out, a window resize), so
+    /// lines never run under the vertical scroller. Both engines.
+    private func _followClipViewWidth() {
+        guard let clip = superview as? NSClipView else { return }
+        if _extras.trackedClipView !== clip {
+            if let o = _extras.clipFrameObserver { NotificationCenter.default.removeObserver(o) }
+            _extras.trackedClipView = clip
+            clip.postsFrameChangedNotifications = true
+            _extras.clipFrameObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?._matchClipViewWidth() }
+            }
+        }
+        _matchClipViewWidth()
+    }
+
+    private func _matchClipViewWidth() {
+        guard let clip = superview as? NSClipView, !isHorizontallyResizable, !isFieldEditor, autoresizingMask.contains(.width) else { return }
+        let width = clip.bounds.width
+        guard width > 0, abs(frame.width - width) > 0.5 else { return }
+        setFrameSize(NSSize(width: width, height: frame.height))
     }
 
     internal override func _lineRange(at offset: Int) -> NSRange {

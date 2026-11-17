@@ -199,6 +199,17 @@ attributes in document order without rebuilding the run list, and looks for text
 after content edits. TextEdit sizes its text view from the scroll view's content size, so a
 legacy (Windows) scroller no longer covers the end of each line.
 
+The second PC run measured seconds per keystroke in a 3000-line document under both
+engines. The causes, all shared: the "incremental" spelling pass unioned its range with the
+document's start; spelling indexed a bridged `String` character by character (linear per
+access on corelibs Foundation, so quadratic); TextKit 1 drew the whole document on every
+display, and its spelling underline looped every mark over every line. Spelling now copies
+just the checked range, a long pass checks the visible text first and the rest 2000
+characters per run-loop turn, TextKit 1 draws only the lines in the dirty rect, and the
+underline starts at each mark's own line. A wrapping text view in a scroll view also keeps
+its width equal to the clip view's (it watches the clip view's frame), so no path that
+narrows the clip view can leave lines under the scroller.
+
 ## Consequences
 
 - Both engines share one typesetter, so TextKit 2 fragment frames match TextKit 1 line rects

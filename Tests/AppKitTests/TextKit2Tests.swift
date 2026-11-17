@@ -802,4 +802,69 @@ final class TextKit2Tests: XCTestCase, @unchecked Sendable {
             }
         }
     }
+
+    /// A keystroke in a 3000-line document does a paragraph's worth of work: spelling checks
+    /// the edited paragraph only, TextKit 2 lays out only the fragments it shows, and a long
+    /// paste is checked in slices after the visible part. Both engines.
+    func testKeystrokeWorkInALongDocumentIsBounded() {
+        for textKit2 in [false, true] {
+            MainActor.assumeIsolated {
+                let (w, _, tv) = textView(textKit2: textKit2)
+                tv.isContinuousSpellCheckingEnabled = true
+                w.makeKeyAndOrderFront(nil)
+                _ = w.makeFirstResponder(tv)
+                let big = (0..<3000).map { "Line \($0) with some wrods in it" }.joined(separator: "\n")
+                tv.insertText(big, replacementRange: NSRange(location: NSNotFound, length: 0))
+                w.display()
+                // The first turn checks what is visible, not the whole paste.
+                tv._extras.spellCheckedCharacters = 0
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+                XCTAssertLessThan(tv._extras.spellCheckedCharacters, (big as NSString).length / 4, "textKit2 \(textKit2): the paste is checked in slices")
+                // Let the slices finish, then measure one keystroke.
+                for _ in 0..<400 where tv._extras.spellCheckedCharacters < (big as NSString).length { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
+                tv._extras.spellCheckedCharacters = 0
+                let layouts = tv.textLayoutManager?._fragmentLayoutCount ?? 0
+                tv.insertNewline(nil)
+                tv.insertText("ok")
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                w.contentView?.layoutSubtreeIfNeeded()
+                w.display()
+                XCTAssertLessThan(tv._extras.spellCheckedCharacters, 200, "textKit2 \(textKit2): typing checks the edited paragraph only")
+                if let tlm = tv.textLayoutManager {
+                    XCTAssertLessThan(tlm._fragmentLayoutCount - layouts, 80, "only the visible fragments are laid out again")
+                }
+            }
+        }
+    }
+
+    /// A text view that resizes its width with the clip view stays as wide as the clip
+    /// view, however that width changes (a legacy scroller appearing, a window resize), so
+    /// no line runs under the scroller. Both engines.
+    func testTextViewFollowsTheClipViewWidth() {
+        for textKit2 in [false, true] {
+            MainActor.assumeIsolated {
+                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+                let scroll = NSScrollView(frame: w.contentView!.bounds)
+                scroll.autoresizingMask = [.width, .height]
+                scroll.hasVerticalScroller = true
+                scroll.scrollerStyle = .legacy
+                scroll.autohidesScrollers = false
+                // Sized from the scroll view, not its content: wider than the clip view.
+                let tv = NSTextView(usingTextLayoutManager: textKit2)
+                tv.frame = scroll.bounds
+                tv.minSize = NSSize(width: 0, height: scroll.bounds.height)
+                tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+                tv.isVerticallyResizable = true
+                tv.autoresizingMask = [.width, .height]
+                scroll.documentView = tv
+                w.contentView!.addSubview(scroll)
+                w.display()
+                XCTAssertEqual(tv.frame.width, scroll.contentView.bounds.width, "textKit2 \(textKit2)")
+                XCTAssertEqual(tv.textContainer!.size.width, scroll.contentView.bounds.width, "textKit2 \(textKit2): the container wraps before the scroller")
+                w.setContentSize(NSSize(width: 360, height: 460))
+                w.display()
+                XCTAssertEqual(tv.frame.width, scroll.contentView.bounds.width, "textKit2 \(textKit2): after a resize")
+            }
+        }
+    }
 }

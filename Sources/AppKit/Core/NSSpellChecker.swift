@@ -162,23 +162,26 @@ open class NSSpellChecker: NSObject {
 
     /// The words of `string` (UTF-16 ranges): letters, digits and inner apostrophes/hyphens.
     internal static func _words(in string: String, from start: Int = 0, to end: Int? = nil) -> [NSRange] {
-        let s = string as NSString
-        let limit = min(end ?? s.length, s.length)
+        // UTF-16 units copied once: indexing a bridged String character by character is
+        // linear per access on corelibs Foundation, which made checking a long text quadratic.
+        let s = Array(string.utf16)
+        let limit = min(end ?? s.count, s.count)
         var out: [NSRange] = []
         var i = max(0, start)
         func isLetter(_ c: unichar) -> Bool {
+            if c < 0x80 { return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) }
             guard let u = UnicodeScalar(c) else { return c >= 0xD800 && c <= 0xDFFF }
             return CharacterSet.letters.contains(u) || CharacterSet.decimalDigits.contains(u) || CharacterSet.nonBaseCharacters.contains(u)
         }
         while i < limit {
-            while i < limit && !isLetter(s.character(at: i)) { i += 1 }
+            while i < limit && !isLetter(s[i]) { i += 1 }
             guard i < limit else { break }
             let a = i
             while i < limit {
-                let c = s.character(at: i)
+                let c = s[i]
                 if isLetter(c) { i += 1; continue }
                 // An apostrophe or hyphen between letters belongs to the word ("don't").
-                if (c == 0x27 || c == 0x2019) && i + 1 < limit && isLetter(s.character(at: i + 1)) { i += 1; continue }
+                if (c == 0x27 || c == 0x2019) && i + 1 < limit && isLetter(s[i + 1]) { i += 1; continue }
                 break
             }
             out.append(NSRange(location: a, length: i - a))

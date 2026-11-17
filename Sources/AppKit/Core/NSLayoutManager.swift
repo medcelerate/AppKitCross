@@ -904,7 +904,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// manager's to draw (as AppKit's does), one stroke per fragment in the text colour.
     @MainActor private func _drawStrikethroughs(forGlyphRange range: NSRange, at origin: NSPoint) {
         guard let storage = textStorage, storage.length > 0 else { return }
-        let whole = NSRange(location: 0, length: storage.length)
+        let whole = NSIntersectionRange(NSRange(location: 0, length: storage.length), range)
+        guard whole.length > 0 else { return }
         storage.enumerateAttribute(.strikethroughStyle, in: whole, options: []) { value, run, _ in
             guard let style = (value as? NSNumber)?.intValue ?? (value as? Int), style != 0 else { return }
             let attrs = storage.attributes(at: run.location, effectiveRange: nil)
@@ -960,7 +961,13 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         for m in marks where m.range.location < end && m.range.location + m.range.length > range.location {
             let state = (m.attrs[.spellingState] as? NSNumber)?.intValue ?? 1
             (state & 2 != 0 && state & 1 == 0 ? NSColor.systemGreen : NSColor.systemRed).setFill()
-            for f in _fragments where f.charRange.location < m.range.location + m.range.length && f.visibleEnd > m.range.location {
+            // From the mark's own fragment (a pass over every fragment per mark made drawing a
+            // long, misspelt document quadratic).
+            guard var fi = _fragmentIndex(forCharacter: m.range.location) else { continue }
+            while fi < _fragments.count, _fragments[fi].charRange.location < m.range.location + m.range.length {
+                let f = _fragments[fi]
+                fi += 1
+                guard f.visibleEnd > m.range.location else { continue }
                 let a = max(m.range.location, f.charRange.location), b = min(m.range.location + m.range.length, f.visibleEnd)
                 guard b > a else { continue }
                 let x0 = f.textX + CTLineGetOffsetForStringIndex(f.line, a, nil), x1 = f.textX + CTLineGetOffsetForStringIndex(f.line, b, nil)

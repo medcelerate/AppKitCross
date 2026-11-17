@@ -110,14 +110,20 @@ extension NSTextView {
     /// Marks misspelt words in `range` (whole words around it) with the spelling state.
     internal func _markSpelling(in range: NSRange? = nil, skippingWordAtInsertionPoint: Bool = false) {
         let s = string as NSString
-        let r = range.map { NSUnionRange(_paragraphsRange($0), NSRange(location: 0, length: 0)) } ?? NSRange(location: 0, length: s.length)
+        let r = range.map { _paragraphsRange($0) } ?? NSRange(location: 0, length: s.length)
         _setSpellingMark(0, range: r)
         guard isContinuousSpellCheckingEnabled || range != nil || !skippingWordAtInsertionPoint else { return }
         let checker = NSSpellChecker.shared
         let caret = selectedRange.length == 0 ? selectedRange.location : -1
-        for w in NSSpellChecker._words(in: string, from: r.location, to: NSMaxRange(r)) {
+        // Only the checked range is copied out of the text (see NSSpellChecker._words).
+        let text = s.substring(with: r)
+        let units = Array(text.utf16)
+        _extras.spellCheckedCharacters &+= r.length
+        for local in NSSpellChecker._words(in: text) {
+            let w = NSRange(location: r.location + local.location, length: local.length)
             if skippingWordAtInsertionPoint && caret >= w.location && caret <= NSMaxRange(w) { continue }
-            if checker._isMisspelled(s.substring(with: w), tag: _spellTag) { setSpellingState(NSAttributedString.SpellingState.spelling.rawValue, range: w) }
+            let word = String(decoding: units[local.location..<NSMaxRange(local)], as: UTF16.self)
+            if checker._isMisspelled(word, tag: _spellTag) { setSpellingState(NSAttributedString.SpellingState.spelling.rawValue, range: w) }
         }
     }
 
@@ -140,9 +146,54 @@ extension NSTextView {
                 self._extras.spellCheckPending = false
                 let dirty = self._extras.spellDirty
                 self._extras.spellDirty = nil
-                self._markSpelling(in: dirty.map { self._clamped($0) }, skippingWordAtInsertionPoint: true)
+                self._runSpellingPass(dirty.map { self._clamped($0) })
             }
         }
+    }
+
+    /// Checks `range` (the whole text for nil). A long range (a big paste, a new document)
+    /// is checked where it is visible first, then a slice per run-loop turn, so typing and
+    /// scrolling stay responsive while the rest is checked.
+    internal func _runSpellingPass(_ range: NSRange?) {
+        let n = (string as NSString).length
+        let r = range.map { _paragraphsRange($0) } ?? NSRange(location: 0, length: n)
+        guard r.length > _NSTextViewExtras.spellSlice else { _markSpelling(in: r, skippingWordAtInsertionPoint: true); return }
+        _extras.spellPass &+= 1
+        if let visible = _visibleCharacterRange {
+            let v = NSIntersectionRange(r, visible)
+            if v.length > 0 { _markSpelling(in: v, skippingWordAtInsertionPoint: true) }
+        }
+        _spellSlice(from: r.location, to: NSMaxRange(r), pass: _extras.spellPass)
+    }
+
+    private func _spellSlice(from start: Int, to end: Int, pass: Int) {
+        // A newer pass (another big edit) takes over; edits in between are checked by their own pass.
+        guard pass == _extras.spellPass, isContinuousSpellCheckingEnabled else { return }
+        let stop = min(end, (string as NSString).length)
+        guard start < stop else { return }
+        let slice = _paragraphsRange(NSRange(location: start, length: min(_NSTextViewExtras.spellSlice, stop - start)))
+        _markSpelling(in: slice, skippingWordAtInsertionPoint: true)
+        let next = max(NSMaxRange(slice), start + 1)
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?._spellSlice(from: next, to: stop, pass: pass) }
+        }
+    }
+
+    /// The characters in the visible part of the view (nil outside a scroll view).
+    internal var _visibleCharacterRange: NSRange? {
+        guard enclosingScrollView != nil else { return nil }
+        let area = visibleRect.offsetBy(dx: -_drawOrigin.x, dy: -_drawOrigin.y)
+        if let tlm = _textLayoutManager {
+            var lo = Int.max, hi = 0
+            for f in tlm._layoutFragments(in: area) {
+                guard let r = f.rangeInElement._nsRange else { continue }
+                lo = min(lo, r.location); hi = max(hi, NSMaxRange(r))
+            }
+            return lo == Int.max ? nil : NSRange(location: lo, length: hi - lo)
+        }
+        guard let container = textContainer else { return nil }
+        let r = _layoutManager.glyphRange(forBoundingRect: area, in: container)
+        return r.length > 0 ? r : nil
     }
 
     /// Notes the text an approved edit puts at `range` for the next spelling pass.
@@ -753,6 +804,16 @@ extension NSTextView {
     var spellTag = 0
     var spellCheckPending = false
     var spellDirty: NSRange?
+    /// Counts long spelling passes (a newer one stops an older one's slices).
+    var spellPass = 0
+    /// Characters spell-checked so far (tests bound the work an edit does).
+    var spellCheckedCharacters = 0
+    /// Characters a long spelling pass checks per run-loop turn.
+    static let spellSlice = 2000
+    /// The clip view whose width the text view follows, and the observer of its frame.
+    weak var trackedClipView: NSView?
+    nonisolated(unsafe) var clipFrameObserver: NSObjectProtocol?
+    deinit { if let o = clipFrameObserver { NotificationCenter.default.removeObserver(o) } }
     var completionPartial: String?
     /// The style of an empty last paragraph (no character carries it yet).
     var pendingParagraphStyle: (location: Int, style: NSParagraphStyle)?

@@ -253,8 +253,12 @@ open class NSTextLayoutManager: NSObject, NSSecureCoding, NSCoding, NSTextSelect
     }
 
     /// Lays one fragment out (it keeps its frame's origin; positions after it are stale).
+    /// Fragments laid out so far (tests bound the work an edit does).
+    internal var _fragmentLayoutCount = 0
+
     internal func _layout(_ f: NSTextLayoutFragment) {
         guard let container = _textContainer else { return }
+        _fragmentLayoutCount &+= 1
         let all = _allFragments
         let isLast = f === all.last
         let string = _paragraphString(f)
