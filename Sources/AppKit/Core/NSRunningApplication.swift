@@ -79,7 +79,9 @@ open class NSRunningApplication: NSObject, @unchecked Sendable {
         NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == bundleIdentifier }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrunningapplication/terminateautomaticallyterminableapplications()
-    public class func terminateAutomaticallyTerminableApplications() { unimplemented() }
+    /// Nothing: automatic termination is a macOS process-lifecycle feature; no Windows or
+    /// Linux application opts in, so there is never one to terminate.
+    public class func terminateAutomaticallyTerminableApplications() { }
 
     // MARK: Identity
 
@@ -111,7 +113,9 @@ open class NSRunningApplication: NSObject, @unchecked Sendable {
                 return 0
                 #endif
             }
-            guard let arch = Platform.backend.workspace.executableArchitecture(processIdentifier: _info.processIdentifier) else { unimplemented() }
+            guard let arch = Platform.backend.workspace.executableArchitecture(processIdentifier: _info.processIdentifier) else {
+                unimplemented("NSRunningApplication.executableArchitecture — this platform's workspace cannot read another process's architecture")
+            }
             return arch
         }
     }

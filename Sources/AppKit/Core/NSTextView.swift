@@ -52,46 +52,11 @@ import CoreText
     /// Returns false when the event is not handled here (key equivalents fall through).
     @discardableResult
     internal func _interpret(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags
-        let shift = flags.contains(.shift)
-        let option = flags.contains(.option)
-        let command = flags.contains(.command) || flags.contains(.control)
-        let plain = event.charactersIgnoringModifiers ?? ""
-        var selector: String? = nil
-        switch plain {
-        case "\r", "\u{3}": selector = "insertNewline:"
-        case "\t": selector = shift ? "insertBacktab:" : "insertTab:"
-        case "\u{1B}": selector = option ? "complete:" : "cancelOperation:"
-        case "\u{F708}": selector = "complete:"
-        case "\u{7F}", "\u{8}": selector = option ? "deleteWordBackward:" : "deleteBackward:"
-        case "\u{F728}": selector = option ? "deleteWordForward:" : "deleteForward:"
-        case "\u{F702}": selector = command ? (shift ? "moveToBeginningOfLineAndModifySelection:" : "moveToBeginningOfLine:") : option ? (shift ? "moveWordLeftAndModifySelection:" : "moveWordLeft:") : (shift ? "moveLeftAndModifySelection:" : "moveLeft:")
-        case "\u{F703}": selector = command ? (shift ? "moveToEndOfLineAndModifySelection:" : "moveToEndOfLine:") : option ? (shift ? "moveWordRightAndModifySelection:" : "moveWordRight:") : (shift ? "moveRightAndModifySelection:" : "moveRight:")
-        case "\u{F700}": selector = command ? (shift ? "moveToBeginningOfDocumentAndModifySelection:" : "moveToBeginningOfDocument:") : (shift ? "moveUpAndModifySelection:" : "moveUp:")
-        case "\u{F701}": selector = command ? (shift ? "moveToEndOfDocumentAndModifySelection:" : "moveToEndOfDocument:") : (shift ? "moveDownAndModifySelection:" : "moveDown:")
-        case "\u{F729}": selector = shift ? "moveToBeginningOfDocumentAndModifySelection:" : "moveToBeginningOfDocument:"
-        case "\u{F72B}": selector = shift ? "moveToEndOfDocumentAndModifySelection:" : "moveToEndOfDocument:"
-        case "\u{F72C}": selector = "pageUp:"
-        case "\u{F72D}": selector = "pageDown:"
-        default: break
+        switch NSResponder._standardKeyBinding(for: event) {
+        case .command(let s): doCommand(by: Selector((s))); return true
+        case .text(let text): insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)); return true
+        case nil: return false
         }
-        if selector == nil && command {
-            switch plain.lowercased() {
-            case "a": selector = "selectAll:"
-            case "c": selector = "copy:"
-            case "x": selector = "cut:"
-            case "v": selector = "paste:"
-            default: return false     // other key equivalents belong to menus
-            }
-        }
-        if let s = selector {
-            doCommand(by: Selector((s)))
-            return true
-        }
-        guard let text = event.characters, !text.isEmpty,
-              text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && ($0.value < 0xF700 || $0.value > 0xF8FF) }) else { return false }
-        insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-        return true
     }
 
     private func _move(to offset: Int, extend: Bool) {
@@ -1595,6 +1560,10 @@ import CoreText
     @MainActor open var textLayoutManager: NSTextLayoutManager? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textstorage
     @MainActor open var textStorage: NSTextStorage? { _storage }
+    @MainActor internal override func _richContents() -> NSAttributedString { _storage }
+    @MainActor internal override func _replaceRich(_ range: NSRange, with content: NSAttributedString) {
+        _replaceAttributed(range, with: isRichText ? content : NSAttributedString(string: content.string, attributes: typingAttributes), selectAfter: false)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/tightenkerning(_:)
     @MainActor open func tightenKerning(_ sender: Any?) { _adjustKern(by: -1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticdashsubstitution(_:)

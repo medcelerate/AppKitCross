@@ -59,7 +59,7 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         super.init()
         _paperSize = NSSize(width: CGFloat(coder.decodeDouble(forKey: "NSPaperWidth")), height: CGFloat(coder.decodeDouble(forKey: "NSPaperHeight")))
         if _paperSize.width <= 0 || _paperSize.height <= 0 { _paperSize = paper.size }
-        _paperName = (coder.decodeObject(forKey: "NSPaperName") as? String).map { NSPrinter.PaperName($0) }
+        _paperName = (coder._decodeObjectIfPresent(forKey: "NSPaperName") as? String).map { NSPrinter.PaperName($0) }
         _orientation = coder.decodeInteger(forKey: "NSOrientation") == 1 ? .landscape : .portrait
         if coder.containsValue(forKey: "NSLeftMargin") { _leftMargin = CGFloat(coder.decodeDouble(forKey: "NSLeftMargin")) }
         if coder.containsValue(forKey: "NSRightMargin") { _rightMargin = CGFloat(coder.decodeDouble(forKey: "NSRightMargin")) }
@@ -70,8 +70,8 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         _verticalPagination = PaginationMode(rawValue: coder.decodeInteger(forKey: "NSVerticalPagination")) ?? .automatic
         if coder.containsValue(forKey: "NSHorizontallyCentered") { _horizontallyCentered = coder.decodeBool(forKey: "NSHorizontallyCentered") }
         if coder.containsValue(forKey: "NSVerticallyCentered") { _verticallyCentered = coder.decodeBool(forKey: "NSVerticallyCentered") }
-        if let d = coder.decodeObject(forKey: "NSJobDisposition") as? String { _jobDisposition = JobDisposition(rawValue: d) }
-        if let name = coder.decodeObject(forKey: "NSPrinterName") as? String { _printer = NSPrinter(name: name) }
+        if let d = coder._decodeObjectIfPresent(forKey: "NSJobDisposition") as? String { _jobDisposition = JobDisposition(rawValue: d) }
+        if let name = coder._decodeObjectIfPresent(forKey: "NSPrinterName") as? String { _printer = NSPrinter(name: name) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/init(dictionary:)
     public init(dictionary attributes: [NSPrintInfo.AttributeKey : Any]) {
@@ -296,11 +296,11 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmpageformat()
-    open func pmPageFormat() -> UnsafeMutableRawPointer { unimplemented() }
+    open func pmPageFormat() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPageFormat — PMPageFormat is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmprintsession()
-    open func pmPrintSession() -> UnsafeMutableRawPointer { unimplemented() }
+    open func pmPrintSession() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPrintSession — PMPrintSession is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/pmprintsettings()
-    open func pmPrintSettings() -> UnsafeMutableRawPointer { unimplemented() }
+    open func pmPrintSettings() -> UnsafeMutableRawPointer { unimplemented("NSPrintInfo.pmPrintSettings — PMPrintSettings is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/printsettings
     open var printSettings: NSMutableDictionary { _printSettings }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/printer
@@ -339,16 +339,16 @@ open class NSPrintInfo: NSObject, NSCopying, NSCoding {
         set { _shared = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/takesettings(from:)
-    open func takeSettings(from inPDFInfo: NSPDFInfo) { unimplemented() }
+    open func takeSettings(from inPDFInfo: NSPDFInfo) { unimplemented("NSPrintInfo.takeSettings(from:) — NSPDFInfo is a generated stub (no PDF panel exists to fill one)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/topmargin
     open var topMargin: CGFloat {
         get { _topMargin }
         set { _topMargin = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/updatefrompmpageformat()
-    open func updateFromPMPageFormat() { unimplemented() }
+    open func updateFromPMPageFormat() { unimplemented("NSPrintInfo.updateFromPMPageFormat — PMPageFormat is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/updatefrompmprintsettings()
-    open func updateFromPMPrintSettings() { unimplemented() }
+    open func updateFromPMPrintSettings() { unimplemented("NSPrintInfo.updateFromPMPrintSettings — PMPrintSettings is the macOS Core Printing API") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsprintinfo/verticalpagination
     open var verticalPagination: NSPrintInfo.PaginationMode {
         get { _verticalPagination }

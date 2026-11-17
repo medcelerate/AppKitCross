@@ -1243,7 +1243,12 @@ internal final class _NSBrowserScroller: NSScroller {
             dragImageOffset?.pointee = offset
             return image
         }
-        unimplemented()   // AppKit renders the rows; row drag images arrive with browser drag and drop.
+        // The rows as drawn, from the column's matrix (AppKit renders the rows).
+        dragImageOffset?.pointee = .zero
+        guard let matrix = self.matrix(inColumn: column) else { return nil }
+        let frames = rowIndexes.map { matrix.cellFrame(atRow: $0, column: 0) }
+        let union = frames.reduce(NSRect.null) { $0.union($1) }
+        return union.isNull ? nil : matrix._snapshotImage(of: frames, in: union)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbrowser/setdraggingsourceoperationmask(_:forlocal:)
     @MainActor open func setDraggingSourceOperationMask(_ mask: NSDragOperation, forLocal isLocal: Bool) {

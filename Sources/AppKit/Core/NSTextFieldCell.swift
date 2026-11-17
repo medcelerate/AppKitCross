@@ -89,15 +89,23 @@ import CoreText
 
     /// True while the field editor shows the text.
     internal var _hidesText = false
+    /// NSTextField's `placeholderAttributedStrings` (macOS 26), longest first as given.
+    internal var _placeholderCandidates: [NSAttributedString] = []
 
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         if _hidesText { return }
         let rect = _textRect(forBounds: cellFrame)
         let flipped = controlView.isFlipped
         if stringValue.isEmpty {
-            if let p = _placeholderString, !p.isEmpty {
-                var attrs = _attributes
-                attrs[.foregroundColor] = NSColor.placeholderTextColor
+            var attrs = _attributes
+            attrs[.foregroundColor] = NSColor.placeholderTextColor
+            if !_placeholderCandidates.isEmpty {
+                // NSTextField.placeholderAttributedStrings: the first that fits the width, else the last.
+                let fitting = _placeholderCandidates.first { $0.size().width <= rect.width } ?? _placeholderCandidates.last!
+                _drawText(fitting.string, attributes: attrs.merging(fitting.length > 0 ? fitting.attributes(at: 0, effectiveRange: nil) : [:]) { $1 }, in: rect, alignment: _alignment, flipped: flipped)
+            } else if let a = _placeholderAttributedString, a.length > 0 {
+                _drawText(a.string, attributes: attrs.merging(a.attributes(at: 0, effectiveRange: nil)) { $1 }, in: rect, alignment: _alignment, flipped: flipped)
+            } else if let p = _placeholderString, !p.isEmpty {
                 _drawText(p, attributes: attrs, in: rect, alignment: _alignment, flipped: flipped)
             }
             return

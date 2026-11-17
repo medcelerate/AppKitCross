@@ -97,7 +97,13 @@ import CoreGraphics
     open class var selectionIsChangingNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionIsChangingNotification") }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        let header = NSTableHeaderView(frame: NSRect(x: 0, y: 0, width: 0, height: NSTableHeaderView.defaultHeight))
+        header._tableView = self
+        _headerView = header
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1242,7 +1248,16 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/candragrows(with:at:)
     @MainActor open func canDragRows(with rowIndexes: IndexSet, at mouseDownPoint: NSPoint) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/dragimageforrows(with:tablecolumns:event:offset:)
-    @MainActor open func dragImageForRows(with dragRows: IndexSet, tableColumns: [NSTableColumn], event dragEvent: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    /// The rows' cells in `tableColumns` as drawn now, in one image over their rects; the
+    /// offset is zero.
+    @MainActor open func dragImageForRows(with dragRows: IndexSet, tableColumns: [NSTableColumn], event dragEvent: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        dragImageOffset.pointee = .zero
+        let columns = tableColumns.compactMap { c in self.tableColumns.firstIndex { $0 === c } }
+        var frames: [NSRect] = []
+        for r in dragRows { for c in columns { let f = frameOfCell(atColumn: c, row: r); if !f.isEmpty { frames.append(f) } } }
+        let union = frames.reduce(NSRect.null) { $0.union($1) }
+        return union.isNull ? NSImage(size: .zero) : _snapshotImage(of: frames, in: union)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/draggingdestinationfeedbackstyle
     @MainActor open var draggingDestinationFeedbackStyle: NSTableView.DraggingDestinationFeedbackStyle {
         get { _draggingDestinationFeedbackStyle }
