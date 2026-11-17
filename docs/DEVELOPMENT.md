@@ -15,7 +15,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Sources/CoreGraphics` (Windows and Linux only) | `CGContext`, `CGPath`, `CGColor`, `CGImage` over Direct2D or Cairo. |
 | `Sources/CoreText` (Windows and Linux only) | CoreText's API over DirectWrite or Pango/HarfBuzz (ADR-0007). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. On Windows `MTKView` presents through a DXGI composition swap chain shown by the window's DirectComposition tree; on the host backend (tests) frames are read back and drawn. |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. On Windows `MTKView` presents through a DXGI composition swap chain shown by the window's DirectComposition tree; on Linux through a `VkSwapchainKHR` on a child X window or a Wayland subsurface under the view (ADR-0012, ADR-0042); on the host backend (tests) frames are read back and drawn. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/UniformTypeIdentifiers`, `Sources/ImageIO` (Windows and Linux only) | `UTType` over a table generated from the macOS SDK (`tools/uttypes`); `CGImageSource`/`CGImageDestination` over WIC or Cairo (ADR-0009). |
 | `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
@@ -29,6 +29,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
 | `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable`, `AudioPlayer`, `TextEdit`, `Toolbar`, `Sheets`, `Workspace` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
 | `Examples/DailyTodo` | A real third-party SwiftUI app (Daily To Do, MIT) vendored unmodified, with shims for the Apple frameworks the port lacks; the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
+| `Examples/MDVault` | A real document-based SwiftUI app (MD Vault, MIT) vendored with one `@MainActor`; its Info.plist under `Resources/` (named by `APPKITWIN_INFO_PLIST`); the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
 | `Examples/LibraryCompat` | A package of its own: third-party SwiftUI libraries as dependencies, one tab each, with the per-library verdicts and API gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Built by `tools/library-compat.sh` (see below). |
 
 ## Conventions
@@ -159,6 +160,7 @@ says what it demonstrates. CI builds every one on macOS, Windows and both Linux 
 | `Toolbar` | `NSToolbar` (image items, `NSToolbarItemGroup`, `NSMenuToolbarItem`, `NSSearchToolbarItem`, validation, overflow, the customization sheet, autosave) and an `NSStatusItem` with a menu | `swift run Toolbar` |
 | `Workspace` | `NSWorkspace` (open a URL, reveal in the file manager, icons, recycle, `urlForApplication`), `NSRunningApplication` (frontmost, launch, activate, hide, terminate) and `NSDockTile` (a badge on the taskbar button) | `swift run Workspace` (`--report`) |
 | `DailyTodo` | Daily To Do, a real third-party SwiftUI app vendored unmodified: `NavigationStack` + toolbar, `DatePicker`s, a checkbox `List`, `ContentUnavailableView`, a `.sheet` with a grouped `Form`, `LabeledContent`, `Picker`, `environmentObject`, JSON persistence; `UserNotifications`/`ServiceManagement` shims off macOS; its self-checks as `DailyTodoChecks` | `swift run DailyTodo`, `swift run DailyTodoChecks` |
+| `MDVault` | MD Vault, a real document-based SwiftUI app: `DocumentGroup` + `FileDocument`, an `NSTextView` representable editor, a SwiftUI Markdown viewer, `@FocusedValue` commands, `@AppStorage` | `APPKITWIN_INFO_PLIST=Examples/MDVault/Resources/Info.plist swift run MDVault` |
 
 The port has no Observation framework (`@Observable`), so Observable uses `ObservableObject`;
 `UndoManager` and `FileWrapper` are missing from swift-corelibs-foundation and the port supplies

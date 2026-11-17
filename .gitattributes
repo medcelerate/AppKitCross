@@ -1,0 +1,3 @@
+# Upstream sample documents stay LF on every checkout (core.autocrlf=true turned them into
+# CR LF on the Windows PC, where the app counts lines by "\n").
+Examples/MDVault/Resources/*.md text eol=lf
