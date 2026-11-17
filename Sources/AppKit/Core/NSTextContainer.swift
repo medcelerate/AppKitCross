@@ -16,6 +16,8 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
     private var _lineBreakMode: NSLineBreakMode = .byWordWrapping
     private var _exclusionPaths: [NSBezierPath] = []
     internal weak var _layoutManager: NSLayoutManager?
+    /// The TextKit 2 layout manager laying this container out (ADR-0040).
+    internal weak var _textLayoutManager: NSTextLayoutManager?
     internal weak var _textView: NSTextView?
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/init(size:)
@@ -34,7 +36,10 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/supportssecurecoding
     class public var supportsSecureCoding: Bool { true }
 
-    private func _geometryChanged() { _layoutManager?.textContainerChangedGeometry(self) }
+    private func _geometryChanged() {
+        _layoutManager?.textContainerChangedGeometry(self)
+        _textLayoutManager?._containerGeometryDidChange()
+    }
 
     /// The width right-aligned and centred lines flush against when `size.width` is
     /// unbounded (a field editor's or a horizontally resizable view's container, which
@@ -105,7 +110,7 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
         for c in containers { newLayoutManager.addTextContainer(c) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/textlayoutmanager
-    open var textLayoutManager: NSTextLayoutManager? { nil }
+    open var textLayoutManager: NSTextLayoutManager? { _textLayoutManager }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/textview
     open var textView: NSTextView? {
         get { _textView }

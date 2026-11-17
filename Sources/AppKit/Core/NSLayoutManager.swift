@@ -182,144 +182,26 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
 
     private var _length: Int { _textStorage?.length ?? 0 }
 
-    /// NSFont / NSColor attributes expressed for CoreText, with temporary attributes merged.
+    /// NSFont / NSColor attributes expressed for CoreText, with temporary attributes merged
+    /// (the conversion TextKit 2 shares, ADR-0040).
     internal func _coreTextString() -> NSAttributedString {
         guard let storage = _textStorage else { return NSAttributedString(string: "") }
-        let out = NSMutableAttributedString(string: storage.string)
-        let n = storage.length
-        guard n > 0 else { return out }
         // Semantic colours resolve under the text view's appearance (a dark field editor
         // draws light text), not whatever appearance happens to be current during layout.
         let appearance: NSAppearance? = MainActor.assumeIsolated { firstTextView?.effectiveAppearance }
         _layoutIsDark = appearance?.isDark ?? MainActor.assumeIsolated { NSAppearance.currentIsDark }
-        // Tab stops reach CoreText through a CTParagraphStyle (alignment, indents and spacing
-        // are applied here, line by line).
-        var ctStyles: [ObjectIdentifier: CTParagraphStyle] = [:]
-        func ctStyle(_ ps: NSParagraphStyle) -> CTParagraphStyle? {
-            guard !ps.tabStops.isEmpty || ps.defaultTabInterval > 0 else { return nil }
-            if let cached = ctStyles[ObjectIdentifier(ps)] { return cached }
-            let made = NSLayoutManager._ctParagraphStyle(tabStops: ps.tabStops, defaultTabInterval: ps.defaultTabInterval)
-            ctStyles[ObjectIdentifier(ps)] = made
-            return made
-        }
-        func convert(_ attrs: [NSAttributedString.Key: Any], into range: NSRange) {
-            var ct: [NSAttributedString.Key: Any] = [:]
-            MainActor.assumeIsolated {
-                let font = (attrs[.font] as? NSFont) ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
-                ct[NSAttributedString.Key(kCTFontAttributeName as String)] = font._coreTextFont
-                let color = (attrs[.foregroundColor] as? NSColor) ?? NSColor.textColor
-                let underlineColor = attrs[.underlineColor] as? NSColor
-                var cg = color.cgColor, ucg = underlineColor?.cgColor
-                appearance?.performAsCurrentDrawingAppearance { cg = color.cgColor; ucg = underlineColor?.cgColor }
-                ct[NSAttributedString.Key(kCTForegroundColorAttributeName as String)] = cg
-                if let u = attrs[.underlineStyle] as? NSNumber, u.intValue != 0 { ct[NSAttributedString.Key(kCTUnderlineStyleAttributeName as String)] = u }
-                if let ucg { ct[NSAttributedString.Key(kCTUnderlineColorAttributeName as String)] = ucg }
-                // Outline (positive) and fill-and-stroke (negative) glyphs, as a percentage of the size.
-                if let w = attrs[.strokeWidth] as? NSNumber, w.doubleValue != 0 {
-                    ct[NSAttributedString.Key(kCTStrokeWidthAttributeName as String)] = w
-                    if let sc = attrs[.strokeColor] as? NSColor {
-                        var scg = sc.cgColor
-                        appearance?.performAsCurrentDrawingAppearance { scg = sc.cgColor }
-                        ct[NSAttributedString.Key(kCTStrokeColorAttributeName as String)] = scg
-                    }
-                }
-            }
-            if let ps = attrs[.paragraphStyle] as? NSParagraphStyle, let cts = ctStyle(ps) { ct[NSAttributedString.Key(kCTParagraphStyleAttributeName as String)] = cts }
-            if let k = attrs[.kern] as? NSNumber { ct[NSAttributedString.Key(kCTKernAttributeName as String)] = k }
-            if let b = attrs[.baselineOffset] as? NSNumber { ct[NSAttributedString.Key(kCTBaselineOffsetAttributeName as String)] = b }
-            out.addAttributes(ct, range: range)
-        }
         // Links draw with the text view's link attributes (blue and underlined by default).
         let linkAttributes: [NSAttributedString.Key: Any]? = MainActor.assumeIsolated { firstTextView?.linkTextAttributes }
-        storage.enumerateAttributes(in: NSRange(location: 0, length: n), options: []) { stored, range, _ in
-            var attrs = stored
-            if stored[.link] != nil, let la = linkAttributes { for (k, v) in la { attrs[k] = v } }
-            var merged = attrs
-            for t in _temporary where t.range.location < range.location + range.length && t.range.location + t.range.length > range.location {
-                // Split the run where temporary attributes apply.
-                let lo = max(range.location, t.range.location), hi = min(range.location + range.length, t.range.location + t.range.length)
-                for (k, v) in t.attrs { merged[k] = v }
-                convert(merged, into: NSRange(location: lo, length: hi - lo))
-                merged = attrs
-            }
-            convert(attrs, into: range)
-            for t in _temporary where t.range.location < range.location + range.length && t.range.location + t.range.length > range.location {
-                let lo = max(range.location, t.range.location), hi = min(range.location + range.length, t.range.location + t.range.length)
-                var m = attrs
-                for (k, v) in t.attrs { m[k] = v }
-                convert(m, into: NSRange(location: lo, length: hi - lo))
-            }
-        }
-        // Attachments: their characters advance by the attachment's width and raise the
-        // line to its height (a run delegate); the attachment draws after the glyphs.
-        _attachments = [:]
-        let units = storage.string as NSString
-        let container = _textContainers.first
-        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: n), options: []) { value, range, _ in
-            guard let attachment = value as? NSTextAttachment else { return }
-            for i in range.location..<(range.location + range.length) where units.character(at: i) == 0xFFFC {
-                var m = attachment._layoutMetrics(in: container, characterIndex: i)
-                if let override = _attachmentSizeOverrides[i] { m.size = override }
-                _attachments[i] = (attachment, m.size, m.baselineOffset)
-                let delegate = NSLayoutManager._runDelegate(width: m.size.width, ascent: max(0, m.size.height + m.baselineOffset), descent: max(0, -m.baselineOffset))
-                if let delegate {
-                    out.addAttribute(NSAttributedString.Key(kCTRunDelegateAttributeName as String), value: delegate, range: NSRange(location: i, length: 1))
-                }
-                out.addAttribute(NSAttributedString.Key(kCTForegroundColorAttributeName as String), value: NSLayoutManager._clearColor, range: NSRange(location: i, length: 1))
-            }
-        }
-        return out
+        let converted = _NSCoreTextConversion.convert(storage, range: NSRange(location: 0, length: storage.length), documentOffset: 0,
+                                                      appearance: appearance, linkAttributes: linkAttributes, temporary: _temporary,
+                                                      container: _textContainers.first, attachmentSizeOverrides: _attachmentSizeOverrides)
+        _attachments = converted.attachments
+        return converted.string
     }
 
     /// Attachments by character index: the attachment and its laid-out size and baseline offset.
     internal var _attachments: [Int: (attachment: NSTextAttachment, size: CGSize, baselineOffset: CGFloat)] = [:]
     private var _attachmentSizeOverrides: [Int: CGSize] = [:]
-    private static let _clearColor = CGColor(red: 0, green: 0, blue: 0, alpha: 0)
-
-    /// Metrics a run delegate reports, retained by the delegate.
-    private final class _DelegateMetrics {
-        let width: CGFloat, ascent: CGFloat, descent: CGFloat
-        init(width: CGFloat, ascent: CGFloat, descent: CGFloat) { self.width = width; self.ascent = ascent; self.descent = descent }
-    }
-
-    private static func _runDelegate(width: CGFloat, ascent: CGFloat, descent: CGFloat) -> CTRunDelegate? {
-        var callbacks = CTRunDelegateCallbacks(
-            version: kCTRunDelegateVersion1,
-            dealloc: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).release() },
-            getAscent: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().ascent },
-            getDescent: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().descent },
-            getWidth: { p in Unmanaged<_DelegateMetrics>.fromOpaque(p).takeUnretainedValue().width })
-        let box = Unmanaged.passRetained(_DelegateMetrics(width: width, ascent: ascent, descent: descent)).toOpaque()
-        guard let d = CTRunDelegateCreate(&callbacks, box) else { Unmanaged<_DelegateMetrics>.fromOpaque(box).release(); return nil }
-        return d
-    }
-
-    /// A CoreText paragraph style carrying only tab stops.
-    internal static func _ctParagraphStyle(tabStops: [NSTextTab], defaultTabInterval: CGFloat) -> CTParagraphStyle {
-        let tabs: [CTTextTab] = tabStops.map { t in
-            let a: CTTextAlignment
-            switch t.alignment {
-            case .right: a = .right
-            case .center: a = .center
-            default: a = .left
-            }
-            return CTTextTabCreate(a, Double(t.location), nil)
-        }
-        #if canImport(Darwin)
-        var array: CFArray = tabs as CFArray
-        #else
-        var array: CFArray = NSArray(array: tabs)
-        #endif
-        var interval = defaultTabInterval
-        return withUnsafeBytes(of: &array) { tp in
-            withUnsafeBytes(of: &interval) { ip in
-                var settings = [CTParagraphStyleSetting(spec: .tabStops, valueSize: MemoryLayout<CFArray>.size, value: tp.baseAddress!)]
-                if defaultTabInterval > 0 { settings.append(CTParagraphStyleSetting(spec: .defaultTabInterval, valueSize: MemoryLayout<CGFloat>.size, value: ip.baseAddress!)) }
-                return CTParagraphStyleCreate(settings, settings.count)
-            }
-        }
-    }
-
     private func _paragraphStyle(at index: Int) -> NSParagraphStyle? {
         guard let storage = _textStorage, storage.length > 0 else { return nil }
         return storage.attribute(.paragraphStyle, at: min(index, storage.length - 1), effectiveRange: nil) as? NSParagraphStyle
@@ -333,12 +215,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         }
     }
 
-    private func _newlineLength(at i: Int, in units: [UInt16]) -> Int {
-        guard i < units.count else { return 0 }
-        let u = units[i]
-        if u == 0x0D { return (i + 1 < units.count && units[i + 1] == 0x0A) ? 2 : 1 }
-        return (u == 0x0A || u == 0x2028 || u == 0x2029 || u == 0x0C) ? 1 : 0
-    }
+    private func _newlineLength(at i: Int, in units: [UInt16]) -> Int { _NSLineTypesetter.newlineLength(at: i, in: units) }
 
     /// Where the next line goes while laying out (one column of text).
     private struct _Cursor {
@@ -405,15 +282,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     }
 
     /// The end of the paragraph starting at `index` (after its newline).
-    private func _paragraphEnd(from index: Int, units: [UInt16]) -> Int {
-        var i = index
-        while i < units.count {
-            let nl = _newlineLength(at: i, in: units)
-            if nl > 0 { return i + nl }
-            i += 1
-        }
-        return units.count
-    }
+    private func _paragraphEnd(from index: Int, units: [UInt16]) -> Int { _NSLineTypesetter.paragraphEnd(from: index, units: units) }
 
     /// The paragraphs from `index` whose outermost text block satisfies `belongs`.
     private func _run(from index: Int, units: [UInt16], while belongs: (NSTextBlock) -> Bool) -> Int {
@@ -431,86 +300,46 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         var paragraphStart = index == 0 || _newlineLength(at: index - 1, in: units) > 0 || (index >= 2 && units[index - 2] == 0x0D && units[index - 1] == 0x0A)
         var firstInColumn = true
         var column = column
+        let typesetter = _nsTypesetter
         while index < end {
             guard cursor.container < _textContainers.count else { break }
             let container = _textContainers[cursor.container]
             let style = _paragraphStyle(at: index)
-            let padding = container.lineFragmentPadding
-            let columnWidth = column.width
-            let head = paragraphStart ? (style?.firstLineHeadIndent ?? 0) : (style?.headIndent ?? 0)
-            let tail = style?.tailIndent ?? 0
-            let width = max(1, (tail > 0 ? tail : columnWidth + tail) - head - 2 * padding)
-            let mode = container.lineBreakMode == .byWordWrapping ? (style?.lineBreakMode ?? .byWordWrapping) : container.lineBreakMode
-            var count: Int
-            switch mode {
-            case .byClipping, .byTruncatingHead, .byTruncatingTail, .byTruncatingMiddle:
-                count = 0
-                while index + count < end {
-                    let nl = _newlineLength(at: index + count, in: units)
-                    if nl > 0 { count += nl; break }
-                    count += 1
-                }
-            case .byCharWrapping:
-                count = CTTypesetterSuggestClusterBreakWithOffset(ts, index, Double(width + head), Double(head))
-            default:
-                count = CTTypesetterSuggestLineBreakWithOffset(ts, index, Double(width + head), Double(head))
-            }
-            count = max(1, min(count, end - index))
-            let line = CTTypesetterCreateLineWithOffset(ts, CFRangeMake(index, count), Double(head))
-            var drawn = line
-            switch mode {
-            case .byTruncatingHead: drawn = CTLineCreateTruncatedLine(line, Double(width), .start, nil) ?? line
-            case .byTruncatingTail: drawn = CTLineCreateTruncatedLine(line, Double(width), .end, nil) ?? line
-            case .byTruncatingMiddle: drawn = CTLineCreateTruncatedLine(line, Double(width), .middle, nil) ?? line
-            default: break
-            }
-            var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
-            let lineWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
-            if !_usesFontLeading { leading = 0 }
-            if let s = style {
-                if s.lineHeightMultiple > 0 { ascent *= s.lineHeightMultiple; descent *= s.lineHeightMultiple }
-                let h = ascent + descent + leading
-                if s.maximumLineHeight > 0, h > s.maximumLineHeight { ascent -= h - s.maximumLineHeight }
-                if s.minimumLineHeight > 0, h < s.minimumLineHeight { ascent += s.minimumLineHeight - h }
-            }
-            let height = (ascent + descent + leading).rounded(.up)
+            typesetter._begin(layoutManager: self, container: container, style: style, paragraphStart: paragraphStart, at: index, units: units)
+            let t = _NSLineTypesetter.line(typesetter: ts, units: units, index: index, end: end, style: style, paragraphStart: paragraphStart,
+                                           columnMinX: column.minX, columnWidth: column.width, container: container, usesFontLeading: _usesFontLeading)
+            let proposed = NSRect(x: column.minX, y: cursor.y, width: column.width, height: t.height)
             // Space before a paragraph, except at the top of the text or of a block's column.
-            let spacingBefore = paragraphStart && !_fragments.isEmpty && !(firstInColumn && !breaksContainers) ? (style?.paragraphSpacingBefore ?? 0) : 0
+            let spacingBefore = paragraphStart && !_fragments.isEmpty && !(firstInColumn && !breaksContainers) ? typesetter.paragraphSpacing(beforeGlyphAt: index, withProposedLineFragmentRect: proposed) : 0
             let top = cursor.y + spacingBefore
             let maxLines = container.maximumNumberOfLines
-            let overflow = (container.size.height < CGFloat.greatestFiniteMagnitude / 2 && top + height > container.size.height)
+            let overflow = (container.size.height < CGFloat.greatestFiniteMagnitude / 2 && top + t.height > container.size.height)
                 || (maxLines > 0 && cursor.linesInContainer >= maxLines)
             if breaksContainers && overflow && cursor.linesInContainer > 0 {
                 cursor.container += 1; cursor.y = 0; cursor.linesInContainer = 0
                 if cursor.container < _textContainers.count { column.size.width = _textContainers[cursor.container].size.width }
                 continue
             }
-            let flush: CGFloat
-            switch style?.alignment ?? .natural {
-            case .center: flush = 0.5
-            case .right: flush = 1
-            case .left: flush = 0
-            default: flush = style?.baseWritingDirection == .rightToLeft ? 1 : 0   // natural follows the paragraph's direction
-            }
-            let trailing = CGFloat(CTLineGetTrailingWhitespaceWidth(line))
-            // An unbounded column (a field editor's, a horizontally resizable view's) flushes
-            // against the view's visible width instead, when the container names one.
-            let flushWidth = columnWidth >= CGFloat.greatestFiniteMagnitude / 2 ? (container._alignmentWidth.map { max(1, $0 - head - 2 * padding) } ?? width) : width
-            let flushOffset = max(0, flushWidth - (lineWidth - trailing)) * flush
-            let textX = column.minX + padding + head + flushOffset
-            let nl = _newlineLength(at: index + count - 1, in: units) > 0 ? (count >= 2 && units[index + count - 2] == 0x0D && units[index + count - 1] == 0x0A ? 2 : 1) : 0
-            let fragment = _NSLineFragment(charRange: NSRange(location: index, length: count), newlineLength: nl,
-                                           rect: NSRect(x: column.minX, y: top, width: columnWidth, height: height),
-                                           usedRect: NSRect(x: textX, y: top, width: lineWidth - trailing, height: height),
-                                           container: cursor.container, baseline: ascent, textX: textX, line: line, drawnLine: drawn)
+            // The typesetter may adjust the rects before they are stored (a subclass hook).
+            var rect = NSRect(x: column.minX, y: top, width: column.width, height: t.height)
+            var used = NSRect(x: t.textX, y: top, width: t.usedWidth, height: t.height)
+            var baseline = t.ascent
+            let lineRange = NSRange(location: index, length: t.count)
+            typesetter.willSetLineFragmentRect(&rect, forGlyphRange: lineRange, usedRect: &used, baselineOffset: &baseline)
+            let fragment = _NSLineFragment(charRange: lineRange, newlineLength: t.newlineLength,
+                                           rect: rect, usedRect: used,
+                                           container: cursor.container, baseline: baseline, textX: used.minX, line: t.line, drawnLine: t.drawnLine)
             _fragments.append(fragment)
+            typesetter.endLine(withGlyphRange: lineRange)
+            if t.newlineLength > 0 { typesetter.endParagraph() }
             cursor.linesInContainer += 1
             firstInColumn = false
-            cursor.y = top + height + (style?.lineSpacing ?? 0)
-            if nl > 0 { cursor.y += style?.paragraphSpacing ?? 0 }
-            paragraphStart = nl > 0
-            index += count
+            cursor.y = rect.minY + rect.height + typesetter.lineSpacing(afterGlyphAt: index + t.count - 1, withProposedLineFragmentRect: rect)
+            if t.newlineLength > 0 { cursor.y += typesetter.paragraphSpacing(afterGlyphAt: index + t.count - 1, withProposedLineFragmentRect: rect) }
+            paragraphStart = t.newlineLength > 0
+            index += t.count
         }
+        typesetter._end()
         return index
     }
 
@@ -1083,7 +912,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
 
     /// The rect an attachment occupies (container coordinates, flipped), from its line.
     internal func _attachmentRect(at index: Int) -> NSRect? {
-        guard let a = _attachments[index], let fi = _fragmentIndex(forCharacter: index) else { return nil }
+        // The fragment lookup lays the text out, which fills the attachment table.
+        guard let fi = _fragmentIndex(forCharacter: index), let a = _attachments[index] else { return nil }
         let f = _fragments[fi]
         let x = f.textX + CTLineGetOffsetForStringIndex(f.line, index, nil)
         let baselineY = f.rect.minY + f.baseline
@@ -1299,9 +1129,11 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     open var typesetterBehavior: NSLayoutManager.TypesetterBehavior { get { _typesetterBehavior } set { _typesetterBehavior = newValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/typesetter
     open var typesetter: NSTypesetter {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _nsTypesetter }
+        set { _nsTypesetter = newValue; _invalidateAll() }
     }
+    /// The NSTypesetter asked for spacing while laying out (ADR-0040).
+    private var _nsTypesetter: NSTypesetter = NSATSTypesetter.shared
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/glyphgenerator
     open var glyphGenerator: NSGlyphGenerator {
         get { unimplemented() }

@@ -57,7 +57,10 @@ extension NSTextView {
     }
 
     internal func _updateRulerMarkers() {
-        guard let ruler = _availableRuler, ruler.clientView === self, let lm = layoutManager else { return }
+        // The ruler's markers come from the paragraph style; asking for them does not switch
+        // a TextKit 2 view to TextKit 1.
+        guard let ruler = _availableRuler, ruler.clientView === self else { return }
+        let lm = _layoutManager
         ruler.markers = lm.rulerMarkers(for: self, paragraphStyle: _rulerParagraphStyle, ruler: ruler)
     }
 

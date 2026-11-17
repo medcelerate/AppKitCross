@@ -38,7 +38,8 @@ extension NSTextView {
 
     /// Rects of a character range in view coordinates.
     internal func _rects(forCharacterRange range: NSRange) -> [NSRect] {
-        guard let lm = layoutManager, let tc = textContainer else { return [] }
+        if _textLayoutManager != nil { return _tk2Rects(forCharacterRange: range) }
+        guard let lm = _activeLayoutManager, let tc = textContainer else { return [] }
         var out: [NSRect] = []
         let origin = textContainerOrigin
         lm.enumerateEnclosingRects(forGlyphRange: range, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: tc) { r, _ in
@@ -107,10 +108,9 @@ extension NSTextView {
 
     /// Marks misspelt words in `range` (whole words around it) with the spelling state.
     internal func _markSpelling(in range: NSRange? = nil, skippingWordAtInsertionPoint: Bool = false) {
-        guard let lm = layoutManager else { return }
         let s = string as NSString
         let r = range.map { NSUnionRange(_paragraphsRange($0), NSRange(location: 0, length: 0)) } ?? NSRange(location: 0, length: s.length)
-        lm.removeTemporaryAttribute(.spellingState, forCharacterRange: r)
+        _setSpellingMark(0, range: r)
         guard isContinuousSpellCheckingEnabled || range != nil || !skippingWordAtInsertionPoint else { return }
         let checker = NSSpellChecker.shared
         let caret = selectedRange.length == 0 ? selectedRange.location : -1
@@ -142,7 +142,7 @@ extension NSTextView {
     /// Learned or ignored words change what is misspelt everywhere in the view.
     internal func _spellingDidChange() {
         if isContinuousSpellCheckingEnabled { _markSpelling(skippingWordAtInsertionPoint: false) }
-        else { layoutManager?.removeTemporaryAttribute(.spellingState, forCharacterRange: NSRange(location: 0, length: (string as NSString).length)) }
+        else { _setSpellingMark(0, range: NSRange(location: 0, length: (string as NSString).length)) }
     }
 
     /// Finds the next misspelling after the selection (wrapping), selects it and updates
@@ -164,10 +164,8 @@ extension NSTextView {
 
     /// The misspelt word at a character index, if the spelling state marks one there.
     internal func _misspelledWord(at index: Int) -> NSRange? {
-        guard let lm = layoutManager, index >= 0, index < (string as NSString).length else { return nil }
-        var r = NSRange(location: 0, length: 0)
-        guard let state = lm.temporaryAttribute(.spellingState, atCharacterIndex: index, effectiveRange: &r) as? NSNumber, state.intValue != 0 else { return nil }
-        return r
+        guard index >= 0, index < (string as NSString).length else { return nil }
+        return _spellingMark(at: index)
     }
 
     /// The context menu: spelling guesses for a misspelt word, Ignore and Learn, then the
