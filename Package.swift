@@ -232,19 +232,61 @@ if buildsAVFAudio {
     appKitDependencies += ["AVFAudio"]
 }
 
+// UserNotifications and ServiceManagement (ADR-0043): local notifications over Windows
+// toasts (WinRT, through the CWinAppServices shim) and the freedesktop notification server
+// (D-Bus), and the app's login item over the Run key / Startup folder and XDG autostart.
+// AppKit depends on both, so `import UserNotifications` and `import ServiceManagement`
+// resolve in any target that uses AppKit, as they do on macOS (AppKit does not re-export
+// them; Apple's does not either). On macOS apps use Apple's frameworks; the tests compile
+// the same sources as UserNotificationsPortable and ServiceManagementPortable instead, so the
+// module names never shadow Apple's.
+#if os(Windows)
+targets += [
+    .target(name: "CWinAppServices", path: "Sources/CWinAppServices",
+            linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32"), .linkedLibrary("shell32"), .linkedLibrary("advapi32"), .linkedLibrary("uuid")]),
+]
+let notificationPlatformDependencies: [Target.Dependency] = ["CWinAppServices"]
+let loginItemPlatformDependencies: [Target.Dependency] = ["CWinAppServices"]
+let notificationTestPlatformDependencies: [Target.Dependency] = []
+#elseif os(Linux)
+let notificationPlatformDependencies: [Target.Dependency] = ["CDBus"]
+let loginItemPlatformDependencies: [Target.Dependency] = []
+// The D-Bus test plays the notification server itself.
+let notificationTestPlatformDependencies: [Target.Dependency] = ["CDBus"]
+#endif
+#if os(Windows) || os(Linux)
+targets += [
+    .target(name: "UserNotifications", dependencies: notificationPlatformDependencies, path: "Sources/UserNotifications", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ServiceManagement", dependencies: loginItemPlatformDependencies, path: "Sources/ServiceManagement", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+appKitDependencies += ["UserNotifications", "ServiceManagement"]
+let systemServiceProducts: [Product] = [.library(name: "UserNotifications", targets: ["UserNotifications"]), .library(name: "ServiceManagement", targets: ["ServiceManagement"])]
+let userNotificationsModule: Target.Dependency = "UserNotifications"
+let serviceManagementModule: Target.Dependency = "ServiceManagement"
+#else
+targets += [
+    .target(name: "UserNotificationsPortable", path: "Sources/UserNotifications", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ServiceManagementPortable", path: "Sources/ServiceManagement", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+let systemServiceProducts: [Product] = []
+let userNotificationsModule: Target.Dependency = "UserNotificationsPortable"
+let serviceManagementModule: Target.Dependency = "ServiceManagementPortable"
+let notificationTestPlatformDependencies: [Target.Dependency] = []
+#endif
+targets += [
+    .testTarget(name: "UserNotificationsTests", dependencies: [userNotificationsModule] + notificationTestPlatformDependencies, path: "Tests/UserNotificationsTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .testTarget(name: "ServiceManagementTests", dependencies: [serviceManagementModule], path: "Tests/ServiceManagementTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+
 // On macOS the tests import Apple's Combine; on Windows and Linux they need our target.
 #if os(Windows) || os(Linux)
 let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
 let combineTestDependencies: [Target.Dependency] = ["Combine"]
-// Examples/DailyTodo imports UserNotifications and ServiceManagement, which exist only in
-// Apple's SDK: Examples/DailyTodo/Shims supplies both under their module names here.
-targets += [
-    .target(name: "UserNotifications", path: "Examples/DailyTodo/Shims/UserNotifications"),
-    .target(name: "ServiceManagement", path: "Examples/DailyTodo/Shims/ServiceManagement"),
-]
-let dailyTodoShimDependencies: [Target.Dependency] = ["Combine", "UserNotifications", "ServiceManagement"]
+// Examples/DailyTodo imports UserNotifications and ServiceManagement without naming them:
+// they come with AppKit, as on macOS.
+let dailyTodoPlatformDependencies: [Target.Dependency] = ["Combine"]
 #else
-let dailyTodoShimDependencies: [Target.Dependency] = []
+let dailyTodoPlatformDependencies: [Target.Dependency] = []
 let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
@@ -294,10 +336,10 @@ targets += [
     .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
     // A real third-party SwiftUI app, vendored unmodified (one `#if canImport(ObjectiveC)`
     // around an `@objc`): Daily To Do (MIT, Examples/DailyTodo/README.md). Its logic module and
-    // its dependency-free self-checks come along; the frameworks the port lacks are shimmed.
+    // its dependency-free self-checks come along.
     // Upstream declares tools version 5.9, so its three targets build in Swift 5 language mode.
     .target(name: "DailyTodoCore", path: "Examples/DailyTodo/Sources/DailyTodoCore", swiftSettings: [.swiftLanguageMode(.v5)]),
-    .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoShimDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoPlatformDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
     .executableTarget(name: "DailyTodoChecks", dependencies: ["DailyTodoCore"], path: "Examples/DailyTodo/Sources/DailyTodoChecks", swiftSettings: [.swiftLanguageMode(.v5)]),
     .testTarget(
         name: "AppKitTests",
@@ -317,7 +359,7 @@ let package = Package(
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
-    ] + combineProducts + leafModuleProducts + avfAudioProducts,
+    ] + combineProducts + leafModuleProducts + avfAudioProducts + systemServiceProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )

@@ -15,8 +15,10 @@ state, a `.sheet` holding a grouped `Form` with `Section`s, a `Picker` over ever
 zone, `LabeledContent` rows and a `Done` toolbar button through `@Environment(\.dismiss)`,
 an `ObservableObject` store passed by `environmentObject`, JSON persistence through
 `JSONEncoder` and `FileManager` under Application Support, a repeating `Timer`, and two Apple
-frameworks the port does not have: `UserNotifications` (the midday reminder) and
-`ServiceManagement` (open at login).
+frameworks beyond AppKit: `UserNotifications` (the midday reminder) and `ServiceManagement`
+(open at login). Off macOS both are the port's own modules (ADR-0043): the reminder is a
+Windows toast or a freedesktop notification, and the login item is the Run key or an XDG
+autostart entry.
 
 ## Layout
 
@@ -25,11 +27,14 @@ frameworks the port does not have: `UserNotifications` (the midday reminder) and
 | `Sources/DailyTodo` | The app (upstream, unmodified except one `#if canImport(ObjectiveC)` around an `@objc` in `ReminderScheduler.swift`, marked `AppKitCross:` in the source). |
 | `Sources/DailyTodoCore` | The app's logic module (upstream, unmodified). |
 | `Sources/DailyTodoChecks` | The app's dependency-free self-checks (upstream, unmodified); CI builds them everywhere and runs them on macOS and Linux. |
-| `Shims/UserNotifications`, `Shims/ServiceManagement` | Modules under Apple's names for Windows and Linux only (the macOS host build uses the real frameworks); each file's header comment says which port gap it covers and what the real implementation would be. |
 
 The three upstream targets are declared in the root `Package.swift` (the app depends on the
-`AppKit` and `SwiftUI` products like the other examples, plus `Combine` and the two shims off
-macOS) in Swift 5 language mode, as upstream's tools version 5.9 implies.
+`AppKit` and `SwiftUI` products like the other examples, plus `Combine` off macOS) in Swift 5
+language mode, as upstream's tools version 5.9 implies. `UserNotifications` and
+`ServiceManagement` come with AppKit, as on macOS: the port's AppKit depends on its two
+modules of those names (`Sources/UserNotifications`, `Sources/ServiceManagement`).
+"Open at login" still stops at the app's own check that it runs from an `.app` bundle, which
+an executable built by SwiftPM on Windows or Linux is not (upstream behaviour, unchanged).
 
 ## Build and run
 
