@@ -294,13 +294,14 @@ final class _NSDragTracker: PlatformDragSource {
         if frameInView.size == .zero { imageOffset = NSPoint(x: -8, y: -8) }
     }
 
-    /// The item's image: its one component's contents, or its components drawn together
-    /// at their frames (measured from the frame's bottom-left) when it has several.
+    /// The item's image: its components drawn at their frames (measured from the dragging
+    /// frame's bottom-left), so a component smaller than the frame (an item's label) keeps
+    /// its size and place instead of being stretched over the frame.
     static func compositeImage(of item: NSDraggingItem?) -> NSImage? {
         guard let item, let components = item.imageComponents, !components.isEmpty else { return nil }
-        if components.count == 1 { return components[0].contents as? NSImage }
         let size = item.draggingFrame.size
         guard size.width > 0, size.height > 0 else { return components[0].contents as? NSImage }
+        if components.count == 1, components[0].frame == NSRect(origin: .zero, size: size) { return components[0].contents as? NSImage }
         let parts = components.compactMap { c in (c.contents as? NSImage).map { (c.frame, $0) } }
         return NSImage(size: size, flipped: false) { _ in
             for (frame, image) in parts { image.draw(in: frame) }

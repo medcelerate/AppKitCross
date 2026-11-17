@@ -1121,14 +1121,7 @@ import CoreGraphics
         let p = convert(event.locationInWindow, from: nil)
         if let start = _dragCandidate, !_dragAttempted, _marqueeStart == nil, abs(p.x - _pressPoint.x) > 3 || abs(p.y - _pressPoint.y) > 3 {
             _dragAttempted = true
-            if _beginItemDrag(from: start, event: event) {
-                // The drag session has the mouse now: the press is over.
-                _pressed = nil
-                _dragCandidate = nil
-                _collapseOnMouseUp = nil
-                if !_highlighted.isEmpty { _setHighlight(.none, for: _highlighted) }
-                return
-            }
+            if _beginItemDrag(from: start, event: event) { return }
         }
         guard _isSelectable else { return }
         if let origin = _marqueeStart {
@@ -1149,6 +1142,15 @@ import CoreGraphics
         let range = _indexPaths(between: start, and: ip)
         _userSetSelection(range)
     }
+    /// Forgets the press (a drag took the mouse).
+    private func _endPress() {
+        _pressed = nil
+        _dragCandidate = nil
+        _collapseOnMouseUp = nil
+        _mouseDownEvent = nil
+        if !_highlighted.isEmpty { _setHighlight(.none, for: _highlighted) }
+    }
+
     @MainActor open override func mouseUp(with event: NSEvent) {
         let pressed = _pressed
         _pressed = nil
@@ -1451,6 +1453,10 @@ import CoreGraphics
             dragged = indexPaths
         }
         _draggedIndexPaths = dragged
+        // The press is over before the session starts: a window system that runs the drag
+        // itself (OLE) returns only after the drop, having moved the items, and then
+        // delivers the release; a click's deferred selection must not land on them.
+        _endPress()
         _ = beginDraggingSession(with: dragItems, event: event, source: self)
         return true
     }

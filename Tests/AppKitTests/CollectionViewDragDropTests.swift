@@ -68,12 +68,19 @@ private final class DragSource: NSObject, NSCollectionViewDataSource, NSCollecti
     func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
         log.append("accept \(indexPath.section),\(indexPath.item) \(describe(dropOperation))")
         dropped = (draggingInfo.draggingPasteboard.pasteboardItems ?? []).compactMap { $0.string(forType: .string) }
-        if reorders, let from = dropped.first.flatMap({ items.firstIndex(of: $0) }) {
+        if reorders {
+            // Every dragged item to the target, in order, as one (animated) batch: the demo's move.
+            let froms = dropped.compactMap { items.firstIndex(of: $0) }.sorted()
             var to = indexPath.item
-            if from < to { to -= 1 }
-            let moved = items.remove(at: from)
-            items.insert(moved, at: to)
-            collectionView.moveItem(at: IndexPath(item: from, section: 0), to: IndexPath(item: to, section: 0))
+            for f in froms.reversed() { items.remove(at: f); if f < to { to -= 1 } }
+            items.insert(contentsOf: froms.map { dropped[froms.firstIndex(of: $0)!] }, at: to)
+            let moves = froms.enumerated().map { (IndexPath(item: $1, section: 0), IndexPath(item: to + $0, section: 0)) }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.2
+                collectionView.animator().performBatchUpdates {
+                    for (f, t) in moves where f != t { collectionView.moveItem(at: f, to: t) }
+                }
+            }
         }
         return true
     }
@@ -311,6 +318,79 @@ final class CollectionViewDragDropTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testMovedItemsStaySelectedAtTheirDestination() throws {
+        try requireHostBackend("drags track through the host backend's event path")
+        MainActor.assumeIsolated {
+            let ds = DragSource()
+            ds.answer = .move
+            ds.reorders = true
+            let f = Fixture(dataSource: ds)
+            let cv = f.collectionView
+            // Cmd-click b and c, then drag c past the end of the row of five and drop.
+            send(.leftMouseDown, f.point(item: 1), in: f.window, flags: .command)
+            send(.leftMouseUp, f.point(item: 1), in: f.window, flags: .command)
+            send(.leftMouseDown, f.point(item: 2), in: f.window, flags: .command)
+            send(.leftMouseUp, f.point(item: 2), in: f.window, flags: .command)
+            XCTAssertEqual(cv.selectionIndexPaths, [IndexPath(item: 1, section: 0), IndexPath(item: 2, section: 0)])
+            send(.leftMouseDown, f.point(item: 2), in: f.window)
+            send(.leftMouseDragged, f.point(item: 2, dx: 40), in: f.window)
+            XCTAssertTrue(_NSDragTracker.isDragging)
+            send(.leftMouseDragged, f.point(item: 4, dx: 55), in: f.window)
+            send(.leftMouseUp, f.point(item: 4, dx: 55), in: f.window)
+            XCTAssertEqual(ds.items, ["a", "d", "e", "b", "c", "f", "g"])
+            XCTAssertEqual(f.texts(), ds.items)
+            XCTAssertEqual(cv.selectionIndexPaths, [IndexPath(item: 3, section: 0), IndexPath(item: 4, section: 0)], "the dragged items stay selected where they went")
+            XCTAssertEqual((0..<7).filter { cv.item(at: IndexPath(item: $0, section: 0))!.isSelected }, [3, 4])
+            f.window.close()
+        }
+    }
+
+    func testAModalPlatformDragKeepsTheMovedSelection() throws {
+        try requireHostBackend("stands a modal drag runner in for OLE on the host backend")
+        MainActor.assumeIsolated {
+            /// Runs the drag as OLE does: the drop happens inside `beginDrag`, then the window
+            /// delivers the button release before `beginDraggingSession` returns.
+            final class ModalRunner: PlatformDragDrop {
+                weak var window: NSWindow?
+                var dropAt: NSPoint = .zero
+                var ran = false
+                func beginDrag(from window: PlatformWindow, entries: [(item: Int, entry: PlatformPasteboardEntry)], operations: NSDragOperation, image: PlatformDragImage?, source: any PlatformDragSource) -> Bool {
+                    MainActor.assumeIsolated {
+                        ran = true
+                        guard let w = self.window else { return }
+                        let info = PlatformDragInfo(location: dropAt, sourceOperations: operations, modifierFlags: [], items: [], isFromThisApplication: true) { _, _ in nil }
+                        _ = w.platformDragEntered(info)
+                        let op = w.platformDrop(info)
+                        source.platformDragEnded(at: w.convertPoint(toScreen: dropAt), operation: op)
+                        send(.leftMouseUp, dropAt, in: w)
+                    }
+                    return true
+                }
+                func foreignDragMoved(to screenPoint: NSPoint, operations: NSDragOperation) -> NSDragOperation { [] }
+                func foreignDrop(at screenPoint: NSPoint, operations: NSDragOperation) -> Bool { false }
+                func foreignDragEnded() { }
+            }
+            let host = Platform.backend as! HostBackend
+            let runner = ModalRunner()
+            host.dragDrop = runner
+            defer { host.dragDrop = nil }
+            let ds = DragSource()
+            ds.answer = .move
+            ds.reorders = true
+            let f = Fixture(dataSource: ds)
+            let cv = f.collectionView
+            runner.window = f.window
+            runner.dropAt = f.point(item: 4, dx: 55)
+            cv.selectionIndexPaths = [IndexPath(item: 1, section: 0), IndexPath(item: 2, section: 0)]
+            send(.leftMouseDown, f.point(item: 2), in: f.window)
+            send(.leftMouseDragged, f.point(item: 2, dx: 40), in: f.window)
+            XCTAssertTrue(runner.ran)
+            XCTAssertEqual(ds.items, ["a", "d", "e", "b", "c", "f", "g"])
+            XCTAssertEqual(cv.selectionIndexPaths, [IndexPath(item: 3, section: 0), IndexPath(item: 4, section: 0)], "the release after the drop selects nothing of its own")
+            f.window.close()
+        }
+    }
+
     func testValidateDropRetargetsAndReorderMovesTheItem() throws {
         try requireHostBackend("drags track through the host backend's event path")
         MainActor.assumeIsolated {
@@ -484,6 +564,26 @@ final class CollectionViewDragDropTests: XCTestCase, @unchecked Sendable {
             item3.view = NSView(frame: NSRect(x: 0, y: 0, width: 60, height: 40))
             XCTAssertEqual(item3.draggingImageComponents.map(\.frame), [NSRect(x: 0, y: 0, width: 60, height: 40)])
             XCTAssertEqual((item3.draggingImageComponents[0].contents as? NSImage)?.size, NSSize(width: 60, height: 40))
+        }
+    }
+
+    func testADragImageKeepsAComponentAtItsFrame() {
+        MainActor.assumeIsolated {
+            // An item whose one component (a label) is smaller than its frame: the image is
+            // the frame's size with the label in its place, not the label stretched over it.
+            let label = NSImage(size: NSSize(width: 50, height: 13), flipped: false) { r in NSColor.red.setFill(); NSBezierPath(rect: r).fill(); return true }
+            let d = NSDraggingItem(pasteboardWriter: NSPasteboardItem())
+            d.draggingFrame = NSRect(x: 0, y: 0, width: 56, height: 56)
+            let c = NSDraggingImageComponent(key: .icon)
+            c.frame = NSRect(x: 3, y: 3, width: 50, height: 13)
+            c.contents = label
+            d.imageComponentsProvider = { [c] }
+            let image = _NSDragTracker.compositeImage(of: d)!
+            XCTAssertEqual(image.size, NSSize(width: 56, height: 56))
+            let rep = NSBitmapImageRep(data: image.tiffRepresentation!)!
+            let scale = rep.pixelsWide / 56
+            XCTAssertGreaterThan(rep.colorAt(x: 28 * scale, y: (56 - 8) * scale)?.redComponent ?? 0, 0.9, "the label at the bottom")
+            XCTAssertLessThan(rep.colorAt(x: 28 * scale, y: 10 * scale)?.alphaComponent ?? 1, 0.1, "clear above it")
         }
     }
 

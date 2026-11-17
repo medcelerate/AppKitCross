@@ -1944,7 +1944,25 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             return true
         }
     }
+    /// Tells the demo when a drag leaves the grid (the delegate has no exit message).
+    final class DemoCollectionView: NSCollectionView {
+        var onDragExit: (() -> Void)?
+        override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+            super.draggingExited(sender)
+            onDragExit?()
+        }
+    }
     final class SwatchItem: NSCollectionViewItem {
+        /// The whole swatch drags (AppKit's default would be the label alone, the item's only outlet).
+        override var draggingImageComponents: [NSDraggingImageComponent] {
+            let c = NSDraggingImageComponent(key: .icon)
+            c.frame = view.bounds
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            let image = NSImage(size: view.bounds.size)
+            if let rep { view.cacheDisplay(in: view.bounds, to: rep); image.addRepresentation(rep) }
+            c.contents = image
+            return [c]
+        }
         final class SwatchView: NSView {
             weak var item: SwatchItem?
             var color = NSColor.gray
@@ -2014,12 +2032,14 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         ("Warm", [Swatch(name: "Red", color: .systemRed), Swatch(name: "Orange", color: .systemOrange), Swatch(name: "Yellow", color: .systemYellow), Swatch(name: "Pink", color: .systemPink), Swatch(name: "Brown", color: .systemBrown)]),
         ("Cool", [Swatch(name: "Green", color: .systemGreen), Swatch(name: "Teal", color: .systemTeal), Swatch(name: "Blue", color: .systemBlue), Swatch(name: "Indigo", color: .systemIndigo), Swatch(name: "Purple", color: .systemPurple), Swatch(name: "Mint", color: .systemMint)]),
     ]
-    let collection = NSCollectionView(frame: .zero)
+    let collection = DemoCollectionView(frame: .zero)
     let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move; drag to reorder.")
     let well = DropWell(frame: .zero)
     let animate = NSButton(checkboxWithTitle: "Animate", target: nil, action: nil)
     private var inserted = 0
     private var dragged: [IndexPath] = []
+    private var dragNames = ""
+    private var droppedHere = false
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -2049,6 +2069,10 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         collection.registerForDraggedTypes([CollectionDemoViewController.swatchType, .string])
         collection.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         collection.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collection.onDragExit = { [unowned self] in
+            // Off the grid: drop the stale target from the status.
+            status.stringValue = dragged.isEmpty ? "" : "Dragging \(dragNames)"
+        }
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
@@ -2137,10 +2161,13 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
     }
     func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) {
         dragged = indexPaths.sorted()
-        status.stringValue = "Dragging " + dragged.map { sections[$0.section].1[$0.item].name }.joined(separator: ", ")
+        dragNames = dragged.map { sections[$0.section].1[$0.item].name }.joined(separator: ", ")
+        droppedHere = false
+        status.stringValue = "Dragging \(dragNames)"
     }
     func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
-        if operation.isEmpty { status.stringValue = "Drag cancelled." }
+        if operation.isEmpty { status.stringValue = "Drag of \(dragNames) cancelled." }
+        else if !droppedHere { status.stringValue = "Dragged \(dragNames) out (\(operation.contains(.move) ? "move" : "copy"))." }
         dragged = []
     }
     func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
@@ -2150,7 +2177,7 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         if fromHere {
             // Reordering lands between swatches, never on one.
             proposedDropOperation.pointee = .before
-            status.stringValue = "Move before \(where_)"
+            status.stringValue = "Dragging \(dragNames): move before \(where_)"
             return .move
         }
         guard draggingInfo.draggingPasteboard.string(forType: .string) != nil else { return [] }
@@ -2173,6 +2200,7 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             for (s, section) in sections.enumerated() { for (i, w) in section.1.enumerated() { newPaths[w.id] = IndexPath(item: i, section: s) } }
             let moves = zip(dragged, moving).map { ($0, newPaths[$1.id]!) }
             update { for (from, to) in moves where from != to { self.collection.moveItem(at: from, to: to) } }
+            droppedHere = true
             status.stringValue = "Moved " + moving.map(\.name).joined(separator: ", ")
             return true
         }
