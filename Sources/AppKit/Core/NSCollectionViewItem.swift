@@ -66,7 +66,32 @@ import CoreGraphics
         set { _textField = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewitem/draggingimagecomponents
-    @MainActor open var draggingImageComponents: [NSDraggingImageComponent] { unimplemented() }
+    /// The image view's picture as the icon and the text field's text as the label, each
+    /// at its frame in the item's view (AppKit's components for an item with those outlets);
+    /// the whole view as the icon when the item has neither.
+    @MainActor open var draggingImageComponents: [NSDraggingImageComponent] {
+        let v = view
+        var out: [NSDraggingImageComponent] = []
+        if let iv = imageView, iv.isDescendant(of: v) {
+            let c = NSDraggingImageComponent(key: .icon)
+            c.frame = v.convert(iv.bounds, from: iv)
+            c.contents = iv._snapshotImage(of: [iv.bounds], in: iv.bounds)
+            out.append(c)
+        }
+        if let tf = textField, tf.isDescendant(of: v) {
+            let c = NSDraggingImageComponent(key: .label)
+            c.frame = v.convert(tf.bounds, from: tf)
+            c.contents = tf._snapshotImage(of: [tf.bounds], in: tf.bounds)
+            out.append(c)
+        }
+        if out.isEmpty {
+            let c = NSDraggingImageComponent(key: .icon)
+            c.frame = v.bounds
+            c.contents = v._snapshotImage(of: [v.bounds], in: v.bounds)
+            out.append(c)
+        }
+        return out
+    }
 
     // MARK: NSCollectionViewElement
 
@@ -85,6 +110,15 @@ import CoreGraphics
     @MainActor open func didTransition(from oldLayout: NSCollectionViewLayout, to newLayout: NSCollectionViewLayout) { }
 
     // Requirement of NSCopying (the legacy `itemPrototype` path)
-    open func copy(with zone: NSZone? = nil) -> Any { unimplemented() }
+    /// A new item of the same class and nib with the same represented object. macOS copies
+    /// by archiving the view; the port archives no views, so the copy's view comes from its
+    /// own `loadView` (or nib) rather than duplicating a view set on the prototype.
+    open func copy(with zone: NSZone? = nil) -> Any {
+        MainActor.assumeIsolated {
+            let c = type(of: self).init(nibName: nibName, bundle: nibBundle)
+            c.representedObject = representedObject
+            return c
+        }
+    }
     // SKIPPED (Foundation.NSExtensionContext not in corelibs): func beginRequest(with context: NSExtensionContext)
 }

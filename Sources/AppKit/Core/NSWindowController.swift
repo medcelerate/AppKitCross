@@ -130,10 +130,12 @@ import CoreText
     @MainActor open var owner: AnyObject? { _owner ?? self }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/previewrepresentableactivityitems
     @available(macOS 13.2, *)
+    /// Stored; the port has no share sheet or window-title preview to offer them in.
     @MainActor open var previewRepresentableActivityItems: [any NSPreviewRepresentableActivityItem]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _previewItems }
+        set { _previewItems = newValue }
     }
+    private var _previewItems: [any NSPreviewRepresentableActivityItem]? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/setdocumentedited(_:)
     @MainActor open func setDocumentEdited(_ dirtyFlag: Bool) { window?.isDocumentEdited = dirtyFlag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindowcontroller/shouldcascadewindows

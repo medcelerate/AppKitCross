@@ -93,7 +93,13 @@ import CoreText
     // MARK: Initialisers
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrulerview/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// A horizontal ruler with no scroll view (the port loads no nibs: nothing is decoded).
+    public required init?(coder: NSCoder) {
+        _scrollView = nil
+        _orientation = .horizontalRuler
+        _units = NSRulerView._defaultUnits
+        super.init(coder: coder)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsrulerview/init(scrollview:orientation:)
     @MainActor public init(scrollView: NSScrollView?, orientation: NSRulerView.Orientation) {
         _scrollView = scrollView

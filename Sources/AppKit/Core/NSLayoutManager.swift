@@ -358,8 +358,16 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         }
     }
 
+    /// What a typesetter set on the laid-out glyphs (`setNotShownAttribute`, `setLocation`, …);
+    /// the next layout pass recomputes the glyphs and drops them, as AppKit regenerates them.
+    private var _notShownOverrides: [Int: Bool] = [:]
+    private var _drawsOutsideOverrides: Set<Int> = []
+    private var _intAttributes: [Int: [Int: Int]] = [:]
+    private var _locationOverrides: [Int: NSPoint] = [:]
+
     private func _layoutPass() {
         _layoutValid = true
+        _notShownOverrides = [:]; _drawsOutsideOverrides = []; _intAttributes = [:]; _locationOverrides = [:]
         _fragments = []
         _blockFrames = []
         _extraContainer = nil
@@ -739,9 +747,12 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         return _fragments[fi].charRange
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/notshownattribute(forglyphat:)
-    open func notShownAttribute(forGlyphAt glyphIndex: Int) -> Bool { propertyForGlyph(at: glyphIndex).contains(.controlCharacter) }
+    open func notShownAttribute(forGlyphAt glyphIndex: Int) -> Bool {
+        _ensureLayout()
+        return _notShownOverrides[glyphIndex] ?? propertyForGlyph(at: glyphIndex).contains(.controlCharacter)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/drawsoutsidelinefragment(forglyphat:)
-    open func drawsOutsideLineFragment(forGlyphAt glyphIndex: Int) -> Bool { false }
+    open func drawsOutsideLineFragment(forGlyphAt glyphIndex: Int) -> Bool { _ensureLayout(); return _drawsOutsideOverrides.contains(glyphIndex) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/truncatedglyphrange(inlinefragmentforglyphat:)
     open func truncatedGlyphRange(inLineFragmentForGlyphAt glyphIndex: Int) -> NSRange {
         guard let fi = _fragmentIndex(forCharacter: glyphIndex) else { return NSRange(location: NSNotFound, length: 0) }
@@ -814,6 +825,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/location(forglyphat:)
     open func location(forGlyphAt glyphIndex: Int) -> NSPoint {
+        _ensureLayout()
+        if let set = _locationOverrides[glyphIndex] { return set }
         guard let fi = _fragmentIndex(forCharacter: glyphIndex) else { return NSPoint(x: _extraUsedRect.minX, y: _extraRect.height) }
         let f = _fragments[fi]
         return NSPoint(x: f.textX + CTLineGetOffsetForStringIndex(f.line, min(glyphIndex, f.visibleEnd), nil), y: f.baseline)
@@ -1299,13 +1312,13 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     open var typesetterBehavior: NSLayoutManager.TypesetterBehavior { get { _typesetterBehavior } set { _typesetterBehavior = newValue } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/typesetter
     open var typesetter: NSTypesetter {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { unimplemented("NSLayoutManager.typesetter — the port typesets with CoreText; NSTypesetter (a generated stub) belongs to the TextKit 2 / typesetter round") }
+        set { unimplemented("NSLayoutManager.typesetter — the port typesets with CoreText; NSTypesetter (a generated stub) belongs to the TextKit 2 / typesetter round") }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/glyphgenerator
     open var glyphGenerator: NSGlyphGenerator {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { unimplemented("NSLayoutManager.glyphGenerator — glyphs come from CoreText line by line; NSGlyphGenerator is a generated stub with no glyph storage to drive") }
+        set { unimplemented("NSLayoutManager.glyphGenerator — glyphs come from CoreText line by line; NSGlyphGenerator is a generated stub with no glyph storage to drive") }
     }
 
     // MARK: Glyph storage (NSGlyphStorage) and manual layout: not used by the CoreText typesetter
@@ -1315,33 +1328,70 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/layoutoptions()
     open func layoutOptions() -> Int { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/insertglyphs(_:length:forstartingglyphat:characterindex:)
-    open func insertGlyphs(_ glyphs: UnsafePointer<NSGlyph>, length: Int, forStartingGlyphAt glyphIndex: Int, characterIndex charIndex: Int) { unimplemented() }
+    open func insertGlyphs(_ glyphs: UnsafePointer<NSGlyph>, length: Int, forStartingGlyphAt glyphIndex: Int, characterIndex charIndex: Int) { unimplemented("NSLayoutManager.insertGlyphs — the port keeps one glyph per character (CoreText shapes each line when it is drawn), so there is no glyph storage to edit") }
+    // The manual-layout setters below are what a typesetter calls while laying out. The
+    // port's CoreText layout has already placed the glyphs; a value set here replaces the
+    // laid-out one in the queries until the next layout pass recomputes it (as AppKit's next
+    // typesetting pass would). Drawing still follows the CoreText lines.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setintattribute(_:value:forglyphat:)
-    open func setIntAttribute(_ attributeTag: Int, value val: Int, forGlyphAt glyphIndex: Int) { unimplemented() }
+    open func setIntAttribute(_ attributeTag: Int, value val: Int, forGlyphAt glyphIndex: Int) {
+        _ensureLayout()
+        _intAttributes[glyphIndex, default: [:]][attributeTag] = val
+    }
+    /// 0 for an attribute never set (AppKit's default for the soft, elastic, bidi-level and
+    /// inscribe attributes).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/intattribute(_:forglyphat:)
-    open func intAttribute(_ attributeTag: Int, forGlyphAt glyphIndex: Int) -> Int { unimplemented() }
+    open func intAttribute(_ attributeTag: Int, forGlyphAt glyphIndex: Int) -> Int { _ensureLayout(); return _intAttributes[glyphIndex]?[attributeTag] ?? 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/insertglyph(_:atglyphindex:characterindex:)
-    open func insertGlyph(_ glyph: NSGlyph, atGlyphIndex glyphIndex: Int, characterIndex charIndex: Int) { unimplemented() }
+    open func insertGlyph(_ glyph: NSGlyph, atGlyphIndex glyphIndex: Int, characterIndex charIndex: Int) { unimplemented("NSLayoutManager.insertGlyph — the port keeps one glyph per character (CoreText shapes each line when it is drawn), so there is no glyph storage to edit") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/replaceglyph(at:withglyph:)
-    open func replaceGlyph(at glyphIndex: Int, withGlyph newGlyph: NSGlyph) { unimplemented() }
+    open func replaceGlyph(at glyphIndex: Int, withGlyph newGlyph: NSGlyph) { unimplemented("NSLayoutManager.replaceGlyph — the port keeps one glyph per character (CoreText shapes each line when it is drawn), so there is no glyph storage to edit") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/deleteglyphs(in:)
-    open func deleteGlyphs(in glyphRange: NSRange) { unimplemented() }
+    open func deleteGlyphs(in glyphRange: NSRange) { unimplemented("NSLayoutManager.deleteGlyphs — the port keeps one glyph per character (CoreText shapes each line when it is drawn), so there is no glyph storage to edit") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setcharacterindex(_:forglyphat:)
-    open func setCharacterIndex(_ charIndex: Int, forGlyphAt glyphIndex: Int) { unimplemented() }
+    open func setCharacterIndex(_ charIndex: Int, forGlyphAt glyphIndex: Int) { unimplemented("NSLayoutManager.setCharacterIndex — the port keeps one glyph per character (CoreText shapes each line when it is drawn), so there is no glyph storage to edit") }
+    /// The fragments of the range move to `container` (by index among the text containers).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/settextcontainer(_:forglyphrange:)
-    open func setTextContainer(_ container: NSTextContainer, forGlyphRange glyphRange: NSRange) { unimplemented() }
+    open func setTextContainer(_ container: NSTextContainer, forGlyphRange glyphRange: NSRange) {
+        _ensureLayout()
+        guard let ci = _textContainers.firstIndex(where: { $0 === container }) else { return }
+        for i in _fragments.indices where NSIntersectionRange(_fragments[i].charRange, glyphRange).length > 0 { _fragments[i].container = ci }
+    }
+    /// The rects of the fragment holding the range (its baseline moves with the rect).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setlinefragmentrect(_:forglyphrange:usedrect:)
-    open func setLineFragmentRect(_ fragmentRect: NSRect, forGlyphRange glyphRange: NSRange, usedRect: NSRect) { unimplemented() }
+    open func setLineFragmentRect(_ fragmentRect: NSRect, forGlyphRange glyphRange: NSRange, usedRect: NSRect) {
+        _ensureLayout()
+        guard let fi = _fragmentIndex(forCharacter: glyphRange.location) else { return }
+        _fragments[fi].baseline += fragmentRect.minY - _fragments[fi].rect.minY
+        _fragments[fi].textX += fragmentRect.minX - _fragments[fi].rect.minX
+        _fragments[fi].rect = fragmentRect
+        _fragments[fi].usedRect = usedRect
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setextralinefragmentrect(_:usedrect:textcontainer:)
-    open func setExtraLineFragmentRect(_ fragmentRect: NSRect, usedRect: NSRect, textContainer container: NSTextContainer) { unimplemented() }
+    open func setExtraLineFragmentRect(_ fragmentRect: NSRect, usedRect: NSRect, textContainer container: NSTextContainer) {
+        _ensureLayout()
+        guard let ci = _textContainers.firstIndex(where: { $0 === container }) else { return }
+        _extraRect = fragmentRect
+        _extraUsedRect = usedRect
+        _extraContainer = ci
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setlocation(_:forstartofglyphrange:)
-    open func setLocation(_ location: NSPoint, forStartOfGlyphRange glyphRange: NSRange) { unimplemented() }
+    open func setLocation(_ location: NSPoint, forStartOfGlyphRange glyphRange: NSRange) {
+        _ensureLayout()
+        _locationOverrides[glyphRange.location] = location
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setlocations(_:startingglyphindexes:count:forglyphrange:)
-    open func setLocations(_ locations: NSPointArray, startingGlyphIndexes glyphIndexes: UnsafeMutablePointer<Int>, count: Int, forGlyphRange glyphRange: NSRange) { unimplemented() }
+    open func setLocations(_ locations: NSPointArray, startingGlyphIndexes glyphIndexes: UnsafeMutablePointer<Int>, count: Int, forGlyphRange glyphRange: NSRange) {
+        _ensureLayout()
+        for i in 0..<count { _locationOverrides[glyphIndexes[i]] = locations[i] }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setnotshownattribute(_:forglyphat:)
-    open func setNotShownAttribute(_ flag: Bool, forGlyphAt glyphIndex: Int) { unimplemented() }
+    open func setNotShownAttribute(_ flag: Bool, forGlyphAt glyphIndex: Int) { _ensureLayout(); _notShownOverrides[glyphIndex] = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setdrawsoutsidelinefragment(_:forglyphat:)
-    open func setDrawsOutsideLineFragment(_ flag: Bool, forGlyphAt glyphIndex: Int) { unimplemented() }
+    open func setDrawsOutsideLineFragment(_ flag: Bool, forGlyphAt glyphIndex: Int) {
+        _ensureLayout()
+        if flag { _drawsOutsideOverrides.insert(glyphIndex) } else { _drawsOutsideOverrides.remove(glyphIndex) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/setattachmentsize(_:forglyphrange:)
     open func setAttachmentSize(_ attachmentSize: NSSize, forGlyphRange glyphRange: NSRange) {
         for i in glyphRange.location..<(glyphRange.location + max(1, glyphRange.length)) { _attachmentSizeOverrides[i] = attachmentSize }
@@ -1388,7 +1438,12 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         else { _blockFrames.append(_BlockFrame(block: block, bounds: rect, layout: rect, charRange: glyphRange, container: 0)) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/ruleraccessoryview(for:paragraphstyle:ruler:enabled:)
-    open func rulerAccessoryView(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView, enabled isEnabled: Bool) -> NSView? { unimplemented() }
+    /// A formatting strip with the paragraph's alignment (left, centre, right, justified)
+    /// that sends the text view's align actions; AppKit's strip also has spacing and list
+    /// pop-ups (ADR-0039).
+    open func rulerAccessoryView(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView, enabled isEnabled: Bool) -> NSView? {
+        MainActor.assumeIsolated { _NSRulerAccessoryView(textView: view, style: style, enabled: isEnabled) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nslayoutmanager/rulermarkers(for:paragraphstyle:ruler:)
     /// The first-line, head and tail indent markers and one marker per tab stop (ADR-0034).
     open func rulerMarkers(for view: NSTextView, paragraphStyle style: NSParagraphStyle, ruler: NSRulerView) -> [NSRulerMarker] {

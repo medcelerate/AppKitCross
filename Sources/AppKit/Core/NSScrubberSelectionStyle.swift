@@ -24,7 +24,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberselectionstyle/init()
     @MainActor public override init() { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberselectionstyle/init(coder:)
-    @MainActor public required init(coder: NSCoder) { unimplemented() }
+    /// The base style keeps nothing.
+    @MainActor public required init(coder: NSCoder) { super.init() }
     /// None in the base class.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberselectionstyle/makeselectionview()
     @MainActor open func makeSelectionView() -> NSScrubberSelectionView? { nil }
@@ -33,7 +34,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberselectionstyle/roundedbackground
     @MainActor class public var roundedBackground: NSScrubberSelectionStyle { _rounded }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { }
 
     private static let _outline = _NSScrubberBuiltinSelectionStyle(outline: true)
     private static let _rounded = _NSScrubberBuiltinSelectionStyle(outline: false)
@@ -42,7 +43,9 @@ import CoreText
 @MainActor private final class _NSScrubberBuiltinSelectionStyle: NSScrubberSelectionStyle {
     let outline: Bool
     init(outline: Bool) { self.outline = outline; super.init() }
-    required init(coder: NSCoder) { unimplemented() }
+    /// A decoded built-in style is the outline one (macOS writes `NSScrubberSelectionShowsHighlight`).
+    required init(coder: NSCoder) { outline = !coder.decodeBool(forKey: "NSScrubberSelectionRoundedBackground"); super.init(coder: coder) }
+    override func encode(with coder: NSCoder) { coder.encode(!outline, forKey: "NSScrubberSelectionRoundedBackground") }
     override func makeSelectionView() -> NSScrubberSelectionView? {
         let v = _NSScrubberBuiltinSelectionView(frame: .zero)
         v.outline = outline

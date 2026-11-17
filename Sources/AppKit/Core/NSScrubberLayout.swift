@@ -27,7 +27,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberlayout/init()
     @MainActor public override init() { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberlayout/init(coder:)
-    @MainActor public required init(coder: NSCoder) { unimplemented() }
+    /// The abstract layout keeps nothing (subclasses read their own keys).
+    @MainActor public required init(coder: NSCoder) { super.init() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberlayout/automaticallymirrorsinrighttoleftlayout
     @MainActor open var automaticallyMirrorsInRightToLeftLayout: Bool { true }
     /// Asks the scrubber for a new layout pass.
@@ -60,5 +61,5 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrubberlayout/visiblerect
     @MainActor open var visibleRect: NSRect { _scrubber?._visibleContentRect ?? .zero }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { }
 }

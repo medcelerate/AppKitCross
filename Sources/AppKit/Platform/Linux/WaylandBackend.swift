@@ -23,6 +23,7 @@ final class WaylandOutput {
     var x = 0, y = 0
     var widthPx = 0, heightPx = 0
     var scale = 1
+    var refreshMilliHertz = 0
     var description = "Wayland Output"
     init(proxy: OpaquePointer, name: UInt32) { self.proxy = proxy; self.name = name }
     var logicalSize: NSSize { NSSize(width: CGFloat(widthPx) / CGFloat(scale), height: CGFloat(heightPx) / CGFloat(scale)) }
@@ -203,11 +204,11 @@ final class WaylandBackend: PlatformBackend {
                         if !parts.isEmpty { o.description = parts.joined(separator: " ") }
                     }
                 },
-                mode: { data, output, flags, width, height, _ in
+                mode: { data, output, flags, width, height, refresh in
                     guard flags & UInt32(WL_OUTPUT_MODE_CURRENT.rawValue) != 0, let backend = WaylandBackend.from(data) else { return }
                     MainActor.assumeIsolated {
                         guard let o = backend.outputs.first(where: { $0.proxy == output }) else { return }
-                        o.widthPx = Int(width); o.heightPx = Int(height)
+                        o.widthPx = Int(width); o.heightPx = Int(height); o.refreshMilliHertz = Int(refresh)
                     }
                 },
                 done: { _, _ in },
@@ -280,7 +281,9 @@ final class WaylandBackend: PlatformBackend {
             let size = o.logicalSize
             let origin = NSPoint(x: CGFloat(o.x - primary.x), y: primaryHeight - CGFloat(o.y - primary.y) - size.height)
             let frame = NSRect(origin: origin, size: size)
-            return PlatformDisplay(frame: frame, visibleFrame: frame, backingScaleFactor: CGFloat(o.scale), localizedName: o.description, isMain: i == 0)
+            var d = PlatformDisplay(frame: frame, visibleFrame: frame, backingScaleFactor: CGFloat(o.scale), localizedName: o.description, isMain: i == 0)
+            if o.refreshMilliHertz > 0 { d.refreshRate = Double(o.refreshMilliHertz) / 1000 }
+            return d
         }
     }
 

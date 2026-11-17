@@ -510,7 +510,7 @@ import CoreGraphics
         super.init(frame: .zero)
         _makeControls()
     }
-    required init?(coder: NSCoder) { unimplemented() }
+    required init?(coder: NSCoder) { unimplemented("an NSRuleEditor row view or predicate — an internal helper; nothing archives it") }
 
     override var isFlipped: Bool { true }
 
@@ -678,7 +678,7 @@ enum _NSRulePredicates {
         guard let op = operatorType(parts[.operatorType]) else { return nil }
         return NSComparisonPredicate(leftExpression: l, rightExpression: r, modifier: modifier, type: op, options: options)
         #else
-        if parts[.customSelector] != nil { unimplemented() }   // no selector dispatch without the runtime
+        if parts[.customSelector] != nil { unimplemented("NSRuleEditor.predicate — a custom selector predicate needs selector dispatch, which the runtime-less port lacks") }
         guard let op = operatorType(parts[.operatorType]), let keyPath = left as? String else { return nil }
         return _NSRuleComparisonPredicate(keyPath: keyPath, operator: op, value: _KVC.flatten(right), modifier: modifier, options: options)
         #endif
@@ -725,7 +725,7 @@ final class _NSRuleComparisonPredicate: NSPredicate {
         self.comparisonOptions = options
         super.init(value: true)
     }
-    required init?(coder: NSCoder) { unimplemented() }
+    required init?(coder: NSCoder) { unimplemented("an NSRuleEditor row view or predicate — an internal helper; nothing archives it") }
 
     override func evaluate(with object: Any?) -> Bool { evaluate(with: object, substitutionVariables: nil) }
 

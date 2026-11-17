@@ -19,7 +19,17 @@ open class NSUserDefaultsController: NSController {
     nonisolated(unsafe) private var _observer: (any NSObjectProtocol)?
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuserdefaultscontroller/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// The standard user defaults with no initial values (`NSAppliesImmediately` read when present).
+    public required init?(coder: NSCoder) {
+        _defaults = .standard
+        _initialValues = nil
+        super.init(coder: coder)
+        if coder.containsValue(forKey: "NSAppliesImmediately") { _appliesImmediately = coder.decodeBool(forKey: "NSAppliesImmediately") }
+        _observer = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: _defaults, queue: nil) { [weak self] _ in
+            guard let self else { return }
+            _KVO.didChangeAllKeys(self._values)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsuserdefaultscontroller/init(defaults:initialvalues:)
     public init(defaults: UserDefaults?, initialValues: [String : Any]?) {
         _defaults = defaults ?? .standard

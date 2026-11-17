@@ -156,7 +156,7 @@ import CoreText
         set { _numberOfTickMarks = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/preferstrackinguntilmouseup
-    @MainActor class public override var prefersTrackingUntilMouseUp: Bool { unimplemented() }
+    @MainActor class public override var prefersTrackingUntilMouseUp: Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/rectoftickmark(at:)
     @MainActor open func rectOfTickMark(at index: Int) -> NSRect {
         guard _numberOfTickMarks > 1 else { return .zero }

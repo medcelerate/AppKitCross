@@ -269,9 +269,45 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
         self.init(red: r, green: g, blue: b, alpha: a)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(coder:)
+    /// AppKit's archive (`NSColorSpace` 1/2 with `NSRGB`, 3/4 with `NSWhite`, 5 with `NSCMYK`,
+    /// 6 a catalog colour by `NSCatalogName`/`NSColorName` with an `NSColor` fallback): space-
+    /// separated components, alpha left out when 1, NUL-terminated (macOS 15).
     public required init?(coder: NSCoder) {
-        storage = .rgb(0, 0, 0, 1)
+        let decoded = NSColor._decodeStorage(coder)
+        storage = decoded.storage
         super.init()
+        _catalog = decoded.catalog
+    }
+    private static func _components(_ coder: NSCoder, _ key: String) -> [CGFloat] {
+        guard let d = coder._decodeObjectIfPresent(forKey: key) as? Data else { return [] }
+        let text = String(decoding: d.prefix { $0 != 0 }, as: UTF8.self)
+        return text.split(separator: " ").compactMap { Double($0).map { CGFloat($0) } }
+    }
+    private static func _decodeStorage(_ coder: NSCoder) -> (storage: Storage, catalog: (list: String, name: String)?) {
+        switch coder.decodeInteger(forKey: "NSColorSpace") {
+        case 3, 4:
+            let c = _components(coder, "NSWhite")
+            return (.gray(c.first ?? 0, c.count > 1 ? c[1] : 1), nil)
+        case 5:
+            let c = _components(coder, "NSCMYK") + [0, 0, 0, 0]
+            return (.cmyk(c[0], c[1], c[2], c[3], c.count > 8 ? c[4] : 1), nil)
+        case 6:
+            let list = coder._decodeObjectIfPresent(forKey: "NSCatalogName") as? String ?? "System"
+            let name = coder._decodeObjectIfPresent(forKey: "NSColorName") as? String ?? ""
+            if let c = MainActor.assumeIsolated({ NSColor(catalogName: list, colorName: name) }) {
+                return (c.storage, list == "System" ? nil : (list, name))
+            }
+            if let fallback = coder._decodeObjectIfPresent(forKey: "NSColor") as? NSColor { return (fallback.storage, nil) }
+            return (.rgb(0, 0, 0, 1), nil)
+        default:
+            let c = _components(coder, "NSRGB")
+            guard c.count >= 3 else {
+                // An empty archive (the port wrote none before ADR-0039) is black.
+                if coder.containsValue(forKey: "NSCMYK") { let k = _components(coder, "NSCMYK") + [0, 0, 0, 0, 1]; return (.cmyk(k[0], k[1], k[2], k[3], k[4]), nil) }
+                return (.rgb(0, 0, 0, 1), nil)
+            }
+            return (.rgb(c[0], c[1], c[2], c.count > 3 ? c[3] : 1), nil)
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscolor/init(colorspace:components:count:)
     /// `count` is the space's components plus alpha (last).
@@ -869,7 +905,34 @@ open class NSColor: NSObject, NSAccessibilityColor, NSCopying, NSSecureCoding, N
     // Requirement of NSSecureCoding
     class public var supportsSecureCoding: Bool { true }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { }
+    /// AppKit's keys (see `init(coder:)`); colours in other spaces, pattern and dynamic colours
+    /// are written as their sRGB components.
+    open func encode(with coder: NSCoder) {
+        func put(_ values: [CGFloat], alpha: CGFloat, _ key: String) {
+            var parts = values.map { String(format: "%.10g", Double($0)) }
+            if alpha != 1 { parts.append(String(format: "%.10g", Double(alpha))) }
+            var d = Data(parts.joined(separator: " ").utf8)
+            d.append(0)
+            coder.encode(d, forKey: key)
+        }
+        if _provider == nil, let name = _namedComponent {
+            coder.encode(6, forKey: "NSColorSpace")
+            coder.encode(_catalog?.list ?? "System", forKey: "NSCatalogName")
+            coder.encode(name, forKey: "NSColorName")
+            let (r, g, b, a) = _rgba
+            coder.encode(NSColor(storage: .rgb(r, g, b, a)), forKey: "NSColor")
+            return
+        }
+        switch storage {
+        case let .gray(w, a) where _provider == nil && _pattern == nil:
+            coder.encode(3, forKey: "NSColorSpace"); put([w], alpha: a, "NSWhite")
+        case let .cmyk(c, m, y, k, a) where _provider == nil:
+            coder.encode(5, forKey: "NSColorSpace"); put([c, m, y, k], alpha: a, "NSCMYK")
+        default:
+            let (r, g, b, a) = _pattern != nil ? (0, 0, 0, 1) : _rgba
+            coder.encode(1, forKey: "NSColorSpace"); put([r, g, b], alpha: a, "NSRGB")
+        }
+    }
     // MARK: Pasteboard (`com.apple.cocoa.pasteboard.color`): the sRGB components as a property list.
     public static func readableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.color] }
     public func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { [.color] }

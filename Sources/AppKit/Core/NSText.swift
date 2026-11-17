@@ -493,7 +493,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/movementuserinfokey
     @available(macOS 10.13, *)
-    static public var movementUserInfoKey: String { unimplemented() }
+    static public var movementUserInfoKey: String { "NSTextMovement" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/paste(_:)
     @MainActor open func paste(_ sender: Any?) {
         guard _isEditable, var text = NSPasteboard.general.string(forType: .string) else { return }
@@ -505,17 +505,53 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/pasteruler(_:)
     @MainActor open func pasteRuler(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/readrtfd(fromfile:)
-    @MainActor open func readRTFD(fromFile path: String) -> Bool { unimplemented() }
+    /// Replaces the whole text with an RTFD package (a directory with TXT.rtf), or a plain
+    /// RTF file; false when it cannot be read.
+    @MainActor open func readRTFD(fromFile path: String) -> Bool {
+        let url = URL(fileURLWithPath: path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return false }
+        let parsed: NSAttributedString?
+        if isDirectory.boolValue {
+            guard let wrapper = try? FileWrapper(url: url, options: .immediate) else { return false }
+            parsed = _RTFReader.readRTFD(wrapper)
+        } else {
+            guard let data = try? Data(contentsOf: url) else { return false }
+            parsed = _RTFReader(data: data).read()
+        }
+        guard let parsed else { return false }
+        _replaceRich(NSRange(location: 0, length: _length), with: parsed)
+        return true
+    }
+    /// The text as attributed content (a plain NSText: the string in its font and colour;
+    /// NSTextView answers its text storage).
+    @MainActor internal func _richContents() -> NSAttributedString { NSAttributedString(string: _string, attributes: _attributes) }
+    /// Replaces a range with attributed content (a plain NSText keeps only the characters).
+    @MainActor internal func _replaceRich(_ range: NSRange, with content: NSAttributedString) { _replace(_clamped(range), with: content.string) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/replacecharacters(in:with:)
     @MainActor open func replaceCharacters(in range: NSRange, with string: String) { _replace(range, with: string) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/replacecharacters(in:withrtf:)
-    @MainActor open func replaceCharacters(in range: NSRange, withRTF rtfData: Data) { unimplemented() }
+    @MainActor open func replaceCharacters(in range: NSRange, withRTF rtfData: Data) {
+        guard let parsed = _RTFReader(data: rtfData).read() else { return }
+        _replaceRich(range, with: parsed)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/replacecharacters(in:withrtfd:)
-    @MainActor open func replaceCharacters(in range: NSRange, withRTFD rtfdData: Data) { unimplemented() }
+    @MainActor open func replaceCharacters(in range: NSRange, withRTFD rtfdData: Data) {
+        guard let wrapper = _RTFDArchive.unarchive(rtfdData), let parsed = _RTFReader.readRTFD(wrapper) else { return }
+        _replaceRich(range, with: parsed)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/rtf(from:)
-    @MainActor open func rtf(from range: NSRange) -> Data? { unimplemented() }
+    @MainActor open func rtf(from range: NSRange) -> Data? {
+        let content = _richContents()
+        let r = NSIntersectionRange(range, NSRange(location: 0, length: content.length))
+        return content.rtf(from: r)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/rtfd(from:)
-    @MainActor open func rtfd(from range: NSRange) -> Data? { unimplemented() }
+    @MainActor open func rtfd(from range: NSRange) -> Data? {
+        let content = _richContents()
+        let r = NSIntersectionRange(range, NSRange(location: 0, length: content.length))
+        return content.rtfd(from: r)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/scrollrangetovisible(_:)
     @MainActor open func scrollRangeToVisible(_ range: NSRange) {
         let r = _caretRect(for: _clamped(range).location)
@@ -581,7 +617,14 @@ import CoreText
         set { _usesFontPanel = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/writertfd(tofile:atomically:)
-    @MainActor open func writeRTFD(toFile path: String, atomically flag: Bool) -> Bool { unimplemented() }
+    /// Writes the whole text as an RTFD package (a directory with TXT.rtf and the attachments).
+    @MainActor open func writeRTFD(toFile path: String, atomically flag: Bool) -> Bool {
+        let content = _richContents()
+        guard let wrapper = content.rtfdFileWrapper(from: NSRange(location: 0, length: content.length)) else { return false }
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: path) { try? FileManager.default.removeItem(at: url) }
+        return (try? wrapper.write(to: url, options: flag ? .atomic : [], originalContentsURL: nil)) != nil
+    }
     // Requirement of NSChangeSpelling
     open func changeSpelling(_ sender: Any?) { }
     // Requirement of NSIgnoreMisspelledWords
