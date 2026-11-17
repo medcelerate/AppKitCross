@@ -195,6 +195,107 @@ final class MetalVulkanPresentationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The drawable the view hands out is the chain's image: the view's `drawableSize` and
+    /// `colorPixelFormat`, for every format the surface presents.
+    func testDrawableMatchesTheViewSizeAndFormat() throws {
+        try MainActor.assumeIsolated {
+            let device = try presentableDevice()
+            let (w, view, renderer) = makeWindow(device: device, viewFrame: NSRect(x: 20, y: 30, width: 120, height: 80))
+            defer { withExtendedLifetime(renderer) { w.close() } }
+            for format in [MTLPixelFormat.bgra8Unorm, .bgra8Unorm_srgb] {
+                view.colorPixelFormat = format
+                guard view.currentDrawable != nil, let texture = view.currentTexture else { return XCTFail("no drawable in \(format): \(view._presentationError)") }
+                XCTAssertTrue(view._presentsThroughSwapChain, "\(format): \(view._presentationError)")
+                XCTAssertEqual(texture.pixelFormat, format)
+                XCTAssertEqual(CGSize(width: texture.width, height: texture.height), view.drawableSize)
+                view.draw()   // presents the acquired image
+            }
+        }
+    }
+
+    /// Hiding the view (or an ancestor) takes its native surface away, since the surface is
+    /// above the window's own drawing; showing it again presents through a new chain.
+    func testHidingTheViewDropsTheSurface() throws {
+        try MainActor.assumeIsolated {
+            let device = try presentableDevice()
+            let (w, view, renderer) = makeWindow(device: device, viewFrame: NSRect(x: 20, y: 30, width: 120, height: 80))
+            defer { withExtendedLifetime(renderer) { w.close() } }
+            view.draw()
+            XCTAssertTrue(view._presentsThroughSwapChain, view._presentationError)
+            view.isHidden = true
+            XCTAssertFalse(view._presentsThroughSwapChain)
+            XCTAssertNil(view._presentationSurfaceFrame)
+            view.isHidden = false
+            view.draw()
+            XCTAssertTrue(view._presentsThroughSwapChain, "after unhiding: \(view._presentationError)")
+            // An ancestor: the view sits in a container that is hidden and shown.
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 150))
+            view.removeFromSuperview()
+            container.addSubview(view)
+            w.contentView!.addSubview(container)
+            view.draw()
+            XCTAssertTrue(view._presentsThroughSwapChain, view._presentationError)
+            container.isHidden = true
+            XCTAssertFalse(view._presentsThroughSwapChain, "hiding the ancestor drops the surface")
+            container.isHidden = false
+            view.draw()
+            XCTAssertTrue(view._presentsThroughSwapChain, view._presentationError)
+        }
+    }
+
+    /// A move without a resize (the view's origin, an ancestor's layout) moves the surface,
+    /// even when no frame is drawn: the window's paint places it.
+    func testMovingTheViewMovesTheSurface() throws {
+        try MainActor.assumeIsolated {
+            let device = try presentableDevice()
+            let (w, view, renderer) = makeWindow(device: device, viewFrame: NSRect(x: 20, y: 30, width: 120, height: 80))
+            defer { withExtendedLifetime(renderer) { w.close() } }
+            view.draw()
+            XCTAssertEqual(view._presentationSurfaceFrame, NSRect(x: 20, y: 30, width: 120, height: 80))
+            let frames = renderer.frames
+            view.setFrameOrigin(NSPoint(x: 50, y: 10))
+            XCTAssertEqual(view._presentationSurfaceFrame, NSRect(x: 50, y: 10, width: 120, height: 80))
+            XCTAssertEqual(renderer.frames, frames, "a move alone draws no frame")
+            pump(timeout: 0.3)
+            if w._captureContent() != nil {
+                let scale = w.backingScaleFactor
+                assertClose(windowPixel(w, Int(160 * scale), Int((150 - 50) * scale)), Self.clearBGRA, "the moved view's right part")
+            }
+            // Partly out of the content area: the surface is clipped to it.
+            view.setFrameOrigin(NSPoint(x: 140, y: 10))
+            XCTAssertEqual(view._presentationSurfaceFrame, NSRect(x: 140, y: 10, width: 60, height: 80))
+            // Wholly outside: no surface.
+            view.setFrameOrigin(NSPoint(x: 400, y: 10))
+            XCTAssertNil(view._presentationSurfaceFrame)
+            XCTAssertFalse(view._presentsThroughSwapChain)
+        }
+    }
+
+    /// Timed updates: with `isPaused` and `enableSetNeedsDisplay` false, AppKit's display
+    /// link draws and presents frames at `preferredFramesPerSecond`; pausing stops them.
+    func testDisplayLinkDrivesPresentsAtThePreferredRate() throws {
+        try MainActor.assumeIsolated {
+            let device = try presentableDevice()
+            let (w, view, renderer) = makeWindow(device: device, viewFrame: NSRect(x: 20, y: 30, width: 120, height: 80))
+            defer { withExtendedLifetime(renderer) { w.close() } }
+            view.preferredFramesPerSecond = 10
+            view.enableSetNeedsDisplay = false
+            let start = renderer.frames, presented = view._swapChainPresentCount
+            let began = Date()
+            pump(until: { renderer.frames >= start + 3 }, timeout: 3)
+            let elapsed = Date().timeIntervalSince(began)
+            XCTAssertGreaterThanOrEqual(renderer.frames, start + 3, "the display link ran frames")
+            XCTAssertTrue(view._presentsThroughSwapChain, view._presentationError)
+            XCTAssertGreaterThan(view._swapChainPresentCount, presented, "the link's frames presented")
+            // 10 fps: three frames need about 0.2 s at least (the first fires at once).
+            XCTAssertGreaterThan(elapsed, 0.15, "frames at 10 fps, not every tick (\(renderer.frames - start) in \(elapsed) s)")
+            view.isPaused = true
+            let paused = renderer.frames
+            pump(timeout: 0.4)
+            XCTAssertEqual(renderer.frames, paused, "a paused view draws no frames")
+        }
+    }
+
     /// The formats a chain can be made in are the layer's, on any device.
     func testPresentableFormats() {
         XCTAssertTrue(MTLVulkanSwapChain.isSupported(.bgra8Unorm))

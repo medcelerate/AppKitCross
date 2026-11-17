@@ -68,6 +68,13 @@ echo "presented clear-colour pixels on screen: $METAL_PIXELS"
 if grep -q "presentation=swap chain" /tmp/hellowindow-linux-metal.log && [ "$METAL_PIXELS" -lt 10000 ]; then
     echo "FAIL: the swap chain presented but the screenshot does not show the clear colour"; exit 1
 fi
+# The Metal self-test with a window system (ADR-0042): after the offscreen checks one
+# MTKView frame must go through the swap chain and read back equal to the reference device.
+echo "== HelloWindow --metal-selftest with a window (presented frame vs the reference device)"
+if ! APPKITWIN_LINUX_BACKEND=x11 timeout 60 ./.build/debug/HelloWindow --metal-selftest >/tmp/metal-selftest-x11.log 2>&1; then
+    echo "FAIL: the Metal self-test failed"; grep -E "^FAIL|presented" /tmp/metal-selftest-x11.log; exit 1
+fi
+grep -E "^presented frame|presented .* frame" /tmp/metal-selftest-x11.log
 # Right-to-left layout: the same window mirrored (leading edges on the right, natural
 # text flush right); compare with hellowindow-linux.png.
 APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_LAYOUT_DIRECTION=rtl timeout 5 ./.build/debug/HelloWindow >/tmp/hellowindow-linux-rtl.log 2>&1 &

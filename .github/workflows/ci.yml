@@ -167,6 +167,8 @@ jobs:
         run: APPKITWIN_HOST_BACKEND=1 APPKITWIN_VULKAN_DEBUG=1 swift test
       - name: Metal self-test on the Vulkan device
         run: APPKITWIN_VULKAN_DEBUG=1 .build/debug/HelloWindow --metal-selftest
+      - name: Metal self-test presents a frame through the swap chain under Xvfb (ADR-0042)
+        run: xvfb-run -a -s "-screen 0 1280x800x24" env APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_VULKAN_DEBUG=1 timeout 60 .build/debug/HelloWindow --metal-selftest
       - name: Swap-chain presentation tests on the X11 backend under Xvfb (lavapipe presents to a child window)
         run: xvfb-run -a -s "-screen 0 1280x800x24" env APPKITWIN_LINUX_BACKEND=x11 APPKITWIN_VULKAN_DEBUG=1 swift test --filter MetalVulkanPresentationTests
       - name: HelloWindow Metal tab presents through the swap chain under Xvfb
