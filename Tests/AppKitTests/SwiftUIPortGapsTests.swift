@@ -254,13 +254,14 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
                                     .onDelete { log.deleted.append($0); veg.remove(atOffsets: $0) }
                             }
                         }
-                        .frame(height: 200)
+                        .frame(height: 360)     // all seven rows visible with any platform's font
                         Text("left \(fruit.joined(separator: ",")) / \(veg.joined(separator: ","))")
                     }
                 }
             }
-            let (w, h) = host(Probe(log: log), height: 300)
+            let (w, h) = host(Probe(log: log), height: 480)
             guard let list = allViews(h).compactMap({ $0 as? _ListView }).first else { return XCTFail("no list") }
+            XCTAssertLessThanOrEqual(list.rowFrames.last?.maxY ?? .infinity, list.visibleRect.maxY + 1, "every row is on screen")
             // Rows: Fruit header, 3 fruit, Vegetables header, 2 vegetables.
             XCTAssertEqual(list.rowFrames.count, 7)
             XCTAssertEqual(list.supplementaryRows, [0, 4])
@@ -268,7 +269,7 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
             click(list, row: 0, in: w)
             XCTAssertTrue(list.selectedRows.isEmpty)
             // Banana, then Onion with Command: one delete per ForEach with its own offsets.
-            click(list, row: 2, in: w)
+            click(list, row: 2, in: w); h.layoutSubtreeIfNeeded()
             click(list, row: 6, flags: [.command], in: w)
             h.layoutSubtreeIfNeeded()
             XCTAssertEqual(list.selectedRows, [2, 6])
@@ -343,7 +344,9 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
             let single = fields.first { $0.placeholderString == "Single" }!
             XCTAssertFalse(vertical.usesSingleLineMode)
             XCTAssertTrue(single.usesSingleLineMode)
-            XCTAssertEqual(single.frame.height, 21, accuracy: 1, "macOS's bezeled field height")
+            #if os(macOS)
+            XCTAssertEqual(single.frame.height, 21, accuracy: 1, "macOS's bezeled field height")   // other platforms' fonts differ
+            #endif
             let lineHeight = single.frame.height - 5
             XCTAssertEqual(vertical.frame.height, 2 * lineHeight + 5, accuracy: 1, "empty: the range's two lines")
             box.text = "one\ntwo\nthree"
