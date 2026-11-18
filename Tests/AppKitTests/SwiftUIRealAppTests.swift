@@ -321,7 +321,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             // while it is still being edited.
             guard let field = allViews(h).compactMap({ $0 as? NSTextField }).first(where: { $0.isEditable }) else { return XCTFail("no task field") }
             XCTAssertTrue(w.makeFirstResponder(field))
-            (field.currentEditor as? NSTextView)?.insertText("Write the report", replacementRange: NSRange(location: 0, length: 0))
+            (field.currentEditor() as? NSTextView)?.insertText("Write the report", replacementRange: NSRange(location: 0, length: 0))
             (Platform.backend as! HostBackend).drain()
             h.layoutSubtreeIfNeeded()
             XCTAssertEqual(buttons(h).first { $0.title == "Add" }?.isEnabled, true, "Add enables once there is text")
@@ -330,7 +330,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             h.layoutSubtreeIfNeeded()
             XCTAssertEqual(store.items.map(\.title), ["Write the report"])
             XCTAssertEqual(field.stringValue, "", "the binding cleared the field")
-            XCTAssertEqual(field.currentEditor?.string ?? "", "", "and the field editor shows it cleared")
+            XCTAssertEqual(field.currentEditor()?.string ?? "", "", "and the field editor shows it cleared")
 
             // The date field keeps its selected field across body updates, so arrows step it.
             if let picker = allViews(h).compactMap({ $0 as? NSDatePicker }).first {
