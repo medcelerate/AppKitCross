@@ -75,5 +75,5 @@ Port gaps both runs found, for the port's list: the eight SwiftUI names in
 
 - The guide is a second place that states build flags and switches; when `tools/library-compat.sh`,
   CI's toolchain or the runtime switches change, `AGENTS.md` must change with them.
-- Validation so far covers the macOS host build. A Windows run of the same exercise is a
+- Validation so far covers the macOS host build and the Linux container. A Windows run of the same exercise is a
   follow-up for the Windows test machine.
