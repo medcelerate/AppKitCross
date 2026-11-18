@@ -36,7 +36,13 @@ docs/DEVELOPMENT.md ("Shipping an app").
 `macos-release`, `linux-release` and `windows-release` build `-c release`, run the whole
 test suite in release (`swift test -c release`, testable imports on) and run in parallel
 with the debug jobs, so they add runner time but not wall-clock time. `-Ounchecked` is not
-used. The Windows job keeps `-j 1`.
+used. The Windows job keeps `-j 1`; its release build of the whole package takes about 16
+minutes on `windows-2022`. Its release *test* build adds `-Xfrontend -disable-cmo`: the
+Swift 6.2 Windows toolchain CI installs is an asserts build, and cross-module optimization
+of the test module trips its SIL deserializer ("Value Type mismatch?") on SwiftUI's
+deprecated `accessibility(hidden:)`, an opaque-result function forwarding to another. The
+release build and the bundles keep the default optimization; macOS and Linux test release
+unchanged.
 
 ### 3. `swift package bundle`
 

@@ -241,7 +241,7 @@ jobs:
           status=0; APPKITWIN_HOST_BACKEND=1 APPKITWIN_CRASH_TEST=1 timeout 30 Examples/Dependent/.build/bundle/Dependent/Dependent || status=$?
           test "$status" = 139
           report=$(ls xdg/Dependent/Crashes/*.txt | head -1)
-          cat "$report" | head -40
+          head -40 "$report"
           grep -q "SIGSEGV" "$report"
           grep -q "Backtrace" "$report"
       - uses: actions/upload-artifact@v4
@@ -298,11 +298,6 @@ jobs:
       - name: Build (release)
         shell: bash
         run: swift build -c release -j 1
-      - name: Tests in release on the host backend
-        shell: bash
-        run: swift test -c release -j 1
-        env:
-          APPKITWIN_HOST_BACKEND: "1"
       - name: A dependent package (Examples/Dependent) with a plain swift build
         shell: bash
         working-directory: Examples/Dependent
@@ -339,6 +334,16 @@ jobs:
           Get-Content $txt.FullName -TotalCount 40
           if (-not $dmp -or $dmp.Length -lt 1000) { Write-Error "no minidump"; exit 1 }
           if (-not (Select-String -Path $txt.FullName -Pattern "EXCEPTION_ACCESS_VIOLATION" -Quiet)) { Write-Error "no exception in the report"; exit 1 }
+      # Last, since `swift test` rebuilds everything with testability. -disable-cmo: Swift
+      # 6.2's Windows toolchain (an asserts build) trips "Value Type mismatch?" in
+      # DeserializeSIL when the optimizer pulls SwiftUI's opaque-result forwarding functions
+      # (View.accessibility(hidden:)) into the test module across modules. The shipped
+      # release build above and the bundles use the default optimization (ADR-0046).
+      - name: Tests in release on the host backend
+        shell: bash
+        run: swift test -c release -j 1 -Xswiftc -Xfrontend -Xswiftc -disable-cmo
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
       - uses: actions/upload-artifact@v4
         with:
           name: bundles-windows
