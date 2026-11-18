@@ -265,11 +265,26 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
 
     func show() {
         guard !isVisible else { return }
+        if !classHintSet { setClassHint() }
         backend.x11WindowSystem?.apply(to: xid)
         XMapRaised(backend.display, xid)
         isVisible = true
         dirty = NSRect(origin: .zero, size: _frame.size)
         XFlush(backend.display)
+    }
+
+    /// `WM_CLASS` before the first map (ADR-0045): the executable's name and the application's
+    /// identity, which the desktop entry's `StartupWMClass` names, so the window list and
+    /// taskbars group the windows under the app's entry and icon.
+    private var classHintSet = false
+    private func setClassHint() {
+        classHintSet = true
+        let identity = _AppBundle.main
+        let name = strdup(identity.layout.executableName ?? "AppKitCross")
+        let cls = strdup(identity.platformIdentifier)
+        defer { free(name); free(cls) }
+        var hint = XClassHint(res_name: name, res_class: cls)
+        XSetClassHint(backend.display, xid, &hint)
     }
 
     func hide() {

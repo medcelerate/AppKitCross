@@ -27,7 +27,8 @@ Vault as Default for Markdown…), dynamic `NSColor(name:dynamicProvider:)` colo
 | Path | Contents |
 | --- | --- |
 | `Sources/MDVault` | The app (upstream `Sources/`, unmodified except one `@MainActor` on the editor's coordinator in `EditorView.swift`, marked `AppKitCross:` in the source; see below). |
-| `Resources/Info.plist` | Upstream's Info.plist, unmodified: the app name, the Markdown UTI declaration (`UTImportedTypeDeclarations`, with the `md`, `markdown`, ... extensions) and the document types. Not a SwiftPM resource (SwiftPM refuses a resource named `Info.plist`); `APPKITWIN_INFO_PLIST` names it at launch. |
+| `Resources/Info.plist` | Upstream's Info.plist, unmodified: the app name, the Markdown UTI declaration (`UTImportedTypeDeclarations`, with the `md`, `markdown`, ... extensions), the document types and `CFBundleIconFile` = `AppIcon`. The whole folder is the target's SwiftPM resource (`.copy("Resources")`), where the port finds the Info.plist at launch (ADR-0045); `APPKITWIN_INFO_PLIST` still overrides it. |
+| `Resources/AppIcon.png`, `Resources/AppIcon.ico` | The icon (the port's: upstream's is an `.icns` made by `Tools/MakeIcon.swift`): the PNG for the windows and the Linux desktop entry, the ICO for the Windows file association's icon. |
 | `Resources/sample.md`, `Resources/Welcome.md` | Upstream's sample documents, for trying the viewer. |
 
 The target is declared in the root `Package.swift` (it depends on the `AppKit` and `SwiftUI`
@@ -47,16 +48,22 @@ so Swift 5 clients get Apple's leniency) is a follow-up in the gap table.
 
 ```bash
 swift build --product MDVault
-APPKITWIN_INFO_PLIST=Examples/MDVault/Resources/Info.plist .build/debug/MDVault Examples/MDVault/Resources/sample.md
+.build/debug/MDVault Examples/MDVault/Resources/sample.md
 ```
 
 On Windows (one job at a time, as CI does, see `docs/ci-windows-runner.md`):
 
 ```
 swift build -c debug -j 1 --product MDVault
-set APPKITWIN_INFO_PLIST=%CD%\Examples\MDVault\Resources\Info.plist
 .build\debug\MDVault.exe Examples\MDVault\Resources\sample.md
 ```
+
+The app bundle (ADR-0045): the windows show the icon; a second `MDVault other.md` while one
+runs opens the document in the running instance and exits; `MDVault --appkitcross-register`
+registers the Markdown and plain-text types for the current user (Explorer's Open With and
+Settings > Default apps on Windows, `~/.local/share/applications/com.aadesh.mdvault.desktop`
+on Linux) and `--appkitcross-unregister` removes them; File > Set MD Vault as Default for
+Markdown registers too, then sets the default on Linux or opens Settings on its page on Windows.
 
 Without `APPKITWIN_INFO_PLIST` the app still runs (the DocumentGroup knows its types), but
 it is named after its executable ("MDVault") and, on Windows and Linux, the Markdown type

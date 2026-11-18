@@ -535,7 +535,7 @@ public struct Text: View, _PrimitiveView, Equatable {
 
     public init(verbatim content: String) { runs = [Run(string: content)] }
     public init<S: StringProtocol>(_ content: S) { runs = [Run(string: String(content))] }
-    public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.key)] }
+    public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.resolved(tableName: tableName, bundle: bundle))] }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/init(_:)-1a4oh
     public init(_ attributed: AttributedString) { runs = Text._runs(of: attributed) }
     public init(_ date: Date, style: DateStyle) {
@@ -620,35 +620,46 @@ extension Text {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey
+/// The key is Apple's (`"%lld items"` for `"\(count) items"`); `key` is its text in the main
+/// bundle's `Localizable` table for the user's language, formatted with the interpolated
+/// values, or the text itself when there is no translation (ADR-0045).
 public struct LocalizedStringKey: ExpressibleByStringLiteral, ExpressibleByStringInterpolation, Equatable, Sendable {
-    let key: String
-    public init(_ value: String) { key = value }
-    public init(stringLiteral value: String) { key = value }
-    public init(stringInterpolation: StringInterpolation) { key = stringInterpolation.output }
+    let _raw: _LocalizationKey
+    /// The localized text (main bundle, default table).
+    var key: String { _raw.resolve(table: nil, bundle: nil, locale: nil) }
+    func resolved(tableName: String?, bundle: Bundle?) -> String { _raw.resolve(table: tableName, bundle: bundle, locale: nil) }
+    public init(_ value: String) { _raw = _LocalizationKey(value) }
+    public init(stringLiteral value: String) { _raw = _LocalizationKey(value) }
+    public init(stringInterpolation: StringInterpolation) { _raw = stringInterpolation._key }
 
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey/stringinterpolation
-    /// The key is built as the formatted string (there is no strings table to look up).
     public struct StringInterpolation: StringInterpolationProtocol, Sendable {
-        var output = ""
-        public init(literalCapacity: Int, interpolationCount: Int) { output.reserveCapacity(literalCapacity) }
-        public mutating func appendLiteral(_ literal: String) { output += literal }
-        public mutating func appendInterpolation(_ string: String) { output += string }
-        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) { output += subject.description }
-        public mutating func appendInterpolation<T>(_ value: T) { output += String(describing: value) }
+        var _key = _LocalizationKey()
+        public init(literalCapacity: Int, interpolationCount: Int) {}
+        public mutating func appendLiteral(_ literal: String) { _key.appendLiteral(literal) }
+        public mutating func appendInterpolation(_ string: String) { _key.append(string, specifier: "%@") }
+        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) {
+            if let arg = subject as? CVarArg, !(subject is String) { _key.append(arg, specifier: _LocalizationKey.specifier(for: subject)) }
+            else { _key.append(subject.description, specifier: "%@") }
+        }
+        public mutating func appendInterpolation<T>(_ value: T) {
+            if let arg = value as? CVarArg, !(value is String) { _key.append(arg, specifier: _LocalizationKey.specifier(for: value)) }
+            else { _key.append(String(describing: value), specifier: "%@") }
+        }
         /// `"\(value, specifier: "%.2f")"`: a printf-style format for the value.
-        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { output += String(format: specifier, value._arg) }
+        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { _key.append(value._arg, specifier: specifier) }
         public mutating func appendInterpolation<Subject: ReferenceConvertible>(_ subject: Subject, formatter: Formatter? = nil) {
             let any: Any = subject
-            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += String(describing: subject) }
+            _key.append((formatter?.string(for: any)) ?? String(describing: subject), specifier: "%@")
         }
         public mutating func appendInterpolation<Subject: NSObject>(_ subject: Subject, formatter: Formatter? = nil) {
             let any: Any = subject
-            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += subject.description }
+            _key.append((formatter?.string(for: any)) ?? subject.description, specifier: "%@")
         }
-        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { output += format.format(input) }
-        public mutating func appendInterpolation(_ text: Text) { output += text._string }
+        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { _key.append(format.format(input), specifier: "%@") }
+        public mutating func appendInterpolation(_ text: Text) { _key.append(text._string, specifier: "%@") }
         public mutating func appendInterpolation(_ image: Image) {}
-        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { output += Text(date, style: style)._string }
+        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { _key.append(Text(date, style: style)._string, specifier: "%@") }
     }
 }
 
