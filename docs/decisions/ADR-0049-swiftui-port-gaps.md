@@ -80,5 +80,6 @@ which Swift never reports against Apple's AppKit.
 - The package has its first macro target. It builds on every toolchain the port supports,
   adds no dependency, and must follow the compiler's plugin protocol; it answers with the
   protocol version the compiler offers (up to 7) and only the messages it needs.
+- The compiler sends each expansion's leading trivia (comments, line ends) with its source; the plugin skips it with `Character.isNewline`, since a CRLF line end (Windows checkouts) is one `Character`. Windows CI caught this.
 - `SwiftUIPortGapsTests` (10) covers each item, including the masked render on the host
   backend. On Windows the visible check is a SecureField showing bullets while typing.

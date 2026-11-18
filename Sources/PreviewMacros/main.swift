@@ -52,7 +52,9 @@ func withoutLeadingTrivia(_ text: String) -> String {
     while true {
         rest = rest.drop { $0.isWhitespace }
         if rest.hasPrefix("//") {
-            rest = rest.drop { $0 != "\n" && $0 != "\r" }
+            // `isNewline`, not a comparison with "\n": a CRLF line end (Windows checkouts) is
+            // one Character, "\r\n", equal to neither "\r" nor "\n".
+            rest = rest.drop { !$0.isNewline }
         } else if rest.hasPrefix("/*"), let end = rest.range(of: "*/") {
             rest = rest[end.upperBound...]
         } else {
