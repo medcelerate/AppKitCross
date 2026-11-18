@@ -173,7 +173,7 @@ app's. Read build output through `grep "error:"`, or keep only lines under the a
 Build **one job at a time**:
 
 ```bash
-swift build -j 1
+swift build -j 1       # -j 1 with Swift 6.2; 6.4.1 builds without it
 swift test -j 1        # with APPKITWIN_HOST_BACKEND=1 set
 ```
 
@@ -407,15 +407,34 @@ Open an issue at <https://github.com/medcelerate/AppKitCross/issues> with the
 **App layout, resources and identity**: *pending (the app bundle and identity work).* Today:
 give the app an Info.plist through `APPKITWIN_INFO_PLIST` or beside the executable (section 6).
 
-<!-- PLACEHOLDER(release-bundle-tool): `swift package bundle`, the app folder and zip per platform, release flags, the release CI to copy. -->
-**Packaging and release builds**: *pending (the `swift package bundle` plugin and release CI
-work).* Today: `swift build -c release` (`-j 1` on Windows) and ship `.build/release/<App>`;
-on Windows the Swift runtime DLLs from the toolchain go beside the executable.
+<!-- FILLED(release-bundle-tool) from PR 87 / ADR-0046: true once PR 87 is on main. -->
+**Release builds and the app folder** (ADR-0046, [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#shipping-an-app)):
 
-<!-- PLACEHOLDER(ime-text-input): input methods on Windows and Linux, what custom text views need, how to test composition. -->
-**Input methods (IME)**: *pending (the IME work).* Today: Windows composition reaches
-`NSTextView`, `NSTextField` and SwiftUI text fields (`APPKITWIN_IME_LAYOUT=00000411` tests
-Japanese without changing system settings); Linux has no IME yet.
+```bash
+swift build -c release                                    # Windows with Swift 6.2: add -j 1
+swift package --allow-writing-to-package-directory bundle --product MyApp -c release --zip
+```
+
+The `bundle` command plugin (from AppKitCross, nothing to declare) writes `.build/bundle/MyApp/`,
+a folder that runs on a machine without Swift, and with `--zip`
+`MyApp-<version>-<windows|linux>-<arch>.zip`: the executable, the shared libraries the target
+machine lacks (Swift runtime and VC++ runtime on Windows; Swift runtime, Cairo, Pango, GLib on
+Linux, which needs `patchelf`), the SwiftPM resource bundles, and `Info.plist`, `Resources/`
+and icons from the app's directory (`--info-plist`, `--resources`, `--icon` override them).
+`--appimage` needs `appimagetool`. A `WARNING: not found` line (exit status 2) means the folder
+will not start elsewhere. Build Linux folders on the oldest distribution you support (glibc
+comes from the system). Crash reports go to `%LOCALAPPDATA%\<bundle id>\Crashes` or
+`~/.local/share/<bundle id>/Crashes`; `APPKITWIN_CRASH_TEST=1` crashes a second after launch
+to check them.
+
+<!-- FILLED(ime-text-input) from PR 58 / ADR-0047: true once PR 58 is on main. -->
+**Input methods** (ADR-0047): CJK input works in `NSTextView`, `NSTextField` and the SwiftUI
+text fields built on them, through TSF (IMM32 as fallback) on Windows, `text-input-v3` on
+Wayland and XIM (ibus, fcitx5) on X11. A custom text view needs what it needs on macOS:
+`NSTextInputClient`, including `firstRect(forCharacterRange:actualRange:)` so the candidate
+window opens under the text. To test, `APPKITWIN_TRACE_TEXTINPUT=1` logs every composition step,
+`APPKITWIN_IME_LAYOUT=00000411` opens Japanese on Windows without a system change, and
+`tools/linux/ime-e2e.sh` types pinyin through ibus in the Linux image.
 
 **macOS**: ship as before, built against Apple's frameworks (no `APPKITCROSS`).
 
