@@ -45,7 +45,31 @@ nowhere (the manifest product gating, the corelibs XCTest main-actor crash).
 
 ## Validation
 
-VALIDATION_RESULTS
+The app: [tuanductran/cat-age-calculator](https://github.com/tuanductran/cat-age-calculator)
+at `bd960ab` (MIT, 1,506 lines of Swift, a SwiftPM package declaring macOS 13, importing
+AppKit, Combine and SwiftUI, 19 XCTest tests; a URLSession client for an AI assistant).
+Cloned into a scratch directory, not vendored.
+
+- **Run 1** (guide at the first draft): built and passed its 19 tests plus four
+  screen-render tests the agent added, on the macOS host build, in the Linux container and on
+  the unchanged Apple build. No `AppKitCross:` trap fired. It reported ten problems; the ones
+  that changed the guide: a path dependency is named after its directory, not `AppKitCross`
+  (hard stop); `#if os(macOS)` cannot hide a gap from the host build, so the manifest now
+  defines `APPKITCROSS`; eight common SwiftUI APIs the port lacks were not listed; `@MainActor`
+  test classes (not only methods) crash corelibs discovery; `FoundationNetworking`; keep the
+  app's own deployment target for the Apple build; `NSSecureTextField` draws text in clear.
+  Checking the fixes found one more: a port build into the default `.build` leaves the port's
+  modules where a later Apple build picks them up.
+- **Run 2** (a different agent, fresh copy, the revised guide): built and passed the 19 tests
+  on the macOS host build and in the Linux container in about six minutes, and every compile
+  error was on the guide's list. Its points: ready-made shims for all listed gaps (now
+  `docs/compatibility/swiftui-shims.md`, its own file), the exact compiler messages, pre-flight
+  greps so the Linux-only failures do not each cost a container round trip, the warning
+  volume, the tools version and single-target apps. All are in the guide.
+
+Port gaps both runs found, for the port's list: the eight SwiftUI names in
+`swiftui-shims.md`, `SecureField`/`NSSecureTextField` masking, and `@discardableResult` on
+`NSPasteboard.clearContents()` and `setString(_:forType:)`.
 
 ## Consequences
 

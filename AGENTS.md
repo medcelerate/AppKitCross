@@ -43,7 +43,7 @@ Three kinds of "missing", and how each shows up:
 
 [docs/API-COVERAGE.md](docs/API-COVERAGE.md) lists every AppKit type with its status, the
 number of members still stubbed and the Apple-only list. A clean build does **not** mean
-every call works; grep before you rely on a rarely used member (section 5).
+every call works; grep before you rely on a rarely used member (section 5, step 7).
 
 ## 2. Add the dependency
 
@@ -107,7 +107,9 @@ let package = Package(
 - **`.macOS(.v14)` is the floor.** The port's modules are built for macOS 14, and the
   compiler refuses to import them into a target with a lower deployment target
   (`compiling for macOS 10.15, but module 'SwiftUI' has a minimum deployment target of macOS 14`).
-  Raise it for port builds only, as above; for third-party dependencies you cannot edit,
+  Raise it for port builds only, as above. The `swift-tools-version:5.9` line is what was
+  tested; an app with one executable target can put `appDeps` and the settings on that target
+  and `@testable import` it from its tests, no split needed; for third-party dependencies you cannot edit,
   see section 3.
 - There are no release tags yet: depend on `branch: "main"` (or pin a `revision:`).
 - `UserNotifications` and `ServiceManagement` also resolve through `AppKit` off macOS, as on
@@ -162,8 +164,9 @@ Always give the container its own `--scratch-path`: sharing `.build` with the ma
 corrupts both. For a local checkout, mount it under its own name
 (`-v /path/to/AppKitCross:/AppKitCross:ro -e APPKITCROSS_PATH=/AppKitCross`). Add
 `.build-port/` and `.build-linux/` to the app's `.gitignore`. The port's own sources print
-Swift 6 isolation warnings while they compile (`[#ConformanceIsolation]`); they are not the
-app's.
+hundreds of Swift 6 concurrency warnings and notes while they compile; they are not the
+app's. Read build output through `grep "error:"`, or keep only lines under the app's own
+`Sources/` and `Tests/`.
 
 **Windows 11**: the swift.org toolchain, Visual Studio Build Tools with the Windows 10/11 SDK
 (CI uses the `windows-2022` image; VS 2026's STL needs a newer Clang than Swift 6.2's).
@@ -259,65 +262,52 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 
 Work in this order; each step's failures hide the next step's.
 
-1. **Manifest.** Add the dependency as in section 2, raise `platforms` to `.macOS(.v14)`,
+1. **Pre-flight greps** (each saves a Linux round trip; the macOS host build cannot see
+   them): `grep -rn "@MainActor" Tests/` (remove it from `XCTestCase` classes and test
+   methods, section 4); `grep -rln "URLSession\|URLRequest" Sources/` (add the
+   `FoundationNetworking` import, step 10); `grep -rn "#Preview\|SecureField\|onReceive\|onDelete" Sources/`
+   (known gaps, step 4).
+2. **Manifest.** Add the dependency as in section 2, raise `platforms` to `.macOS(.v14)`,
    split the views into a library target if you want to test them, and keep one scratch path
    per platform. If the upstream package declares Swift tools 6.0 but its code was written for
    Swift 5, set `swiftSettings: [.swiftLanguageMode(.v5)]` on its targets.
-2. **Build on the macOS host first** (`APPKITCROSS=1 swift build --scratch-path .build-port`).
+3. **Build on the macOS host first** (`APPKITCROSS=1 swift build --scratch-path .build-port`).
    It is the fastest loop and catches most API gaps; it cannot catch Linux/Windows-only
    issues such as corelibs Foundation differences (`ObservableObject` was missing in a file
    that imported only Foundation and AppKit until the port's AppKit re-exported Combine).
-3. **Fix what breaks first.** In the two real apps vendored here these were, in order:
+4. **Fix what breaks first.** In the two real apps vendored here these were, in order:
    - Objective-C: `@objc` on a delegate method, `#selector`, `NSObject.perform`. Wrap the
      attribute in `#if canImport(ObjectiveC)` (`Examples/DailyTodo/.../ReminderScheduler.swift`);
      for target/action use `Selector(("name:"))`.
    - Actor isolation (section 2): add `@MainActor` to coordinators and helpers that touch AppKit.
-   - Frameworks the port lacks (WebKit, MapKit, StoreKit, Sparkle, ...): see step 5.
+   - Frameworks the port lacks (WebKit, MapKit, StoreKit, Sparkle, ...): see step 6.
    - SwiftUI API the port lacks: expect several in any app. Known missing (2026-11-18):
      `#Preview` (wrap previews in `#if !APPKITCROSS`), `SecureField`, `onReceive`,
      `ForEach.onDelete`, `remove(atOffsets:)`, `lineLimit(_: ClosedRange)`,
      `TextField(_:text:axis:)`, and `Section { } header: { }` without a footer (reported as
      the misleading `generic parameter 'Footer' could not be inferred`). Check
      [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) for what real
-     apps hit, then shim (step 5) and file a gap (section 7).
+     apps hit, then shim (step 6) and file a gap (section 7).
    - Corelibs Foundation strictness: `NSLock.lock()` is unavailable in `async` functions
      (take it in a synchronous helper); `UserDefaults.didChangeNotification` is not posted for
      a set (the port's `@AppStorage` handles it; your own observers will not fire).
-4. **Run the tests** with `APPKITWIN_HOST_BACKEND=1` on Linux (container) and Windows, then
+5. **Run the tests** with `APPKITWIN_HOST_BACKEND=1` on Linux (container) and Windows, then
    run the app (Xvfb or a real desktop). Read every trap message (below).
-5. **Shim what is missing** without touching upstream logic: one file in the app module
+6. **Shim what is missing** without touching upstream logic: one file in the app module
    (for example `PortShims/SwiftUIPortShims.swift`) under `#if APPKITCROSS`, declaring the
    few names the app uses with Apple's exact signatures and doing the closest honest thing,
    or nothing while saying so on stderr. A missing framework (WebKit, StoreKit, ...) is
    gated with `#if canImport(X)` instead; a missing member of the port's own SwiftUI or
    AppKit cannot be, since the module imports fine.
 
-   ```swift
-   #if APPKITCROSS
-   import Combine
-   import SwiftUI
-
-   extension View {   // Apple's signature; the port has no onReceive yet
-       func onReceive<P: Publisher>(_ publisher: P, perform action: @escaping (P.Output) -> Void) -> some View
-           where P.Failure == Never { modifier(ReceiveShim(publisher: publisher, action: action)) }
-   }
-   private struct ReceiveShim<P: Publisher>: ViewModifier where P.Failure == Never {
-       let publisher: P
-       let action: (P.Output) -> Void
-       @State private var token: AnyCancellable?
-       func body(content: Content) -> some View {
-           content.onAppear { token = publisher.sink(receiveValue: action) }
-                  .onDisappear { token = nil }
-       }
-   }
-   #endif
-   ```
+   [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md) has a ready-made
+   file covering every gap listed in step 4, each with the compiler messages it answers.
 
    Keep the names Apple's, so deleting the file is the whole migration; when the port adds
    a name, the shim turns into an ambiguity error, which is the cue to delete that part.
    A call that cannot work on the port goes behind `#if !APPKITCROSS` with an `#else` that
    tells the user the feature is unavailable. Never edit the AppKitCross checkout.
-6. **Read a trap and choose.** A trap prints `<Module>/<File>.swift:<line>: Fatal error:
+7. **Read a trap and choose.** A trap prints `<Module>/<File>.swift:<line>: Fatal error:
    AppKitCross: ...` with the member name (`#function`, so without the type; the file names
    the type). Find it in the source and in `docs/API-COVERAGE.md`:
 
@@ -335,7 +325,7 @@ Work in this order; each step's failures hide the next step's.
 
    Never patch the port's sources from the app repository, and never paper over a trap with a
    dummy value in a shim that claims to be the real API.
-7. **Platform conventions the port switches for you** (do not "fix" these in the app):
+8. **Platform conventions the port switches for you** (do not "fix" these in the app):
    Command shortcuts are **Ctrl** on Windows and Linux (`keyboardShortcut("s")` answers
    Ctrl+S, and menus show "Ctrl+S"); Alt is `.option` and the Windows/Super key is
    `.control`. The main menu becomes the window's menu bar on
@@ -345,7 +335,7 @@ Work in this order; each step's failures hide the next step's.
    it has a status item or its delegate answers
    `applicationShouldTerminateAfterLastWindowClosed`. Window chrome, caption buttons and
    Wayland client-side decorations are the port's.
-8. **Performance rules** the ports of real apps had to learn (each one spun a core):
+9. **Performance rules** the ports of real apps had to learn (each one spun a core):
    - Never invalidate from `draw(_:)`: no `needsDisplay = true`, no control or cell setter
      (they invalidate), no layout changes. A draw that schedules the next draw is a busy loop
      on Windows, where each paint can also re-run SwiftUI bodies.
@@ -358,7 +348,7 @@ Work in this order; each step's failures hide the next step's.
      `APPKITWIN_TRACE=1` shows what keeps redrawing (`setNeedsDisplay <View>`,
      `setNeedsUpdate <ViewType>`); in a host-backend test,
      `NSView._invalidationCount` (port-only) must not grow across idle frames.
-9. **Check the details corelibs changes** (they fail only off macOS, so build in the Linux
+10. **Check the details corelibs changes** (they fail only off macOS, so build in the Linux
    container early): `URLSession`, `URLRequest` and friends need
    `#if canImport(FoundationNetworking)` / `import FoundationNetworking` / `#endif`; file paths under `FileManager`'s application
    support directory (`%LOCALAPPDATA%`/`%APPDATA%` on Windows, `~/.local/share` on Linux),
