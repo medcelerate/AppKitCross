@@ -178,3 +178,171 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x800x24" env APPKITWIN_LINUX_BACKEND=x11 timeout 8 .build/debug/HelloWindow --metal --metal-log --metal-static > metal.log 2>&1 || true
           grep -E "^device|Vulkan|pipeline failed|^frame" metal.log | head -5
           grep -q "presentation=swap chain" metal.log
+
+  # Shipping (ADR-0046): the release configuration, a dependent package built with a plain
+  # `swift build`, the app folders `swift package bundle` lays out, and the crash report path.
+  # Separate jobs so the release builds run beside the debug ones instead of after them.
+  macos-release:
+    name: macOS release build, tests and dependent package
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode 26
+        run: |
+          x=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$x" ]; then sudo xcode-select -s "$x"; fi
+      - run: swift build -c release
+      - name: Tests in release
+        run: swift test -c release
+      - name: A dependent package (Examples/Dependent) with a plain swift build
+        working-directory: Examples/Dependent
+        run: swift build
+      - name: Bundle MDVault (the host layout check)
+        run: swift package --allow-writing-to-package-directory bundle --product MDVault -c release --zip && ls -R .build/bundle | head -20
+
+  linux-release:
+    name: Linux release build, tests, bundles and crash report
+    runs-on: ubuntu-24.04
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packages (Azure Ubuntu mirror, with retries)
+        run: tools/ci/apt-install.sh pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libpipewire-0.3-dev libasound2-dev libhunspell-1.7-0 hunspell-en-us dbus patchelf zip
+      - run: swift build -c release
+      - name: Tests in release on the host backend
+        run: APPKITWIN_HOST_BACKEND=1 swift test -c release
+      - name: A dependent package (Examples/Dependent) with a plain swift build
+        working-directory: Examples/Dependent
+        run: swift build
+      - name: Bundle the dependent package through the plugin it gets from AppKitCross
+        working-directory: Examples/Dependent
+        run: swift package --allow-writing-to-package-directory bundle --product Dependent -c release --zip
+      - name: Bundle MDVault and DailyTodo
+        run: |
+          swift package --allow-writing-to-package-directory bundle --product MDVault -c release --zip
+          swift package --allow-writing-to-package-directory bundle --product DailyTodo -c release --zip
+          ls -la .build/bundle .build/bundle/MDVault
+      - name: The bundles run with the Swift toolchain moved away (and crash into a report)
+        shell: bash
+        run: |
+          set -x
+          mv /usr/lib/swift/linux /usr/lib/swift/linux.hidden
+          trap 'mv /usr/lib/swift/linux.hidden /usr/lib/swift/linux' EXIT
+          ! ldd Examples/Dependent/.build/bundle/Dependent/Dependent | grep "not found"
+          ! ldd .build/bundle/MDVault/MDVault | grep "not found"
+          # MDVault keeps running on the headless backend: still alive after 5 s means it launched.
+          status=0; APPKITWIN_HOST_BACKEND=1 timeout 5 .build/bundle/MDVault/MDVault || status=$?
+          test "$status" = 124
+          status=0; APPKITWIN_HOST_BACKEND=1 timeout 5 .build/bundle/DailyTodo/DailyTodo || status=$?
+          test "$status" = 124
+          # APPKITWIN_CRASH_TEST: a segfault a second after launch leaves a report under
+          # $XDG_DATA_HOME/<bundle id>/Crashes.
+          export XDG_DATA_HOME=$PWD/xdg
+          status=0; APPKITWIN_HOST_BACKEND=1 APPKITWIN_CRASH_TEST=1 timeout 30 Examples/Dependent/.build/bundle/Dependent/Dependent || status=$?
+          test "$status" = 139
+          report=$(ls xdg/Dependent/Crashes/*.txt | head -1)
+          cat "$report" | head -40
+          grep -q "SIGSEGV" "$report"
+          grep -q "Backtrace" "$report"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-linux
+          path: |
+            .build/bundle/*.zip
+            Examples/Dependent/.build/bundle/*.zip
+          retention-days: 14
+
+  linux-bundle-clean:
+    name: Linux bundles on Ubuntu without Swift or Cairo
+    needs: linux-release
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bundles-linux
+          path: bundles
+      # Only what LibraryPolicy leaves to the system: glibc and libstdc++, X11/xcb, Wayland,
+      # xkbcommon, fonts, D-Bus, and PipeWire's client library (linked through its pkg-config
+      # entry although the audio shim dlopens it). No Swift, no Cairo, no Pango, no GLib.
+      - name: Install the desktop base libraries (Azure Ubuntu mirror, with retries)
+        run: tools/ci/apt-install.sh unzip libx11-6 libxcb1 libwayland-client0 libwayland-cursor0 libxkbcommon0 libfontconfig1 libfreetype6 libharfbuzz0b libfribidi0 libdbus-1-3 libasound2t64 libexpat1 zlib1g libgmp10 libcom-err2 libp11-kit0 libpipewire-0.3-0t64
+      - name: Unzip and run
+        shell: bash
+        run: |
+          set -x
+          cd bundles
+          find . -name '*.zip' -exec unzip -q -o {} \;
+          ls
+          ! ldd MDVault/MDVault | grep "not found"
+          status=0; APPKITWIN_HOST_BACKEND=1 timeout 5 ./MDVault/MDVault || status=$?
+          test "$status" = 124
+          status=0; APPKITWIN_HOST_BACKEND=1 timeout 5 ./DailyTodo/DailyTodo || status=$?
+          test "$status" = 124
+          export XDG_DATA_HOME=$PWD/xdg
+          status=0; APPKITWIN_HOST_BACKEND=1 APPKITWIN_CRASH_TEST=trap timeout 30 ./Dependent/Dependent || status=$?
+          test "$status" != 0 && test "$status" != 124
+          grep -l "Backtrace" xdg/Dependent/Crashes/*.txt
+
+  windows-release:
+    name: Windows release build, tests, bundles and crash report
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-6.2-release
+          tag: 6.2-RELEASE
+      # -j 1 everywhere, as in the debug job (docs/ci-windows-runner.md).
+      - name: Build (release)
+        shell: bash
+        run: swift build -c release -j 1
+      - name: Tests in release on the host backend
+        shell: bash
+        run: swift test -c release -j 1
+        env:
+          APPKITWIN_HOST_BACKEND: "1"
+      - name: A dependent package (Examples/Dependent) with a plain swift build
+        shell: bash
+        working-directory: Examples/Dependent
+        run: swift build -j 1
+      - name: Bundle the dependent package through the plugin it gets from AppKitCross
+        shell: bash
+        working-directory: Examples/Dependent
+        run: swift package -j 1 --allow-writing-to-package-directory bundle --product Dependent -c release --zip
+      - name: Bundle MDVault and DailyTodo
+        shell: bash
+        run: |
+          swift package -j 1 --allow-writing-to-package-directory bundle --product MDVault -c release --zip
+          swift package -j 1 --allow-writing-to-package-directory bundle --product DailyTodo -c release --zip
+          ls -la .build/bundle .build/bundle/MDVault
+      - name: The bundles run without the Swift runtime on PATH (and crash into a report)
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          foreach ($app in @(".build\bundle\MDVault\MDVault.exe", ".build\bundle\DailyTodo\DailyTodo.exe")) {
+            $p = Start-Process -FilePath $app -PassThru
+            Start-Sleep -Seconds 8
+            if ($p.HasExited) { Write-Error "$app exited with $($p.ExitCode) (a missing DLL is 0xC0000135 = -1073741515)"; exit 1 }
+            Stop-Process -Id $p.Id -Force
+            Write-Host "$app ran for 8 s"
+          }
+          $env:LOCALAPPDATA = "$PWD\localappdata"
+          $env:APPKITWIN_CRASH_TEST = "1"
+          $p = Start-Process -FilePath "Examples\Dependent\.build\bundle\Dependent\Dependent.exe" -PassThru
+          if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id -Force; Write-Error "the crash test did not end"; exit 1 }
+          Write-Host "exit code $($p.ExitCode)"
+          Get-ChildItem -Recurse localappdata | Format-Table FullName, Length
+          $txt = Get-ChildItem localappdata\Dependent\Crashes\*.txt | Select-Object -First 1
+          $dmp = Get-ChildItem localappdata\Dependent\Crashes\*.dmp | Select-Object -First 1
+          Get-Content $txt.FullName -TotalCount 40
+          if (-not $dmp -or $dmp.Length -lt 1000) { Write-Error "no minidump"; exit 1 }
+          if (-not (Select-String -Path $txt.FullName -Pattern "EXCEPTION_ACCESS_VIOLATION" -Quiet)) { Write-Error "no exception in the report"; exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles-windows
+          path: |
+            .build/bundle/*.zip
+            Examples/Dependent/.build/bundle/*.zip
+          retention-days: 14

@@ -39,6 +39,8 @@ import CoreText
 
     @MainActor public override init() {
         super.init()
+        // The crash handler first (ADR-0046): a crash anywhere after this leaves a report.
+        PlatformCrashReporting.installAtLaunch()
         _CoreAnimationHost.installIfNeeded()
         if NSApplication._shared == nil { NSApplication._shared = self }
         #if os(Windows) || os(Linux)
@@ -294,6 +296,7 @@ import CoreText
             }
         }
         delegate?.applicationDidFinishLaunching(post(NSApplication.didFinishLaunchingNotification))
+        PlatformCrashReporting.scheduleCrashTestIfRequested()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/helpmenu
     @MainActor open var helpMenu: NSMenu? {
