@@ -1,6 +1,6 @@
 // NSTextInputContext (hand-written; seeded from the generated stub, see tools/apigen)
 //
-// The input method side of a text input client (ADR-0045). On macOS the context talks to
+// The input method side of a text input client (ADR-0047). On macOS the context talks to
 // the Text Input Sources; here the window backend runs the platform's input method (Text
 // Services Framework or IMM32 on Windows, text-input-v3 on Wayland, XIM on X11) and every
 // one of them edits the client through `_TextInputSession`, so the composition reaches the
@@ -102,16 +102,16 @@ open class NSTextInputContext: NSObject {
     open func invalidateCharacterCoordinates() { _notifyPlatform(.layoutChanged) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextinputcontext/keyboardinputsources
     /// Input sources are the platform's keyboard layouts and input methods; listing them by
-    /// macOS input source identifiers is not mapped (ADR-0045).
-    open var keyboardInputSources: [NSTextInputSourceIdentifier]? { unimplemented("NSTextInputContext.keyboardInputSources — platform input sources are not mapped to macOS identifiers (ADR-0045)") }
+    /// macOS input source identifiers is not mapped (ADR-0047).
+    open var keyboardInputSources: [NSTextInputSourceIdentifier]? { unimplemented("NSTextInputContext.keyboardInputSources — platform input sources are not mapped to macOS identifiers (ADR-0047)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextinputcontext/keyboardselectiondidchangenotification
     static public var keyboardSelectionDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextInputContextKeyboardSelectionDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextinputcontext/localizedname(forinputsource:)
-    public class func localizedName(forInputSource inputSourceIdentifier: NSTextInputSourceIdentifier) -> String? { unimplemented("NSTextInputContext.localizedName(forInputSource:) — platform input sources are not mapped to macOS identifiers (ADR-0045)") }
+    public class func localizedName(forInputSource inputSourceIdentifier: NSTextInputSourceIdentifier) -> String? { unimplemented("NSTextInputContext.localizedName(forInputSource:) — platform input sources are not mapped to macOS identifiers (ADR-0047)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextinputcontext/selectedkeyboardinputsource
     open var selectedKeyboardInputSource: NSTextInputSourceIdentifier? {
-        get { unimplemented("NSTextInputContext.selectedKeyboardInputSource — platform input sources are not mapped to macOS identifiers (ADR-0045)") }
-        set { unimplemented("NSTextInputContext.selectedKeyboardInputSource — platform input sources are not mapped to macOS identifiers (ADR-0045)") }
+        get { unimplemented("NSTextInputContext.selectedKeyboardInputSource — platform input sources are not mapped to macOS identifiers (ADR-0047)") }
+        set { unimplemented("NSTextInputContext.selectedKeyboardInputSource — platform input sources are not mapped to macOS identifiers (ADR-0047)") }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextinputcontext/textinputclientdidendscrollingorzooming()
     @available(macOS 14.0, *)

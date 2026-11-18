@@ -56,7 +56,7 @@ import CoreText
     internal var _markedRange: NSRange? = nil
     internal var _markedSelection = NSRange(location: 0, length: 0)
     /// The composition's clauses relative to `_markedRange` (thin, or thick for the clause
-    /// being converted), from the underline styles of the marked string (ADR-0045).
+    /// being converted), from the underline styles of the marked string (ADR-0047).
     internal var _markedClauses: [_TextInputClause] = []
 
     /// The marked-text underlines inside `range` (absolute UTF-16), as rectangles from

@@ -160,7 +160,7 @@ public protocol PlatformWindow: AnyObject {
     func zoom()
     var isMiniaturized: Bool { get }
     var isZoomed: Bool { get }
-    /// The focused text input client changed (ADR-0045). Backends with an input method
+    /// The focused text input client changed (ADR-0047). Backends with an input method
     /// follow it; the default ignores it.
     func textInputChanged(_ change: PlatformTextInputChange)
     /// Destroys the native window. The object is unusable afterwards.
@@ -312,7 +312,7 @@ extension PlatformWindow {
 }
 
 /// What the core tells a window's input method about the focused text input client
-/// (`NSTextInputContext`, ADR-0045).
+/// (`NSTextInputContext`, ADR-0047).
 public enum PlatformTextInputChange: Equatable, Sendable {
     /// The client got the keyboard focus (`activate()`): compose into it.
     case activated
@@ -428,7 +428,7 @@ public struct PlatformTextInput {
     /// The caret or composition rectangle in window content coordinates (points, bottom-left).
     public var markedRect: @MainActor () -> NSRect?
     /// The client behind these closures, for the input method protocols that read and edit
-    /// the text itself (TSF's text store, Wayland's surrounding text; ADR-0045).
+    /// the text itself (TSF's text store, Wayland's surrounding text; ADR-0047).
     public var session: _TextInputSession?
     public init(hasMarkedText: @escaping @MainActor () -> Bool, setMarkedText: @escaping @MainActor (String, NSRange) -> Void, unmarkText: @escaping @MainActor () -> Void, insertText: @escaping @MainActor (String) -> Void, markedRect: @escaping @MainActor () -> NSRect?) {
         self.hasMarkedText = hasMarkedText; self.setMarkedText = setMarkedText; self.unmarkText = unmarkText; self.insertText = insertText; self.markedRect = markedRect

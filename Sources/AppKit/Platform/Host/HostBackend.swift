@@ -455,7 +455,7 @@ final class HostWindow: PlatformWindow {
     /// Test hook: the input-method target, as a backend would fetch it.
     func textInput() -> PlatformTextInput? { owner?.platformWindowTextInput() }
 
-    /// Test hook: what the core told this window's input method (ADR-0045), in order.
+    /// Test hook: what the core told this window's input method (ADR-0047), in order.
     var textInputChanges: [PlatformTextInputChange] = []
     func textInputChanged(_ change: PlatformTextInputChange) { textInputChanges.append(change) }
 

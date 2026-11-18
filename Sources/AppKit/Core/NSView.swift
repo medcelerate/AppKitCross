@@ -1308,7 +1308,7 @@ import CoreText
     @MainActor open var inLiveResize: Bool { _window?.inLiveResize ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/inputcontext
     /// Nil for a view that is not an `NSTextInputClient`; a client view makes its context on
-    /// first use and keeps it (ADR-0045).
+    /// first use and keeps it (ADR-0047).
     @MainActor open var inputContext: NSTextInputContext? {
         guard let client = self as? NSTextInputClient else { return nil }
         if let c = _inputContextStorage { return c }

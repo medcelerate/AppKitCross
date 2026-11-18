@@ -1,4 +1,4 @@
-// The platform-neutral half of input method support (ADR-0045).
+// The platform-neutral half of input method support (ADR-0047).
 //
 // Each window backend speaks its platform's input method protocol: the Text Services
 // Framework (a text store the input method edits, Windows), IMM32 (composition strings,

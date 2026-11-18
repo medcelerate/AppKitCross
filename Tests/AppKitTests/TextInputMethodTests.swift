@@ -1,4 +1,4 @@
-// Input method text input (ADR-0045): scripted compositions through the platform-neutral
+// Input method text input (ADR-0047): scripted compositions through the platform-neutral
 // session every backend drives (TSF text store edits, text-input-v3 batches, XIM preedit),
 // NSTextInputContext activation, and the marked-text clauses NSTextView draws.
 

@@ -716,7 +716,7 @@ import CoreText
     @MainActor public var effectiveAppearance: NSAppearance { _appearance ?? NSApplication.shared.effectiveAppearance }
 
     /// Input methods talk to the first responder when it accepts text input.
-    /// The key window's first responder owns the input method (ADR-0045): its context is
+    /// The key window's first responder owns the input method (ADR-0047): its context is
     /// activated, and the previous client of this window loses it.
     internal func _updateTextInputContext() {
         guard _isKey else { return }
@@ -739,7 +739,7 @@ import CoreText
                 if let tv = view as? NSTextView { return tv._inputMethodRect }
                 return _TextInputSession(client: client, window: self).caretRectInWindow
             })
-        // TSF, text-input-v3 and XIM read and edit the client itself (ADR-0045).
+        // TSF, text-input-v3 and XIM read and edit the client itself (ADR-0047).
         input.session = _TextInputSession(client: client, window: self)
         return input
     }
