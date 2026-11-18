@@ -88,7 +88,20 @@ default, so a delegate that implements neither gets Apple's result instead of a 
 
 **Windows.** The app registers an AppUserModelID (its bundle identifier, otherwise
 `AppKitCross.<exe>`) under `HKCU\Software\Classes\AppUserModelId` with its display name. That ID
-becomes the process's AUMID unless the process already has one. Toasts use the `ToastGeneric`
+becomes the process's AUMID unless the process already has one. The registry entry alone is not
+enough: on Windows 11 (build 26200, checked on the PC) every toast of a registry-only ID is
+accepted, listed in the history and never displayed, and neither `IconUri` nor a
+`CustomActivator` value changes that. The shell displays them once a Start-menu shortcut carries
+the ID. So the notifier, when it is first created, makes sure
+`<Start menu>\Programs\<display name>.lnk` starts the running executable with
+`System.AppUserModel.ID` set to the ID. It adds the ID to an existing shortcut to the same
+executable, and it uses `<ID>.lnk` when another program's shortcut has the display name. The
+shortcut stays, like an installed app's Start-menu entry; an installer that makes its own with
+the ID makes this a no-op. The shell takes some seconds to pick up a new shortcut and drops
+the toasts shown before then. So for 30 seconds after the process made the shortcut, until
+Windows records the app under `Notifications\Settings\<ID>` (which it does with the first
+toast it displays), the shim shows each new toast again every 3 seconds while it is still the
+toast under its tag. Toasts use the `ToastGeneric`
 template: up to three text lines (title, subtitle, body), one inline image attachment, up to
 five buttons, and a text box per text-input action. Each toast gets a tag (the identifier,
 hashed when longer than 64 characters) and one group for the app. Removal uses

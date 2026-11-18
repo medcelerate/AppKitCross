@@ -24,8 +24,10 @@ typedef void (*cwas_toast_activated_fn)(void *context, const char *tag, const ch
 typedef void (*cwas_toast_dismissed_fn)(void *context, const char *tag, int reason, int32_t error);
 
 /// Registers the AppUserModelID for toasts (HKCU\Software\Classes\AppUserModelId\<aumid>
-/// with its display name and, when given, an icon file), makes it the process's ID unless the
-/// process already has one, and creates the toast notifier. Returns an HRESULT.
+/// with its display name and, when given, an icon file), makes sure a Start-menu shortcut to
+/// this executable carries that ID (Windows displays no toast of an unpackaged app without
+/// one), makes it the process's ID unless the process already has one, and creates the toast
+/// notifier. Returns an HRESULT.
 int32_t cwas_toast_init(const char *aumid, const char *display_name, const char *icon_path,
                         cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context);
 /// The notifier's NotificationSetting: 0 enabled, 1 disabled for the app, 2 disabled for

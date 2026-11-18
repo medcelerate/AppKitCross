@@ -1,8 +1,13 @@
 // Toast notifications for an unpackaged desktop app (ADR-0043). See cwas.h.
 //
 // An unpackaged app gets toasts by registering an AppUserModelID under
-// HKCU\Software\Classes\AppUserModelId (display name, icon) and creating the notifier with
-// that ID. Activation without a COM activator reaches the app only through the toast
+// HKCU\Software\Classes\AppUserModelId (display name, icon), giving the shell a Start-menu
+// shortcut that carries that ID, and creating the notifier with that ID. Without the shortcut
+// Windows 11 accepts every toast (Show succeeds, history lists it) and displays none, and it
+// takes the shell some seconds to pick up a new shortcut: toasts shown in that window never
+// surface. So the shim makes the shortcut when it creates the notifier and, while the shell
+// has not yet displayed one of the app's toasts, shows a fresh toast again a few times
+// (see `retryUntilDisplayed`). Activation without a COM activator reaches the app only through the toast
 // object's Activated event, so the shim keeps every shown toast (and its handlers) alive until
 // it is activated, dismissed by the user, or removed: a toast clicked in Action Center while
 // the app runs still reports back; one clicked after the app quit starts nothing.
@@ -24,13 +29,16 @@
 #include <objbase.h>
 #include <roapi.h>
 #include <winstring.h>
+#include <shlobj.h>
 #include <shobjidl.h>
+#include <propsys.h>
 #include <windows.foundation.h>
 #include <windows.foundation.collections.h>
 #include <windows.data.xml.dom.h>
 #include <windows.ui.notifications.h>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -81,6 +89,7 @@ template <typename T> static void release(T *&p) { if (p) { p->Release(); p = nu
 
 struct LiveToast {
     IToastNotification *toast = nullptr;
+    uint64_t serial = 0;   // which show this is, so a retry can tell it was replaced or removed
     std::wstring group;
     std::vector<std::wstring> inputIds;
 };
@@ -90,6 +99,9 @@ static CO_MTA_USAGE_COOKIE g_mtaCookie = nullptr;
 static IToastNotifier *g_notifier = nullptr;
 static IToastNotificationHistory *g_history = nullptr;
 static std::wstring g_aumid;
+static uint64_t g_nextSerial = 0;
+/// GetTickCount64 when this process made or repaired the Start-menu shortcut; 0 otherwise.
+static ULONGLONG g_shortcutMadeAt = 0;
 static cwas_toast_activated_fn g_activated = nullptr;
 static cwas_toast_dismissed_fn g_dismissed = nullptr;
 static void *g_context = nullptr;
@@ -202,9 +214,10 @@ static std::wstring tagOf(IToastNotification *toast, std::wstring *group) {
 
 /// Forgets a live toast (it was activated, dismissed by the user, or removed) if `toast` is
 /// still the one shown under its tag; returns its text box ids.
-static std::vector<std::wstring> forget(IToastNotification *toast, const std::wstring &tag, const std::wstring &group) {
+static std::vector<std::wstring> forget(IToastNotification *toast, const std::wstring &tag, const std::wstring &group, bool *found = nullptr) {
     std::vector<std::wstring> ids;
     IToastNotification *drop = nullptr;
+    if (found) *found = false;
     {
         std::lock_guard<std::mutex> guard(g_lock);
         auto it = g_live.find(liveKey(tag, group));
@@ -212,10 +225,19 @@ static std::vector<std::wstring> forget(IToastNotification *toast, const std::ws
             ids = it->second.inputIds;
             drop = it->second.toast;
             g_live.erase(it);
+            if (found) *found = true;
         }
     }
     release(drop);
     return ids;
+}
+
+/// Whether `toast` is still the one shown under its tag. Events from a toast that a newer one
+/// replaced, or that the app removed, are not reported.
+static bool isLive(IToastNotification *toast, const std::wstring &tag, const std::wstring &group) {
+    std::lock_guard<std::mutex> guard(g_lock);
+    auto it = g_live.find(liveKey(tag, group));
+    return it != g_live.end() && it->second.toast == toast;
 }
 
 static std::vector<std::wstring> inputIdsOf(IToastNotification *toast, const std::wstring &tag, const std::wstring &group) {
@@ -317,7 +339,10 @@ public:
         if (args) args->get_Reason(&reason);
         int code = reason == ToastDismissalReason_UserCanceled ? 0 : reason == ToastDismissalReason_ApplicationHidden ? 1 : 2;
         // A timed-out toast moved to Action Center and can still be clicked: keep its handlers.
-        if (code != 2) forget(sender, tag, group);
+        bool live = false;
+        if (code != 2) forget(sender, tag, group, &live);
+        else live = isLive(sender, tag, group);
+        if (!live) return S_OK;
         std::string tagUtf8 = narrow(tag.c_str(), (UINT32)tag.size());
         if (g_dismissed) g_dismissed(g_context, tagUtf8.c_str(), code, 0);
         return S_OK;
@@ -331,7 +356,9 @@ public:
         std::wstring tag = tagOf(sender, &group);
         HRESULT error = E_FAIL;
         if (args) args->get_ErrorCode(&error);
-        forget(sender, tag, group);
+        bool live = false;
+        forget(sender, tag, group, &live);
+        if (!live) return S_OK;
         std::string tagUtf8 = narrow(tag.c_str(), (UINT32)tag.size());
         fprintf(stderr, "UserNotifications: toast %s failed (HRESULT 0x%08lx)\n", tagUtf8.c_str(), (unsigned long)error);
         if (g_dismissed) g_dismissed(g_context, tagUtf8.c_str(), -1, (int32_t)error);
@@ -350,6 +377,107 @@ static void registerAumid(const std::wstring &aumid, const std::wstring &name, c
     RegCloseKey(key);
 }
 
+/// PKEY_AppUserModel_ID, spelled out so the shim needs no propsys import library.
+static const PROPERTYKEY kAppUserModelID = {{0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
+
+static std::wstring fileSafe(const std::wstring &s) {
+    std::wstring out;
+    for (wchar_t c : s) out.push_back(wcschr(L"\\/:*?\"<>|", c) || c < 32 ? L'_' : c);
+    return out;
+}
+
+/// Reads the target and AppUserModelID of the shortcut at `path`; false when there is none.
+static bool readShortcut(const std::wstring &path, std::wstring *target, std::wstring *aumid) {
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
+    IShellLinkW *link = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void **>(&link)))) return false;
+    bool ok = false;
+    IPersistFile *file = nullptr;
+    IPropertyStore *store = nullptr;
+    if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&file))) && SUCCEEDED(file->Load(path.c_str(), STGM_READ))) {
+        ok = true;
+        wchar_t buffer[4 * MAX_PATH] = {0};
+        if (SUCCEEDED(link->GetPath(buffer, ARRAYSIZE(buffer), nullptr, SLGP_RAWPATH))) *target = buffer;
+        if (SUCCEEDED(link->QueryInterface(__uuidof(IPropertyStore), reinterpret_cast<void **>(&store)))) {
+            PROPVARIANT value;
+            PropVariantInit(&value);
+            if (SUCCEEDED(store->GetValue(kAppUserModelID, &value)) && value.vt == VT_LPWSTR && value.pwszVal) *aumid = value.pwszVal;
+            PropVariantClear(&value);
+        }
+    }
+    release(store);
+    release(file);
+    release(link);
+    return ok;
+}
+
+/// Makes sure a shortcut in the user's Start-menu Programs folder starts this executable with
+/// the toast AppUserModelID. Its name is the display name; a different program's shortcut of
+/// that name is left alone and the ID names ours instead. An existing shortcut to this
+/// executable gets the ID added. Returns S_OK when it was already right, S_FALSE when it was
+/// made or repaired, or a failure.
+static HRESULT ensureStartShortcut(const std::wstring &aumid, const std::wstring &name) {
+    PWSTR folder = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_Programs, KF_FLAG_CREATE, nullptr, &folder))) return E_FAIL;
+    std::wstring directory = folder;
+    CoTaskMemFree(folder);
+    wchar_t exe[4 * MAX_PATH] = {0};
+    DWORD length = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
+    if (length == 0 || length >= ARRAYSIZE(exe)) return E_FAIL;
+
+    std::wstring path = directory + L"\\" + fileSafe(name.empty() ? aumid : name) + L".lnk";
+    std::wstring target, existingId;
+    if (readShortcut(path, &target, &existingId)) {
+        if (existingId == aumid && _wcsicmp(target.c_str(), exe) == 0) return S_OK;
+        if (existingId != aumid && _wcsicmp(target.c_str(), exe) != 0) {
+            path = directory + L"\\" + fileSafe(aumid) + L".lnk";
+            target.clear();
+            existingId.clear();
+            if (readShortcut(path, &target, &existingId) && existingId == aumid && _wcsicmp(target.c_str(), exe) == 0) return S_OK;
+        }
+    }
+
+    std::wstring exeDirectory(exe);
+    exeDirectory = exeDirectory.substr(0, exeDirectory.find_last_of(L"\\/"));
+    IShellLinkW *link = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void **>(&link));
+    if (FAILED(hr)) return hr;
+    IPropertyStore *store = nullptr;
+    IPersistFile *file = nullptr;
+    do {
+        link->SetPath(exe);
+        link->SetWorkingDirectory(exeDirectory.c_str());
+        if (FAILED(hr = link->QueryInterface(__uuidof(IPropertyStore), reinterpret_cast<void **>(&store)))) break;
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        size_t bytes = (aumid.size() + 1) * sizeof(wchar_t);
+        value.pwszVal = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
+        if (!value.pwszVal) { hr = E_OUTOFMEMORY; break; }
+        memcpy(value.pwszVal, aumid.c_str(), bytes);
+        value.vt = VT_LPWSTR;
+        hr = store->SetValue(kAppUserModelID, value);
+        PropVariantClear(&value);
+        if (FAILED(hr) || FAILED(hr = store->Commit())) break;
+        if (FAILED(hr = link->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&file)))) break;
+        if (FAILED(hr = file->Save(path.c_str(), TRUE))) break;
+        hr = S_FALSE;
+    } while (false);
+    release(file);
+    release(store);
+    release(link);
+    return hr;
+}
+
+/// Windows writes HKCU\...\Notifications\Settings\<aumid> when it first displays one of the
+/// app's toasts: the sign that the shell knows the app.
+static bool shellKnowsApp() {
+    std::wstring path = L"Software\\Microsoft\\Windows\\CurrentVersion\\Notifications\\Settings\\" + g_aumid;
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) return false;
+    RegCloseKey(key);
+    return true;
+}
+
 static int32_t toastInit(const char *aumid, const char *display_name, const char *icon_path,
                          cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context) {
     std::lock_guard<std::mutex> guard(g_lock);
@@ -360,6 +488,13 @@ static int32_t toastInit(const char *aumid, const char *display_name, const char
     g_dismissed = dismissed;
     g_context = context;
     registerAumid(g_aumid, widen(display_name), widen(icon_path));
+    HRESULT shortcut = ensureStartShortcut(g_aumid, widen(display_name));
+    if (shortcut == S_FALSE) {
+        g_shortcutMadeAt = GetTickCount64();
+        fprintf(stderr, "UserNotifications: made the Start-menu shortcut for %s; Windows shows its toasts once the shell has picked it up\n", aumid);
+    } else if (FAILED(shortcut)) {
+        fprintf(stderr, "UserNotifications: no Start-menu shortcut for %s (HRESULT 0x%08lx); Windows may not display its toasts\n", aumid, (unsigned long)shortcut);
+    }
     PWSTR existing = nullptr;
     if (SUCCEEDED(GetCurrentProcessExplicitAppUserModelID(&existing))) {
         CoTaskMemFree(existing);
@@ -401,7 +536,7 @@ static int toastSetting(void) {
     return SUCCEEDED(hr) ? (int)setting : -1;
 }
 
-static int32_t toastShow(const char *xml, const char *tag, const char *group, int suppress_popup, const char *input_ids) {
+static int32_t toastShow(const char *xml, const char *tag, const char *group, int suppress_popup, const char *input_ids, uint64_t *serial = nullptr) {
     IToastNotifier *notifier = nullptr;
     {
         std::lock_guard<std::mutex> guard(g_lock);
@@ -461,6 +596,8 @@ static int32_t toastShow(const char *xml, const char *tag, const char *group, in
             live.toast = toast;
             live.group = wgroup;
             live.inputIds = ids;
+            live.serial = ++g_nextSerial;
+            if (serial) *serial = live.serial;
         }
         release(replaced);
         hr = notifier->Show(toast);
@@ -510,6 +647,34 @@ static void toastClear(void) {
     for (auto &entry : live) release(entry.second.toast);
 }
 
+/// The shell needs some seconds to pick up a Start-menu shortcut this process just made, and
+/// drops the toasts shown before then. Until it has displayed one of the app's toasts (or for
+/// 30 seconds after the shortcut was made), shows the toast again every 3 seconds, as long as it
+/// is still the toast under its tag (not replaced, removed or clicked).
+static void retryUntilDisplayed(std::string xml, std::string tag, std::string group, int suppress, std::string packedIds, uint64_t serial) {
+    std::thread([=]() mutable {
+        fprintf(stderr, "UserNotifications: the shell has not shown %s's toasts yet; showing toast %s again until it does\n",
+                narrow(g_aumid.c_str(), (UINT32)g_aumid.size()).c_str(), tag.c_str());
+        for (;;) {
+            Sleep(3000);
+            bool more = false;
+            onToastThread([&] {
+                if (shellKnowsApp() || GetTickCount64() - g_shortcutMadeAt > 30000) return;
+                {
+                    std::lock_guard<std::mutex> guard(g_lock);
+                    auto it = g_live.find(liveKey(widen(tag.c_str()), widen(group.c_str())));
+                    if (it == g_live.end() || it->second.serial != serial) return;
+                }
+                uint64_t next = 0;
+                if (FAILED(toastShow(xml.c_str(), tag.c_str(), group.c_str(), suppress, packedIds.empty() ? nullptr : packedIds.c_str(), &next))) return;
+                serial = next;
+                more = true;
+            });
+            if (!more) break;
+        }
+    }).detach();
+}
+
 // The entry points: each runs its work on the toast thread (see the top of the file).
 
 extern "C" int32_t cwas_toast_init(const char *aumid, const char *display_name, const char *icon_path,
@@ -538,8 +703,14 @@ extern "C" int32_t cwas_toast_show(const char *xml, const char *tag, const char 
     DWORD caller = GetCurrentThreadId();
     int32_t hr = E_UNEXPECTED;
     onToastThread([&] {
-        hr = toastShow(xml, tag, group, suppress_popup, input_ids);
+        uint64_t serial = 0;
+        hr = toastShow(xml, tag, group, suppress_popup, input_ids, &serial);
         if (FAILED(hr) || GetEnvironmentVariableA("APPKITWIN_TRACE_TOASTS", nullptr, 0) > 0) traceThread("show toast", tag, caller, hr);
+        if (SUCCEEDED(hr) && g_shortcutMadeAt != 0 && GetTickCount64() - g_shortcutMadeAt < 30000 && !shellKnowsApp()) {
+            std::string packed;
+            for (const char *p = input_ids; p && *p; p += strlen(p) + 1) { packed.append(p); packed.push_back('\0'); }
+            retryUntilDisplayed(xml, tag, group, suppress_popup, packed, serial);
+        }
     });
     return hr;
 }
