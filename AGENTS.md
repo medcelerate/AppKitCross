@@ -67,36 +67,48 @@ let usePort = ProcessInfo.processInfo.environment["APPKITCROSS"] == "1"
 let usePort = true
 #endif
 
+// A local checkout instead of GitHub: APPKITCROSS_PATH=/path/to/AppKitCross. SwiftPM names a
+// path dependency after its directory, so `port` must be that directory's last component.
+let portPath = ProcessInfo.processInfo.environment["APPKITCROSS_PATH"]
+let port = portPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "AppKitCross"
+
 var packageDeps: [Package.Dependency] = []
 var appDeps: [Target.Dependency] = []
 if usePort {
-    packageDeps.append(.package(url: "https://github.com/medcelerate/AppKitCross.git", branch: "main"))
-    appDeps += [.product(name: "AppKit", package: "AppKitCross"),
-                .product(name: "SwiftUI", package: "AppKitCross")]
+    packageDeps.append(portPath.map { .package(path: $0) }
+        ?? .package(url: "https://github.com/medcelerate/AppKitCross.git", branch: "main"))
+    appDeps += [.product(name: "AppKit", package: port), .product(name: "SwiftUI", package: port)]
     #if os(Linux) || os(Windows)
     // Only what the app imports: Combine, UniformTypeIdentifiers, ImageIO, AVFAudio, ...
-    appDeps += [.product(name: "Combine", package: "AppKitCross"),
-                .product(name: "UniformTypeIdentifiers", package: "AppKitCross")]
+    appDeps += [.product(name: "Combine", package: port),
+                .product(name: "UniformTypeIdentifiers", package: port)]
     #endif
 }
+// `#if APPKITCROSS` in the app's code: true on every port build, the macOS host build too.
+let portSettings: [SwiftSetting] = usePort ? [.define("APPKITCROSS")] : []
 
 let package = Package(
     name: "MyApp",
-    platforms: [.macOS(.v14)],
+    // The port needs 14; the Apple build keeps whatever the app declared before.
+    platforms: [usePort ? .macOS(.v14) : .macOS(.v13)],
     dependencies: packageDeps,
     targets: [
-        .target(name: "MyAppCore", dependencies: appDeps),
-        .executableTarget(name: "MyApp", dependencies: ["MyAppCore"]),
-        .testTarget(name: "MyAppTests", dependencies: ["MyAppCore"]),
+        .target(name: "MyAppCore", dependencies: appDeps, swiftSettings: portSettings),
+        .executableTarget(name: "MyApp", dependencies: ["MyAppCore"], swiftSettings: portSettings),
+        .testTarget(name: "MyAppTests", dependencies: ["MyAppCore"], swiftSettings: portSettings),
     ]
 )
 ```
 
+**`#if APPKITCROSS`, not `#if os(macOS)`, marks a port gap.** The macOS host build is
+`os(macOS)` too, so `#if os(macOS)` cannot hide a gap from the loop you will use most;
+`os(macOS)` only separates Windows and Linux.
+
 - **`.macOS(.v14)` is the floor.** The port's modules are built for macOS 14, and the
   compiler refuses to import them into a target with a lower deployment target
   (`compiling for macOS 10.15, but module 'SwiftUI' has a minimum deployment target of macOS 14`).
-  Raise the app's `platforms` line; for third-party dependencies you cannot edit, see
-  section 3.
+  Raise it for port builds only, as above; for third-party dependencies you cannot edit,
+  see section 3.
 - There are no release tags yet: depend on `branch: "main"` (or pin a `revision:`).
 - `UserNotifications` and `ServiceManagement` also resolve through `AppKit` off macOS, as on
   macOS, but naming them does no harm.
@@ -122,6 +134,11 @@ APPKITCROSS=1 swift build --scratch-path .build-port
 APPKITCROSS=1 swift test --scratch-path .build-port
 ```
 
+Never build the port into the default `.build`: its `SwiftUI`/`AppKit` modules stay in
+`.build/.../Modules` and a later plain build picks them up (`compiling for macOS 13.0, but
+module 'SwiftUI' has a minimum deployment target of macOS 14.0`). If it happened, delete
+`.build`.
+
 **Linux**, apt packages (from `Package.swift`'s `providers` and CI's install line):
 
 ```bash
@@ -142,8 +159,11 @@ docker run --rm -v "$PWD":/app -w /app appkitcross-linux \
 ```
 
 Always give the container its own `--scratch-path`: sharing `.build` with the macOS build
-corrupts both. For a path dependency on a local checkout, mount it too
-(`-v /path/to/AppKitCross:/port:ro`) and point the manifest's `path:` at `/port`.
+corrupts both. For a local checkout, mount it under its own name
+(`-v /path/to/AppKitCross:/AppKitCross:ro -e APPKITCROSS_PATH=/AppKitCross`). Add
+`.build-port/` and `.build-linux/` to the app's `.gitignore`. The port's own sources print
+Swift 6 isolation warnings while they compile (`[#ConformanceIsolation]`); they are not the
+app's.
 
 **Windows 11**: the swift.org toolchain, Visual Studio Build Tools with the Windows 10/11 SDK
 (CI uses the `windows-2022` image; VS 2026's STL needs a newer Clang than Swift 6.2's).
@@ -160,17 +180,12 @@ no diagnostic is that, not your code.
 
 **Third-party SwiftUI packages in the app's graph** (Shimmer, MarkdownUI, ...) do not depend
 on AppKitCross, so SwiftPM builds them with no edge to the port's modules and no C shim module
-maps. They need the two-step build that [tools/library-compat.sh](tools/library-compat.sh)
-does: (1) `swift build --target SwiftUI` (and `--target ImageIO` off macOS) so the port's
-modules are in the Modules directory first; (2) `swift build` with, on every compile,
-`-Xcc -fmodule-map-file=<abs path>` for each `Sources/C*/module.modulemap`,
-`Sources/C*/include/module.modulemap` and `.build/debug/C*.build/module.modulemap`, plus
-`-Xcc -I<dir>` for each `Sources/C*` and `Sources/C*/include` (on Linux also
-`pkg-config --cflags-only-I pangocairo x11 dbus-1`). Extra flags: on macOS
-`-Xswiftc -target -Xswiftc <arch>-apple-macosx14.0` (the libraries declare 10.15 to 12); on
-Windows `-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types -j 1`;
-`-Xswiftc -no-color-diagnostics` everywhere. Copy the script and change its paths rather
-than retyping the flags. Which libraries work is in
+maps. Copy [tools/library-compat.sh](tools/library-compat.sh) and change its paths: it builds
+in two steps, (1) `swift build --target SwiftUI` (and `--target ImageIO` off macOS) so the
+port's modules are in the Modules directory first, (2) `swift build` passing
+`-Xcc -fmodule-map-file=` and `-Xcc -I` for every C shim of the port, plus
+`-Xswiftc -target -Xswiftc <arch>-apple-macosx14.0` on macOS (the libraries declare 10.15 to
+12) and `-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types -j 1` on Windows. Which libraries work is in
 [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md); a library
 that switches `#if os(macOS) ... #else import UIKit` can never build off macOS without an
 upstream change to `#if canImport(AppKit)`.
@@ -189,6 +204,11 @@ On Windows and Linux a plain run uses the native backend.
 | Wayland | `tools/linux/run-wayland.sh` (headless sway, `grim`) |
 | Render one view to PNG, any backend | `cacheDisplay` (below) |
 
+**No `@MainActor` on `XCTestCase` subclasses or test methods.** Corelibs XCTest (Linux,
+Windows) crashes in test discovery on them (`Could not cast value of type '(...) ->
+@MainActor () throws -> ()'`, signal 6), and the macOS host build cannot catch it. Keep test
+classes nonisolated and wrap main-actor work in `MainActor.assumeIsolated { }`.
+
 A host-backend UI test that hosts SwiftUI, lays it out and writes a PNG (passes on the macOS
 host build and in the Linux container; on the host backend the bitmap is at 2x):
 
@@ -200,8 +220,6 @@ import SwiftUI
 
 final class ScreenTests: XCTestCase {
     func testContentRenders() throws {
-        // Not `@MainActor func test...`: corelibs XCTest (Linux, Windows) crashes in test
-        // discovery on main-actor test methods (swift_dynamicCastFailure in __allTests).
         MainActor.assumeIsolated {
             let host = NSHostingView(rootView: ContentView())
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
@@ -236,8 +254,6 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
 | `APPKITWIN_METAL_REFERENCE=1` | the CPU Metal device instead of Direct3D 12 or Vulkan |
-| `APPKITWIN_LAYOUT_DIRECTION=rtl` | right-to-left layout |
-| `APPKITWIN_PRINT_PANEL=native` | Windows: the system print dialog |
 
 ## 5. Porting recipe
 
@@ -257,40 +273,64 @@ Work in this order; each step's failures hide the next step's.
      for target/action use `Selector(("name:"))`.
    - Actor isolation (section 2): add `@MainActor` to coordinators and helpers that touch AppKit.
    - Frameworks the port lacks (WebKit, MapKit, StoreKit, Sparkle, ...): see step 5.
-   - SwiftUI API the port lacks: a compile error naming the type. Check
-     [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) (what each real
-     app hit and how it was fixed) before writing a workaround, then file a gap (section 7).
+   - SwiftUI API the port lacks: expect several in any app. Known missing (2026-11-18):
+     `#Preview` (wrap previews in `#if !APPKITCROSS`), `SecureField`, `onReceive`,
+     `ForEach.onDelete`, `remove(atOffsets:)`, `lineLimit(_: ClosedRange)`,
+     `TextField(_:text:axis:)`, and `Section { } header: { }` without a footer (reported as
+     the misleading `generic parameter 'Footer' could not be inferred`). Check
+     [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) for what real
+     apps hit, then shim (step 5) and file a gap (section 7).
    - Corelibs Foundation strictness: `NSLock.lock()` is unavailable in `async` functions
      (take it in a synchronous helper); `UserDefaults.didChangeNotification` is not posted for
      a set (the port's `@AppStorage` handles it; your own observers will not fire).
 4. **Run the tests** with `APPKITWIN_HOST_BACKEND=1` on Linux (container) and Windows, then
    run the app (Xvfb or a real desktop). Read every trap message (below).
-5. **Shim an Apple-only or missing framework** without touching upstream logic: a small file
-   or target compiled only off macOS that declares the few names the app uses, with Apple's
-   exact signatures, doing the closest honest thing (or nothing, and saying so on stderr):
+5. **Shim what is missing** without touching upstream logic: one file in the app module
+   (for example `PortShims/SwiftUIPortShims.swift`) under `#if APPKITCROSS`, declaring the
+   few names the app uses with Apple's exact signatures and doing the closest honest thing,
+   or nothing while saying so on stderr. A missing framework (WebKit, StoreKit, ...) is
+   gated with `#if canImport(X)` instead; a missing member of the port's own SwiftUI or
+   AppKit cannot be, since the module imports fine.
 
    ```swift
-   #if !canImport(StoreKit)              // Windows and Linux
-   enum StoreShim { static var isAvailable: Bool { false } }
+   #if APPKITCROSS
+   import Combine
+   import SwiftUI
+
+   extension View {   // Apple's signature; the port has no onReceive yet
+       func onReceive<P: Publisher>(_ publisher: P, perform action: @escaping (P.Output) -> Void) -> some View
+           where P.Failure == Never { modifier(ReceiveShim(publisher: publisher, action: action)) }
+   }
+   private struct ReceiveShim<P: Publisher>: ViewModifier where P.Failure == Never {
+       let publisher: P
+       let action: (P.Output) -> Void
+       @State private var token: AnyCancellable?
+       func body(content: Content) -> some View {
+           content.onAppear { token = publisher.sink(receiveValue: action) }
+                  .onDisappear { token = nil }
+       }
+   }
    #endif
    ```
 
-   Keep the shim's names Apple's so deleting it later is the whole migration. Put a call
-   that cannot work off macOS behind `#if os(macOS)` in the app, with an `#else` that tells
-   the user the feature is unavailable. Do not edit `.build/checkouts/AppKitCross`.
+   Keep the names Apple's, so deleting the file is the whole migration; when the port adds
+   a name, the shim turns into an ambiguity error, which is the cue to delete that part.
+   A call that cannot work on the port goes behind `#if !APPKITCROSS` with an `#else` that
+   tells the user the feature is unavailable. Never edit the AppKitCross checkout.
 6. **Read a trap and choose.** A trap prints `<Module>/<File>.swift:<line>: Fatal error:
    AppKitCross: ...` with the member name (`#function`, so without the type; the file names
    the type). Find it in the source and in `docs/API-COVERAGE.md`:
 
    ```bash
-   grep -rn "unimplemented()\|appleOnlyUnavailable(" .build/checkouts/AppKitCross/Sources/AppKit/Generated/NSImage.swift | head
+   # in the checkout: .build-port/checkouts/AppKitCross, or your APPKITCROSS_PATH
+   grep -rn "unimplemented()\|appleOnlyUnavailable(" Sources/AppKit/Generated/NSImage.swift | head
    ```
 
    | Trap | What to do |
    | --- | --- |
-   | `exists only on macOS` | Never coming. `#if os(macOS)` around the call, or a different API |
-   | `is not implemented yet`, on a path the user needs | File a gap (section 7); meanwhile `#if os(macOS)` with a degraded `#else` |
-   | `is not implemented yet`, on a cosmetic path | `#if os(macOS)` it away and note it |
+   | `exists only on macOS` | Never coming. `#if !APPKITCROSS` around the call (for example a Share button over `NSSharingServicePicker`), or a different API |
+   | `is not implemented yet`, on a path the user needs | File a gap (section 7); meanwhile `#if !APPKITCROSS` with a degraded `#else` |
+   | `is not implemented yet`, on a cosmetic path | `#if !APPKITCROSS` it away and note it |
    | `optional requirement ... has no default yet` | Implement that delegate method in your type (any body Apple documents as the default) |
 
    Never patch the port's sources from the app repository, and never paper over a trap with a
@@ -318,7 +358,9 @@ Work in this order; each step's failures hide the next step's.
      `APPKITWIN_TRACE=1` shows what keeps redrawing (`setNeedsDisplay <View>`,
      `setNeedsUpdate <ViewType>`); in a host-backend test,
      `NSView._invalidationCount` (port-only) must not grow across idle frames.
-9. **Check the details corelibs changes**: file paths under `FileManager`'s application
+9. **Check the details corelibs changes** (they fail only off macOS, so build in the Linux
+   container early): `URLSession`, `URLRequest` and friends need
+   `#if canImport(FoundationNetworking)` / `import FoundationNetworking` / `#endif`; file paths under `FileManager`'s application
    support directory (`%LOCALAPPDATA%`/`%APPDATA%` on Windows, `~/.local/share` on Linux),
    CR LF in files and clipboard text on Windows (the pasteboard converts; your own file I/O
    does not), POSIX permissions on Windows, time zone and date formatting names.
@@ -345,13 +387,14 @@ Work in this order; each step's failures hide the next step's.
   (for example Markdown) have no extensions off macOS, so those files will not open.
 - **Printing** (ADR-0022): the port's print panel everywhere (`APPKITWIN_PRINT_PANEL=native`
   for Windows' own); PDF output through the platform's writer; CUPS on Linux.
+- **Secure text**: `NSSecureTextField` (and so any `SecureField` shim built on a text field)
+  draws its text in clear on the port today; only accessibility masks it. Do not ship a
+  password or API-key field without saying so; this is a known gap.
 - **Accessibility** (ADR-0013): `NSAccessibility` maps to UI Automation (Narrator,
   Accessibility Insights) and AT-SPI2 (Orca). Standard controls need nothing; custom views
   need the same `setAccessibility...` calls as on macOS.
-- **Audio** (ADR-0014): `AVAudioEngine` over WASAPI, PipeWire or ALSA. `AVPlayer` and video
-  are not ported.
-- **Metal** (ADR-0004, ADR-0012): Direct3D 12 on Windows, Vulkan on Linux, MSL translated;
-  `MTKView` presents through a swap chain on both.
+- **Audio and GPU**: `AVAudioEngine` over WASAPI, PipeWire or ALSA (ADR-0014; no `AVPlayer`
+  or video); Metal over Direct3D 12 or Vulkan with MSL translated (ADR-0004, ADR-0012).
 
 ## 7. Report a port gap
 
@@ -370,45 +413,24 @@ Open an issue at <https://github.com/medcelerate/AppKitCross/issues> with the
 
 ## 8. Shipping
 
-<!-- PLACEHOLDER(app-bundle-identity): replace this section's first part when the
-"bundle, resources, localization and app identity" PR merges (ADR-0045,
-docs/DEVELOPMENT.md "App layout on Windows and Linux"). It should cover: the folder layout
-beside the executable (Info.plist, Resources, .lproj localizations, the icon), how
-Bundle.main and Bundle.module resolve there, CFBundleIdentifier as the app's identity
-(AUMID, desktop file id), file associations and single-instance hand-off. -->
+<!-- PLACEHOLDER(app-bundle-identity): folder layout beside the executable, Info.plist, .lproj, icon, identity, file associations (ADR-0045). -->
+**App layout, resources and identity**: *pending (the app bundle and identity work).* Today:
+give the app an Info.plist through `APPKITWIN_INFO_PLIST` or beside the executable (section 6).
 
-**App layout, resources and identity**: *pending (the app bundle and identity work, ADR-0045).*
-Today: SwiftPM resources (`Bundle.module`) work off macOS; give the app an Info.plist through
-`APPKITWIN_INFO_PLIST` or beside the executable (section 6).
+<!-- PLACEHOLDER(release-bundle-tool): `swift package bundle`, the app folder and zip per platform, release flags, the release CI to copy. -->
+**Packaging and release builds**: *pending (the `swift package bundle` plugin and release CI
+work).* Today: `swift build -c release` (`-j 1` on Windows) and ship `.build/release/<App>`;
+on Windows the Swift runtime DLLs from the toolchain go beside the executable.
 
-<!-- PLACEHOLDER(release-bundle-tool): replace when the release CI and
-`swift package bundle` command plugin PR merges. It should cover: the plugin invocation,
-what the runnable app folder and zip contain on each platform, release build flags
-(-c release, Windows -j 1), the release CI workflow to copy, and docs/DEVELOPMENT.md
-"Shipping an app". -->
+<!-- PLACEHOLDER(ime-text-input): input methods on Windows and Linux, what custom text views need, how to test composition. -->
+**Input methods (IME)**: *pending (the IME work).* Today: Windows composition reaches
+`NSTextView`, `NSTextField` and SwiftUI text fields (`APPKITWIN_IME_LAYOUT=00000411` tests
+Japanese without changing system settings); Linux has no IME yet.
 
-**Packaging (`swift package bundle`) and release builds**: *pending (the release CI and
-bundle plugin work).* Today: `swift build -c release` (`-j 1` on Windows) and ship
-`.build/release/<App>` with the toolchain's runtime libraries beside it on Windows.
-
-<!-- PLACEHOLDER(ime-text-input): replace when the IME text input PR merges. It should
-cover: what works with input methods on Windows (IMM32/TSF) and Linux (X11 XIM, Wayland
-text-input-v3 / ibus / fcitx), what the app must do (NSTextInputClient for custom text
-views), and how to test composition (APPKITWIN_IME_LAYOUT on Windows). -->
-
-**Input methods (IME)**: *pending (the IME text input work).* Today: Windows composition
-reaches `NSTextView`, `NSTextField` and SwiftUI text fields (`APPKITWIN_IME_LAYOUT=00000411`
-tests Japanese without changing system settings); Linux has no IME yet.
-
-**macOS**: ship the app as before, built against Apple's frameworks (no `APPKITCROSS`).
+**macOS**: ship as before, built against Apple's frameworks (no `APPKITCROSS`).
 
 ## Further reading
 
-- [README.md](README.md): what runs today, with screenshots on all three platforms.
-- [docs/API-COVERAGE.md](docs/API-COVERAGE.md): per-type implementation status.
-- [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md): every gap two
-  real apps hit, with root causes; `Examples/DailyTodo` and `Examples/MDVault` are the apps.
-- [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md):
-  third-party SwiftUI packages, verdict per platform.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/decisions/](docs/decisions/): how and why.
-- [docs/ROADMAP.md](docs/ROADMAP.md): milestone state; what is verified on real Windows.
+[llms.txt](llms.txt) indexes the docs; start with [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
+and [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) (every gap the
+vendored apps `Examples/DailyTodo` and `Examples/MDVault` hit, with root causes).
