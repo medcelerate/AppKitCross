@@ -1,13 +1,15 @@
-// C interface over the Text Services Framework (TSF) for one window's text input (ADR-0016).
+// C interface over the Text Services Framework (TSF) for a window's text input (ADR-0047).
 //
-// A document is a text store (ITextStoreACP) plus a TSF context: the input method (Microsoft
-// IME for Japanese, Chinese or Korean, or any text service) reads the text through the store,
-// edits it under locks, and draws its composition through ITfContextOwnerCompositionSink. The
-// store does not keep text of its own: every read, edit and selection goes through the
-// callbacks, which the window answers from its text view (the platform text input seam).
-// Compositions reach the view as marked text, so the view draws the underline itself.
+// A document is a text store (ITextStoreACP) plus a TSF context in its own document
+// manager. The store keeps a copy of the text around the focused text view's selection,
+// which the window hands it with `cts_document_sync`. The input method (Microsoft IME for
+// Japanese, Chinese or Korean, or any text service) reads and edits that copy under locks;
+// when a lock in which it edited ends, the store reports the new text, selection,
+// composition and clauses through `edited`, and the window turns them into the
+// NSTextInputClient calls (marked text, insertText). The view then draws the composition.
 //
-// Everything runs on the UI thread (an STA); callbacks arrive there too.
+// One thread manager serves every document of the UI thread. Everything runs on that thread
+// (an STA); callbacks arrive there too, never while the store is locked.
 #ifndef CTS_H
 #define CTS_H
 
@@ -19,60 +21,67 @@ extern "C" {
 
 typedef struct CTSDocument CTSDocument;
 
+/// One clause of the composition: `start`/`length` in the store, `thick` when the input
+/// method shows it as the clause being converted (TF_ATTR_TARGET_*) or with a bold line.
+typedef struct CTSClause {
+    int32_t start;
+    int32_t length;
+    int32_t thick;
+} CTSClause;
+
 typedef struct CTSCallbacks {
     void *user;
-    /// Length of the document in UTF-16 code units.
-    int32_t (*length)(void *user);
-    /// Copies up to `count` UTF-16 units starting at `start`; returns the number copied.
-    int32_t (*read)(void *user, int32_t start, int32_t count, uint16_t *out);
-    /// The selection (caret when `count` is 0) in UTF-16 units.
-    void (*selection)(void *user, int32_t *start, int32_t *count);
-    void (*setSelection)(void *user, int32_t start, int32_t count);
-    /// Replaces `count` units at `start` with `text`. `marked` is non-zero while the text is part
-    /// of the input method's composition; the view then keeps it as marked text. On return the
-    /// view has moved the selection to the end of the inserted text.
-    void (*replace)(void *user, int32_t start, int32_t count, const uint16_t *text, int32_t textCount, int32_t marked);
-    /// The composition covers `count` units at `start` (marked text).
-    void (*markRange)(void *user, int32_t start, int32_t count);
-    /// The composition ended: its text becomes ordinary text.
-    void (*endComposition)(void *user);
-    /// Screen rectangle of the units `start`..`start+count` as left, top, right, bottom in pixels.
-    /// Returns 0 when there is no layout for them yet.
+    /// Before the store grants a lock: the window syncs the store if the view changed.
+    void (*refresh)(void *user);
+    /// After a lock in which the input method edited: the store's text (UTF-16, `length`
+    /// units), selection, composition (`compositionStart` -1 when none) and its clauses.
+    void (*edited)(void *user, const uint16_t *text, int32_t length, int32_t selectionStart, int32_t selectionEnd,
+                   int32_t compositionStart, int32_t compositionLength, const CTSClause *clauses, int32_t clauseCount);
+    /// Screen rectangle of the store's units `start`..`start+count` as left, top, right,
+    /// bottom in pixels. Returns 0 when there is no layout for them.
     int32_t (*rect)(void *user, int32_t start, int32_t count, int32_t *ltrb);
-    /// The window's HWND for the text store's GetWnd.
-    void *(*window)(void *user);
-    /// The input method's candidate list changed to `count` entries (0 when it closed).
+    /// The input method's candidate list opened with `count` entries, changed, or closed (0).
     void (*candidates)(void *user, int32_t count);
 } CTSCallbacks;
 
-/// Creates the document (thread manager, text store, context) for the window `hwnd`.
-/// Returns NULL when TSF is not available.
-CTSDocument *cts_document_create(const CTSCallbacks *callbacks, void *hwnd);
+/// Creates the document for the window `hwnd` (and the thread's thread manager on first use).
+/// Returns NULL when TSF is not available; `*hresult` says why.
+CTSDocument *cts_document_create(const CTSCallbacks *callbacks, void *hwnd, int32_t *hresult);
 void cts_document_destroy(CTSDocument *document);
 
-/// The document gets (1) or loses (0) keyboard focus; the input method follows it.
+/// The document gets (1) or loses (0) the keyboard focus. Losing it focuses an empty
+/// document manager, which turns the input method off for the window.
 void cts_document_set_focus(CTSDocument *document, int focused);
-/// The text or selection changed outside an edit session: TSF refreshes its view of them.
-void cts_document_notify_change(CTSDocument *document, int32_t start, int32_t oldCount, int32_t newCount);
-void cts_document_notify_selection(CTSDocument *document);
+/// Replaces the store's copy of the text and selection with the view's; the input method
+/// is told what changed. Deferred until the lock ends when called inside one.
+void cts_document_sync(CTSDocument *document, const uint16_t *text, int32_t length, int32_t selectionStart, int32_t selectionEnd);
+/// The caret or text moved on screen: the input method reads the rectangles again.
+void cts_document_layout_changed(CTSDocument *document);
+/// Ends the composition: the input method keeps its text as committed text.
+void cts_document_end_composition(CTSDocument *document);
+/// Whether a composition is active.
+int cts_document_composing(CTSDocument *document);
+/// Number of candidates the input method lists (0 when none).
+int cts_document_candidate_count(CTSDocument *document);
 
 /// The input method's open state (Japanese: on = kana input, off = direct input).
 void cts_document_set_ime_open(CTSDocument *document, int open);
 int cts_document_ime_open(CTSDocument *document);
-/// The input mode's conversion bits (TF_CONVERSIONMODE_*): 0x1 native (kana), 0x10 roman (romaji).
-/// Japanese romaji-to-kana input needs both (0x11); 0 is direct (ASCII) input.
+/// The input mode's conversion bits (TF_CONVERSIONMODE_*): 0x1 native (kana), 0x10 roman.
 void cts_document_set_conversion(CTSDocument *document, int32_t mode);
 int32_t cts_document_conversion(CTSDocument *document);
-/// Number of candidates the input method currently lists (0 when none).
-int cts_document_candidate_count(CTSDocument *document);
-/// Reconversion: the input method converts the selected text again. Returns an HRESULT.
-int32_t cts_document_reconvert(CTSDocument *document);
-/// Forwards a key message to the text services; returns 1 when they took it (the app must not act on it).
-int cts_document_key(CTSDocument *document, uint64_t wParam, int64_t lParam, int down);
-/// Makes the Microsoft IME (Japanese) this process's active text service. Returns an HRESULT.
+
+/// Offers a key message to the text services before the window translates it; returns 1
+/// when an input method took it (the window must not act on it). `message` is WM_KEYDOWN
+/// or WM_KEYUP.
+int cts_process_key(uint32_t message, uint64_t wParam, int64_t lParam);
+
+/// Makes the Microsoft IME (Japanese) this process's active text service (a test hook for
+/// machines where the input language cannot be switched by hand). Returns an HRESULT.
 int32_t cts_activate_microsoft_ime_jp(void);
-/// Whether a composition is active (TSF owns the marked text).
-int cts_document_composing(CTSDocument *document);
+
+/// 1: one stderr line per store call and lock (`[textinput] tsf ...`).
+void cts_set_trace(int on);
 
 #ifdef __cplusplus
 }
