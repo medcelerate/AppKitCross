@@ -80,7 +80,8 @@ final class Win32Window: PlatformWindow {
         if env["APPKITWIN_IME_LAYOUT"] != nil {
             // After the thread manager exists: activating earlier is reset by it.
             let hr = Win32TextServices.activateMicrosoftIME()
-            textServices.setConversion(0x11)
+            // Hiragana: native | full shape | roman (TF_CONVERSIONMODE_*).
+            textServices.setConversion(0x19)
             _TextInputTrace.log("tsf activate Microsoft IME (Japanese) hr 0x\(String(UInt32(bitPattern: hr), radix: 16)), conversion 0x\(String(textServices.conversion, radix: 16))")
         }
         if let open = env["APPKITWIN_IME_OPEN"] { textServices.setIMEOpen(open == "1") }
@@ -1476,6 +1477,9 @@ final class Win32Window: PlatformWindow {
             activateTestInputMethodIfRequested()
             textServices?.focus()
             return nil      // DefWindowProc activates the input method context for the window
+        case WM_INPUTLANGCHANGE:
+            _TextInputTrace.log("input language changed: keyboard layout 0x\(String(UInt(bitPattern: Int(lParam)), radix: 16)), charset \(wParam)")
+            return nil
         case WM_KILLFOCUS:
             isKey = false
             textServices?.blur()

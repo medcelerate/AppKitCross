@@ -39,6 +39,8 @@ void trace(const char *format, ...) {
 
 // MARK: - The thread's thread manager (shared by every document)
 
+class ThreadSink;
+
 struct Thread {
     ITfThreadMgr *threadMgr = nullptr;
     ITfKeystrokeMgr *keys = nullptr;
@@ -46,8 +48,187 @@ struct Thread {
     TfClientId client = TF_CLIENTID_NULL;
     int documents = 0;
     int focused = 0;                        // documents with the focus (0 or 1)
+    // Diagnostics: focus changes, active text service (profile) changes, open state and
+    // conversion mode changes on this thread manager.
+    ThreadSink *sink = nullptr;
+    DWORD focusCookie = TF_INVALID_COOKIE;
+    DWORD profileCookie = TF_INVALID_COOKIE;
+    ITfCompartment *openCompartment = nullptr;
+    ITfCompartment *conversionCompartment = nullptr;
+    DWORD openCookie = TF_INVALID_COOKIE;
+    DWORD conversionCookie = TF_INVALID_COOKIE;
 };
 Thread g_thread;
+
+// MARK: - Compartments (open state, conversion mode)
+//
+// GUID_COMPARTMENT_KEYBOARD_OPENCLOSE and _INPUTMODE_CONVERSION live in the thread
+// manager's own compartment manager (QueryInterface), not the global one.
+
+ITfCompartment *threadCompartment(REFGUID key) {
+    if (!g_thread.threadMgr) return nullptr;
+    ITfCompartmentMgr *mgr = nullptr;
+    if (FAILED(g_thread.threadMgr->QueryInterface(IID_ITfCompartmentMgr, reinterpret_cast<void **>(&mgr))) || !mgr) return nullptr;
+    ITfCompartment *compartment = nullptr;
+    if (FAILED(mgr->GetCompartment(key, &compartment))) compartment = nullptr;
+    mgr->Release();
+    return compartment;
+}
+
+void setCompartment(REFGUID key, int32_t value) {
+    ITfCompartment *compartment = threadCompartment(key);
+    if (!compartment) return;
+    VARIANT v;
+    VariantInit(&v);
+    v.vt = VT_I4;
+    v.lVal = value;
+    HRESULT hr = compartment->SetValue(g_thread.client, &v);
+    trace("set compartment %s = 0x%lx hr 0x%08lx", IsEqualGUID(key, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE) ? "open" : "conversion",
+          (long)value, (unsigned long)hr);
+    compartment->Release();
+}
+
+int32_t compartmentValue(REFGUID key) {
+    ITfCompartment *compartment = threadCompartment(key);
+    if (!compartment) return 0;
+    int32_t result = 0;
+    VARIANT v;
+    VariantInit(&v);
+    if (SUCCEEDED(compartment->GetValue(&v)) && v.vt == VT_I4) result = v.lVal;
+    VariantClear(&v);
+    compartment->Release();
+    return result;
+}
+
+void traceGUID(const char *label, REFGUID guid) {
+    wchar_t buffer[64] = {0};
+    StringFromGUID2(guid, buffer, 64);
+    trace("%s %ls", label, buffer);
+}
+
+/// The keyboard's active text service on this thread, its open state and conversion mode.
+void traceInputState(const char *why) {
+    if (!g_trace) return;
+    HKL layout = GetKeyboardLayout(0);
+    ITfInputProcessorProfileMgr *mgr = nullptr;
+    TF_INPUTPROCESSORPROFILE profile{};
+    bool known = false;
+    if (SUCCEEDED(CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER, IID_ITfInputProcessorProfileMgr,
+                                   reinterpret_cast<void **>(&mgr))) && mgr) {
+        known = SUCCEEDED(mgr->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &profile));
+        mgr->Release();
+    }
+    int32_t open = compartmentValue(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    int32_t conversion = compartmentValue(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION);
+    if (known && profile.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR) {
+        wchar_t clsid[64] = {0};
+        StringFromGUID2(profile.clsid, clsid, 64);
+        trace("input state (%s): text service %ls langid 0x%04x, keyboard layout %p, open %ld, conversion 0x%lx%s",
+              why, clsid, (unsigned)profile.langid, (void *)layout, (long)open, (long)conversion,
+              open ? ((conversion & TF_CONVERSIONMODE_NATIVE) ? " (kana/hangul)" : " (alphanumeric)") : " (closed: direct input)");
+    } else {
+        trace("input state (%s): keyboard layout %p only (no text service active), open %ld, conversion 0x%lx",
+              why, (void *)layout, (long)open, (long)conversion);
+    }
+}
+
+class ThreadSink final : public ITfThreadMgrEventSink, public ITfInputProcessorProfileActivationSink, public ITfCompartmentEventSink {
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
+        if (!ppv) return E_POINTER;
+        if (IsEqualIID(riid, IID_IUnknown) || IsEqualIID(riid, IID_ITfThreadMgrEventSink)) *ppv = static_cast<ITfThreadMgrEventSink *>(this);
+        else if (IsEqualIID(riid, IID_ITfInputProcessorProfileActivationSink)) *ppv = static_cast<ITfInputProcessorProfileActivationSink *>(this);
+        else if (IsEqualIID(riid, IID_ITfCompartmentEventSink)) *ppv = static_cast<ITfCompartmentEventSink *>(this);
+        else { *ppv = nullptr; return E_NOINTERFACE; }
+        AddRef();
+        return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
+    ULONG STDMETHODCALLTYPE Release() override { ULONG r = --refs_; if (r == 0) delete this; return r; }
+
+    // ITfThreadMgrEventSink
+    HRESULT STDMETHODCALLTYPE OnInitDocumentMgr(ITfDocumentMgr *) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnUninitDocumentMgr(ITfDocumentMgr *) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnSetFocus(ITfDocumentMgr *focus, ITfDocumentMgr *previous) override {
+        trace("thread focus %s %p (was %p)", focus == nullptr ? "none" : (focus == g_thread.disabled ? "disabled" : "document"),
+              (void *)focus, (void *)previous);
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnPushContext(ITfContext *) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPopContext(ITfContext *) override { return S_OK; }
+
+    // ITfInputProcessorProfileActivationSink
+    HRESULT STDMETHODCALLTYPE OnActivated(DWORD type, LANGID langid, REFCLSID clsid, REFGUID, REFGUID, HKL hkl, DWORD flags) override {
+        if (!g_trace) return S_OK;
+        if (type == TF_PROFILETYPE_INPUTPROCESSOR) {
+            wchar_t buffer[64] = {0};
+            StringFromGUID2(clsid, buffer, 64);
+            trace("profile %s: text service %ls langid 0x%04x", (flags & TF_IPSINK_FLAG_ACTIVE) ? "activated" : "deactivated", buffer, (unsigned)langid);
+        } else {
+            trace("profile %s: keyboard layout %p langid 0x%04x", (flags & TF_IPSINK_FLAG_ACTIVE) ? "activated" : "deactivated", (void *)hkl, (unsigned)langid);
+        }
+        return S_OK;
+    }
+
+    // ITfCompartmentEventSink
+    HRESULT STDMETHODCALLTYPE OnChange(REFGUID) override {
+        traceInputState("changed");
+        return S_OK;
+    }
+private:
+    std::atomic<ULONG> refs_{1};
+};
+
+DWORD adviseCompartment(ITfCompartment *compartment) {
+    DWORD cookie = TF_INVALID_COOKIE;
+    if (!compartment || !g_thread.sink) return cookie;
+    ITfSource *source = nullptr;
+    if (SUCCEEDED(compartment->QueryInterface(IID_ITfSource, reinterpret_cast<void **>(&source))) && source) {
+        source->AdviseSink(IID_ITfCompartmentEventSink, static_cast<ITfCompartmentEventSink *>(g_thread.sink), &cookie);
+        source->Release();
+    }
+    return cookie;
+}
+
+void unadviseCompartment(ITfCompartment *&compartment, DWORD &cookie) {
+    if (compartment && cookie != TF_INVALID_COOKIE) {
+        ITfSource *source = nullptr;
+        if (SUCCEEDED(compartment->QueryInterface(IID_ITfSource, reinterpret_cast<void **>(&source))) && source) {
+            source->UnadviseSink(cookie);
+            source->Release();
+        }
+    }
+    cookie = TF_INVALID_COOKIE;
+    if (compartment) { compartment->Release(); compartment = nullptr; }
+}
+
+void adviseThreadSinks() {
+    g_thread.sink = new ThreadSink();
+    ITfSource *source = nullptr;
+    if (SUCCEEDED(g_thread.threadMgr->QueryInterface(IID_ITfSource, reinterpret_cast<void **>(&source))) && source) {
+        source->AdviseSink(IID_ITfThreadMgrEventSink, static_cast<ITfThreadMgrEventSink *>(g_thread.sink), &g_thread.focusCookie);
+        source->AdviseSink(IID_ITfInputProcessorProfileActivationSink,
+                           static_cast<ITfInputProcessorProfileActivationSink *>(g_thread.sink), &g_thread.profileCookie);
+        source->Release();
+    }
+    g_thread.openCompartment = threadCompartment(GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+    g_thread.conversionCompartment = threadCompartment(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION);
+    g_thread.openCookie = adviseCompartment(g_thread.openCompartment);
+    g_thread.conversionCookie = adviseCompartment(g_thread.conversionCompartment);
+}
+
+void unadviseThreadSinks() {
+    unadviseCompartment(g_thread.openCompartment, g_thread.openCookie);
+    unadviseCompartment(g_thread.conversionCompartment, g_thread.conversionCookie);
+    ITfSource *source = nullptr;
+    if (SUCCEEDED(g_thread.threadMgr->QueryInterface(IID_ITfSource, reinterpret_cast<void **>(&source))) && source) {
+        if (g_thread.focusCookie != TF_INVALID_COOKIE) source->UnadviseSink(g_thread.focusCookie);
+        if (g_thread.profileCookie != TF_INVALID_COOKIE) source->UnadviseSink(g_thread.profileCookie);
+        source->Release();
+    }
+    g_thread.focusCookie = g_thread.profileCookie = TF_INVALID_COOKIE;
+    if (g_thread.sink) { g_thread.sink->Release(); g_thread.sink = nullptr; }
+}
 
 HRESULT threadAcquire() {
     if (g_thread.threadMgr) { g_thread.documents++; return S_OK; }
@@ -60,12 +241,16 @@ HRESULT threadAcquire() {
     g_thread.threadMgr->QueryInterface(IID_ITfKeystrokeMgr, reinterpret_cast<void **>(&g_thread.keys));
     g_thread.threadMgr->CreateDocumentMgr(&g_thread.disabled);
     g_thread.documents = 1;
-    trace("thread manager activated, client %lu", (unsigned long)g_thread.client);
+    adviseThreadSinks();
+    trace("thread manager activated, client %lu, thread %lu, keystroke manager %s", (unsigned long)g_thread.client,
+          (unsigned long)GetCurrentThreadId(), g_thread.keys ? "yes" : "no");
+    traceInputState("activated");
     return S_OK;
 }
 
 void threadRelease() {
     if (--g_thread.documents > 0 || !g_thread.threadMgr) return;
+    unadviseThreadSinks();
     g_thread.threadMgr->SetFocus(nullptr);
     if (g_thread.disabled) { g_thread.disabled->Release(); g_thread.disabled = nullptr; }
     if (g_thread.keys) { g_thread.keys->Release(); g_thread.keys = nullptr; }
@@ -687,41 +872,6 @@ void TextStore::detach() {
     if (sink_) { sink_->Release(); sink_ = nullptr; }
 }
 
-// MARK: - Compartments (open state, conversion mode)
-
-void setCompartment(REFGUID key, int32_t value) {
-    if (!g_thread.threadMgr) return;
-    ITfCompartmentMgr *mgr = nullptr;
-    if (FAILED(g_thread.threadMgr->GetGlobalCompartment(&mgr)) || !mgr) return;
-    ITfCompartment *compartment = nullptr;
-    if (SUCCEEDED(mgr->GetCompartment(key, &compartment)) && compartment) {
-        VARIANT v;
-        VariantInit(&v);
-        v.vt = VT_I4;
-        v.lVal = value;
-        compartment->SetValue(g_thread.client, &v);
-        compartment->Release();
-    }
-    mgr->Release();
-}
-
-int32_t compartmentValue(REFGUID key) {
-    if (!g_thread.threadMgr) return 0;
-    ITfCompartmentMgr *mgr = nullptr;
-    if (FAILED(g_thread.threadMgr->GetGlobalCompartment(&mgr)) || !mgr) return 0;
-    int32_t result = 0;
-    ITfCompartment *compartment = nullptr;
-    if (SUCCEEDED(mgr->GetCompartment(key, &compartment)) && compartment) {
-        VARIANT v;
-        VariantInit(&v);
-        if (SUCCEEDED(compartment->GetValue(&v)) && v.vt == VT_I4) result = v.lVal;
-        VariantClear(&v);
-        compartment->Release();
-    }
-    mgr->Release();
-    return result;
-}
-
 } // namespace
 
 // MARK: - C interface
@@ -766,6 +916,11 @@ CTSDocument *cts_document_create(const CTSCallbacks *callbacks, void *hwnd, int3
 void cts_document_destroy(CTSDocument *document) {
     Document *d = reinterpret_cast<Document *>(document);
     if (!d) return;
+    if (g_thread.threadMgr && d->hwnd) {
+        ITfDocumentMgr *previous = nullptr;
+        g_thread.threadMgr->AssociateFocus(d->hwnd, nullptr, &previous);
+        if (previous) previous->Release();
+    }
     if (d->focused && g_thread.threadMgr) g_thread.threadMgr->SetFocus(g_thread.disabled);
     delete d;
 }
@@ -774,8 +929,21 @@ void cts_document_set_focus(CTSDocument *document, int focused) {
     Document *d = reinterpret_cast<Document *>(document);
     if (!d || !g_thread.threadMgr) return;
     d->focused = focused != 0;
-    HRESULT hr = g_thread.threadMgr->SetFocus(focused ? d->documentMgr : g_thread.disabled);
-    trace("focus %s hr 0x%08lx", focused ? "document" : "none", (unsigned long)hr);
+    ITfDocumentMgr *target = focused ? d->documentMgr : g_thread.disabled;
+    // TSF moves its focus itself when the window gets WM_SETFOCUS: to the document manager
+    // associated with the window, which without this association is none (and the input
+    // method would not compose into the store).
+    ITfDocumentMgr *previous = nullptr;
+    HRESULT associated = d->hwnd ? g_thread.threadMgr->AssociateFocus(d->hwnd, target, &previous) : E_INVALIDARG;
+    if (previous) previous->Release();
+    HRESULT hr = g_thread.threadMgr->SetFocus(target);
+    ITfDocumentMgr *now = nullptr;
+    g_thread.threadMgr->GetFocus(&now);
+    trace("focus %s %p hr 0x%08lx (associate hr 0x%08lx), thread focus now %p, window focus %p (document hwnd %p)",
+          focused ? "document" : "disabled", (void *)target, (unsigned long)hr, (unsigned long)associated, (void *)now,
+          (void *)GetFocus(), (void *)d->hwnd);
+    if (now) now->Release();
+    if (focused) traceInputState("focus");
 }
 
 void cts_document_sync(CTSDocument *document, const uint16_t *text, int32_t length, int32_t selectionStart, int32_t selectionEnd) {
@@ -815,22 +983,27 @@ void cts_document_set_conversion(CTSDocument *, int32_t mode) { setCompartment(G
 int32_t cts_document_conversion(CTSDocument *) { return compartmentValue(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION); }
 
 int cts_process_key(uint32_t message, uint64_t wParam, int64_t lParam) {
-    if (!g_thread.keys) return 0;
+    if (!g_thread.keys) { trace("key vk 0x%llx: no keystroke manager", (unsigned long long)wParam); return 0; }
     WPARAM w = static_cast<WPARAM>(wParam);
     LPARAM l = static_cast<LPARAM>(lParam);
-    BOOL eaten = FALSE;
-    if (message == WM_KEYDOWN) {
-        if (SUCCEEDED(g_thread.keys->TestKeyDown(w, l, &eaten)) && eaten) {
-            eaten = FALSE;
-            g_thread.keys->KeyDown(w, l, &eaten);
-        }
+    BOOL tested = FALSE, eaten = FALSE;
+    HRESULT testHr = S_OK, keyHr = S_FALSE;
+    bool down = message == WM_KEYDOWN;
+    if (down) {
+        testHr = g_thread.keys->TestKeyDown(w, l, &tested);
+        if (SUCCEEDED(testHr) && tested) keyHr = g_thread.keys->KeyDown(w, l, &eaten);
     } else if (message == WM_KEYUP) {
-        if (SUCCEEDED(g_thread.keys->TestKeyUp(w, l, &eaten)) && eaten) {
-            eaten = FALSE;
-            g_thread.keys->KeyUp(w, l, &eaten);
-        }
+        testHr = g_thread.keys->TestKeyUp(w, l, &tested);
+        if (SUCCEEDED(testHr) && tested) keyHr = g_thread.keys->KeyUp(w, l, &eaten);
     }
-    if (eaten) trace("key %s vk 0x%llx taken by the input method", message == WM_KEYDOWN ? "down" : "up", (unsigned long long)wParam);
+    if (eaten) {
+        trace("key %s vk 0x%llx taken by the input method", down ? "down" : "up", (unsigned long long)wParam);
+    } else if (down) {
+        // Every key down offered, so a rerun shows whether the input method sees the keys.
+        trace("key down vk 0x%llx offered: TestKeyDown hr 0x%08lx wants %d%s", (unsigned long long)wParam,
+              (unsigned long)testHr, tested ? 1 : 0, tested ? ", KeyDown did not eat it" : "");
+        (void)keyHr;
+    }
     return eaten ? 1 : 0;
 }
 

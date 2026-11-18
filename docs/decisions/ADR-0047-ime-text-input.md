@@ -66,6 +66,11 @@ text view commits the composition (`discardMarkedText`), as on macOS.
 - One `ITfThreadMgr` per thread (activated with the first window that needs it), a document
   manager and context per window, and an empty document manager that gets the focus when no
   text client has it, which turns the input method off for tables, buttons and the like.
+  Each focus change is also recorded with `AssociateFocus(hwnd, …)`: TSF moves its focus by
+  itself when the window gets `WM_SETFOCUS`, to the document manager associated with the
+  window, and without the association that is none. The open state and conversion mode are
+  the thread manager's own compartments (`QueryInterface(IID_ITfCompartmentMgr)`), not the
+  global compartment manager.
 - The `ITextStoreACP` keeps its own copy of the text around the selection (as Chromium's and
   Firefox's stores do). The window syncs it from the view (`cts_document_sync`, coalesced
   after the view's change notifications and refreshed before every lock), and the store tells
@@ -111,7 +116,10 @@ is off whenever TSF owns the window's input.
 ### Diagnostics
 
 `APPKITWIN_TRACE_TEXTINPUT=1` prints one `[textinput]` line per step on stderr: context
-activation, `setMarkedText`/`insertText`/cancel with the text, the TSF store's edits, locks,
+activation, the thread's active text service with its open state and conversion mode (at
+activation, on focus and whenever they change), text service profile switches, the thread
+manager's focus changes, every key down offered to `ITfKeystrokeMgr` with its
+`TestKeyDown` answer, `WM_INPUTLANGCHANGE`, `setMarkedText`/`insertText`/cancel with the text, the TSF store's edits, locks,
 `GetTextExt` rectangles and candidate counts, the IMM composition strings, text-input-v3
 batches and XIM preedit draws.
 

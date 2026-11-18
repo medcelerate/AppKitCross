@@ -174,11 +174,20 @@ final class Win32TextServices {
     /// true when it took the key. `APPKITWIN_TSF_KEYS=0` turns this off (TSF's own keyboard
     /// hook still runs).
     static func preTranslate(_ msg: MSG) -> Bool {
-        guard forwardsKeys, let focused, focused.isFocused else { return false }
         let message = msg.message
         guard message == UINT(WM_KEYDOWN) || message == UINT(WM_KEYUP) else { return false }
+        guard forwardsKeys, let focused, focused.isFocused else {
+            if message == UINT(WM_KEYDOWN), _TextInputTrace.enabled {
+                let why = !forwardsKeys ? "APPKITWIN_TSF_KEYS=0" : (Win32TextServices.focused == nil ? "no window has the TSF focus" : "no text client is active")
+                _TextInputTrace.log("tsf key down vk 0x\(String(UInt(msg.wParam), radix: 16)) not offered: \(why)")
+            }
+            return false
+        }
         // Keys the hook already gave the input method arrive as VK_PROCESSKEY.
-        if Int32(truncatingIfNeeded: msg.wParam) == VK_PROCESSKEY { return false }
+        if Int32(truncatingIfNeeded: msg.wParam) == VK_PROCESSKEY {
+            if message == UINT(WM_KEYDOWN) { _TextInputTrace.log("tsf key down VK_PROCESSKEY (the input method's hook took it)") }
+            return false
+        }
         return cts_process_key(UInt32(message), UInt64(msg.wParam), Int64(msg.lParam)) != 0
     }
     private static let forwardsKeys = ProcessInfo.processInfo.environment["APPKITWIN_TSF_KEYS"] != "0"
