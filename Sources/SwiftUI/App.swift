@@ -185,9 +185,15 @@ extension App {
     public static func main() {
         let app = Self()
         let runner = _AppRunner(name: _AppRunner.defaultName)
+        runner._nameIsExecutableStem = _AppRunner.bundleName == nil
         runner.install(app)
         runner.run(scene: app.body)
         runner.installMenuBar()
+        // Launching finishes once the scenes exist, as on macOS: the delegate's
+        // `applicationDidFinishLaunching` sees the scenes' windows, and a DocumentGroup's
+        // document controller opens the files named on the command line, or an untitled
+        // document, between the will- and did-finish messages.
+        NSApplication.shared.finishLaunching()
         NSApplication.shared.run()
     }
 }
@@ -195,8 +201,13 @@ extension App {
 /// Runs an App: creates the NSApplication, installs the delegate adaptor, opens windows.
 @MainActor
 public final class _AppRunner {
-    public let applicationName: String
+    public private(set) var applicationName: String
     public private(set) var windows: [NSWindow] = []
+    /// The runner of the running App (nil in tests that make their own).
+    static weak var _current: _AppRunner?
+    /// The name is the executable's file stem, not a bundle's: the main window's navigation
+    /// title is a better name and replaces it (`_adoptName`).
+    var _nameIsExecutableStem = false
     var pendingDefaultSize: CGSize? = nil
     var pendingHidesTitleBar = false
     /// `.windowToolbarStyle(_:)` for the windows the next scene opens (Toolbar.swift).
@@ -210,12 +221,43 @@ public final class _AppRunner {
     var commands: [any Commands] = []
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
+    /// A DocumentGroup ran: the File menu gets the document commands (New, Open, Open
+    /// Recent, Save, Save As, Revert) instead of New Window.
+    var _hasDocumentGroups = false
 
-    public init(name: String) { applicationName = name }
+    public init(name: String) {
+        applicationName = name
+        _AppRunner._current = self
+    }
 
+    /// Renames an app named after its executable (no bundle): the app menu follows.
+    func _adoptName(_ name: String) {
+        guard _nameIsExecutableStem, !name.isEmpty, name != applicationName else { return }
+        applicationName = name
+        if NSApplication.shared.mainMenu != nil { installMenuBar() }
+    }
+
+    /// The bundle's name: its Info.plist's `CFBundleName`, or for a bare executable the
+    /// one in the Info.plist `APPKITWIN_INFO_PLIST` names (where AppKit's document
+    /// controller reads the document types too).
+    static var bundleName: String? {
+        if let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty { return n }
+        if let path = ProcessInfo.processInfo.environment["APPKITWIN_INFO_PLIST"], !path.isEmpty,
+           let data = FileManager.default.contents(atPath: path),
+           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+           let n = plist["CFBundleName"] as? String, !n.isEmpty { return n }
+        return nil
+    }
+
+    /// The bundle's name where there is an Info.plist, else the executable's name without
+    /// its extension (Windows executables carry `.exe`; the app menu and window titles
+    /// read "DailyTodo", not "DailyTodo.exe").
     static var defaultName: String {
+        if let bundleName { return bundleName }
         let path = CommandLine.arguments.first ?? "App"
-        return (path as NSString).lastPathComponent
+        let file = (path as NSString).lastPathComponent
+        let stem = (file as NSString).deletingPathExtension
+        return stem.isEmpty ? file : stem
     }
 
     func install<A: App>(_ app: A) {
@@ -228,7 +270,6 @@ public final class _AppRunner {
                 NSApplication.shared.delegate = delegate as? NSApplicationDelegate
             }
         }
-        NSApplication.shared.finishLaunching()
     }
 
     public func run<S: Scene>(scene: S) {
@@ -276,32 +317,118 @@ public final class _AppRunner {
             let size = defaultSize ?? pendingDefaultSize
             primaryWindowGroup = { [weak self] in self?.openWindow(title: title, content: content, defaultSize: size) }
         }
+        let window = _makeWindow(title: title, content: content, defaultSize: defaultSize ?? pendingDefaultSize,
+                                 resizability: pendingResizability, hidesTitleBar: pendingHidesTitleBar, toolbarStyle: pendingToolbarStyle)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// A DocumentGroup document's window (not shown: its window controller shows it), with
+    /// the scene modifiers the group was declared under. Each new one cascades from the
+    /// last document window, as AppKit's document windows do.
+    func _makeDocumentWindow<Content: View>(content: Content, entry: _DocumentGroupEntry) -> NSWindow {
+        let window = _makeWindow(title: "", content: content, defaultSize: entry.defaultSize,
+                                 resizability: entry.resizability, hidesTitleBar: entry.hidesTitleBar, toolbarStyle: entry.toolbarStyle)
+        if let last = _lastDocumentWindow, last.isVisible {
+            let frame = last.frame
+            _ = window.cascadeTopLeft(from: window.cascadeTopLeft(from: NSPoint(x: frame.minX, y: frame.maxY)))
+        } else {
+            window.center()
+        }
+        _lastDocumentWindow = window
+        return window
+    }
+    private weak var _lastDocumentWindow: NSWindow?
+
+    /// A scene window hosting `content`, sized and styled as the scene modifiers say,
+    /// tracked by the runner (closing the last one quits off macOS). Not yet shown.
+    private func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
+                                            hidesTitleBar: Bool, toolbarStyle: NSWindow.ToolbarStyle) -> NSWindow {
+        let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar, pendingToolbarStyle = toolbarStyle
         let hosting = NSHostingView(rootView: content)
         let ideal = hosting.sizeThatFits(.unspecified)
-        var size = defaultSize ?? pendingDefaultSize ?? NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
-        size.width = max(size.width, ideal.width)
-        size.height = max(size.height, ideal.height)
+        var size: NSSize
+        if let given = pendingDefaultSize {
+            // `.defaultSize` is the window's size, grown only to the content's minimum (not
+            // its ideal: a scroll view's ideal is its whole document, which opened MD Vault's
+            // viewer 1460 points tall).
+            let least = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            size = NSSize(width: max(given.width, least.width), height: max(given.height, least.height))
+        } else {
+            size = NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
+        }
+        // A new window fits the screen's visible frame (less the title bar), as AppKit
+        // constrains a window's first frame.
+        if let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame, visible.width > 0, visible.height > 0 {
+            size.width = min(size.width, visible.width)
+            size.height = min(size.height, max(200, visible.height - 40))
+        }
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
         if pendingHidesTitleBar { style.insert(.fullSizeContentView) }
-        // `.contentSize`: the window is fixed at its content's size (no resize frame, no
-        // zoom); `.contentMinSize`: it cannot shrink below the content's ideal size.
-        if pendingResizability == .contentSize { style.remove(.resizable) }
+        // `.contentSize`: the window's size range is the content's (its minimum and
+        // maximum frame sizes), so content with a minimum and no maximum still resizes;
+        // only content of one size gives a fixed window with no resize frame and no zoom.
+        // `.contentMinSize`: it cannot shrink below the content's ideal size.
+        var contentMin = size, contentMax: NSSize? = nil
+        if pendingResizability == .contentSize {
+            let lo = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let hi = hosting.sizeThatFits(NSHostingSizeProposal(width: .infinity, height: .infinity))
+            contentMin = NSSize(width: max(lo.width, 1), height: max(lo.height, 1))
+            contentMax = NSSize(width: hi.width.isFinite ? max(hi.width, contentMin.width) : .greatestFiniteMagnitude,
+                                height: hi.height.isFinite ? max(hi.height, contentMin.height) : .greatestFiniteMagnitude)
+            // The window opens at the content's ideal size (a default size if the scene
+            // gave one), within the content's range: no 300×200 floor for fixed content.
+            var s = pendingDefaultSize ?? ideal
+            s.width = min(max(s.width, contentMin.width), contentMax!.width)
+            s.height = min(max(s.height, contentMin.height), contentMax!.height)
+            size = s
+            if contentMin == contentMax { style.remove(.resizable) }
+        }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: style, backing: .buffered, defer: false)
         window.title = title
         switch pendingResizability.kind {
-        case .contentSize: window.minSize = size; window.maxSize = size
+        case .contentSize: window.minSize = contentMin; if let contentMax { window.maxSize = contentMax }
         case .contentMinSize: window.minSize = ideal
         case .automatic: break
         }
+        observeClose(of: window)
         if pendingHidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
         window.toolbarStyle = pendingToolbarStyle
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting
-        window.center()
-        window.makeKeyAndOrderFront(nil)
         windows.append(window)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        return window
+    }
+
+    private var closeObservers: [any NSObjectProtocol] = []
+    /// Forgets a scene window once it closes. Where there is no Dock to reopen the app
+    /// from (Windows, Linux), a SwiftUI app whose last window closed would linger with no
+    /// window, no menu bar and no way back, so it terminates then, unless it keeps a status
+    /// item (a menu-bar app) or its delegate took the decision. On macOS AppKit's rule
+    /// applies: the app keeps running and the Dock reopens it.
+    private func observeClose(of window: NSWindow) {
+        let token = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window else { return }
+                self.windows.removeAll { $0 === window }
+                self.lastWindowDidClose()
+            }
+        }
+        closeObservers.append(token)
+    }
+    /// Test hook: false keeps a test process alive when it closes a runner's last window.
+    static var _terminatesAfterLastWindowCloses = true
+    private func lastWindowDidClose() {
+        #if !canImport(Darwin)
+        guard _AppRunner._terminatesAfterLastWindowCloses, windows.isEmpty, settingsWindow?.isVisible != true else { return }
+        let app = NSApplication.shared
+        guard !NSStatusBar.system._hasItems, app.delegate?.applicationShouldTerminateAfterLastWindowClosed(app) != true else { return }
+        // After the close finishes: terminate from inside willClose would tear the window
+        // down under its own notification.
+        DispatchQueue.main.async { if NSApplication.shared.windows.allSatisfy({ !$0.isVisible }) { NSApplication.shared.terminate(nil) } }
+        #endif
     }
 }
 

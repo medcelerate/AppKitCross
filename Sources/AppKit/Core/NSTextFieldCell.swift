@@ -25,6 +25,14 @@ import CoreText
     private var _placeholderAttributedString: NSAttributedString? = nil
     private var _allowedInputSourceLocales: [String]? = nil
 
+    @MainActor internal override func _copyCellState(from other: NSCell) {
+        super._copyCellState(from: other)
+        guard let o = other as? NSTextFieldCell else { return }
+        _bezelStyle = o._bezelStyle; _backgroundColor = o._backgroundColor; _drawsBackground = o._drawsBackground
+        _textColorValue = o._textColorValue; _placeholderString = o._placeholderString
+        _placeholderAttributedString = o._placeholderAttributedString; _allowedInputSourceLocales = o._allowedInputSourceLocales
+    }
+
     internal override var _textColor: NSColor {
         // Emphasized (a selected row in a key window): light text over the selection colour.
         if _backgroundStyle == .emphasized, _isEnabled, _textColorValue == nil || _textColorValue == .labelColor || _textColorValue == .textColor || _textColorValue == .controlTextColor { return .alternateSelectedControlTextColor }
@@ -45,7 +53,7 @@ import CoreText
     @MainActor internal func _measure(maxWidth: CGFloat?) -> NSSize {
         var s = stringValue.size(withAttributes: _attributes)
         if _isMultiline, let maxWidth, maxWidth > 0 {
-            s = Platform.backend.text.measure(stringValue, font: _effectiveFont.handle, maxWidth: maxWidth)
+            s = _NSTextMeasureCache.measure(stringValue, font: _effectiveFont, maxWidth: maxWidth)
         }
         if stringValue.isEmpty { s.height = _effectiveFont.ascender - _effectiveFont.descender }
         return s
@@ -81,15 +89,23 @@ import CoreText
 
     /// True while the field editor shows the text.
     internal var _hidesText = false
+    /// NSTextField's `placeholderAttributedStrings` (macOS 26), longest first as given.
+    internal var _placeholderCandidates: [NSAttributedString] = []
 
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         if _hidesText { return }
         let rect = _textRect(forBounds: cellFrame)
         let flipped = controlView.isFlipped
         if stringValue.isEmpty {
-            if let p = _placeholderString, !p.isEmpty {
-                var attrs = _attributes
-                attrs[.foregroundColor] = NSColor.placeholderTextColor
+            var attrs = _attributes
+            attrs[.foregroundColor] = NSColor.placeholderTextColor
+            if !_placeholderCandidates.isEmpty {
+                // NSTextField.placeholderAttributedStrings: the first that fits the width, else the last.
+                let fitting = _placeholderCandidates.first { $0.size().width <= rect.width } ?? _placeholderCandidates.last!
+                _drawText(fitting.string, attributes: attrs.merging(fitting.length > 0 ? fitting.attributes(at: 0, effectiveRange: nil) : [:]) { $1 }, in: rect, alignment: _alignment, flipped: flipped)
+            } else if let a = _placeholderAttributedString, a.length > 0 {
+                _drawText(a.string, attributes: attrs.merging(a.attributes(at: 0, effectiveRange: nil)) { $1 }, in: rect, alignment: _alignment, flipped: flipped)
+            } else if let p = _placeholderString, !p.isEmpty {
                 _drawText(p, attributes: attrs, in: rect, alignment: _alignment, flipped: flipped)
             }
             return
@@ -145,9 +161,13 @@ import CoreText
         set { _placeholderString = newValue; _changed() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/setupfieldeditorattributes(_:)
-    @MainActor open override func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText { textObj }
+    @MainActor open override func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText {
+        let editor = super.setUpFieldEditorAttributes(textObj)
+        if let c = textColor, isEnabled { editor.textColor = c }
+        return editor
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/setwantsnotificationformarkedtext(_:)
-    @MainActor open func setWantsNotificationForMarkedText(_ flag: Bool) { }
+    @MainActor open func setWantsNotificationForMarkedText(_ flag: Bool) { _wantsNotificationForMarkedText = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/textcolor
     @MainActor open var textColor: NSColor? {
         get { _textColorValue }

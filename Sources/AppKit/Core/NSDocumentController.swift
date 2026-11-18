@@ -635,6 +635,10 @@ import UniformTypeIdentifiers
                 remaining.removeFirst()
                 doc._canClose { ok in
                     guard ok else { completion(false); return }
+                    // A reviewed document (saved, or its changes discarded) closes before
+                    // the next one is asked about, as on macOS; Don't Save left it open
+                    // and still edited behind the next alert.
+                    doc.close()
                     next()
                 }
             }
@@ -673,7 +677,7 @@ import UniformTypeIdentifiers
     @MainActor open var allowsAutomaticShareMenu: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdocumentcontroller/standardsharemenuitem()
     @available(macOS 10.13, *)
-    @MainActor open func standardShareMenuItem() -> NSMenuItem { unimplemented() }
+    @MainActor open func standardShareMenuItem() -> NSMenuItem { appleOnlyUnavailable("NSDocumentController.standardShareMenuItem — sharing services (NSSharingService) are macOS-only") }
 
     // MARK: Menu actions and validation
 
@@ -719,5 +723,5 @@ import UniformTypeIdentifiers
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
     // Requirement of NSWindowRestoration
-    @MainActor public static func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder) async throws -> NSWindow { unimplemented() }
+    @MainActor public static func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder) async throws -> NSWindow { unimplemented("NSDocumentController.restoreWindow — the port writes no restoration archives (ADR-0038)") }
 }

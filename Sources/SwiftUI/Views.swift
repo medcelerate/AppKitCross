@@ -14,7 +14,16 @@ public struct Font: Hashable, Sendable {
     public enum Design: Hashable, Sendable { case `default`, serif, rounded, monospaced }
     public enum TextStyle: Hashable, CaseIterable, Sendable { case largeTitle, title, title2, title3, headline, subheadline, body, callout, footnote, caption, caption2 }
 
-    enum Base: Hashable { case system(CGFloat, Design), custom(String, CGFloat), style(TextStyle, Design) }
+    enum Base: Hashable { case system(CGFloat, Design), custom(String, CGFloat), style(TextStyle, Design), platform(_PlatformFont) }
+    /// An AppKit font kept as is (`Font(_:)` with an `NSFont`), compared by name and size.
+    final class _PlatformFont: Hashable, @unchecked Sendable {
+        let font: NSFont
+        let name: String
+        let size: CGFloat
+        init(_ font: NSFont) { self.font = font; name = font.fontName; size = font.pointSize }
+        static func == (a: _PlatformFont, b: _PlatformFont) -> Bool { a === b || (a.name == b.name && a.size == b.size) }
+        func hash(into h: inout Hasher) { h.combine(name); h.combine(size) }
+    }
     let base: Base
     var weight: Weight? = nil
     var isItalic = false
@@ -77,7 +86,7 @@ public struct Font: Hashable, Sendable {
         switch base {
         case .system(let s, _): return Font(base: .system(s, .monospaced), weight: weight, isItalic: isItalic)
         case .style(let st, _): return Font(base: .style(st, .monospaced), weight: weight, isItalic: isItalic)
-        case .custom: return self
+        case .custom, .platform: return self
         }
     }
 
@@ -120,6 +129,7 @@ public struct Font: Hashable, Sendable {
         case .style(let st, let d):
             size = Font.pointSize(st); design = d
             if st == .headline, w == nil { w = .semibold }
+        case .platform(let p): return p.font
         case .custom(let name, let s):
             let f = NSFont(name: name, size: s) ?? NSFont.systemFont(ofSize: s)
             return isItalic ? (NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)) : f
@@ -128,6 +138,15 @@ public struct Font: Hashable, Sendable {
         if isItalic { f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask) }
         return f
     }
+}
+
+extension Font {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/font/init(_:)
+    /// Apple's initializer takes a `CTFont`, which an `NSFont` is toll-free bridged to, so
+    /// apps write `Font(nsFont)`; the port's `NSFont` is not a `CTFont`, so it takes the
+    /// `NSFont` itself (the call site reads the same). The font is used as it is: weight,
+    /// italic and design modifiers do not change it.
+    public init(_ font: NSFont) { base = .platform(_PlatformFont(font)) }
 }
 
 // MARK: Color
@@ -479,6 +498,9 @@ public struct Text: View, _PrimitiveView, Equatable {
         var monospacedDigits = false
         /// An inline image (`Text(image)`), drawn as an attachment.
         var image: Image? = nil
+        /// An attributed string's `link` run: drawn in the accent colour (when the run sets
+        /// none) and carried as the text's `.link` attribute. Not yet clickable.
+        var link: URL? = nil
     }
     var runs: [Run]
 
@@ -531,6 +553,12 @@ public struct Text: View, _PrimitiveView, Equatable {
     public func font(_ font: Font?) -> Text { mapRuns { $0.font = font ?? $0.font } }
     public func foregroundColor(_ color: Color?) -> Text { mapRuns { $0.color = color } }
     public func foregroundStyle(_ color: Color) -> Text { mapRuns { $0.color = color } }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/foregroundstyle(_:)
+    /// A colour or a hierarchical level colours the text; other styles leave it as it is.
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> Text {
+        guard let c = _foregroundColor(for: style, in: EnvironmentValues()) else { return self }
+        return mapRuns { $0.color = c }
+    }
     public func bold() -> Text { mapRuns { $0.bold = true } }
     public func italic() -> Text { mapRuns { $0.italic = true } }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/underline(_:pattern:color:)
@@ -564,6 +592,10 @@ public struct Text: View, _PrimitiveView, Equatable {
             let color = r.color ?? baseColor
             attrs[.foregroundColor] = color?.nsColor ?? (env.isEnabled ? NSColor.labelColor : NSColor.disabledControlTextColor)
             if let bg = r.backgroundColor { attrs[.backgroundColor] = bg.nsColor }
+            if let link = r.link {
+                attrs[.link] = link
+                if r.color == nil { attrs[.foregroundColor] = Color.accentColor.nsColor }
+            }
             if let u = r.underline { attrs[.underlineStyle] = u.nsStyle.rawValue; if let c = u.color { attrs[.underlineColor] = c.nsColor } }
             if let st = r.strikethrough { attrs[.strikethroughStyle] = st.nsStyle.rawValue; if let c = st.color { attrs[.strikethroughColor] = c.nsColor } }
             if r.kerning != 0 || r.tracking != 0 { attrs[.kern] = r.kerning + r.tracking }
@@ -1048,7 +1080,10 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
     private func apply() {
         guard let node else { return }
-        if control.stringValue != text.wrappedValue, control.currentEditor == nil { control.stringValue = text.wrappedValue }
+        // The binding changed under the field (a submit handler clearing it): the field
+        // editor shows the new text too, as it does on macOS, rather than the stale text
+        // until focus leaves.
+        if control.stringValue != text.wrappedValue { control._setStringValueUpdatingEditor(text.wrappedValue) }
         if control.placeholderString != placeholder { control.placeholderString = placeholder }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
@@ -1070,7 +1105,11 @@ public struct Toggle<Label: View>: View, _PrimitiveView {
     let isOn: Binding<Bool>
     let label: Label
     public init(isOn: Binding<Bool>, @ViewBuilder label: () -> Label) { self.isOn = isOn; self.label = label() }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TogglePrimitive(title: (label as? Text)?._string ?? "", isOn: isOn) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        let title = (label as? Text)?._string ?? ""
+        if node.environment.toggleStyle == .switch { return _SwitchTogglePrimitive(title: title, isOn: isOn) }
+        return _TogglePrimitive(title: title, isOn: isOn)
+    }
 }
 
 extension Toggle where Label == Text {
@@ -1113,6 +1152,78 @@ final class _TogglePrimitive: _ControlPrimitive<NSButton> {
     override var intrinsicSize: CGSize { let s = super.intrinsicSize; return CGSize(width: max(s.width, 18), height: max(s.height, 18)) }
 }
 
+/// The `.switch` toggle style: the label, then an `NSSwitch` at the trailing edge.
+@MainActor
+final class _SwiftUISwitchRow: NSView {
+    let label = NSTextField(labelWithString: "")
+    let toggle = NSSwitch(frame: .zero)
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(label)
+        addSubview(toggle)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+    var gap: CGFloat { label.stringValue.isEmpty ? 0 : 8 }
+    override var intrinsicContentSize: NSSize {
+        let l = label.stringValue.isEmpty ? NSSize.zero : label.intrinsicContentSize
+        let s = toggle.intrinsicContentSize
+        return NSSize(width: l.width + gap + s.width, height: max(l.height, s.height))
+    }
+    override func layout() {
+        super.layout()
+        let s = toggle.intrinsicContentSize
+        let l = label.stringValue.isEmpty ? NSSize.zero : label.intrinsicContentSize
+        let rtl = userInterfaceLayoutDirection == .rightToLeft
+        let switchX = rtl ? 0 : bounds.width - s.width
+        toggle.frame = NSRect(x: switchX, y: ((bounds.height - s.height) / 2).rounded(), width: s.width, height: s.height)
+        label.isHidden = label.stringValue.isEmpty
+        let labelWidth = max(0, bounds.width - s.width - gap)
+        label.frame = NSRect(x: rtl ? s.width + gap : 0, y: ((bounds.height - l.height) / 2).rounded(), width: min(l.width, labelWidth), height: l.height)
+    }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
+}
+
+@MainActor
+final class _SwitchTogglePrimitive: _ControlPrimitive<_SwiftUISwitchRow> {
+    var isOn: Binding<Bool>
+    init(title: String, isOn: Binding<Bool>) {
+        self.isOn = isOn
+        let row = _SwiftUISwitchRow(frame: .zero)
+        row.label.stringValue = title
+        row.toggle.state = isOn.wrappedValue ? .on : .off
+        super.init(control: row)
+        let s = row.toggle
+        s.target = s
+        s.action = Selector(("swiftUISwitchAction:"))
+        s.setActionHandler(for: Selector(("swiftUISwitchAction:"))) { [weak self] _ in
+            guard let self else { return }
+            let v = self.control.toggle.state == .on
+            if self.isOn.wrappedValue != v { self.isOn.wrappedValue = v }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _SwitchTogglePrimitive else { return }
+        isOn = o.isOn
+        if control.label.stringValue != o.control.label.stringValue { control.label.stringValue = o.control.label.stringValue }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        let want: NSControl.StateValue = isOn.wrappedValue ? .on : .off
+        if control.toggle.state != want { control.toggle.state = want }
+        control.toggle.isEnabled = node?.environment.isEnabled ?? true
+        control.needsLayout = true
+    }
+    /// A labelled switch takes the width it is offered, the switch at the trailing edge.
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let s = intrinsicSize
+        guard !control.label.stringValue.isEmpty, let w = proposal.width, w.isFinite else { return s }
+        return CGSize(width: max(s.width, w), height: s.height)
+    }
+}
+
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider
 public struct Slider<Label: View, ValueLabel: View>: View, _PrimitiveView {
     public typealias Body = Never
@@ -1120,36 +1231,55 @@ public struct Slider<Label: View, ValueLabel: View>: View, _PrimitiveView {
     let range: ClosedRange<Double>
     let step: Double?
     let onEditingChanged: (Bool) -> Void
+    /// The label's text: the slider's accessibility label (macOS draws it beside the
+    /// slider in a form; here it names the control for assistive technology).
+    let label: String?
     public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where Label == EmptyView, ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
         self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
         range = Double(bounds.lowerBound)...Double(bounds.upperBound)
         self.step = step.map { Double($0) }
         self.onEditingChanged = onEditingChanged
+        label = nil
     }
     public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, step: V.Stride? = nil, onEditingChanged: @escaping (Bool) -> Void = { _ in }, @ViewBuilder label: () -> Label) where ValueLabel == EmptyView, V.Stride: BinaryFloatingPoint {
         self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
         range = Double(bounds.lowerBound)...Double(bounds.upperBound)
         self.step = step.map { Double($0) }
         self.onEditingChanged = onEditingChanged
+        self.label = (label() as? Text)?._string
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range, step: step, label: label) }
 }
 
 @MainActor
 final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
     var value: Binding<Double>
-    init(value: Binding<Double>, range: ClosedRange<Double>) {
+    var step: Double?
+    var label: String?
+    init(value: Binding<Double>, range: ClosedRange<Double>, step: Double? = nil, label: String? = nil) {
         self.value = value
+        self.step = step
+        self.label = label
         let s = NSSlider(frame: NSRect(x: 0, y: 0, width: 120, height: 20))
         s.minValue = range.lowerBound
         s.maxValue = range.upperBound
         s.doubleValue = value.wrappedValue
+        // The step is what an increment from assistive technology (and the arrow keys) moves.
+        if let step, step > 0 { s.altIncrementValue = step }
+        if let label, !label.isEmpty { s.setAccessibilityLabel(label) }
         super.init(control: s)
         s.target = s
         s.action = Selector(("swiftUISliderAction:"))
         s.setActionHandler(for: Selector(("swiftUISliderAction:"))) { [weak self] _ in
             guard let self else { return }
-            if self.value.wrappedValue != self.control.doubleValue { self.value.wrappedValue = self.control.doubleValue }
+            var v = self.control.doubleValue
+            if let step = self.step, step > 0 {
+                // A stepped slider only takes the range's steps, as SwiftUI's does.
+                let lo = self.control.minValue
+                v = min(self.control.maxValue, lo + ((v - lo) / step).rounded() * step)
+                if v != self.control.doubleValue { self.control.doubleValue = v }
+            }
+            if self.value.wrappedValue != v { self.value.wrappedValue = v }
         }
     }
     override func update(from other: _Primitive) {
@@ -1157,6 +1287,13 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         guard let o = other as? _SliderPrimitive else { return }
         value = o.value
         control.minValue = o.control.minValue; control.maxValue = o.control.maxValue
+        if o.step != step { step = o.step; control.altIncrementValue = (step ?? 0) > 0 ? step! : -1 }
+        if o.label != label {
+            // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
+            // above re-applies its own after the update.
+            label = o.label
+            control.setAccessibilityLabel(label.flatMap { $0.isEmpty ? nil : $0 })
+        }
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1291,11 +1428,22 @@ final class _ScrollPrimitive: _Primitive {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let content = node.children.first?.sizeThatFits(ProposedViewSize(width: axes.contains(.horizontal) ? nil : proposal.width, height: axes.contains(.vertical) ? nil : proposal.height)) ?? .zero
-        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : content.width } ?? content.width) : content.width,
-                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : content.height } ?? content.height) : content.height)
+        // Along a scroll axis the view takes what it is offered, and an infinite probe (a
+        // stack measuring flexibility) gets infinity: a scroll view, and so a List, fills
+        // the room its siblings leave rather than stopping at its content's height. Only an
+        // unspecified proposal reports the content's size.
+        return CGSize(width: axes.contains(.horizontal) ? (proposal.width.map { $0.isFinite ? $0 : .infinity } ?? content.width) : content.width,
+                      height: axes.contains(.vertical) ? (proposal.height.map { $0.isFinite ? $0 : .infinity } ?? content.height) : content.height)
     }
     override func place(node: _ViewNode, in rect: CGRect) {
-        let inner = scroll.contentSize == .zero ? rect.size : scroll.contentSize
+        // The clip size for the rect being laid out: the scroll view's own content size is
+        // the previous frame's until the backing views sync (rows lagged one resize behind),
+        // so apply its current scroller and border insets to the new size instead.
+        var inner = rect.size
+        if scroll.contentSize != .zero, scroll.frame.size != .zero {
+            inner.width = max(0, rect.width - (scroll.frame.width - scroll.contentSize.width))
+            inner.height = max(0, rect.height - (scroll.frame.height - scroll.contentSize.height))
+        }
         let proposal = ProposedViewSize(width: axes.contains(.horizontal) ? nil : inner.width, height: axes.contains(.vertical) ? nil : inner.height)
         guard let content = node.children.first else { return }
         let s = content.sizeThatFits(proposal)
@@ -1341,7 +1489,19 @@ extension Section where Parent == EmptyView, Footer == EmptyView {
 public struct Form<Content: View>: View {
     let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
-    public var body: some View { VStack(alignment: .leading, spacing: 10) { content }.padding() }
+    @Environment(\._formStyle) private var style
+    public var body: some View {
+        switch style {
+        case .grouped:
+            // The grouped style boxes the rows on the window's background, as macOS's does.
+            VStack(alignment: .leading, spacing: 12) { content }
+                .padding(14)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .padding()
+        case .automatic, .columns:
+            VStack(alignment: .leading, spacing: 10) { content }.padding()
+        }
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressview
@@ -1349,18 +1509,306 @@ public struct ProgressView<Label: View, CurrentValueLabel: View>: View {
     let value: Double?
     let total: Double
     let label: Label?
-    public init() where Label == EmptyView, CurrentValueLabel == EmptyView { value = nil; total = 1; label = nil }
+    let currentValueLabel: CurrentValueLabel?
+    public init() where Label == EmptyView, CurrentValueLabel == EmptyView { value = nil; total = 1; label = nil; currentValueLabel = nil }
     public init<V: BinaryFloatingPoint>(value: V?, total: V = 1) where Label == EmptyView, CurrentValueLabel == EmptyView {
-        self.value = value.map { Double($0) }; self.total = Double(total); label = nil
+        self.value = value.map { Double($0) }; self.total = Double(total); label = nil; currentValueLabel = nil
     }
-    public init(_ title: String) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(title) }
+    public init<V: BinaryFloatingPoint>(value: V?, total: V = 1, @ViewBuilder label: () -> Label) where CurrentValueLabel == EmptyView {
+        self.value = value.map { Double($0) }; self.total = Double(total); self.label = label(); currentValueLabel = nil
+    }
+    public init<V: BinaryFloatingPoint>(value: V?, total: V = 1, @ViewBuilder label: () -> Label, @ViewBuilder currentValueLabel: () -> CurrentValueLabel) {
+        self.value = value.map { Double($0) }; self.total = Double(total); self.label = label(); self.currentValueLabel = currentValueLabel()
+    }
+    public init(@ViewBuilder label: () -> Label) where CurrentValueLabel == EmptyView { value = nil; total = 1; self.label = label(); currentValueLabel = nil }
+    public init(_ title: String) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(title); currentValueLabel = nil }
+    public init(_ titleKey: LocalizedStringKey) where Label == Text, CurrentValueLabel == EmptyView { value = nil; total = 1; label = Text(titleKey); currentValueLabel = nil }
+    public init<V: BinaryFloatingPoint>(_ title: String, value: V?, total: V = 1) where Label == Text, CurrentValueLabel == EmptyView {
+        self.value = value.map { Double($0) }; self.total = Double(total); label = Text(title); currentValueLabel = nil
+    }
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let label { label }
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.3)).frame(height: 6)
-                RoundedRectangle(cornerRadius: 3).fill(Color.accentColor).frame(width: max(0, 160 * CGFloat((value ?? 0) / max(total, 0.0001))), height: 6)
-            }.frame(width: 160)
+            // The indicator is an AXProgressIndicator (UIA ProgressBar, AT-SPI progress bar)
+            // with the value in 0...total and the label as its name; an indeterminate
+            // one (an AXBusyIndicator when circular) has no value.
+            _ProgressIndicator(value: value, total: total, label: (label as? Text)?._string)
+            if let currentValueLabel { currentValueLabel.font(.caption) }
         }
     }
+}
+
+/// The indicator itself: an `NSProgressIndicator`, a bar (determinate when there is a
+/// value) or, under `.progressViewStyle(.circular)`, a spinner.
+struct _ProgressIndicator: View, _PrimitiveView {
+    typealias Body = Never
+    let value: Double?
+    let total: Double
+    let label: String?
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _ProgressPrimitive(value: value, total: total, label: label) }
+}
+
+@MainActor
+final class _ProgressPrimitive: _ControlPrimitive<NSProgressIndicator> {
+    var value: Double?
+    var total: Double
+    var label: String?
+    init(value: Double?, total: Double, label: String?) {
+        self.value = value; self.total = total; self.label = label
+        let p = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 160, height: 20))
+        p.minValue = 0
+        p.maxValue = max(total, 0.0001)
+        if let label, !label.isEmpty { p.setAccessibilityLabel(label) }
+        super.init(control: p)
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _ProgressPrimitive else { return }
+        value = o.value; total = o.total
+        if o.label != label {
+            // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
+            // above re-applies its own after the update.
+            label = o.label
+            control.setAccessibilityLabel(label.flatMap { $0.isEmpty ? nil : $0 })
+        }
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    override func detach() { control.stopAnimation(nil); super.detach() }
+    private func apply() {
+        let circular = node?.environment.progressViewStyle == .circular
+        let style: NSProgressIndicator.Style = circular ? .spinning : .bar
+        if control.style != style { control.style = style }
+        control.maxValue = max(total, 0.0001)
+        if let v = value {
+            if control.isIndeterminate { control.isIndeterminate = false }
+            control.doubleValue = v
+            control.stopAnimation(nil)
+        } else {
+            if !control.isIndeterminate { control.isIndeterminate = true }
+            control.startAnimation(nil)
+        }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        if control.style == .spinning { let s = control.intrinsicContentSize; return CGSize(width: s.width, height: s.height) }
+        return CGSize(width: max(20, proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160), height: 20)
+    }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/stepper
+public struct Stepper<Label: View>: View {
+    let label: Label
+    let onIncrement: (() -> Void)?
+    let onDecrement: (() -> Void)?
+    let value: Binding<Double>?
+    let range: ClosedRange<Double>?
+    let step: Double
+    let onEditingChanged: (Bool) -> Void
+    public init(@ViewBuilder label: () -> Label, onIncrement: (() -> Void)?, onDecrement: (() -> Void)?, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.label = label(); self.onIncrement = onIncrement; self.onDecrement = onDecrement; value = nil; range = nil; step = 1; self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = nil; self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound); self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0.rounded()) })
+        range = nil; self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public init<V: Strideable>(value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.label = label(); onIncrement = nil; onDecrement = nil
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0.rounded()) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound); self.step = Double(step); self.onEditingChanged = onEditingChanged
+    }
+    public var body: some View {
+        HStack(spacing: 6) {
+            label
+            _StepperControl(value: value, range: range, step: step, onIncrement: onIncrement, onDecrement: onDecrement, onEditingChanged: onEditingChanged)
+        }
+    }
+}
+extension Stepper where Label == Text {
+    public init(_ title: String, onIncrement: (() -> Void)?, onDecrement: (() -> Void)?, onEditingChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.init(label: { Text(title) }, onIncrement: onIncrement, onDecrement: onDecrement, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.init(value: value, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
+        self.init(value: value, in: bounds, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.init(value: value, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+    public init<V: Strideable>(_ title: String, value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V: BinaryInteger, V.Stride: BinaryInteger {
+        self.init(value: value, in: bounds, step: step, label: { Text(title) }, onEditingChanged: onEditingChanged)
+    }
+}
+
+/// The stepper's buttons: an `NSStepper`.
+struct _StepperControl: View, _PrimitiveView {
+    typealias Body = Never
+    let value: Binding<Double>?
+    let range: ClosedRange<Double>?
+    let step: Double
+    let onIncrement: (() -> Void)?
+    let onDecrement: (() -> Void)?
+    let onEditingChanged: (Bool) -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _StepperPrimitive(view: self) }
+}
+
+@MainActor
+final class _StepperPrimitive: _ControlPrimitive<NSStepper> {
+    var view: _StepperControl
+    init(view: _StepperControl) {
+        self.view = view
+        let s = NSStepper(frame: NSRect(x: 0, y: 0, width: 15, height: 24))
+        super.init(control: s)
+        s.target = s
+        s.action = Selector(("swiftUIStepperAction:"))
+        s.setActionHandler(for: Selector(("swiftUIStepperAction:"))) { [weak self] _ in self?.stepped() }
+    }
+    private var lastValue: Double = 0
+    private func stepped() {
+        let v = control.doubleValue
+        view.onEditingChanged(true)
+        if let binding = view.value {
+            if binding.wrappedValue != v { binding.wrappedValue = v }
+        } else {
+            if v > lastValue { view.onIncrement?() } else if v < lastValue { view.onDecrement?() }
+            lastValue = v
+        }
+        view.onEditingChanged(false)
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _StepperPrimitive else { return }
+        view = o.view
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        control.increment = view.step
+        if let binding = view.value {
+            control.valueWraps = false
+            control.minValue = view.range?.lowerBound ?? -Double.greatestFiniteMagnitude
+            control.maxValue = view.range?.upperBound ?? Double.greatestFiniteMagnitude
+            if control.doubleValue != binding.wrappedValue { control.doubleValue = binding.wrappedValue }
+        } else {
+            // Without a value the stepper counts: the direction of each step is the callback.
+            control.minValue = -1e9; control.maxValue = 1e9
+            control.valueWraps = false
+            lastValue = control.doubleValue
+        }
+        control.isEnabled = node?.environment.isEnabled ?? true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepickercomponents
+public struct DatePickerComponents: OptionSet, Sendable {
+    public let rawValue: UInt
+    public init(rawValue: UInt) { self.rawValue = rawValue }
+    public static let hourAndMinute = DatePickerComponents(rawValue: 1)
+    public static let date = DatePickerComponents(rawValue: 2)
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepicker
+public struct DatePicker<Label: View>: View {
+    let label: Label
+    let selection: Binding<Date>
+    let minimum: Date?
+    let maximum: Date?
+    let components: DatePickerComponents
+    public init(selection: Binding<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = nil; maximum = nil; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: ClosedRange<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = range.lowerBound; maximum = range.upperBound; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: PartialRangeFrom<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = range.lowerBound; maximum = nil; components = displayedComponents
+    }
+    public init(selection: Binding<Date>, in range: PartialRangeThrough<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date], @ViewBuilder label: () -> Label) {
+        self.label = label(); self.selection = selection; minimum = nil; maximum = range.upperBound; components = displayedComponents
+    }
+    public var body: some View {
+        HStack(spacing: 6) {
+            label
+            _DatePickerControl(selection: selection, minimum: minimum, maximum: maximum, components: components)
+        }
+    }
+}
+extension DatePicker where Label == Text {
+    public init(_ title: String, selection: Binding<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: ClosedRange<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: PartialRangeFrom<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+    public init(_ title: String, selection: Binding<Date>, in range: PartialRangeThrough<Date>, displayedComponents: DatePickerComponents = [.hourAndMinute, .date]) {
+        self.init(selection: selection, in: range, displayedComponents: displayedComponents) { Text(title) }
+    }
+}
+
+/// The picker itself: an `NSDatePicker` (textual with a stepper; graphical under
+/// `.datePickerStyle(.graphical)`).
+struct _DatePickerControl: View, _PrimitiveView {
+    typealias Body = Never
+    let selection: Binding<Date>
+    let minimum: Date?
+    let maximum: Date?
+    let components: DatePickerComponents
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _DatePickerPrimitive(view: self) }
+}
+
+@MainActor
+final class _DatePickerPrimitive: _ControlPrimitive<NSDatePicker> {
+    var view: _DatePickerControl
+    init(view: _DatePickerControl) {
+        self.view = view
+        let p = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 160, height: 22))
+        super.init(control: p)
+        p.target = p
+        p.action = Selector(("swiftUIDatePickerAction:"))
+        p.setActionHandler(for: Selector(("swiftUIDatePickerAction:"))) { [weak self] _ in
+            guard let self else { return }
+            if self.view.selection.wrappedValue != self.control.dateValue { self.view.selection.wrappedValue = self.control.dateValue }
+        }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _DatePickerPrimitive else { return }
+        view = o.view
+        apply()
+    }
+    override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
+    private func apply() {
+        var flags: NSDatePicker.ElementFlags = []
+        if view.components.contains(.date) { flags.insert(.yearMonthDay) }
+        if view.components.contains(.hourAndMinute) { flags.insert(.hourMinute) }
+        if control.datePickerElements != flags { control.datePickerElements = flags }
+        let style: NSDatePicker.Style = node?.environment.datePickerStyle == .graphical ? .clockAndCalendar : (node?.environment.datePickerStyle == .field ? .textField : .textFieldAndStepper)
+        if control.datePickerStyle != style { control.datePickerStyle = style }
+        // Only on a change: each setter redraws the picker, and an update that always
+        // invalidates feeds the next frame.
+        if control.minDate != view.minimum { control.minDate = view.minimum }
+        if control.maxDate != view.maximum { control.maxDate = view.maximum }
+        if control.dateValue != view.selection.wrappedValue { control.dateValue = view.selection.wrappedValue }
+        // Only on a change: setting the locale resets the picker's selected field, and every
+        // body update would otherwise drop the field the user is stepping or typing into.
+        if control.locale != node?.environment.locale { control.locale = node?.environment.locale }
+        control.isEnabled = node?.environment.isEnabled ?? true
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize { control.intrinsicContentSize }
 }

@@ -23,7 +23,8 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testButtonStateReachesThePlatformItem() {
+    func testButtonStateReachesThePlatformItem() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let bar = NSStatusBar.system
             XCTAssertTrue(bar === NSStatusBar.system)
@@ -59,7 +60,8 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testClicksSendTheActionOrOpenTheMenu() {
+    func testClicksSendTheActionOrOpenTheMenu() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let bar = NSStatusBar.system
             let item = bar.statusItem(withLength: NSStatusItem.squareLength)
@@ -108,7 +110,8 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testVisibilityIsRememberedUnderTheAutosaveName() {
+    func testVisibilityIsRememberedUnderTheAutosaveName() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let key = "NSStatusItem Visible test.item"
             UserDefaults.standard.removeObject(forKey: key)
@@ -135,6 +138,7 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
     /// With a session bus (the container's run.sh starts one), the StatusNotifierItem host
     /// serves the item's properties over D-Bus; without a watcher it is merely unregistered.
     func testStatusNotifierItemServesPropertiesOnTheSessionBus() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         try MainActor.assumeIsolated {
             guard ProcessInfo.processInfo.environment["DBUS_SESSION_BUS_ADDRESS"] != nil else { throw XCTSkip("no session bus") }
             guard let host = LinuxStatusNotifierHost.connect(screenPoint: { x, y in NSPoint(x: CGFloat(x), y: CGFloat(y)) }) else { return XCTFail("no connection") }
@@ -188,3 +192,4 @@ final class StatusItemTests: XCTestCase, @unchecked Sendable {
     }
     #endif
 }
+

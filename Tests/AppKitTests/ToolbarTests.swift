@@ -353,7 +353,7 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testWindowGrowsByTheBandAndKeepsItsContentSize() {
+    func testWindowGrowsByTheBandAndKeepsItsContentSize() throws {
         MainActor.assumeIsolated {
             let w = makeWindow()
             defer { w.close() }
@@ -373,7 +373,7 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             let view = tb._view!
             XCTAssertEqual(view.frame.minY, contentBefore.height, "the toolbar sits right above the content")
             XCTAssertEqual(view.frame.maxY, w._platformContentSize.height, "and right under the title band")
-            XCTAssertEqual(view.frame.width, w.frame.width)
+            XCTAssertEqual(view.frame.width, w._platformContentSize.width, "the content's width (Win32 frames add borders)")
             // Hiding takes the band away again; the menu action toggles it.
             w.toggleToolbarShown(nil)
             XCTAssertFalse(tb.isVisible)
@@ -396,7 +396,7 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testUnifiedToolbarOverlaysContentThatCoversTheTitleBar() {
+    func testUnifiedToolbarOverlaysContentThatCoversTheTitleBar() throws {
         MainActor.assumeIsolated {
             let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
             defer { w.close() }
@@ -413,10 +413,11 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
             let view = tb._view!
             XCTAssertEqual(view.frame.maxY, w.contentView!.bounds.height)
             w.display()
-            // Items start after the standard buttons.
+            // Items start after the standard buttons at the left (none there for Windows
+            // caption buttons, which sit at the right; ADR-0022).
             let first = view.subviews.compactMap { $0 as? _NSToolbarItemButton }.min { $0.frame.minX < $1.frame.minX }!
-            XCTAssertGreaterThanOrEqual(first.frame.minX, _NSWindowButtonsView.width)
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: w.contentView!.bounds.height - 14)), .client, "the close button is still on top")
+            XCTAssertGreaterThanOrEqual(first.frame.minX, w._windowButtonsLeadingInset)
+            XCTAssertEqual(w.platformWindowHitTest(windowCenter(of: w.standardWindowButton(.closeButton)!)), .closeButton, "the close button is still on top")
             w.toolbarStyle = .unifiedCompact
             XCTAssertEqual(w._toolbarMetrics!.height, 38)
             w.toolbarStyle = .expanded
@@ -425,7 +426,8 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testToolbarDrawsUnderTheTitleBandAboveTheContent() {
+    func testToolbarDrawsUnderTheTitleBandAboveTheContent() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             final class Red: NSView { override func draw(_ r: NSRect) { NSColor.red.setFill(); NSBezierPath.fill(bounds) } }
             let w = makeWindow()
@@ -536,9 +538,42 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// With Windows caption buttons at the right (ADR-0022) the unified row starts at the
+    /// left and keeps the trailing 138 points (plus a gap) clear, chevron included.
+    func testUnifiedToolbarStartsAtTheLeftUnderCaptionButtons() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let savedStyle = Platform.windowButtonStyleOverride
+            Platform.windowButtonStyleOverride = .caption
+            defer { Platform.windowButtonStyleOverride = savedStyle }
+            let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView], width: 400)
+            defer { w.close() }
+            let d = Delegate()
+            let tb = NSToolbar(identifier: "test.unified.caption")
+            tb.delegate = d
+            w.toolbar = tb
+            let m = w._toolbarMetrics!
+            XCTAssertEqual(m.leadingInset, 8)
+            XCTAssertEqual(m.trailingInset, _NSWindowButtonsView.captionWidth + 4)
+            w.display()
+            let view = tb._view!
+            let itemButtons = view.subviews.compactMap { $0 as? _NSToolbarItemButton }.filter { !$0.isHidden }
+            let first = itemButtons.min { $0.frame.minX < $1.frame.minX }!
+            XCTAssertLessThan(first.frame.minX, 20, "items start at the left")
+            for b in itemButtons { XCTAssertLessThanOrEqual(b.frame.maxX, 400 - _NSWindowButtonsView.captionWidth - 4, "\(b.frame) overlaps the caption buttons") }
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 390, y: w.contentView!.bounds.height - 14)), .closeButton, "the close button is on top at the right")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: w.contentView!.bounds.height - 14)), .client, "an item sits where the traffic lights were")
+            // Expanded on such a window keeps the title band, with the caption buttons in it.
+            w.toolbarStyle = .expanded
+            XCTAssertEqual(w._toolbarMetrics!.trailingInset, 8)
+            XCTAssertEqual(w._toolbarMetrics!.topInset, NSWindow._titleBarBandHeight)
+        }
+    }
+
     /// The band under a system title bar drags the window: the chrome tells the backend
     /// to ask the window's hit test for client points (Win32 WM_NCHITTEST → HTCAPTION).
-    func testToolbarBandIsDraggableChrome() {
+    func testToolbarBandIsDraggableChrome() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = makeWindow()
             defer { w.close() }
@@ -575,3 +610,6 @@ final class ToolbarTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+
+

@@ -19,3 +19,8 @@ public func NSSelectorFromString(_ name: String) -> Selector { Selector(name) }
 /// autoreleasing pointers. Without the ObjC runtime they are ordinary pointers.
 public typealias AutoreleasingUnsafeMutablePointer<Pointee> = UnsafeMutablePointer<Pointee>
 #endif
+
+#if os(Windows)
+/// `pid_t` as Darwin and Glibc declare it; Windows process ids are 32-bit too.
+public typealias pid_t = Int32
+#endif

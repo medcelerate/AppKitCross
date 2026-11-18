@@ -245,6 +245,16 @@ open class CALayer: NSObject, CAMediaTiming {
     /// Bumped whenever this layer's own rasterised content changes (not its placement).
     /// Native layer hosts re-rasterise a layer only when this moves.
     public private(set) var _rasterVersion = 0
+    /// A number no other layer instance in the process gets (scene node ids; see _nodeID).
+    public let _sceneSerial: Int = CALayer._takeSceneSerial()
+    nonisolated(unsafe) private static var _lastSceneSerial = 0
+    private static let _sceneSerialLock = NSLock()
+    private static func _takeSceneSerial() -> Int {
+        _sceneSerialLock.lock()
+        defer { _sceneSerialLock.unlock() }
+        _lastSceneSerial += 1
+        return _lastSceneSerial
+    }
     /// Platform content a native host shows in place of this layer's raster (Windows: the
     /// `IDXGISwapChain1` a `CAMetalLayer` presents through). Not part of Apple's API: the
     /// seam MetalKit uses; the software compositor ignores it and draws the layer as usual.
@@ -765,8 +775,11 @@ open class CALayer: NSObject, CAMediaTiming {
                 basic.fromValue = pendingOldValues[kp] ?? _presentationValue(forKeyPath: kp)
             }
         }
-        copy.countsForTransaction = CATransaction.noteAnimationAdded()
+        copy.transactionToken = CATransaction.noteAnimationAdded()
+        // An animation replaced under its key is over (its transaction stops waiting).
+        let replaced = animations.filter { $0.key == k }
         animations.removeAll { $0.key == k }
+        for (_, old) in replaced { _finish(old, finished: false) }
         animations.append((k, copy))
         hasPresentation = true
         CARuntime.noteAnimating(root: root)
@@ -792,7 +805,7 @@ open class CALayer: NSObject, CAMediaTiming {
     open func animation(forKey key: String) -> CAAnimation? { animations.first { $0.key == key }?.animation }
 
     private func _finish(_ a: CAAnimation, finished: Bool) {
-        if a.countsForTransaction { CATransactionCompletion.animationFinished() }
+        if let t = a.transactionToken { CATransactionCompletion.animationFinished(token: t) }
         a.delegate?.animationDidStop(a, finished: finished)
     }
 

@@ -27,9 +27,9 @@ FLAGS=(-Xswiftc -no-color-diagnostics)
 if [ "$(uname)" = Darwin ]; then FLAGS+=(-Xswiftc -target -Xswiftc "$(uname -m)-apple-macosx14.0"); fi
 # Windows (Swift 6.4.1): the frontend's debug-type round-trip check asserts on some of
 # SwiftUICharts' shape files; skipping the check gives the library's own verdict.
-# ... and two compiler jobs at a time there, since the 7 GB CI runner killed frontends
-# mid-compile with no diagnostic.
-case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types -j 2) ;; esac
+# ... and one compiler job at a time there: Swift 6.2's driver, starting two jobs
+# together, sometimes drops one and exits 1 without a word (docs/ci-windows-runner.md).
+case "$(uname)" in MINGW*|MSYS*|CYGWIN*) FLAGS+=(-Xswiftc -Xfrontend -Xswiftc -disable-round-trip-debug-types -j 1) ;; esac
 # AppKitCross's modules import the C shims (CCairo, CD2D, ...) and a client of a module needs
 # every clang module it imports; SwiftPM only passes those maps to targets that declare the
 # dependency, so they are passed to every compile here: the hand-written maps in Sources
@@ -87,24 +87,9 @@ build() {
         echo "swift build exited with status $status"
         echo "$out" | grep -aE "error:|undefined symbol|lld-link|Assertion|Stack dump|signal|exception|killed|out of memory" | grep -avE "willPresentError|^\s*[0-9]+ \||^\s*\||warning:" | head -30 || true
         # Then the last compile steps and non-warning lines, so a build that dies without a
-        # diagnostic (a killed compiler) at least shows where it stopped.
+        # diagnostic (a driver that dropped a job) at least shows where it stopped.
         echo "$out" | grep -aE "^\[[0-9]+/[0-9]+\]" | tail -5 || true
         echo "$out" | grep -avE "^\[[0-9]+/[0-9]+\]|warning:|note:|^\s*[0-9]+ \||^\s*\||^\s*$|SendableClosureCaptures" | tail -40 || true
-        case "$(uname)" in MINGW*|MSYS*|CYGWIN*)
-            powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | Format-List" 2>/dev/null || true
-            # The Windows runner has ended a build with status 1 after its last compile step,
-            # with memory to spare and nothing said; resume the incremental build once,
-            # verbosely, so a second death at least names the command that died.
-            echo "== retrying once (verbose)"
-            status=0
-            out=$(swift build "$@" "${FLAGS[@]}" -v 2>&1 | tr -d '\r') || status=$?
-            if [ "$status" = 0 ]; then
-                echo "$out" | grep -aE "Build complete|Compiling|Linking|Emitting" | tail -3 || true
-                return 0
-            fi
-            echo "swift build (retry) exited with status $status"
-            echo "$out" | grep -avE "warning:|note:|^\s*[0-9]+ \||^\s*\||^\s*$|SendableClosure|ConformanceIsolation|MutableGlobalVariable" | tail -40 || true ;;
-        esac
         return 1
     fi
 }

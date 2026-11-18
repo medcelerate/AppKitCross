@@ -46,9 +46,9 @@ extension NSTokenFieldDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfielddelegate/tokenfield(_:representedobjectforediting:)
     @MainActor public func tokenField(_ tokenField: NSTokenField, representedObjectForEditing editingString: String) -> Any? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfielddelegate/tokenfield(_:shouldadd:at:)
-    @MainActor public func tokenField(_ tokenField: NSTokenField, shouldAdd tokens: [Any], at index: Int) -> [Any] { unimplementedOptionalRequirement() }
+    @MainActor public func tokenField(_ tokenField: NSTokenField, shouldAdd tokens: [Any], at index: Int) -> [Any] { return tokens }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfielddelegate/tokenfield(_:styleforrepresentedobject:)
-    @MainActor public func tokenField(_ tokenField: NSTokenField, styleForRepresentedObject representedObject: Any) -> NSTokenField.TokenStyle { unimplementedOptionalRequirement() }
+    @MainActor public func tokenField(_ tokenField: NSTokenField, styleForRepresentedObject representedObject: Any) -> NSTokenField.TokenStyle { return .default }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstokenfielddelegate/tokenfield(_:writerepresentedobjects:to:)
     @MainActor public func tokenField(_ tokenField: NSTokenField, writeRepresentedObjects objects: [Any], to pboard: NSPasteboard) -> Bool { return false }
 }

@@ -43,7 +43,34 @@ import CoreGraphics
     private var _contentSize: NSSize = .zero
 
     public override init() { super.init() }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Unarchives the metrics under AppKit's keys (absent keys keep the defaults).
+    public required init?(coder: NSCoder) {
+        super.init()
+        typealias L = NSCollectionViewLayout
+        if let v = L._decodeSize(coder, "NSItemSize") { _itemSize = v }
+        if let v = L._decodeSize(coder, "NSEstimatedItemSize") { _estimatedItemSize = v }
+        if let v = L._decodeDouble(coder, "NSLineSpacing") { _minimumLineSpacing = v }
+        if let v = L._decodeDouble(coder, "NSInteritemSpacing") { _minimumInteritemSpacing = v }
+        if let v = L._decodeInt(coder, "NSScrollDirection"), let d = NSCollectionView.ScrollDirection(rawValue: v) { _scrollDirection = d }
+        if let v = L._decodeInsets(coder, "NSSectionInset") { _sectionInset = v }
+        if let v = L._decodeSize(coder, "NSHeaderReferenceSize") { _headerReferenceSize = v }
+        if let v = L._decodeSize(coder, "NSFooterReferenceSize") { _footerReferenceSize = v }
+        if coder.containsValue(forKey: "NSSectionHeadersPinToVisibleBounds") { _headersPin = coder.decodeBool(forKey: "NSSectionHeadersPinToVisibleBounds") }
+        if coder.containsValue(forKey: "NSSectionFootersPinToVisibleBounds") { _footersPin = coder.decodeBool(forKey: "NSSectionFootersPinToVisibleBounds") }
+    }
+    /// Archives the metrics that differ from the defaults, under AppKit's keys.
+    open override func encode(with coder: NSCoder) {
+        super.encode(with: coder)
+        if _itemSize != NSSize(width: 50, height: 50) { coder.encode(NSValue(size: _itemSize), forKey: "NSItemSize") }
+        if _minimumLineSpacing != 10 { coder.encode(Double(_minimumLineSpacing), forKey: "NSLineSpacing") }
+        if _minimumInteritemSpacing != 10 { coder.encode(Double(_minimumInteritemSpacing), forKey: "NSInteritemSpacing") }
+        if _scrollDirection != .vertical { coder.encode(_scrollDirection.rawValue, forKey: "NSScrollDirection") }
+        if _sectionInset.top != 0 || _sectionInset.left != 0 || _sectionInset.bottom != 0 || _sectionInset.right != 0 { coder.encode(NSValue(edgeInsets: _sectionInset), forKey: "NSSectionInset") }
+        if _headerReferenceSize != .zero { coder.encode(NSValue(size: _headerReferenceSize), forKey: "NSHeaderReferenceSize") }
+        if _footerReferenceSize != .zero { coder.encode(NSValue(size: _footerReferenceSize), forKey: "NSFooterReferenceSize") }
+        if _headersPin { coder.encode(true, forKey: "NSSectionHeadersPinToVisibleBounds") }
+        if _footersPin { coder.encode(true, forKey: "NSSectionFootersPinToVisibleBounds") }
+    }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/invalidationcontextclass
     @MainActor open override class var invalidationContextClass: AnyClass { NSCollectionViewFlowLayoutInvalidationContext.self }
@@ -292,10 +319,28 @@ import CoreGraphics
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesfordroptarget(at:)
+    ///
+    /// The item under the point, else the inter-item gap of the nearest line in the
+    /// section the point is in (ADR-0041).
     @MainActor open override func layoutAttributesForDropTarget(at pointInCollectionView: NSPoint) -> NSCollectionViewLayoutAttributes? {
-        for section in _sections { for a in section.items where a.frame.contains(pointInCollectionView) { return a } }
-        return nil
+        _lineDropTarget(at: pointInCollectionView)
     }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/layoutattributesforinteritemgap(before:)
+    @MainActor open override func layoutAttributesForInterItemGap(before indexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineInterItemGap(before: indexPath)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/initiallayoutattributesforappearingitem(at:)
+    @MainActor open override func initialLayoutAttributesForAppearingItem(at itemIndexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineInitialAttributes(forAppearingItemAt: itemIndexPath)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewlayout/finallayoutattributesfordisappearingitem(at:)
+    @MainActor open override func finalLayoutAttributesForDisappearingItem(at itemIndexPath: IndexPath) -> NSCollectionViewLayoutAttributes? {
+        _lineFinalAttributes(forDisappearingItemAt: itemIndexPath)
+    }
+    internal override var _lineItemAttributes: [[NSCollectionViewLayoutAttributes]] { _sections.map { $0.items } }
+    internal override var _lineSectionFrames: [NSRect]? { _sections.map { $0.frame } }
+    internal override var _linesRunVertically: Bool { !_vertical }
+    internal override func _lineGapWidth(inSection section: Int) -> CGFloat { _interitemSpacing(forSection: section) }
 
     /// The header moved to stay in view while its section is: it slides from the top
     /// (leading edge) of the visible rect to the end of the section, above the items.

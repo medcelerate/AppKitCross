@@ -410,7 +410,11 @@ final class _FramePrimitive: _Primitive {
         func resolve(_ proposed: CGFloat?, _ content: CGFloat, _ lo: CGFloat?, _ hi: CGFloat?) -> CGFloat {
             guard lo != nil || hi != nil else { return content }
             let low = lo ?? content, high = hi ?? content
-            let target = proposed.map { $0.isFinite ? $0 : (hi == .infinity ? content : $0) } ?? content
+            // An infinite offer (a stack measuring how far an item can grow) to a frame with
+            // an infinite maximum gets infinity back, as in SwiftUI: the frame is flexible
+            // whatever its content is (an NSViewRepresentable's fitting size was taken as
+            // the frame's maximum, so a stack gave an editor a third of the window).
+            let target = proposed ?? content
             return max(min(target, high), low)
         }
         var w = resolve(pw, child.width, minWidth, maxWidth)

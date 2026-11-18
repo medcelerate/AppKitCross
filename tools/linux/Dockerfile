@@ -12,6 +12,8 @@
 # python3-dbus drives tools/linux/atspi-probe.py against HelloWindow. libpipewire-0.3-dev and
 # libasound2-dev build the audio shims (ADR-0014); the container has no sound device, so the
 # audio tests run through the offline and null backends and AudioPlayer renders to a file.
+# libhunspell-1.7-0 and hunspell-en-us give NSSpellChecker the system checker (ADR-0030; it
+# loads hunspell at run time and falls back to its word list without them).
 FROM swift:6.2-noble
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libcairo2-dev libpango1.0-dev libx11-dev libxi-dev \
@@ -21,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libvulkan-dev libvulkan1 mesa-vulkan-drivers vulkan-validationlayers vulkan-tools glslang-tools \
         libdbus-1-dev dbus at-spi2-core python3-dbus \
         libpipewire-0.3-dev libasound2-dev \
+        libhunspell-1.7-0 hunspell-en-us \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m appkitwin
 WORKDIR /src

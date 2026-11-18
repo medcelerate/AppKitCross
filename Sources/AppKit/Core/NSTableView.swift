@@ -16,6 +16,17 @@ import CoreGraphics
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview
 @MainActor open class NSTableView: NSControl, NSUserInterfaceValidations, NSTextViewDelegate, NSTextDelegate, NSDraggingSource, NSAccessibilityTable, NSAccessibilityGroup, NSSelectorHandling {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal var _applyingSelectionBinding = false
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.content, .selectionIndexes, .sortDescriptors] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyTableBinding(b) || super._applyViewBinding(b) }
+    /// The sort descriptors from a binding: no write-back, no data-source callback.
+    internal func _setSortDescriptorsFromBinding(_ descriptors: [NSSortDescriptor]) {
+        _sortDescriptors = descriptors
+        _headerView?.needsDisplay = true
+    }
+
     // MARK: Storage
     private var _tableColumns: [NSTableColumn] = []
     private weak var _dataSource: (any NSTableViewDataSource)?
@@ -86,7 +97,13 @@ import CoreGraphics
     open class var selectionIsChangingNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTableViewSelectionIsChangingNotification") }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        let header = NSTableHeaderView(frame: NSRect(x: 0, y: 0, width: 0, height: NSTableHeaderView.defaultHeight))
+        header._tableView = self
+        _headerView = header
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -118,6 +135,7 @@ import CoreGraphics
         tableColumn._tableView = self
         _tableColumns.append(tableColumn)
         _columnsDidChange()
+        if let b = _NSBindings.binding(tableColumn, .value) { _adoptColumnBinding(b) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/removetablecolumn(_:)
     @MainActor open func removeTableColumn(_ tableColumn: NSTableColumn) {
@@ -283,12 +301,29 @@ import CoreGraphics
     // delegate call that depends on the row model goes through one, so the outline view can
     // answer from its flattened rows and its own protocols without forking the table.
 
-    internal func _rowCountFromDataSource() -> Int { max(0, _dataSource?.numberOfRows(in: self) ?? 0) }
+    internal func _rowCountFromDataSource() -> Int {
+        if _dataSource == nil, let bound = _boundContent() { return bound.count }
+        return max(0, _dataSource?.numberOfRows(in: self) ?? 0)
+    }
     internal func _delegateHeightOfRow(_ row: Int) -> CGFloat { _delegate?.tableView(self, heightOfRow: row) ?? _rowHeight }
-    internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? { _delegate?.tableView(self, viewFor: column, row: row) }
-    internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? { _dataSource?.tableView(self, objectValueFor: column, row: row) }
-    internal func _delegateRowView(forRow row: Int) -> NSTableRowView? { _delegate?.tableView(self, rowViewForRow: row) }
-    internal func _delegateIsGroupRow(_ row: Int) -> Bool { _delegate?.tableView(self, isGroupRow: row) ?? false }
+    internal func _delegateView(for column: NSTableColumn, row: Int) -> NSView? {
+        if let p = _contentProvider { return p._tableView(self, viewFor: column, row: row) }
+        return _delegate?.tableView(self, viewFor: column, row: row)
+    }
+    internal func _objectValue(for column: NSTableColumn?, row: Int) -> Any? {
+        if _dataSource == nil, let bound = _boundObjectValue(for: column, row: row) { return bound }
+        return _dataSource?.tableView(self, objectValueFor: column, row: row)
+    }
+    internal func _delegateRowView(forRow row: Int) -> NSTableRowView? {
+        _contentProvider?._tableView(self, rowViewForRow: row) ?? _delegate?.tableView(self, rowViewForRow: row)
+    }
+    internal func _delegateIsGroupRow(_ row: Int) -> Bool {
+        if let p = _contentProvider, p._tableView(self, isGroupRow: row) { return true }
+        return _delegate?.tableView(self, isGroupRow: row) ?? false
+    }
+    /// A data source that also supplies the views (a diffable data source): it answers for
+    /// the delegate's view methods, as on macOS.
+    internal var _contentProvider: (any _NSTableViewContentProviding)? { _dataSource as? any _NSTableViewContentProviding }
     internal func _delegateDidAdd(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didAdd: rowView, forRow: row) }
     internal func _delegateDidRemove(_ rowView: NSTableRowView, row: Int) { _delegate?.tableView(self, didRemove: rowView, forRow: row) }
     internal func _delegateSelectionShouldChange() -> Bool { _delegate?.selectionShouldChange(in: self) ?? true }
@@ -303,7 +338,12 @@ import CoreGraphics
     internal func _delegateWillDisplayCell(_ cell: NSCell, for column: NSTableColumn, row: Int) { _delegate?.tableView(self, willDisplayCell: cell, for: column, row: row) }
     /// The frame of each visible column's cell inside a row view of `height`.
     internal func _cellFrames(forRow row: Int, height: CGFloat) -> [(column: Int, frame: NSRect)] {
-        _tableColumns.indices.filter { !_tableColumns[$0].isHidden }.map { i in
+        // A diffable data source's section header spans the row.
+        if let p = _contentProvider, p._tableView(self, isGroupRow: row),
+           let first = _tableColumns.indices.first(where: { !_tableColumns[$0].isHidden }) {
+            return [(first, NSRect(x: 0, y: 0, width: bounds.width, height: height))]
+        }
+        return _tableColumns.indices.filter { !_tableColumns[$0].isHidden }.map { i in
             let cf = rect(ofColumn: i)
             return (i, NSRect(x: cf.minX, y: 0, width: cf.width, height: height))
         }
@@ -377,10 +417,20 @@ import CoreGraphics
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/reloaddata()
     @MainActor open func reloadData() {
+        // Asked while the visible rows are being made (a binding or a main-queue block that runs
+        // during the draw pass): finish making them, then reload (see _updateVisibleRows).
+        if _updatingVisibleRows {
+            _reloadRequestedWhileUpdating = true
+            return
+        }
+        _rowMap = nil
         _needsReload = true
         _dropAllRowViews()
         _reloadIfNeeded()
         needsDisplay = true
+        // The rows are made in layout, before a natively hosted window builds its layer scene
+        // (made only at draw time, their layers would miss that frame's commit).
+        needsLayout = true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/reloaddata(forrowindexes:columnindexes:)
     @MainActor open func reloadData(forRowIndexes rowIndexes: IndexSet, columnIndexes: IndexSet) {
@@ -389,6 +439,7 @@ import CoreGraphics
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/notenumberofrowschanged()
     @MainActor open func noteNumberOfRowsChanged() {
+        _rowMap = nil
         let selected = _selectedRows
         _needsReload = true
         _dropAllRowViews()
@@ -408,36 +459,62 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/endupdates()
     @MainActor open func endUpdates() {
         _updateDepth = max(0, _updateDepth - 1)
-        if _updateDepth == 0 { noteNumberOfRowsChanged() }
+        if _updateDepth == 0 { _commitRowChanges() }
+    }
+
+    /// Where each live row view's row has gone during the current updates (original row →
+    /// current row; a removed row has no entry). Nil when no row was inserted, removed or
+    /// moved since the last commit.
+    private var _rowMap: [Int: Int]?
+
+    private func _trackRows(_ newRow: (Int) -> Int?) {
+        var map = _rowMap ?? Dictionary(uniqueKeysWithValues: _rowViews.keys.map { ($0, $0) })
+        for (k, v) in map { map[k] = newRow(v) }
+        _rowMap = map
+    }
+
+    /// Ends a run of row changes: the row views follow their rows (keeping their cells), the
+    /// views of removed rows are recycled and the counts are read again.
+    private func _commitRowChanges() {
+        guard let map = _rowMap else { noteNumberOfRowsChanged(); return }
+        _rowMap = nil
+        _noteRowsChanged(keeping: { map[$0] }, rebindingCells: false)
+    }
+
+    /// `row` after inserting rows at `indexes` (given in the coordinates after the insert).
+    private static func _row(_ row: Int, afterInserting indexes: IndexSet) -> Int {
+        var r = row
+        for i in indexes { if i <= r { r += 1 } else { break } }
+        return r
+    }
+    private static func _row(_ row: Int, afterRemoving indexes: IndexSet) -> Int? {
+        indexes.contains(row) ? nil : row - indexes.count(in: 0..<row)
+    }
+    private static func _row(_ row: Int, afterMoving oldIndex: Int, to newIndex: Int) -> Int {
+        if row == oldIndex { return newIndex }
+        var r = row
+        if r > oldIndex { r -= 1 }
+        if r >= newIndex { r += 1 }
+        return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/insertrows(at:withanimation:)
     @MainActor open func insertRows(at indexes: IndexSet, withAnimation animationOptions: NSTableView.AnimationOptions = []) {
-        // Selection follows the rows below the insertion points.
-        var selected = IndexSet()
-        for row in _selectedRows { selected.insert(row + indexes.count(in: 0...row)) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        // Selection and row views follow the rows below the insertion points.
+        _selectedRows = IndexSet(_selectedRows.map { Self._row($0, afterInserting: indexes) })
+        _trackRows { Self._row($0, afterInserting: indexes) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/removerows(at:withanimation:)
     @MainActor open func removeRows(at indexes: IndexSet, withAnimation animationOptions: NSTableView.AnimationOptions = []) {
-        var selected = IndexSet()
-        for row in _selectedRows where !indexes.contains(row) { selected.insert(row - indexes.count(in: 0..<row)) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        _selectedRows = IndexSet(_selectedRows.compactMap { Self._row($0, afterRemoving: indexes) })
+        _trackRows { Self._row($0, afterRemoving: indexes) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/moverow(at:to:)
     @MainActor open func moveRow(at oldIndex: Int, to newIndex: Int) {
-        let wasSelected = _selectedRows.contains(oldIndex)
-        var selected = IndexSet()
-        for row in _selectedRows where row != oldIndex {
-            var r = row
-            if r > oldIndex { r -= 1 }
-            if r >= newIndex { r += 1 }
-            selected.insert(r)
-        }
-        if wasSelected { selected.insert(newIndex) }
-        _selectedRows = selected
-        if _updateDepth == 0 { noteNumberOfRowsChanged() } else { _needsReload = true }
+        _selectedRows = IndexSet(_selectedRows.map { Self._row($0, afterMoving: oldIndex, to: newIndex) })
+        _trackRows { Self._row($0, afterMoving: oldIndex, to: newIndex) }
+        if _updateDepth == 0 { _commitRowChanges() } else { _needsReload = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/hiddenrowindexes
     @MainActor open var hiddenRowIndexes: IndexSet { _hiddenRows }
@@ -611,8 +688,11 @@ import CoreGraphics
             return v
         }
         let value = _objectValue(for: c, row: row)
-        let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell")
+        // Reused per column: a cell keeps its width (and its layer's raster size) across reloads
+        // instead of moving between columns of different widths.
+        let id = NSUserInterfaceItemIdentifier("AppKitCross.TextCell." + c.identifier.rawValue)
         let cell = (makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? NSTableCellView._makeLabelCell(frame: frame)
+        cell.identifier = id
         cell.frame = frame
         cell.objectValue = value
         if let s = value as? String { cell.textField?.stringValue = s }
@@ -638,6 +718,7 @@ import CoreGraphics
     /// Fills `rv` with row `row`'s cells (replacing the ones it had) and records it as the
     /// row's view.
     private func _bindRowView(_ rv: NSTableRowView, row: Int) {
+        _replaceFiledView(at: row, with: rv)
         let r = rect(ofRow: row)
         rv.frame = r
         rv._row = row
@@ -660,7 +741,12 @@ import CoreGraphics
     /// row view whose row is now `newRow(oldRow)` stays that row's view, with its cells
     /// re-read, so the view's identity (its accessibility element) follows the content;
     /// views of rows that vanished (`nil`) are recycled.
-    internal func _noteRowsChanged(keeping newRow: (Int) -> Int?) {
+    internal func _noteRowsChanged(keeping newRow: (Int) -> Int?, rebindingCells: Bool = true) {
+        // Nothing may make row views while they are being re-filed: a query that re-enters
+        // here (a UIA client or a synchronous paint on Windows, through tile()) would file
+        // fresh views that the kept ones then overwrite, orphaning them on screen.
+        _refilingRows += 1
+        defer { _refilingRows -= 1 }
         let selected = _selectedRows
         let old = _rowViews
         _rowViews.removeAll()
@@ -671,9 +757,30 @@ import CoreGraphics
         for (row, rv) in old.sorted(by: { $0.key < $1.key }) {
             if let n = newRow(row), n >= 0, n < _numberOfRows, taken.insert(n).inserted { kept.append((rv, n)) } else { _recycle(rv, row: row) }
         }
-        for (rv, n) in kept { _bindRowView(rv, row: n) }
+        for (rv, n) in kept {
+            if rebindingCells { _bindRowView(rv, row: n) } else { _moveRowView(rv, to: n) }
+        }
         _selectedRows = IndexSet(selected.filter { $0 < _numberOfRows })
         needsDisplay = true
+    }
+
+    /// Re-files a row view (with its cells) as row `row`'s.
+    private func _moveRowView(_ rv: NSTableRowView, to row: Int) {
+        _replaceFiledView(at: row, with: rv)
+        let r = rect(ofRow: row)
+        rv.frame = r
+        rv._row = row
+        rv.isGroupRowStyle = _delegateIsGroupRow(row)
+        let frames = _cellFrames(forRow: row, height: r.height)
+        for (i, cell) in rv._cellViews.enumerated() where frames.indices.contains(i) { cell.frame = frames[i].frame }
+        _rowViewDidLayout(rv, row: row)
+        _applyRowState(rv, row: row)
+        _rowViews[row] = rv
+    }
+
+    /// A row has one view: one already filed for `row` that is not `rv` is recycled.
+    private func _replaceFiledView(at row: Int, with rv: NSTableRowView) {
+        if let other = _rowViews[row], other !== rv { _recycle(other, row: row) }
     }
 
     private func _recycle(_ rv: NSTableRowView, row: Int) {
@@ -699,6 +806,9 @@ import CoreGraphics
     private func _applyRowState(_ rv: NSTableRowView, row: Int) {
         rv.isEmphasized = _isEmphasized
         rv.isSelected = _selectedRows.contains(row)
+        // The row's setters skip unchanged values, and its cells may have just come from
+        // another row (selected, emphasized: light text): give them this row's style.
+        rv._updateCellBackgroundStyles()
         rv.isPreviousRowSelected = row > 0 && _selectedRows.contains(row - 1)
         rv.isNextRowSelected = _selectedRows.contains(row + 1)
         if _usesAlternatingRowBackgroundColors {
@@ -727,20 +837,52 @@ import CoreGraphics
 
     /// Makes row views for the visible rows and recycles the rest.
     private var _updatingVisibleRows = false
+    /// Above zero while `_noteRowsChanged` re-files the row views.
+    private var _refilingRows = 0
     private func _updateVisibleRows() {
-        guard !_updatingVisibleRows else { return }
+        // Not while rows are re-filed or inside beginUpdates/endUpdates: the filed views
+        // still carry the old row numbers then; the commit asks for display afterwards.
+        guard !_updatingVisibleRows, _refilingRows == 0, _updateDepth == 0 else { return }
         _updatingVisibleRows = true
-        defer { _updatingVisibleRows = false }
         _reloadIfNeeded()
+        // Repair before drawing: a filed row view that left the table or carries another row
+        // number is replaced, and a row view the table no longer files is removed, so every
+        // visible row has exactly one row view in its slot.
+        for (row, v) in _rowViews where v.superview !== self || v._row != row { _recycle(v, row: row) }
+        let filed = Set(_rowViews.values.map { ObjectIdentifier($0) })
+        for case let stray as NSTableRowView in subviews where !filed.contains(ObjectIdentifier(stray)) { stray.removeFromSuperview() }
         let visible = visibleRect
         let range = rows(in: visible.isEmpty ? bounds : visible)
         let wanted = range.length > 0 ? Set(range.location..<(range.location + range.length)) : Set<Int>()
         for (row, v) in _rowViews where !wanted.contains(row) || row >= _numberOfRows { _recycle(v, row: row) }
         for row in wanted.sorted() where _rowViews[row] == nil && _rowHeights[row] > 0 { _ = _makeRowView(row) }
+        if NSView._traceInvalidation {
+            for (row, v) in _rowViews.sorted(by: { $0.key < $1.key }) {
+                let cells = v._cellViews.map { c -> String in
+                    let text = (c as? NSTableCellView)?.textField?.stringValue ?? "-"
+                    let l = (c as? NSTableCellView)?.textField?.layer
+                    return "'\(text)' \(c.frame) node \(l.map { String($0._sceneSerial * 4) } ?? "-") v\(l?._rasterVersion ?? -1)"
+                }
+                NSView._trace("table row \(row) frame \(v.frame) in table \(v.superview === self) alpha \(v.alphaValue) hidden \(v.isHidden) layer opacity \(v.layer?.opacity ?? -1) node \(v.layer.map { String($0._sceneSerial * 4) } ?? "-") v\(v.layer?._rasterVersion ?? -1) layer pos \(v.layer.map { "\($0.position) parent \($0.superlayer.map { String($0._sceneSerial * 4) } ?? "none") anims \($0.animationKeys() ?? [])" } ?? "-") cells \(cells)")
+            }
+        }
+        _updatingVisibleRows = false
+        if _reloadRequestedWhileUpdating {
+            _reloadRequestedWhileUpdating = false
+            reloadData()
+            _updateVisibleRows()
+        }
     }
+    private var _reloadRequestedWhileUpdating = false
 
     @MainActor open override func viewWillDraw() {
         super.viewWillDraw()
+        _updateVisibleRows()
+    }
+
+    /// Makes the visible rows' views, as AppKit's table does during layout.
+    @MainActor open override func layout() {
+        super.layout()
         _updateVisibleRows()
     }
 
@@ -907,6 +1049,7 @@ import CoreGraphics
         _selectedRows = rows
         for (row, v) in _rowViews { _applyRowState(v, row: row) }
         needsDisplay = true
+        _pushSelectionBinding()
         guard notify else { return }
         let n = Notification(name: type(of: self).selectionDidChangeNotification, object: self)
         NotificationCenter.default.post(n)
@@ -1086,6 +1229,7 @@ import CoreGraphics
             _sortDescriptors = newValue
             _headerView?.needsDisplay = true
             _dataSourceSortDescriptorsDidChange(old)
+            if let b = _NSBindings.binding(self, .sortDescriptors) { b.push(newValue) }
         }
     }
 
@@ -1104,7 +1248,16 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/candragrows(with:at:)
     @MainActor open func canDragRows(with rowIndexes: IndexSet, at mouseDownPoint: NSPoint) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/dragimageforrows(with:tablecolumns:event:offset:)
-    @MainActor open func dragImageForRows(with dragRows: IndexSet, tableColumns: [NSTableColumn], event dragEvent: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage { unimplemented() }
+    /// The rows' cells in `tableColumns` as drawn now, in one image over their rects; the
+    /// offset is zero.
+    @MainActor open func dragImageForRows(with dragRows: IndexSet, tableColumns: [NSTableColumn], event dragEvent: NSEvent, offset dragImageOffset: NSPointPointer) -> NSImage {
+        dragImageOffset.pointee = .zero
+        let columns = tableColumns.compactMap { c in self.tableColumns.firstIndex { $0 === c } }
+        var frames: [NSRect] = []
+        for r in dragRows { for c in columns { let f = frameOfCell(atColumn: c, row: r); if !f.isEmpty { frames.append(f) } } }
+        let union = frames.reduce(NSRect.null) { $0.union($1) }
+        return union.isNull ? NSImage(size: .zero) : _snapshotImage(of: frames, in: union)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/draggingdestinationfeedbackstyle
     @MainActor open var draggingDestinationFeedbackStyle: NSTableView.DraggingDestinationFeedbackStyle {
         get { _draggingDestinationFeedbackStyle }

@@ -98,9 +98,28 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/automaticallyinsertswritingtoolsitems
     @available(macOS 15.2, *)
+    /// Stored, true by default (macOS 15.2); there is no Writing Tools service to insert items for.
     open var automaticallyInsertsWritingToolsItems: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _automaticallyInsertsWritingToolsItems }
+        set { _automaticallyInsertsWritingToolsItems = newValue }
+    }
+    private var _automaticallyInsertsWritingToolsItems = true
+    private var _menuChangedMessagesEnabled = false
+    private var _presentationStyle: NSMenu.PresentationStyle = .regular
+    private var _selectionMode: NSMenu.SelectionMode = .automatic
+    private var _paletteSelectionHandler: ((NSMenu) -> Void)? = nil
+    /// Choosing an item of a menu that manages selection (`selectOne`/`selectAny`, as a
+    /// palette does) updates the items' states before the action is sent.
+    internal func _applySelection(choosing item: NSMenuItem) {
+        switch _selectionMode {
+        case .selectOne:
+            for i in _items where i !== item && !i.isSeparatorItem { i.state = .off }
+            item.state = .on
+        case .selectAny:
+            item.state = item.state == .on ? .off : .on
+        default: return
+        }
+        _paletteSelectionHandler?(self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/canceltracking()
     open func cancelTracking() { MainActor.assumeIsolated { if _NSMenuTracker.current?.rootMenu === self || _NSMenuTracker.current?.levels.contains(where: { $0.menu === self }) == true { _NSMenuTracker.current?.cancel() } } }
@@ -129,7 +148,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
         set { _font = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/helprequested(with:)
-    open func helpRequested(with eventPtr: NSEvent) { unimplemented() }
+    /// Context help for the menu. NSHelpManager registers no help on these platforms (it is a
+    /// stub), so there is never any to show and this does nothing, as macOS does for a menu
+    /// without help.
+    open func helpRequested(with eventPtr: NSEvent) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/highlighteditem
     open var highlightedItem: NSMenuItem? { MainActor.assumeIsolated { _NSMenuTracker.current?.levels.first { $0.menu === self }?.window.menuView.highlightedItem } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/index(of:)
@@ -187,9 +209,10 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/menubarvisible()
     public class func menuBarVisible() -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/menuchangedmessagesenabled
+    /// Stored, false by default (macOS 15); the port posts its change notifications regardless.
     open var menuChangedMessagesEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _menuChangedMessagesEnabled }
+        set { _menuChangedMessagesEnabled = newValue }
     }
     // SKIPPED (ObjectiveC.NSZone): class func menuZone() -> NSZone!
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/minimumwidth
@@ -209,11 +232,38 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     /// from the `selectedItems` property.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/palette(colors:titles:template:onselectionchange:)
     @available(macOS 14.0, *)
-    public static func palette(colors: [NSColor], titles: [String] = [], template: NSImage? = nil, onSelectionChange: ((NSMenu) -> Void)? = nil) -> NSMenu { unimplemented() }
+    /// One item per colour, titled from `titles` (empty past their end), in a menu with the
+    /// palette presentation and `selectAny` selection (macOS 14). macOS draws the swatches in
+    /// a private view and leaves the items' images nil; the port's menus draw item images, so
+    /// each item gets its swatch as its image: `template` tinted with the colour, or a circle.
+    public static func palette(colors: [NSColor], titles: [String] = [], template: NSImage? = nil, onSelectionChange: ((NSMenu) -> Void)? = nil) -> NSMenu {
+        MainActor.assumeIsolated {
+            let menu = NSMenu(title: "")
+            menu._presentationStyle = .palette
+            menu._selectionMode = .selectAny
+            menu._paletteSelectionHandler = onSelectionChange
+            for (i, color) in colors.enumerated() {
+                let item = NSMenuItem(title: i < titles.count ? titles[i] : "", action: nil, keyEquivalent: "")
+                let size = template?.size ?? NSSize(width: 14, height: 14)
+                item.image = NSImage(size: size, flipped: false) { rect in
+                    if let template, let tinted = template._tintedForTemplate(color, size: rect.size) {
+                        tinted.draw(in: rect)
+                    } else {
+                        color.setFill()
+                        NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                    }
+                    return true
+                }
+                menu.addItem(item)
+            }
+            return menu
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/performactionforitem(at:)
     open func performActionForItem(at index: Int) {
         guard let item = item(at: index), item.isEnabled, !item.isSeparatorItem else { return }
         MainActor.assumeIsolated {
+            _applySelection(choosing: item)
             NotificationCenter.default.post(name: NSMenu.willSendActionNotification, object: self, userInfo: ["MenuItem": item])
             if let action = item.action {
                 let handled = NSApplication.shared.sendAction(action, to: item.target, from: item)
@@ -228,11 +278,17 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     open func performKeyEquivalent(with event: NSEvent) -> Bool {
         MainActor.assumeIsolated {
             guard event.type == .keyDown else { return false }
+            // Validate first, as AppKit does: an item disabled at the last update (Redo before
+            // an Undo) must still match once its target can perform it.
+            update()
             for (i, item) in _items.enumerated() where !item.isHidden || item.allowsKeyEquivalentWhenHidden {
                 if let sub = item.submenu {
                     if sub.performKeyEquivalent(with: event) { return true }
                 } else if item._matches(event) {
                     update()
+                    if NSView._traceInvalidation {
+                        NSView._trace("key equivalent '\(item.title)' action \(item.action.map(NSStringFromSelector) ?? "none") enabled \(item.isEnabled) target \(item.target.map { String(describing: type(of: $0)) } ?? "nil") first responder \(NSApplication.shared.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "none")")
+                    }
                     guard item.isEnabled else { return true }
                     performActionForItem(at: i)
                     return true
@@ -264,14 +320,18 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
             let window = event.window ?? view.window
             let point = window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
             let isDown = event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown
-            _NSMenuTracker.begin(menu: menu, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: nil), font: font, openedWithMouseDown: isDown)
+            view.willOpenMenu(menu, with: event)
+            _NSMenuTracker.begin(menu: menu, anchor: NSRect(origin: point, size: .zero), placement: .atPoint(itemIndex: nil), font: font, openedWithMouseDown: isDown) { [weak view] _ in
+                view?.didCloseMenu(menu, with: nil)
+            }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/presentationstyle
     @available(macOS 14.0, *)
+    /// Stored; palette menus lay out like regular ones (with their swatch images) here.
     open var presentationStyle: NSMenu.PresentationStyle {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _presentationStyle }
+        set { _presentationStyle = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/propertiestoupdate
     open var propertiesToUpdate: NSMenu.Properties { [.propertyItemTitle, .propertyItemEnabled] }
@@ -292,15 +352,20 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/selecteditems
     @available(macOS 14.0, *)
+    /// The items whose state is on. Setting turns those on and the rest off; a `selectOne`
+    /// menu keeps only the last one (macOS 15).
     open var selectedItems: [NSMenuItem] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _items.filter { $0.state == .on } }
+        set {
+            let chosen = _selectionMode == .selectOne ? Array(newValue.suffix(1)) : newValue
+            for i in _items { i.state = chosen.contains { $0 === i } ? .on : .off }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/selectionmode
     @available(macOS 14.0, *)
     open var selectionMode: NSMenu.SelectionMode {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _selectionMode }
+        set { _selectionMode = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenu/setmenubarvisible(_:)
     public class func setMenuBarVisible(_ visible: Bool) { }
@@ -340,6 +405,9 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
                 } else {
                     item.isEnabled = false
                 }
+                if _PasteboardTrace.enabled, NSStringFromSelector(action).hasPrefix("paste") {
+                    _PasteboardTrace.log("NSMenu.update \"\(item.title)\" (\(NSStringFromSelector(action))): target \(target.map { "\(type(of: $0)) \(ObjectIdentifier($0))" } ?? "none"), validates \(target is NSMenuItemValidation) -> enabled \(item.isEnabled)")
+                }
             }
         }
     }
@@ -360,12 +428,24 @@ open class NSMenu: NSObject, NSCopying, NSCoding, NSUserInterfaceItemIdentificat
     }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
+    // MARK: Accessibility (ADR-0013, NSMenuAccessibility.swift)
+    // AXMenuBar for the main menu, AXMenu otherwise; the items are the children. An open
+    // menu has the frame of its window.
+    internal var _accessibilityID = 0
+    open func accessibilityRole() -> NSAccessibility.Role? { MainActor.assumeIsolated { _a11yRole } }
+    open func accessibilityTitle() -> String? { _title }
+    open func accessibilityLabel() -> String? { _title.isEmpty ? nil : _title }
+    open func isAccessibilityElement() -> Bool { true }
+    open func isAccessibilityEnabled() -> Bool { true }
+    open func accessibilityChildren() -> [Any]? { MainActor.assumeIsolated { _a11yChildren } }
+    open func accessibilityPerformCancel() -> Bool { MainActor.assumeIsolated { _a11yCancel() } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _a11yFrame } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
+    /// The item whose submenu this is; the application for the main menu; nil otherwise.
+    open func accessibilityParent() -> Any? { MainActor.assumeIsolated { _a11yParent } }
     // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
+    open func isAccessibilityFocused() -> Bool { false }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { _identifier?.rawValue ?? "" }
 }

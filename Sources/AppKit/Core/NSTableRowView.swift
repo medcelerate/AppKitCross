@@ -32,7 +32,8 @@ import CoreGraphics
     internal var _insetStyle = false
 
     @MainActor public override init(frame frameRect: NSRect) { super.init(frame: frameRect) }
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
 
     @MainActor open override var isFlipped: Bool { true }
 
@@ -140,7 +141,9 @@ import CoreGraphics
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstablerowview/accessibilitydisclosurelevel()
     open func accessibilityDisclosureLevel() -> Int { 0 }
 
-    private func _updateCellBackgroundStyles() {
+    /// Gives every cell the row's interior style (also for cells just placed in the row: a
+    /// recycled cell still carries the style of the row it came from).
+    internal func _updateCellBackgroundStyles() {
         let style = interiorBackgroundStyle
         for v in _cellViews { (v as? NSTableCellView)?.backgroundStyle = style }
     }

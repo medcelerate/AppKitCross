@@ -423,7 +423,7 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testAccessoriesShareTheBandWithTheButtonsWhenTheContentCoversTheTitleBar() {
+    func testAccessoriesShareTheBandWithTheButtonsWhenTheContentCoversTheTitleBar() throws {
         MainActor.assumeIsolated {
             let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
             defer { w.close() }
@@ -436,9 +436,12 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
             w.addTitlebarAccessoryViewController(trail)
             w.addTitlebarAccessoryViewController(bottom)
             XCTAssertEqual(w.frame, frameBefore, "nothing comes out of the frame: the accessories overlay the content")
-            XCTAssertEqual(lead.view.frame.minX, _NSWindowButtonsView.width + 4, "leading starts after the standard buttons")
+            // The standard buttons keep their edge in the backend's style: traffic lights at
+            // the left (host, macOS, Linux), caption buttons at the right (Win32; ADR-0022).
+            let leftInset = max(8, w._windowButtonsLeadingInset), rightInset = max(8, w._windowButtonsTrailingInset)
+            XCTAssertEqual(lead.view.frame.minX, leftInset, "leading starts after the standard buttons")
             XCTAssertEqual(lead.view.frame.midY, ch - NSWindow._titleBarBandHeight / 2, accuracy: 0.5, "in the title band")
-            XCTAssertEqual(trail.view.frame.maxX, w.contentView!.bounds.width - 8)
+            XCTAssertEqual(trail.view.frame.maxX, w.contentView!.bounds.width - rightInset)
             XCTAssertEqual(bottom.view.frame.maxY, ch - NSWindow._titleBarBandHeight, "the bottom accessory under the title band")
             XCTAssertEqual(w.contentLayoutRect.height, ch - NSWindow._titleBarBandHeight - 26, "contentLayoutRect excludes the band and the accessory")
             // With a unified toolbar the bottom accessory goes under the toolbar band.
@@ -462,7 +465,36 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testClientSideTitleBandHoldsTheSideAccessoriesBesideTheButtons() {
+    /// Under Windows caption buttons (ADR-0022) the accessories keep clear of the right
+    /// edge instead: leading starts at the left margin, trailing ends before the buttons,
+    /// and a unified toolbar's items start after the leading accessory.
+    func testAccessoriesKeepClearOfCaptionButtonsOnTheRight() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let savedStyle = Platform.windowButtonStyleOverride
+            Platform.windowButtonStyleOverride = .caption
+            defer { Platform.windowButtonStyleOverride = savedStyle }
+            let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
+            defer { w.close() }
+            let width = w.contentView!.bounds.width
+            let lead = accessory(.leading, size: NSSize(width: 60, height: 20))
+            let trail = accessory(.trailing, size: NSSize(width: 40, height: 20))
+            w.addTitlebarAccessoryViewController(lead)
+            w.addTitlebarAccessoryViewController(trail)
+            XCTAssertEqual(lead.view.frame.minX, 8, "nothing at the left but the margin")
+            XCTAssertEqual(trail.view.frame.maxX, width - _NSWindowButtonsView.captionWidth - 4, "trailing stops before the caption buttons")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: width - 20, y: w.contentView!.bounds.height - 14)), .closeButton, "the buttons stay on top")
+            let tb = NSToolbar(identifier: "test.accessory.caption")
+            w.toolbar = tb
+            w.display()
+            let m = tb._view!.metrics
+            XCTAssertEqual(m.leadingInset, 8 + 60 + 8, "items start after the leading accessory")
+            XCTAssertEqual(m.trailingInset, _NSWindowButtonsView.captionWidth + 4 + 40 + 8, "and stop before the trailing accessory and the buttons")
+        }
+    }
+
+    func testClientSideTitleBandHoldsTheSideAccessoriesBesideTheButtons() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             defer { w.close() }
@@ -499,7 +531,8 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testHostedLayerSceneKeepsTheContentUnderTheStrip() {
+    func testHostedLayerSceneKeepsTheContentUnderTheStrip() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             // A layer-backed window composited natively (DirectComposition on Windows): the
             // content root is placed at the bottom of the platform's content area, under the
@@ -545,7 +578,7 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testRightToLeftMirrorsLeadingAndTrailingButNotLeftAndRight() {
+    func testRightToLeftMirrorsLeadingAndTrailingButNotLeftAndRight() throws {
         MainActor.assumeIsolated {
             let w = makeWindow([.titled, .closable, .resizable, .fullSizeContentView])
             defer { w.close() }
@@ -557,14 +590,17 @@ final class TitlebarAccessoryTests: XCTestCase, @unchecked Sendable {
             let right = accessory(.right, size: NSSize(width: 30, height: 20))
             for a in [lead, trail, left, right] { w.addTitlebarAccessoryViewController(a) }
             let width = w.contentView!.bounds.width
-            XCTAssertEqual(lead.view.frame.maxX, width - 8, "leading is at the right edge")
-            XCTAssertEqual(trail.view.frame.minX, _NSWindowButtonsView.width + 4, "trailing after the buttons, which stay left")
+            // The buttons keep their edge whatever the direction: traffic lights stay left,
+            // Windows caption buttons stay right (ADR-0022).
+            let leftInset = max(8, w._windowButtonsLeadingInset), rightInset = max(8, w._windowButtonsTrailingInset)
+            XCTAssertEqual(lead.view.frame.maxX, width - rightInset, "leading is at the right edge")
+            XCTAssertEqual(trail.view.frame.minX, leftInset, "trailing at the left, after any buttons there")
             XCTAssertEqual(left.view.frame.minX, trail.view.frame.maxX + 8, "left stacks after trailing on the left")
             XCTAssertEqual(right.view.frame.maxX, lead.view.frame.minX - 8, "right stacks before leading on the right")
             w.contentView!.userInterfaceLayoutDirection = .leftToRight
             w._accessoryGeometryDidChange()
-            XCTAssertEqual(lead.view.frame.minX, _NSWindowButtonsView.width + 4)
-            XCTAssertEqual(trail.view.frame.maxX, width - 8)
+            XCTAssertEqual(lead.view.frame.minX, leftInset)
+            XCTAssertEqual(trail.view.frame.maxX, width - rightInset)
         }
     }
 
@@ -1084,3 +1120,5 @@ final class PagesTabTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+
+

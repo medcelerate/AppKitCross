@@ -24,7 +24,13 @@ targets += [
                          .linkedLibrary("d3d11"), .linkedLibrary("dxgi"), .linkedLibrary("dxguid"),
                          // Milestone 3b: DirectComposition presentation of translucent windows and
                          // the DWM frame/backdrop attributes used by Win32Window.
-                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi")]
+                         .linkedLibrary("dcomp"), .linkedLibrary("dwmapi"),
+                         // ADR-0026: the shell (version resources, session notifications).
+                         .linkedLibrary("version"), .linkedLibrary("wtsapi32"), .linkedLibrary("user32"),
+                         // ADR-0022: printers (winspool), the PrintDlgEx dialog and the common colour
+                         // dialog (comdlg32, also behind APPKITWIN_COLOR_PANEL=native), print tickets
+                         // (prntvpt) and the print document package target's CLSID/IIDs (uuid).
+                         .linkedLibrary("winspool"), .linkedLibrary("comdlg32"), .linkedLibrary("prntvpt"), .linkedLibrary("uuid")]
     ),
     // Apple's CoreGraphics submodule names (`import CoreGraphics.CGGeometry`): a clang
     // module map the Swift CoreGraphics module overlays (Sources/CCoreGraphicsModules).
@@ -81,7 +87,14 @@ targets += [
     .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
+<<<<<<< HEAD
 appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers", "CTextServices"]
+=======
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
+// The spell checker seam (ADR-0030): the Windows Spell Checking API over COM.
+targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("ole32")])]
+appKitDependencies += ["CSpellCheck", "Combine"]
+>>>>>>> origin/main
 appKitExclude += ["Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -147,6 +160,9 @@ targets += [
 ]
 let audioShimDependencies: [Target.Dependency] = ["CPipeWire", "CALSA"]
 appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText", "CDBus", "ImageIO", "UniformTypeIdentifiers"]
+// The spell checker seam (ADR-0030): hunspell, loaded at run time.
+targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("dl")])]
+appKitDependencies += ["CSpellCheck", "Combine"]
 appKitExclude += ["Platform/Win32"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
@@ -227,11 +243,63 @@ if buildsAVFAudio {
     appKitDependencies += ["AVFAudio"]
 }
 
+// UserNotifications and ServiceManagement (ADR-0043): local notifications over Windows
+// toasts (WinRT, through the CWinAppServices shim) and the freedesktop notification server
+// (D-Bus), and the app's login item over the Run key / Startup folder and XDG autostart.
+// AppKit depends on both, so `import UserNotifications` and `import ServiceManagement`
+// resolve in any target that uses AppKit, as they do on macOS (AppKit does not re-export
+// them; Apple's does not either). On macOS apps use Apple's frameworks; the tests compile
+// the same sources as UserNotificationsPortable and ServiceManagementPortable instead, so the
+// module names never shadow Apple's.
+#if os(Windows)
+targets += [
+    .target(name: "CWinAppServices", path: "Sources/CWinAppServices",
+            linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32"), .linkedLibrary("shell32"), .linkedLibrary("advapi32"), .linkedLibrary("uuid")]),
+]
+let notificationPlatformDependencies: [Target.Dependency] = ["CWinAppServices"]
+let loginItemPlatformDependencies: [Target.Dependency] = ["CWinAppServices"]
+let notificationTestPlatformDependencies: [Target.Dependency] = []
+#elseif os(Linux)
+let notificationPlatformDependencies: [Target.Dependency] = ["CDBus"]
+let loginItemPlatformDependencies: [Target.Dependency] = []
+// The D-Bus test plays the notification server itself.
+let notificationTestPlatformDependencies: [Target.Dependency] = ["CDBus"]
+#endif
+#if os(Windows) || os(Linux)
+targets += [
+    .target(name: "UserNotifications", dependencies: notificationPlatformDependencies, path: "Sources/UserNotifications", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ServiceManagement", dependencies: loginItemPlatformDependencies, path: "Sources/ServiceManagement", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+appKitDependencies += ["UserNotifications", "ServiceManagement"]
+let systemServiceProducts: [Product] = [.library(name: "UserNotifications", targets: ["UserNotifications"]), .library(name: "ServiceManagement", targets: ["ServiceManagement"])]
+let userNotificationsModule: Target.Dependency = "UserNotifications"
+let serviceManagementModule: Target.Dependency = "ServiceManagement"
+#else
+targets += [
+    .target(name: "UserNotificationsPortable", path: "Sources/UserNotifications", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "ServiceManagementPortable", path: "Sources/ServiceManagement", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+let systemServiceProducts: [Product] = []
+let userNotificationsModule: Target.Dependency = "UserNotificationsPortable"
+let serviceManagementModule: Target.Dependency = "ServiceManagementPortable"
+let notificationTestPlatformDependencies: [Target.Dependency] = []
+#endif
+targets += [
+    .testTarget(name: "UserNotificationsTests", dependencies: [userNotificationsModule] + notificationTestPlatformDependencies, path: "Tests/UserNotificationsTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .testTarget(name: "ServiceManagementTests", dependencies: [serviceManagementModule], path: "Tests/ServiceManagementTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+
 // On macOS the tests import Apple's Combine; on Windows and Linux they need our target.
 #if os(Windows) || os(Linux)
 let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
 let combineTestDependencies: [Target.Dependency] = ["Combine"]
+// Examples/DailyTodo imports UserNotifications and ServiceManagement without naming them:
+// they come with AppKit, as on macOS.
+let dailyTodoPlatformDependencies: [Target.Dependency] = ["Combine"]
+let mdVaultDependencies: [Target.Dependency] = ["UniformTypeIdentifiers"]
 #else
+let dailyTodoPlatformDependencies: [Target.Dependency] = []
+let mdVaultDependencies: [Target.Dependency] = []
 let combineProducts: [Product] = []
 let combineTestDependencies: [Target.Dependency] = []
 #endif
@@ -278,6 +346,19 @@ targets += [
     // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
     .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
+    .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
+    // A real third-party SwiftUI app, vendored unmodified (one `#if canImport(ObjectiveC)`
+    // around an `@objc`): Daily To Do (MIT, Examples/DailyTodo/README.md). Its logic module and
+    // its dependency-free self-checks come along.
+    // Upstream declares tools version 5.9, so its three targets build in Swift 5 language mode.
+    .target(name: "DailyTodoCore", path: "Examples/DailyTodo/Sources/DailyTodoCore", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoPlatformDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "DailyTodoChecks", dependencies: ["DailyTodoCore"], path: "Examples/DailyTodo/Sources/DailyTodoChecks", swiftSettings: [.swiftLanguageMode(.v5)]),
+    // The second real app, document-based: MD Vault (MIT, Examples/MDVault/README.md), its
+    // `Sources/` vendored unmodified. Upstream builds with plain `swiftc` (Swift 5 mode); its
+    // Info.plist (document types, the Markdown UTI, the app name) stays in
+    // Examples/MDVault/Resources, which `APPKITWIN_INFO_PLIST` can name at launch.
+    .executableTarget(name: "MDVault", dependencies: ["AppKit", "SwiftUI"] + mdVaultDependencies, path: "Examples/MDVault/Sources/MDVault", swiftSettings: [.swiftLanguageMode(.v5)]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,
@@ -296,7 +377,7 @@ let package = Package(
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
-    ] + combineProducts + leafModuleProducts + avfAudioProducts,
+    ] + combineProducts + leafModuleProducts + avfAudioProducts + systemServiceProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )

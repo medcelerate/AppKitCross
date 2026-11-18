@@ -44,6 +44,8 @@ enum {
     /// ExpandCollapse pattern (outline rows, disclosure triangles); CUIA_EXPANDED is its state.
     CUIA_HAS_EXPAND_COLLAPSE = 1 << 16,
     CUIA_EXPANDED = 1 << 17,
+    /// Never the answer to a hit test (custom-action buttons covering their element).
+    CUIA_SKIP_HIT_TEST = 1 << 18,
 };
 
 /// One element. Strings are UTF-16, NUL-terminated, and may be NULL; the shim copies
@@ -57,6 +59,7 @@ typedef struct CUIANode {
     const uint16_t *help;
     const uint16_t *automationId;
     const uint16_t *itemType;       // ItemType / LocalizedControlType hint (role description), optional
+    const uint16_t *acceleratorKey; // AcceleratorKey (a menu item's key equivalent), optional
     int32_t left, top, right, bottom;
     uint32_t flags;
     double rangeValue, rangeMin, rangeMax, rangeStep;
@@ -95,6 +98,12 @@ intptr_t cuia_root_handle_getobject(CUIARoot *root, uintptr_t wParam, intptr_t l
 void cuia_root_raise_focus(CUIARoot *root, int32_t id);
 void cuia_root_raise_property_changed(CUIARoot *root, int32_t id, int32_t which);
 void cuia_root_raise_structure_changed(CUIARoot *root, int32_t id);
+/// A child appeared under `parentId` (ChildAdded, raised on the child) or left it
+/// (ChildRemoved, raised on the parent with the child's runtime id).
+void cuia_root_raise_structure_child(CUIARoot *root, int32_t parentId, int32_t childId, bool added);
+/// MenuOpened (on the menu element, after the snapshot that shows it) or MenuClosed (on
+/// the provider clients already hold, without refreshing: the menu is going away).
+void cuia_root_raise_menu(CUIARoot *root, int32_t id, bool opened);
 /// Disconnects every provider and tells UI Automation the window is gone (WM_DESTROY).
 void cuia_root_destroy(CUIARoot *root);
 /// True when a UI Automation client is listening (events are worth raising).
@@ -108,6 +117,8 @@ void cuia_set_use_com_threading(bool enabled);
 /// Test hooks: a property through IRawElementProviderSimple::GetPropertyValue, rendered
 /// as text (numbers and booleans too); false when the provider has no value for it.
 bool cuia_root_debug_property(CUIARoot *root, int32_t id, int32_t propertyId, uint16_t *buffer, int32_t capacity);
+/// Test hook: the node a fragment-root hit test at a physical point answers (-1: none).
+int32_t cuia_root_debug_hit_test(CUIARoot *root, double x, double y);
 /// Test hook: the children of a node through IRawElementProviderFragment::Navigate.
 int32_t cuia_root_debug_child_count(CUIARoot *root, int32_t id);
 /// Test hook: whether the pattern provider for `patternId` exists on the node.

@@ -17,6 +17,7 @@ final class HostFont: PlatformFontHandle {
     var familyName: String { CTFontCopyFamilyName(ct) as String }
     var postScriptName: String { CTFontCopyPostScriptName(ct) as String }
     var isFixedPitch: Bool { CTFontGetSymbolicTraits(ct).contains(.traitMonoSpace) }
+    var styleName: String? { CTFontCopyName(ct, kCTFontStyleNameKey) as String? }
 }
 
 @MainActor

@@ -61,7 +61,21 @@ import CoreGraphics
     }
 
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    /// AppKit's `NSGrid_` keys (width, paddings, hidden, placement).
+    open func encode(with coder: NSCoder) {
+        coder.encode(Double(_width), forKey: "NSGrid_width")
+        coder.encode(Double(_leadingPadding), forKey: "NSGrid_leadingPadding")
+        coder.encode(Double(_trailingPadding), forKey: "NSGrid_trailingPadding")
+        coder.encode(_isHidden, forKey: "NSGrid_hidden")
+        coder.encode(_xPlacement.rawValue, forKey: "NSGrid_xPlacement")
+    }
     // Requirement of NSCoding
-    public required init?(coder: NSCoder) { unimplemented() }
+    public required init?(coder: NSCoder) {
+        super.init()
+        if coder.containsValue(forKey: "NSGrid_width") { _width = CGFloat(coder.decodeDouble(forKey: "NSGrid_width")) }
+        _leadingPadding = CGFloat(coder.decodeDouble(forKey: "NSGrid_leadingPadding"))
+        _trailingPadding = CGFloat(coder.decodeDouble(forKey: "NSGrid_trailingPadding"))
+        _isHidden = coder.decodeBool(forKey: "NSGrid_hidden")
+        _xPlacement = NSGridCell.Placement(rawValue: coder.decodeInteger(forKey: "NSGrid_xPlacement")) ?? .inherited
+    }
 }

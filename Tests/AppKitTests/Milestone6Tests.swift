@@ -53,7 +53,8 @@ final class HostingTests: XCTestCase, @unchecked Sendable {
         return (data[i + 2], data[i + 1], data[i])
     }
 
-    func testHostingViewMeasuresLaysOutDrawsAndRoutesEvents() {
+    func testHostingViewMeasuresLaysOutDrawsAndRoutesEvents() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let hosting = NSHostingView(rootView: BlockContent(size: NSSize(width: 60, height: 40), color: .red))
             let root = hosting.hostingRoot as! BlockContent.Root
@@ -107,3 +108,4 @@ final class HostingTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

@@ -237,6 +237,32 @@ final class CTPangoEngine: CTEngine {
 
     var familyNames: [String] { Array(Set(families.values)).sorted() }
 
+    /// The family's faces from Pango (regular first, then by weight, italics after uprights).
+    func faces(inFamily family: String, size: CGFloat) -> [CTEngineFont] {
+        guard let name = families[family.lowercased()] ?? families[family.replacingOccurrences(of: " ", with: "").lowercased()] else { return [] }
+        var list: UnsafeMutablePointer<UnsafeMutablePointer<PangoFontFamily>?>? = nil
+        var count: Int32 = 0
+        pango_font_map_list_families(fontMap, &list, &count)
+        defer { if let list { g_free(list) } }
+        guard let list, let fam = (0..<Int(count)).lazy.compactMap({ list[$0] }).first(where: { pango_font_family_get_name($0).map { String(cString: $0) } == name }) else { return [] }
+        var faces: UnsafeMutablePointer<UnsafeMutablePointer<PangoFontFace>?>? = nil
+        var faceCount: Int32 = 0
+        pango_font_family_list_faces(fam, &faces, &faceCount)
+        defer { if let faces { g_free(faces) } }
+        var out: [CTEngineFont] = []
+        for i in 0..<Int(faceCount) {
+            guard let faces, let face = faces[i], let desc = pango_font_face_describe(face) else { continue }
+            pango_font_description_set_absolute_size(desc, Double(size) * Double(PANGO_SCALE))
+            if let f = CTPangoFont(description: desc, size: size, engine: self), !out.contains(where: { $0.postScriptName == f.postScriptName }) { out.append(f) }
+            pango_font_description_free(desc)
+        }
+        return out.sorted { a, b in
+            if a.isItalic != b.isItalic { return !a.isItalic }
+            if a.weight != b.weight { return abs(a.weight) < abs(b.weight) || (abs(a.weight) == abs(b.weight) && a.weight < b.weight) }
+            return a.postScriptName < b.postScriptName
+        }
+    }
+
     private static let styleWords: [(String, (weight: Int?, italic: Bool?))] = [
         ("bolditalic", (700, true)), ("boldoblique", (700, true)), ("bold", (700, nil)), ("semibold", (600, nil)), ("demibold", (600, nil)),
         ("extrabold", (800, nil)), ("black", (900, nil)), ("heavy", (900, nil)), ("medium", (500, nil)), ("light", (300, nil)),

@@ -1,0 +1,6 @@
+// Hand-written so clients outside the package (Examples/LibraryCompat) can be handed the map
+// by path, as with the other shims.
+module CWinAppServices {
+    umbrella header "cwas.h"
+    export *
+}

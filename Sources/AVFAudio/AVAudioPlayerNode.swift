@@ -22,10 +22,13 @@ public enum AVAudioPlayerNodeCompletionCallbackType: Int, Sendable {
 
 public typealias AVAudioPlayerNodeCompletionHandler = (AVAudioPlayerNodeCompletionCallbackType) -> Void
 
-/// One scheduled buffer or file segment. The render thread owns `position`.
+/// One scheduled buffer or file segment. The render thread owns `position` (and
+/// `frameCount` of a streamed segment, which ends early if the file is short).
 final class _ScheduledItem {
     let buffer: AVAudioPCMBuffer
-    let frameCount: Int
+    var frameCount: Int
+    /// A file segment streamed from disk (`buffer` is then an empty placeholder).
+    let stream: _FileStream?
     let options: AVAudioPlayerNodeBufferOptions
     let callbackType: AVAudioPlayerNodeCompletionCallbackType
     let completion: AVAudioPlayerNodeCompletionHandler?
@@ -35,13 +38,16 @@ final class _ScheduledItem {
     let stride: Int
     var position = 0
 
-    init(buffer: AVAudioPCMBuffer, options: AVAudioPlayerNodeBufferOptions, callbackType: AVAudioPlayerNodeCompletionCallbackType, completion: AVAudioPlayerNodeCompletionHandler?, startSampleTime: Int64) {
+    init(buffer: AVAudioPCMBuffer, options: AVAudioPlayerNodeBufferOptions, callbackType: AVAudioPlayerNodeCompletionCallbackType, completion: AVAudioPlayerNodeCompletionHandler?, startSampleTime: Int64, stream: _FileStream? = nil) {
         self.buffer = buffer
-        frameCount = Int(buffer.frameLength)
+        self.stream = stream
+        frameCount = stream?.total ?? Int(buffer.frameLength)
         self.options = options; self.callbackType = callbackType; self.completion = completion; self.startSampleTime = startSampleTime
         channelData = buffer.floatChannelData!
         stride = buffer.stride
     }
+
+    deinit { stream?.cancelled.value = true }
 }
 
 struct _PlayerCommand {
@@ -213,7 +219,21 @@ final class _PlayerRenderState {
                 playerSampleTime += Int64(gap)
                 continue
             }
-            let n = min(remaining, item.frameCount - item.position)
+            if let stream = item.stream {
+                let want = min(remaining, item.frameCount - item.position)
+                let got = want > 0 ? stream.read(into: out, offset: written, frames: want, offline: latencyFrames < 0) : 0
+                if got > 0 {
+                    item.position += got
+                    written += got
+                    playerSampleTime += Int64(got)
+                    produced = true
+                }
+                if got < want {
+                    if stream.isExhausted { item.frameCount = item.position }   // the file was shorter
+                    else { break }                                               // the decoder is late: silence for now
+                }
+            }
+            let n = item.stream != nil ? 0 : min(remaining, item.frameCount - item.position)
             if n > 0 {
                 let st = item.stride
                 for c in 0..<min(channels, Int(item.buffer.format.channelCount)) {
@@ -309,12 +329,25 @@ open class AVAudioPlayerNode: AVAudioNode, AVAudioMixing, _Deliverable {
         scheduleSegment(file, startingFrame: startFrame, frameCount: numberFrames, at: when, completionCallbackType: .dataConsumed, completionHandler: completionHandler.map { h in { _ in h() } })
     }
 
-    /// Reads the segment now (on the calling thread), converts it to the node's output
-    /// sample rate and channel count, and schedules the result.
+    /// Segments longer than the stream ring (about 1.4 s at 48 kHz) are streamed from disk
+    /// by the file reader thread, converted to the node's output sample rate and channel
+    /// count on the way; shorter ones are read and converted now, on the calling thread.
     open func scheduleSegment(_ file: AVAudioFile, startingFrame startFrame: AVAudioFramePosition, frameCount numberFrames: AVAudioFrameCount, at when: AVAudioTime?, completionCallbackType callbackType: AVAudioPlayerNodeCompletionCallbackType, completionHandler: AVAudioPlayerNodeCompletionHandler? = nil) {
         let format = outputFormat(forBus: 0)
         let rate = format.sampleRate > 0 ? format.sampleRate : file.processingFormat.sampleRate
         let channels = format.channelCount > 0 ? format.channelCount : file.processingFormat.channelCount
+        let start = max(0, min(startFrame, file.length))
+        let count = Int(min(AVAudioFramePosition(numberFrames), file.length - start))
+        let outFrames = Double(count) * rate / file.processingFormat.sampleRate
+        if outFrames > 65536 - 8192, let stream = _FileStream(file: file, startingFrame: start, frameCount: count, rate: rate, channels: channels) {
+            // Fill the ring now so playback starts at once, then let the reader keep up.
+            stream.fill()
+            let placeholder = AVAudioPCMBuffer(pcmFormat: AVAudioFormat(standardFormatWithSampleRate: rate, channels: channels)!, frameCapacity: 1)!
+            let item = _ScheduledItem(buffer: placeholder, options: [], callbackType: callbackType, completion: completionHandler, startSampleTime: _startSampleTime(when), stream: stream)
+            if !stream.finished.value { _FileStreamer.shared.add(stream) }
+            _submit(_PlayerCommand(kind: .schedule, item: Unmanaged.passRetained(item), nodeSampleTime: -1))
+            return
+        }
         let buffer = _readSegment(file, startingFrame: startFrame, frameCount: numberFrames, rate: rate, channels: channels)
         let item = _ScheduledItem(buffer: buffer, options: [], callbackType: callbackType, completion: completionHandler, startSampleTime: _startSampleTime(when))
         _submit(_PlayerCommand(kind: .schedule, item: Unmanaged.passRetained(item), nodeSampleTime: -1))

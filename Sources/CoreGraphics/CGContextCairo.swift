@@ -340,6 +340,8 @@ public final class CGContext {
         cairo_clip(cairo)
     }
 
+    /// CoreGraphics' name for the clip's bounding box in user space.
+    public var boundingBoxOfClipPath: CGRect { clipBoundingBox }
     public var clipBoundingBox: CGRect {
         var x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0
         cairo_clip_extents(cairo, &x1, &y1, &x2, &y2)

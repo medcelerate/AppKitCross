@@ -73,8 +73,11 @@ extension CALayer {
         return scene
     }
 
+    /// A node id per layer instance and part. Not the layer's address: a native compositor
+    /// caches rasters by node id and version, and a layer allocated where a freed one lived
+    /// (table rows remade by a reload) would inherit that layer's cached surface.
     private static func _nodeID(_ layer: CALayer, part: Int) -> Int {
-        Int(bitPattern: UInt(bitPattern: ObjectIdentifier(layer))) &+ part
+        layer._sceneSerial &* 4 &+ part
     }
 
     /// True when the layer's own rasterised content is animating (so it must redraw each frame).

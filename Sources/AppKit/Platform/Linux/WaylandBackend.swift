@@ -23,6 +23,7 @@ final class WaylandOutput {
     var x = 0, y = 0
     var widthPx = 0, heightPx = 0
     var scale = 1
+    var refreshMilliHertz = 0
     var description = "Wayland Output"
     init(proxy: OpaquePointer, name: UInt32) { self.proxy = proxy; self.name = name }
     var logicalSize: NSSize { NSSize(width: CGFloat(widthPx) / CGFloat(scale), height: CGFloat(heightPx) / CGFloat(scale)) }
@@ -75,11 +76,23 @@ final class WaylandBackend: PlatformBackend {
     /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
     private(set) var dataDevice: WaylandDataDevice!
     var dragDrop: (any PlatformDragDrop)? { dataDevice }
+    /// Printing (LinuxPrinting.swift): Cairo PDF and CUPS.
+    let linuxPrinting = LinuxPrintBackend()
+    var printing: (any PlatformPrintBackend)? { linuxPrinting }
     /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
     /// Wayland has no global coordinates: a host's position is taken as the top-left of
     /// the first output.
     private var statusNotifier: LinuxStatusNotifierHost?
     private var statusNotifierTried = false
+    /// The workspace (LinuxWorkspace.swift, ADR-0022); Wayland lists no windows, so it knows
+    /// the processes launched here and this one.
+    private var linuxWorkspace: LinuxWorkspace?
+    var workspace: any PlatformWorkspace {
+        if let w = linuxWorkspace { return w }
+        let w = LinuxWorkspace(windowSystem: nil)
+        linuxWorkspace = w
+        return w
+    }
     var statusItems: (any PlatformStatusItemHost)? {
         if !statusNotifierTried {
             statusNotifierTried = true
@@ -191,11 +204,11 @@ final class WaylandBackend: PlatformBackend {
                         if !parts.isEmpty { o.description = parts.joined(separator: " ") }
                     }
                 },
-                mode: { data, output, flags, width, height, _ in
+                mode: { data, output, flags, width, height, refresh in
                     guard flags & UInt32(WL_OUTPUT_MODE_CURRENT.rawValue) != 0, let backend = WaylandBackend.from(data) else { return }
                     MainActor.assumeIsolated {
                         guard let o = backend.outputs.first(where: { $0.proxy == output }) else { return }
-                        o.widthPx = Int(width); o.heightPx = Int(height)
+                        o.widthPx = Int(width); o.heightPx = Int(height); o.refreshMilliHertz = Int(refresh)
                     }
                 },
                 done: { _, _ in },
@@ -268,7 +281,9 @@ final class WaylandBackend: PlatformBackend {
             let size = o.logicalSize
             let origin = NSPoint(x: CGFloat(o.x - primary.x), y: primaryHeight - CGFloat(o.y - primary.y) - size.height)
             let frame = NSRect(origin: origin, size: size)
-            return PlatformDisplay(frame: frame, visibleFrame: frame, backingScaleFactor: CGFloat(o.scale), localizedName: o.description, isMain: i == 0)
+            var d = PlatformDisplay(frame: frame, visibleFrame: frame, backingScaleFactor: CGFloat(o.scale), localizedName: o.description, isMain: i == 0)
+            if o.refreshMilliHertz > 0 { d.refreshRate = Double(o.refreshMilliHertz) / 1000 }
+            return d
         }
     }
 
@@ -280,10 +295,8 @@ final class WaylandBackend: PlatformBackend {
         windows.append(window)
         if atspi == nil && !atspiTried {
             atspiTried = true
-            atspi = AtspiBridge.connect(rootWindowProperty: { nil }) { [weak self] r in
-                let h = self?.displays.first?.frame.height ?? 0
-                return (Int32(r.minX.rounded()), Int32((h - r.maxY).rounded()), Int32(r.width.rounded()), Int32(r.height.rounded()))
-            }
+            atspi = AtspiBridge.connect(rootWindowProperty: { nil })
+            atspi?.application = atspiApplication
         }
         atspi?.register(window)
     }
@@ -346,6 +359,7 @@ final class WaylandBackend: PlatformBackend {
         }
         atspi?.dispatch()
         statusNotifier?.dispatch()
+        linuxWorkspace?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }
@@ -392,6 +406,37 @@ final class WaylandBackend: PlatformBackend {
     }
 
     func beep() { FileHandle.standardError.write(Data([0x07])) }   // no bell in the Wayland protocol
+
+    /// The key of the current keymap that types this keysym (at any level), translated by a
+    /// scratch xkb state holding Shift, Lock, Control and Option as Mod5 (ISO Level 3, the
+    /// layout's AltGr level) (ADR-0038).
+    func characters(forKeyCode keyCode: UInt16, modifierFlags flags: NSEvent.ModifierFlags) -> String? {
+        guard let keymap = xkbKeymap else { return nil }
+        let target = xkb_keysym_t(keyCode)
+        var found: xkb_keycode_t? = nil
+        search: for kc in xkb_keymap_min_keycode(keymap)...xkb_keymap_max_keycode(keymap) {
+            for level in 0..<xkb_keymap_num_levels_for_key(keymap, kc, 0) {
+                var syms: UnsafePointer<xkb_keysym_t>? = nil
+                let n = xkb_keymap_key_get_syms_by_level(keymap, kc, 0, level, &syms)
+                if n > 0, let syms, (0..<Int(n)).contains(where: { syms[$0] == target }) { found = kc; break search }
+            }
+        }
+        guard let kc = found, let state = xkb_state_new(keymap) else { return nil }
+        defer { xkb_state_unref(state) }
+        func mask(_ name: String) -> xkb_mod_mask_t {
+            let i = xkb_keymap_mod_get_index(keymap, name)
+            return i == 0xFFFF_FFFF ? 0 : 1 << i
+        }
+        var depressed: xkb_mod_mask_t = 0
+        if flags.contains(.shift) { depressed |= mask("Shift") }
+        if flags.contains(.control) { depressed |= mask("Control") }
+        if flags.contains(.option) { depressed |= mask("Mod5") }
+        let locked: xkb_mod_mask_t = flags.contains(.capsLock) ? mask("Lock") : 0
+        _ = xkb_state_update_mask(state, depressed, 0, locked, 0, 0, 0)
+        var buffer = [CChar](repeating: 0, count: 32)
+        let n = xkb_state_key_get_utf8(state, kc, &buffer, 32)
+        return n > 0 ? String(cString: buffer) : nil
+    }
     var systemAppearanceIsDark: Bool { false }
 
     var mouseLocation: NSPoint {
@@ -426,8 +471,13 @@ final class WaylandBackend: PlatformBackend {
     }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
-        // No native menu bar on Wayland; NSApplication still dispatches key equivalents.
+        // No native menu bar on Wayland; NSApplication still dispatches key equivalents. The
+        // menu reaches assistive technology as the application's AXMenuBar (ADR-0013); the
+        // bridge connects with the first window, so the host is kept until then.
+        atspiApplication = host as? PlatformAccessibilityApplication
+        if let atspi { if atspi.application !== atspiApplication { atspi.application = atspiApplication } else { atspi.menuBarChanged() } }
     }
+    private weak var atspiApplication: PlatformAccessibilityApplication?
 
     /// The band a window of this style would draw itself (ClientSideDecoration.swift):
     /// none when the compositor decorates, which it is expected to when it has xdg-decoration.

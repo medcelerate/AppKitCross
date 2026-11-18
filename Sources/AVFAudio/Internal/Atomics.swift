@@ -152,6 +152,28 @@ final class _FrameRing {
         return true
     }
 
+    /// Consumer: drops up to `frames` of the oldest frames.
+    func discard(_ frames: Int) {
+        let h = head.value, t = tail.value
+        head.value = h + Int64(min(frames, Int(t - h)))
+    }
+
+    /// Producer: appends `frames` frames of interleaved samples (`channels` per frame);
+    /// false (nothing written) when there is no room.
+    @discardableResult func writeInterleaved(_ src: UnsafePointer<Float>, frames: Int) -> Bool {
+        let t = tail.value, h = head.value
+        if Int(t - h) + frames > capacity { return false }
+        let mask = capacity - 1
+        for ch in 0..<channels {
+            let lane = lanes[ch]
+            var i = Int(t & Int64(mask))
+            var s = ch
+            for _ in 0..<frames { lane[i] = src[s]; s += channels; i = (i + 1) & mask }
+        }
+        tail.value = t + Int64(frames)
+        return true
+    }
+
     /// Consumer: removes `frames` frames into `planes` (false when fewer are available).
     func read(into planes: UnsafePointer<UnsafeMutablePointer<Float>>, frames: Int) -> Bool {
         let h = head.value, t = tail.value

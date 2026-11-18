@@ -17,6 +17,61 @@ import CoreText
 #endif
 @available(macOS 15.0, *)
 extension NSCursor {
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition
+    @available(macOS 15.0, *)
+    @frozen public enum FrameResizePosition: Int, Sendable, Equatable, Hashable {
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottom
+        case bottom = 4
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomleft
+        case bottomLeft = 6
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomright
+        case bottomRight = 12
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/left
+        case left = 2
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/right
+        case right = 8
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/top
+        case top = 1
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topleft
+        case topLeft = 3
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topright
+        case topRight = 9
+        /// A collection of all values of this type.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/allcases
+        static public var allCases: [NSCursor.FrameResizePosition] { unimplemented() }
+        /// The bottom leading corner of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomleading(relativeto:)
+        public static func bottomLeading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+        /// The bottom trailing corner of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomtrailing(relativeto:)
+        public static func bottomTrailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+        // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
+        // SKIPPED (constrained extension): var hashValue: Int { get }
+        /// The leading edge of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/leading(relativeto:)
+        public static func leading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+        /// The top leading corner of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topleading(relativeto:)
+        public static func topLeading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+        /// The top trailing corner of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/toptrailing(relativeto:)
+        public static func topTrailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+        /// The trailing edge of the frame, in the given user interface layout direction.
+        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/trailing(relativeto:)
+        public static func trailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
+    }
+
+}
+@available(macOS 15.0, *)
+extension NSCursor.FrameResizePosition {
+    /// A type that can represent a collection of all values of this type.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/allcases
+    @available(macOS 15.0, *)
+    public typealias AllCases = [NSCursor.FrameResizePosition]
+}
+
+@available(macOS 15.0, *)
+extension NSCursor {
     /// The direction in which a rectangular frame can be resized.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizedirection
     @available(macOS 15.0, *)
@@ -117,59 +172,4 @@ extension NSCursor.FrameResizeDirection.Set {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizedirection/set/rawvalue
     @available(macOS 15.0, *)
     public typealias RawValue = Int8
-}
-
-@available(macOS 15.0, *)
-extension NSCursor {
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition
-    @available(macOS 15.0, *)
-    @frozen public enum FrameResizePosition: Int, Sendable, Equatable, Hashable {
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottom
-        case bottom = 4
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomleft
-        case bottomLeft = 6
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomright
-        case bottomRight = 12
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/left
-        case left = 2
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/right
-        case right = 8
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/top
-        case top = 1
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topleft
-        case topLeft = 3
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topright
-        case topRight = 9
-        /// A collection of all values of this type.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/allcases
-        static public var allCases: [NSCursor.FrameResizePosition] { unimplemented() }
-        /// The bottom leading corner of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomleading(relativeto:)
-        public static func bottomLeading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-        /// The bottom trailing corner of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/bottomtrailing(relativeto:)
-        public static func bottomTrailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-        // SKIPPED (constrained extension): func hash(into hasher: inout Hasher)
-        // SKIPPED (constrained extension): var hashValue: Int { get }
-        /// The leading edge of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/leading(relativeto:)
-        public static func leading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-        /// The top leading corner of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/topleading(relativeto:)
-        public static func topLeading(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-        /// The top trailing corner of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/toptrailing(relativeto:)
-        public static func topTrailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-        /// The trailing edge of the frame, in the given user interface layout direction.
-        /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/trailing(relativeto:)
-        public static func trailing(relativeTo layoutDirection: NSUserInterfaceLayoutDirection) -> NSCursor.FrameResizePosition { unimplemented() }
-    }
-
-}
-@available(macOS 15.0, *)
-extension NSCursor.FrameResizePosition {
-    /// A type that can represent a collection of all values of this type.
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresizeposition/allcases
-    @available(macOS 15.0, *)
-    public typealias AllCases = [NSCursor.FrameResizePosition]
 }

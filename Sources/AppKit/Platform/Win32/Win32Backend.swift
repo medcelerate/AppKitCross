@@ -31,6 +31,21 @@ final class Win32Backend: PlatformBackend {
     /// The notification area (Win32StatusItem.swift).
     private(set) var win32StatusItems: Win32StatusItems?
     var statusItems: (any PlatformStatusItemHost)? { win32StatusItems }
+    /// The shell (Win32Workspace.swift, ADR-0026); made on first use.
+    private(set) var win32Workspace: Win32Workspace?
+    var workspace: any PlatformWorkspace {
+        if let w = win32Workspace { return w }
+        let w = Win32Workspace(backend: self)
+        win32Workspace = w
+        return w
+    }
+    /// Printing (Win32Printing.swift): the PDF writer, print jobs through Direct2D's print
+    /// control, the PrintDlgEx dialog.
+    private(set) lazy var win32Printing = Win32PrintBackend(backend: self)
+    var printing: (any PlatformPrintBackend)? { win32Printing }
+
+    /// Windows caption buttons at the top-right of custom-frame windows (ADR-0022).
+    var windowButtonStyle: PlatformWindowButtonStyle { .caption }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
@@ -39,6 +54,7 @@ final class Win32Backend: PlatformBackend {
     func register(_ window: Win32Window) {
         windows.append(window)
         if let hwnd = window.hwnd, window.wantsMenuBar { menuBar.apply(to: hwnd) }
+        win32Workspace?.apply(to: window)
     }
 
     func unregister(_ window: Win32Window) {
@@ -97,12 +113,22 @@ final class Win32Backend: PlatformBackend {
             p.withMemoryRebound(to: WCHAR.self, capacity: 32) { String(decodingCString: $0, as: UTF16.self) }
         }
         let edr = extendedDynamicRange(for: hMonitor)
-        return PlatformDisplay(
+        var display = PlatformDisplay(
             frame: appKitRect(info.rcMonitor, scale: scale, primaryHeight: primaryHeight),
             visibleFrame: appKitRect(info.rcWork, scale: scale, primaryHeight: primaryHeight),
             backingScaleFactor: scale, localizedName: name,
             isMain: (info.dwFlags & DWORD(MONITORINFOF_PRIMARY)) != 0,
             maximumEDRValue: edr.current, maximumPotentialEDRValue: edr.potential, maximumReferenceEDRValue: 0)
+        // The current mode's refresh rate (0 and 1 mean the hardware default). GDI reports
+        // 32 bits per pixel whatever the panel; with HDR on the output is 10 bits a sample.
+        var mode = DEVMODEW()
+        mode.dmSize = WORD(MemoryLayout<DEVMODEW>.size)
+        let gotMode = withUnsafePointer(to: &info.szDevice) { p in
+            p.withMemoryRebound(to: WCHAR.self, capacity: 32) { EnumDisplaySettingsW($0, DWORD(bitPattern: -1) /* ENUM_CURRENT_SETTINGS */, &mode) }
+        }
+        if gotMode, mode.dmDisplayFrequency > 1 { display.refreshRate = Double(mode.dmDisplayFrequency) }
+        if edr.current > 1 { display.bitsPerSample = 10 }
+        return display
     }
 
     /// What the monitor reports about HDR (DXGI output description, SDR white level and
@@ -262,6 +288,7 @@ final class Win32Backend: PlatformBackend {
     /// that repaints every frame would starve the timer and animations would never advance.
     private func pump() -> Bool {
         var msg = MSG()
+        var lastService = GetTickCount64()
         while PeekMessageW(&msg, nil, 0, 0, UINT(PM_REMOVE)) {
             if msg.message == UINT(WM_QUIT) {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
@@ -269,7 +296,18 @@ final class Win32Backend: PlatformBackend {
             }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
+            // The end of an input event closes the undo manager's event groups, as AppKit's
+            // run loop does before the next event: a document is marked edited before a
+            // click on the File menu validates Save (the PC saw it disabled when the menu
+            // was opened within ~50 ms of typing). Only the groups close here; servicing the
+            // whole main queue before input messages broke the menu bar.
+            if Win32Backend.isInputMessage(msg.message) { UndoManager._endEventGroups() }
             fireFrameIfDue()
+            // A window whose paint invalidates itself keeps WM_PAINT coming, and this loop
+            // would never reach the main queue below (a DispatchQueue.main block, a Timer,
+            // the demo's probe never ran); the queue is serviced here every 50 ms regardless.
+            let now = GetTickCount64()
+            if now - lastService >= 50 { _ = PlatformMainQueue.service(); lastService = now }
         }
         fireFrameIfDue()
         // Blocks queued on the main queue from other threads, and RunLoop timers.
@@ -305,6 +343,16 @@ final class Win32Backend: PlatformBackend {
             if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1 }
         }
         return true
+    }
+    /// Keyboard and mouse-button messages (client and non-client): the events that start
+    /// a user action.
+    static func isInputMessage(_ m: UINT) -> Bool {
+        switch Int32(m) {
+        case WM_KEYDOWN, WM_SYSKEYDOWN, WM_CHAR, WM_SYSCHAR,
+             WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+             WM_NCLBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCMBUTTONDOWN: return true
+        default: return false
+        }
     }
     private var wakesQueue = 0, wakesInput = 0, wakesTimeout = 0
     private var serviceMs: UInt64 = 0
@@ -351,6 +399,16 @@ final class Win32Backend: PlatformBackend {
     /// IFileOpenDialog / IFileSaveDialog through the CD2D shim (ADR-0017).
     private lazy var win32FileDialog = Win32FileDialog()
     var fileDialog: (any PlatformFileDialog)? { PlatformFileDialogPolicy.allowsNative ? win32FileDialog : nil }
+
+    /// The common colour dialog (ChooseColor), for `APPKITWIN_COLOR_PANEL=native`.
+    var hasNativeColorDialog: Bool { true }
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? {
+        func byte(_ v: CGFloat) -> UInt32 { UInt32(min(255, max(0, (v * 255).rounded()))) }
+        var rgb: UInt32 = byte(initial.0) | (byte(initial.1) << 8) | (byte(initial.2) << 16)
+        let hwnd = (parent as? Win32Window)?.hwnd
+        guard cd2d_choose_color(hwnd.map { UnsafeMutableRawPointer($0) }, &rgb) else { return nil }
+        return (CGFloat(rgb & 0xFF) / 255, CGFloat((rgb >> 8) & 0xFF) / 255, CGFloat((rgb >> 16) & 0xFF) / 255)
+    }
 
     // MARK: Pasteboard and modal loops
 
@@ -471,6 +529,17 @@ final class Win32Backend: PlatformBackend {
         }
     }
 
+    /// An invisible top-level window of the message window's class: broadcasts
+    /// (WM_SETTINGCHANGE, WM_POWERBROADCAST, WM_WTSSESSION_CHANGE) reach top-level windows
+    /// only, never message-only ones.
+    func makeBroadcastWindow() -> HWND? {
+        let hwnd = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
+            CreateWindowExW(DWORD(WS_EX_TOOLWINDOW), name, name, DWORD(WS_OVERLAPPED), 0, 0, 0, 0, nil, nil, hInstance, nil)
+        }
+        if let hwnd { SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque()))) }
+        return hwnd
+    }
+
     private func createMessageWindow() {
         messageWindow = Win32Backend.messageWindowClassName.withCString(encodedAs: UTF16.self) { name in
             CreateWindowExW(0, name, name, 0, 0, 0, 0, 0, HWND(bitPattern: -3) /* HWND_MESSAGE */, nil, hInstance, nil)
@@ -481,6 +550,15 @@ final class Win32Backend: PlatformBackend {
     }
 
     private static let messageProc: WNDPROC = { hwnd, msg, wParam, lParam in
+        if msg == UINT(WM_SETTINGCHANGE) || msg == UINT(WM_POWERBROADCAST) || msg == 0x02B1 /* WM_WTSSESSION_CHANGE */ || msg == Win32Workspace.eventMessage || msg == Win32Workspace.kickMessage || (msg == UINT(WM_TIMER) && wParam != Win32Backend.dragTimer) {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
+            if ptr != 0 {
+                let backend = Unmanaged<Win32Backend>.fromOpaque(UnsafeRawPointer(bitPattern: Int(ptr))!).takeUnretainedValue()
+                let handled = MainActor.assumeIsolated { backend.win32Workspace?.handle(message: msg, wParam: wParam, lParam: lParam) ?? false }
+                if handled { return msg == UINT(WM_POWERBROADCAST) ? 1 /* TRUE */ : 0 }
+            }
+            return DefWindowProcW(hwnd, msg, wParam, lParam)
+        }
         if msg == UINT(WM_TIMER), wParam == Win32Backend.dragTimer {
             let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA)
             if ptr != 0 {

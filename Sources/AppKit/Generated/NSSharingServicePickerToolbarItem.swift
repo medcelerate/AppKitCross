@@ -20,7 +20,7 @@ import CoreText
 @MainActor open class NSSharingServicePickerToolbarItem: NSToolbarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickertoolbaritem/delegate
     @MainActor open var delegate: (any NSSharingServicePickerToolbarItemDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

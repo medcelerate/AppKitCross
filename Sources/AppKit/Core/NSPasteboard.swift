@@ -33,10 +33,15 @@ open class NSPasteboard: NSObject {
             let pb = Platform.backend.systemPasteboard
             let count = pb.changeCount
             guard count != _lastSyncedPlatformCount else { return }
+            let entries = pb.read()
+            // A clipboard another process held open reads as empty: keep the old contents and
+            // read again next time instead of recording this change as seen.
+            guard !pb.lastReadFailed else { _PasteboardTrace.log("general: read failed at count \(count); will retry"); return }
             _lastSyncedPlatformCount = count
             let item = NSPasteboardItem()
-            for e in pb.read() { item._entries[NSPasteboard.PasteboardType(e.type)] = e.data }
+            for e in entries { item._entries[NSPasteboard.PasteboardType(e.type)] = e.data }
             _items = item._entries.isEmpty ? [] : [item]
+            _PasteboardTrace.log("general: synced count \(count) from \(type(of: pb)); types \(item.types.map(\.rawValue))")
             _localChangeCount += 1
         }
     }
@@ -141,7 +146,7 @@ open class NSPasteboard: NSObject {
     ///     if let contentType = metadataResults.contentType {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedmetadata(for:)
     @available(macOS 15.4, *)
-    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>>) async throws -> NSPasteboard.DetectedMetadata { unimplemented() }
+    open func detectedMetadata(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedMetadata>>) async throws -> NSPasteboard.DetectedMetadata { unimplemented("NSPasteboard.detectedMetadata — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether the first pasteboard item matches the specified patterns, without notifying the person using the app.
     /// 
     /// This method only gives an indication of whether the first pasteboard item matches a particular pattern, and doesn’t allow the app to access the item's contents. As a result, the system doesn’t notify the person using the app about reading the contents of the pasteboard.
@@ -156,7 +161,7 @@ open class NSPasteboard: NSObject {
     ///     } else {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedpatterns(for:)
     @available(macOS 15.4, *)
-    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented() }
+    open func detectedPatterns(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> Set<PartialKeyPath<NSPasteboard.DetectedValues>> { unimplemented("NSPasteboard.detectedPatterns — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// Determines whether the first pasteboard item matches the specified patterns, reading the contents if it finds a match.
     /// 
     /// For details about the types returned for each pattern, see ``NSPasteboard/DetectedValues``.
@@ -171,7 +176,7 @@ open class NSPasteboard: NSObject {
     ///         print ("No links found in item.")
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/detectedvalues(for:)
     @available(macOS 15.4, *)
-    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> NSPasteboard.DetectedValues { unimplemented() }
+    open func detectedValues(for keyPaths: Set<PartialKeyPath<NSPasteboard.DetectedValues>>) async throws -> NSPasteboard.DetectedValues { unimplemented("NSPasteboard.detectedValues — pattern detection needs NSDataDetector, which corelibs Foundation lacks") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/general
     class public var general: NSPasteboard {
         if let p = _named[.general] { return p }
@@ -205,6 +210,8 @@ open class NSPasteboard: NSObject {
                 if cls == NSPasteboardItem.self { result += _items as [Any] } else if let s = string(forType: .string) { result.append(s as NSString) }
             } else if cls == NSImage.self {
                 for t in [NSPasteboard.PasteboardType.png, .tiff] { if let d = data(forType: t), let img = NSImage(data: d) { result.append(img); break } }
+            } else if cls == NSColor.self {
+                if let c = NSColor(from: self) { result.append(c) }
             }
         }
         return result.isEmpty ? nil : result

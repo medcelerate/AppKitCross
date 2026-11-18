@@ -112,6 +112,45 @@ final class AtspiTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The first argument of a reply when it is a struct of int32 (GetExtents).
+    @MainActor
+    private func extents(_ client: Client, _ me: String, _ path: String, coordinateType: UInt32 = 0) -> [Int32] {
+        guard let r = client.call(me, path, "org.a11y.atspi.Component", "GetExtents", { DBus.appendUInt32(&$0, coordinateType) }) else { return [] }
+        defer { dbus_message_unref(r) }
+        var iter = DBusMessageIter()
+        guard dbus_message_iter_init(r, &iter) != 0, dbus_message_iter_get_arg_type(&iter) == DBus.structType else { return [] }
+        var fields = DBusMessageIter()
+        dbus_message_iter_recurse(&iter, &fields)
+        var out: [Int32] = []
+        while dbus_message_iter_get_arg_type(&fields) == Int32(UInt8(ascii: "i")) {
+            var v: Int32 = 0
+            dbus_message_iter_get_basic(&fields, &v)
+            out.append(v)
+            dbus_message_iter_next(&fields)
+        }
+        return out
+    }
+
+    @MainActor
+    private func states(_ client: Client, _ me: String, _ path: String) -> Set<Int> {
+        guard let r = client.call(me, path, "org.a11y.atspi.Accessible", "GetState") else { return [] }
+        defer { dbus_message_unref(r) }
+        var iter = DBusMessageIter()
+        guard dbus_message_iter_init(r, &iter) != 0, dbus_message_iter_get_arg_type(&iter) == DBus.array else { return [] }
+        var words = DBusMessageIter()
+        dbus_message_iter_recurse(&iter, &words)
+        var bits = Set<Int>()
+        var word = 0
+        while dbus_message_iter_get_arg_type(&words) == Int32(UInt8(ascii: "u")) {
+            var v: UInt32 = 0
+            dbus_message_iter_get_basic(&words, &v)
+            for b in 0..<32 where v & (1 << UInt32(b)) != 0 { bits.insert(word * 32 + b) }
+            word += 1
+            dbus_message_iter_next(&words)
+        }
+        return bits
+    }
+
     private final class Target: NSObject, NSSelectorHandling {
         var presses = 0
         func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool { presses += 1; return true }
@@ -167,6 +206,99 @@ final class AtspiTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(Client.signals.contains { $0.path == buttonPath && $0.member == "StateChanged" && $0.detail == "focused" }, "signals: \(Client.signals)")
             // A missing object is an error, not a crash.
             XCTAssertNil(client.string(me, AtspiBridge.elementPathPrefix + "999999", "org.a11y.atspi.Accessible", "GetRoleName"))
+        }
+    }
+
+    /// ADR-0013 follow-ups over the bus: the menu bar under the application, a pop-up's
+    /// items while it is open, custom actions as extra actions, and extents through the
+    /// window's own client origin and scale.
+    func testMenusPopUpsCustomActionsAndExtentsOverTheBus() throws {
+        try MainActor.assumeIsolated {
+            let (backend, bridge) = try bridge()
+            guard let client = Client(address: bridge.address, backend: backend) else { throw XCTSkip("cannot open a client connection to \(bridge.address)") }
+            let target = Target()
+            let app = NSApplication.shared
+            let savedMenu = app.mainMenu
+            let main = NSMenu(title: "Main")
+            let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+            let file = NSMenu(title: "File")
+            file.autoenablesItems = false
+            let save = NSMenuItem(title: "Save", action: Selector(("saveDocument:")), keyEquivalent: "s")
+            save.target = target
+            let wrap = NSMenuItem(title: "Wrap Lines", action: Selector(("wrap:")), keyEquivalent: "")
+            wrap.target = target
+            wrap.state = .on
+            file.addItem(save)
+            file.addItem(wrap)
+            fileItem.submenu = file
+            main.addItem(fileItem)
+            app.mainMenu = main
+
+            let w = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 320, height: 200), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            w.title = "Menus"
+            let popup = NSPopUpButton(frame: NSRect(x: 20, y: 20, width: 120, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["Blue", "Red"])
+            let button = NSButton(title: "Message", target: nil, action: nil)
+            button.frame.origin = NSPoint(x: 20, y: 80)
+            var archived = 0
+            button.setAccessibilityCustomActions([NSAccessibilityCustomAction(name: "Archive") { archived += 1; return true }])
+            for v in [popup, button] as [NSView] { w.contentView!.addSubview(v) }
+            w.makeKeyAndOrderFront(nil)
+            client.pump()
+            defer { app.mainMenu = savedMenu; w.close(); client.pump(0.1); client.close() }
+
+            let me = bridge.uniqueName
+            let p = { (id: Int) in AtspiBridge.elementPathPrefix + String(id) }
+            // The menu bar is the application's child, next to the windows.
+            let appKids = client.children(me, AtspiBridge.rootPath)
+            XCTAssertTrue(appKids.contains(p(main._accessibilityElementID)), "children: \(appKids)")
+            XCTAssertEqual(client.string(me, p(main._accessibilityElementID), "org.a11y.atspi.Accessible", "GetRoleName"), "menu bar")
+            XCTAssertEqual(client.children(me, p(main._accessibilityElementID)), [p(fileItem._accessibilityElementID)])
+            XCTAssertEqual(client.children(me, p(fileItem._accessibilityElementID)), [p(file._accessibilityElementID)])
+            XCTAssertEqual(client.string(me, p(file._accessibilityElementID), "org.a11y.atspi.Accessible", "GetRoleName"), "menu")
+            XCTAssertEqual(client.string(me, p(save._accessibilityElementID), "org.a11y.atspi.Accessible", "GetRoleName"), "menu item")
+            XCTAssertEqual(client.string(me, p(save._accessibilityElementID), "org.a11y.atspi.Action", "GetKeyBinding") { DBus.appendInt32(&$0, 0) }, ";;<Control>s")
+            XCTAssertEqual(client.string(me, p(wrap._accessibilityElementID), "org.a11y.atspi.Accessible", "GetRoleName"), "check menu item")
+            XCTAssertTrue(states(client, me, p(wrap._accessibilityElementID)).isSuperset(of: [4, 41]), "checked, checkable")
+            // Pressing a menu item performs it.
+            XCTAssertEqual(client.bool(me, p(save._accessibilityElementID), "org.a11y.atspi.Action", "DoAction") { DBus.appendInt32(&$0, 0) }, true)
+            XCTAssertEqual(target.presses, 1)
+
+            // The pop-up: a combo box with a popup; expanding shows its items as children.
+            let popupPath = p(popup._accessibilityElementID)
+            XCTAssertEqual(client.string(me, popupPath, "org.a11y.atspi.Accessible", "GetRoleName"), "combo box")
+            XCTAssertTrue(states(client, me, popupPath).isSuperset(of: [9, 5, 42]), "expandable, collapsed, has-popup")
+            XCTAssertEqual(client.children(me, popupPath), [])
+            let actions = (0..<4).map { i in client.string(me, popupPath, "org.a11y.atspi.Action", "GetName") { DBus.appendInt32(&$0, Int32(i)) } ?? "" }
+            XCTAssertEqual(actions, ["press", "showMenu", "expand", "collapse"])
+            XCTAssertEqual(client.bool(me, popupPath, "org.a11y.atspi.Action", "DoAction") { DBus.appendInt32(&$0, 2) }, true)
+            client.pump()
+            XCTAssertTrue(states(client, me, popupPath).contains(10), "expanded")
+            let menuPaths = client.children(me, popupPath)
+            XCTAssertEqual(menuPaths.count, 1)
+            XCTAssertEqual(menuPaths.first.flatMap { client.string(me, $0, "org.a11y.atspi.Accessible", "GetRoleName") }, "menu")
+            let items = menuPaths.first.map { client.children(me, $0) } ?? []
+            XCTAssertEqual(items.map { client.string(me, $0, "org.freedesktop.DBus.Properties", "Get") { DBus.appendString(&$0, "org.a11y.atspi.Accessible"); DBus.appendString(&$0, "Name") } ?? "" }, ["Blue", "Red"])
+            XCTAssertEqual(extents(client, me, items[1]).count, 4)
+            XCTAssertGreaterThan(extents(client, me, items[1])[2], 0, "an open item has a size on screen")
+            XCTAssertEqual(client.bool(me, items[1], "org.a11y.atspi.Action", "DoAction") { DBus.appendInt32(&$0, 0) }, true)
+            client.pump()
+            XCTAssertEqual(popup.titleOfSelectedItem, "Red")
+            XCTAssertEqual(client.children(me, popupPath), [])
+
+            // Custom actions follow the role's actions.
+            let buttonPath = p(button._accessibilityElementID)
+            XCTAssertEqual(client.string(me, buttonPath, "org.a11y.atspi.Action", "GetName") { DBus.appendInt32(&$0, 1) }, "Archive")
+            XCTAssertEqual(client.bool(me, buttonPath, "org.a11y.atspi.Action", "DoAction") { DBus.appendInt32(&$0, 1) }, true)
+            XCTAssertEqual(archived, 1)
+
+            // Extents: the client area's root position plus the offset at the window's scale.
+            let lw = Mirror(reflecting: w).descendant("_platform") as! LinuxWindow
+            let tree = w.accessibilityTree()
+            let mapping = lw.accessibilityScreenMapping(clientFrame: tree.mappingClientFrame)!
+            let expected = mapping.pixelRect(button.accessibilityFrame())
+            XCTAssertEqual(extents(client, me, buttonPath), [expected.x, expected.y, expected.width, expected.height])
+            XCTAssertEqual(expected.width, Int32((button.frame.width * lw.backingScaleFactor).rounded()))
         }
     }
     #else

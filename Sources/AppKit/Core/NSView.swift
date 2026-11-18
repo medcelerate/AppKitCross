@@ -16,6 +16,13 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview
 @MainActor open class NSView: NSResponder, NSAnimatablePropertyContainer, NSUserInterfaceItemIdentification, NSDraggingDestination, NSAppearanceCustomization, NSAccessibilityElementProtocol, NSAccessibilityProtocol {
+    // MARK: Bindings (ADR-0032; overridden by controls, see NSKeyValueBinding+Views.swift)
+
+    internal class var _definedViewBindings: [NSBindingName] { [.hidden, .toolTip] }
+    internal func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyBaseViewBinding(b) }
+    internal func _viewBindingDidAttach(_ b: _NSBinding) { }
+    internal func _viewBindingDidDetach(_ b: _NSBinding) { }
+
     // MARK: Storage
     private var _frame: NSRect
     private var _boundsOrigin = NSPoint.zero
@@ -34,6 +41,9 @@ import CoreText
     private var _layerContentsPlacement: NSView.LayerContentsPlacement = .scaleAxesIndependently
     private var _canDrawSubviewsIntoLayer = false
     private var _animatorPending = false
+    /// `animator()` was asked for, layer or not: a view that animates something other than
+    /// its own geometry (a collection view's batch updates) takes this.
+    private var _animatorRequested = false
     private var _appearance: NSAppearance? = nil
     private var _registeredDraggedTypes: [NSPasteboard.PasteboardType] = []
     /// What `draggingEntered` returned, for the default `draggingUpdated` (AppKit's rule).
@@ -74,6 +84,39 @@ import CoreText
     /// Set when the geometry changed since `updateTrackingAreas()` last ran; the window
     /// calls it before the next evaluation of its tracking areas.
     internal var _needsUpdateTrackingAreas = true
+    // MARK: Core depth (ADR-0036)
+    private var _allowedTouchTypes: NSTouch.TouchTypeMask = .direct
+    /// Tool tip rectangles (`addToolTip`): shown by `_NSToolTipManager` like `toolTip`.
+    internal var _toolTipRects: [(tag: NSView.ToolTipTag, rect: NSRect, owner: AnyObject, userData: UnsafeMutableRawPointer?)] = []
+    /// Legacy tracking rectangles (`addTrackingRect`) by tag.
+    private var _trackingRectAreas: [NSView.TrackingRectTag: NSTrackingArea] = [:]
+    @MainActor internal static var _nextTag = 1
+    private var _additionalSafeAreaInsets = NSEdgeInsets()
+    private var _canDrawConcurrently = false
+    private var _layerUsesCoreImageFilters = false
+    private weak var _nextKeyView: NSView?
+    private weak var _previousKeyView: NSView?
+    private var _prefersCompactControlSizeMetrics = false
+    private var _pressureConfiguration: NSPressureConfiguration? = nil
+    private var _shadow: NSShadow? = nil
+    private var _wantsBestResolutionOpenGLSurface = true
+    private var _wantsExtendedDynamicRangeOpenGLSurface = false
+    private var _wantsRestingTouches = false
+    private var _writingToolsCoordinator: AnyObject? = nil   // NSWritingToolsCoordinator (macOS 15.2)
+    private var _isHorizontalContentSizeConstraintActive = true
+    private var _isVerticalContentSizeConstraintActive = true
+    /// The menu item hosting this view (`NSMenuItem.view`).
+    internal weak var _enclosingMenuItem: NSMenuItem?
+    /// `enterFullScreenMode`: where the view came from.
+    private var _fullScreenState: (window: NSWindow, superview: NSView?, frame: NSRect, index: Int, oldWindow: NSWindow?)? = nil
+    /// What `lockFocus` drew outside a draw pass, shown over the view until it next draws.
+    private var _focusOverlay: CGImage? = nil
+    /// The rect handed to `getRectsBeingDrawn` (kept alive for the pointer it returns).
+    private var _rectsBeingDrawn = UnsafeMutablePointer<NSRect>.allocate(capacity: 1)
+    /// The view whose `draw(_:)` is running.
+    @MainActor internal static weak var _drawingView: NSView?
+    /// `lockFocus` nesting: each entry restores the context it replaced.
+    @MainActor private static var _focusStack: [_NSFocusEntry] = []
 
     /// Geometry, visibility or membership changed: the window re-evaluates its tracking
     /// areas (after giving this view a chance to update them).
@@ -109,7 +152,14 @@ import CoreText
     /// (`force` false) only does so once an engine exists: re-laying out the whole root
     /// for every frame set would turn any two disagreeing sizes into an endless loop.
     internal func _setNeedsConstraintLayout(force: Bool = true) {
+        // Whatever changed here changes the fitting size of this view and its ancestors;
+        // siblings' subtrees keep theirs (a stepper's repeat re-lays its window ten times
+        // a second, and solving every row's fitting size again each pass was the cost).
         let root = _layoutRoot
+        if !root._applyingLayout {       // frames the engine applies do not change what fits
+            var v: NSView? = self
+            while let cur = v { cur._fittingSizeCache = nil; v = cur._superview }
+        }
         guard force || root._engine != nil else { return }
         root._constraintsDirty = true
         root._needsLayout = true
@@ -217,6 +267,9 @@ import CoreText
         CATransaction.setDisableActions(true)
         l.bounds = bounds
         l.position = _frame.origin
+        // The layer's anchor is the frame origin, so frame rotation is a turn about it.
+        let turn = CGAffineTransform(rotationAngle: _frameRotation * .pi / 180)
+        if _frameRotation != 0 || l.affineTransform() != .identity { l.setAffineTransform(_frameRotation == 0 ? .identity : turn) }
         CATransaction.commit()
     }
 
@@ -250,6 +303,14 @@ import CoreText
     private func _takeAnimator() -> Bool {
         let a = _animatorPending
         _animatorPending = false
+        _animatorRequested = false
+        return a
+    }
+    /// Takes the one-shot `animator()` request whether or not the view has a layer yet.
+    internal func _takeAnimatorRequest() -> Bool {
+        let a = _animatorRequested
+        _animatorPending = false
+        _animatorRequested = false
         return a
     }
 
@@ -279,6 +340,10 @@ import CoreText
         _needsUpdateTrackingAreas = true
         window?._trackingAreasDidChange()
         if let l = _layer, let w = window { l.contentsScale = w.backingScaleFactor }
+        // Off-window invalidations only mark the layer quietly (no window to repaint), so a
+        // view changed while detached (a reused table cell or collection item) would keep the
+        // raster the native compositor cached for it. Version it now that it is back.
+        if let l = _layer, !_layerIsHosted, window?._hostsLayersNatively == true, l.needsDisplay() { l.setNeedsDisplay() }
         viewDidMoveToWindow()
         if appearing { _viewController?.viewDidAppear() } else if disappearing { _viewController?.viewDidDisappear() }
     }
@@ -304,18 +369,56 @@ import CoreText
     /// space is y-up). Only then does the frame mapping flip.
     internal var _flipsRelativeToSuperview: Bool { isFlipped != (_superview?.isFlipped ?? false) }
 
+    // The bounds-to-superview mapping is AppKit's (checked against macOS): a point p in
+    // the bounds is first turned by `boundsRotation` about the coordinate origin, moved by
+    // the bounds origin and scaled by frame size / bounds size into "frame space" (the
+    // frame's own rectangle, in this view's orientation): F = D·(R(θb)·p − o). Frame space
+    // flips if the view's orientation differs from its superview's, is turned by
+    // `frameRotation` about the frame origin and lands at the frame origin.
+
+    /// Frame size / bounds size per axis (1 when the bounds track the frame).
+    internal var _boundsScale: (x: CGFloat, y: CGFloat) {
+        guard let bs = _boundsSize else { return (1, 1) }
+        return (bs.width == 0 ? 1 : _frame.width / bs.width, bs.height == 0 ? 1 : _frame.height / bs.height)
+    }
+
+    internal static func _rotate(_ p: NSPoint, degrees: CGFloat) -> NSPoint {
+        guard degrees != 0 else { return p }
+        let r = degrees * .pi / 180, c = cos(r), s = sin(r)
+        return NSPoint(x: p.x * c - p.y * s, y: p.x * s + p.y * c)
+    }
+
+    /// Bounds coordinates to frame space (see above).
+    internal func _toFrameSpace(_ p: NSPoint) -> NSPoint {
+        let q = NSView._rotate(p, degrees: _boundsRotation)
+        let d = _boundsScale
+        return NSPoint(x: (q.x - _boundsOrigin.x) * d.x, y: (q.y - _boundsOrigin.y) * d.y)
+    }
+
+    internal func _fromFrameSpace(_ f: NSPoint) -> NSPoint {
+        let d = _boundsScale
+        return NSView._rotate(NSPoint(x: f.x / d.x + _boundsOrigin.x, y: f.y / d.y + _boundsOrigin.y), degrees: -_boundsRotation)
+    }
+
     internal func _toSuperview(_ p: NSPoint) -> NSPoint {
-        let b = bounds
-        let x = p.x - b.minX + _frame.minX
-        let y = _flipsRelativeToSuperview ? _frame.minY + (b.maxY - p.y) : p.y - b.minY + _frame.minY
-        return NSPoint(x: x, y: y)
+        var f = _toFrameSpace(p)
+        if _flipsRelativeToSuperview { f.y = _frame.height - f.y }
+        f = NSView._rotate(f, degrees: _frameRotation)
+        return NSPoint(x: f.x + _frame.minX, y: f.y + _frame.minY)
     }
 
     internal func _fromSuperview(_ p: NSPoint) -> NSPoint {
-        let b = bounds
-        let x = p.x - _frame.minX + b.minX
-        let y = _flipsRelativeToSuperview ? b.maxY - (p.y - _frame.minY) : p.y - _frame.minY + b.minY
-        return NSPoint(x: x, y: y)
+        var f = NSView._rotate(NSPoint(x: p.x - _frame.minX, y: p.y - _frame.minY), degrees: -_frameRotation)
+        if _flipsRelativeToSuperview { f.y = _frame.height - f.y }
+        return _fromFrameSpace(f)
+    }
+
+    /// Whether a bounds point lies inside the frame rectangle (for a turned view the
+    /// bounds are only the bounding box of the frame).
+    internal func _frameSpaceContains(_ p: NSPoint) -> Bool {
+        if _boundsRotation == 0 { return bounds.contains(p) }
+        let f = _toFrameSpace(p)
+        return f.x >= 0 && f.y >= 0 && f.x < _frame.width && f.y < _frame.height
     }
 
     internal func _toWindow(_ p: NSPoint) -> NSPoint {
@@ -334,13 +437,31 @@ import CoreText
         return pt
     }
 
+    /// The bounding box of the converted corners (all four: a turned view's rect is no
+    /// longer axis-aligned, and AppKit answers its bounding box).
     private func _convertRect(_ rect: NSRect, _ convert: (NSPoint) -> NSPoint) -> NSRect {
-        let a = convert(NSPoint(x: rect.minX, y: rect.minY))
-        let b = convert(NSPoint(x: rect.maxX, y: rect.maxY))
-        return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+        NSView._boundingBox([convert(NSPoint(x: rect.minX, y: rect.minY)), convert(NSPoint(x: rect.maxX, y: rect.minY)),
+                             convert(NSPoint(x: rect.minX, y: rect.maxY)), convert(NSPoint(x: rect.maxX, y: rect.maxY))])
+    }
+
+    internal static func _boundingBox(_ pts: [NSPoint]) -> NSRect {
+        let xs = pts.map(\.x), ys = pts.map(\.y)
+        let minX = xs.min()!, minY = ys.min()!
+        return NSRect(x: minX, y: minY, width: xs.max()! - minX, height: ys.max()! - minY)
+    }
+
+    /// Sizes convert as vectors and come back positive, as AppKit's do.
+    private func _convertSize(_ size: NSSize, _ convert: (NSPoint) -> NSPoint) -> NSSize {
+        let o = convert(.zero), p = convert(NSPoint(x: size.width, y: size.height))
+        return NSSize(width: abs(p.x - o.x), height: abs(p.y - o.y))
     }
 
     // MARK: Drawing
+
+    /// The appearance dynamic colours resolve under while this view draws: its effective
+    /// appearance on screen, aqua while `NSPrintOperation` draws a page or preview (AppKit
+    /// prints light whatever the window shows, so a dark text view prints on white; ADR-0022).
+    internal var _drawingAppearance: NSAppearance { effectiveAppearance }
 
     /// Draws this view and its subviews into `ctx`, which is in the superview's coordinate
     /// system. `dirtyRect` is in superview coordinates too.
@@ -365,13 +486,8 @@ import CoreText
             return
         }
         ctx.saveGState()
-        ctx.translateBy(x: _frame.minX, y: _frame.minY)
-        if _flipsRelativeToSuperview {
-            ctx.translateBy(x: 0, y: _frame.height)
-            ctx.scaleBy(x: 1, y: -1)
-        }
+        _concatToSuperview(ctx)
         let b = bounds
-        ctx.translateBy(x: -b.minX, y: -b.minY)
         let localDirty = _convertRect(dirtyRect, _fromSuperview).intersection(b)
         // Drawing is confined to the dirty region, as in AppKit: siblings outside it keep
         // their pixels.
@@ -381,16 +497,41 @@ import CoreText
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         _dirtyRect = localDirty
+        let previousDrawing = NSView._drawingView
+        NSView._drawingView = self
         draw(localDirty)
+        NSView._drawingView = previousDrawing
         _dirtyRect = nil
         for sub in _subviews { sub._displayHierarchy(in: ctx, dirtyRect: localDirty) }
+        if let overlay = _focusOverlay {
+            // Drawn once over the view: the next display paints the view's own content.
+            _focusOverlay = nil
+            ctx.saveGState()
+            ctx.concatenate(_localToFocusSurface.inverted())
+            ctx.draw(overlay, in: NSRect(origin: .zero, size: _frame.size))
+            ctx.restoreGState()
+        }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = previous
         ctx.restoreGState()
         _needsDisplay = false
+    }
+
+    /// Concatenates the bounds-to-superview mapping onto `ctx` (see `_toSuperview`).
+    internal func _concatToSuperview(_ ctx: CGContext) {
+        ctx.translateBy(x: _frame.minX, y: _frame.minY)
+        if _frameRotation != 0 { ctx.rotate(by: _frameRotation * .pi / 180) }
+        if _flipsRelativeToSuperview {
+            ctx.translateBy(x: 0, y: _frame.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        let d = _boundsScale
+        if d.x != 1 || d.y != 1 { ctx.scaleBy(x: d.x, y: d.y) }
+        ctx.translateBy(x: -_boundsOrigin.x, y: -_boundsOrigin.y)
+        if _boundsRotation != 0 { ctx.rotate(by: _boundsRotation * .pi / 180) }
     }
 
     private func _clearNeedsDisplay() {
@@ -403,8 +544,17 @@ import CoreText
     nonisolated(unsafe) public static let _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
     /// Unbuffered, so a killed process keeps the tail of the trace.
     public static func _trace(_ message: String) { fputs("[trace] \(message)\n", stderr) }
+    /// `APPKITWIN_TRACE_FRAMES=1` logs what each frame costs (the constraint solve, the
+    /// layout and draw of each window, the frame tick), for finding what holds the frame
+    /// clock up on a platform without a profiler to hand. One line per pass, in ms.
+    nonisolated(unsafe) public static let _traceFrames = ProcessInfo.processInfo.environment["APPKITWIN_TRACE_FRAMES"] != nil
+    /// Milliseconds on a monotonic clock, for `_traceFrames` lines.
+    public static func _traceClock() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
 
+    /// Every invalidation since launch (tests measure what an update costs).
+    nonisolated(unsafe) public static var _invalidationCount = 0
     private func _invalidate(_ rect: NSRect) {
+        NSView._invalidationCount &+= 1
         if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {
@@ -424,8 +574,12 @@ import CoreText
 
     /// Inherited from the superview, then the window, then the application.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/effectiveappearance
+    /// While `NSPrintOperation` draws a page or preview every view answers aqua (AppKit
+    /// prints light whatever the window shows), so the text system lays its colours out
+    /// again for the page and dynamic colours resolve light (ADR-0022).
     @MainActor public var effectiveAppearance: NSAppearance {
-        _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
+        if NSGraphicsContext._printing { return NSAppearance._printing }
+        return _appearance ?? _superview?.effectiveAppearance ?? _window?.effectiveAppearance ?? NSApplication.shared.effectiveAppearance
     }
 
     internal func _effectiveAppearanceDidChange() {
@@ -439,6 +593,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimatablepropertycontainer/animator()
     @MainActor public func animator() -> Self {
         _animatorPending = _layer != nil
+        _animatorRequested = true
         return self
     }
 
@@ -463,9 +618,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/acceptsfirstmouse(for:)
     @MainActor open func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/acceptstouchevents
+    /// Deprecated: true when indirect (trackpad) touches are allowed.
     @MainActor open var acceptsTouchEvents: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowedTouchTypes.contains(.indirect) }
+        set { if newValue { _allowedTouchTypes.insert(.indirect) } else { _allowedTouchTypes.remove(.indirect) } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addconstraint(_:)
     @MainActor open func addConstraint(_ constraint: NSLayoutConstraint) {
@@ -530,10 +686,15 @@ import CoreText
         view.viewDidMoveToSuperview()
         didAddSubview(view)
         setNeedsDisplay(view._frame)
-        if _window != nil { view._accessibilityStructureChanged() }
+        if _window != nil { view._accessibilityStructureChanged(.added) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtooltip(_:owner:userdata:)
-    @MainActor open func addToolTip(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?) -> NSView.ToolTipTag { unimplemented() }
+    /// The owner answers through `NSViewToolTipOwner`, or its description is the text.
+    @MainActor open func addToolTip(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?) -> NSView.ToolTipTag {
+        let tag = NSView._nextTag; NSView._nextTag += 1
+        _toolTipRects.append((tag, rect, owner as AnyObject, data))
+        return tag
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtrackingarea(_:)
     @MainActor open func addTrackingArea(_ trackingArea: NSTrackingArea) {
         precondition(trackingArea._view == nil || trackingArea._view === self, "NSTrackingArea: the area is already in another view")
@@ -544,30 +705,78 @@ import CoreText
         _window?._trackingAreasDidChange()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/addtrackingrect(_:owner:userdata:assumeinside:)
-    @MainActor open func addTrackingRect(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?, assumeInside flag: Bool) -> NSView.TrackingRectTag { unimplemented() }
+    /// A tracking area sending `mouseEntered`/`mouseExited` to `owner` while the app is
+    /// active; the events carry the tag as `trackingNumber` and `data` as `userData`.
+    @MainActor open func addTrackingRect(_ rect: NSRect, owner: Any, userData data: UnsafeMutableRawPointer?, assumeInside flag: Bool) -> NSView.TrackingRectTag {
+        let tag = NSView._nextTag; NSView._nextTag += 1
+        var options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInActiveApp]
+        if flag { options.insert(.assumeInside) }
+        let area = NSTrackingArea(rect: rect, options: options, owner: owner, userInfo: nil)
+        area._legacyTag = tag
+        area._legacyUserData = data
+        _trackingRectAreas[tag] = area
+        addTrackingArea(area)
+        return tag
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/additionalsafeareainsets
     @available(macOS 11.0, *)
     @MainActor open var additionalSafeAreaInsets: NSEdgeInsets {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _additionalSafeAreaInsets }
+        set { _additionalSafeAreaInsets = newValue; _setNeedsConstraintLayout(); needsLayout = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustpageheightnew(_:top:bottom:limit:)
-    @MainActor open func adjustPageHeightNew(_ newBottom: UnsafeMutablePointer<CGFloat>, top oldTop: CGFloat, bottom oldBottom: CGFloat, limit bottomLimit: CGFloat) { unimplemented() }
+    /// Moves a page break so that no subview is cut in two: a subview straddling the
+    /// proposed bottom pushes the break up to its top edge, as far as `limit` allows;
+    /// subviews get the same question in their own coordinates.
+    @MainActor open func adjustPageHeightNew(_ newBottom: UnsafeMutablePointer<CGFloat>, top oldTop: CGFloat, bottom oldBottom: CGFloat, limit bottomLimit: CGFloat) {
+        // "Down" is towards the bottom of the page: +y in a flipped view, -y otherwise.
+        let down: CGFloat = isFlipped ? 1 : -1
+        var best = oldBottom
+        for sub in _subviews where !sub.isHidden {
+            let f = sub.frame
+            let near = isFlipped ? f.minY : f.maxY      // the edge nearer the top of the page
+            let far = isFlipped ? f.maxY : f.minY
+            let straddles = (near - oldBottom) * down < 0 && (far - oldBottom) * down > 0
+            guard straddles else { continue }
+            var candidate = near
+            if (candidate - bottomLimit) * down < 0 { candidate = bottomLimit }   // too tall: cut it at the limit
+            // Let the subview refine the break inside itself.
+            var inner = sub._fromSuperview(NSPoint(x: 0, y: oldBottom)).y
+            let innerTop = sub._fromSuperview(NSPoint(x: 0, y: oldTop)).y
+            let innerLimit = sub._fromSuperview(NSPoint(x: 0, y: bottomLimit)).y
+            sub.adjustPageHeightNew(&inner, top: innerTop, bottom: inner, limit: innerLimit)
+            let refined = sub._toSuperview(NSPoint(x: 0, y: inner)).y
+            if abs(refined - oldBottom) > 0.5, (refined - oldBottom) * down < 0, (refined - bottomLimit) * down >= 0 { candidate = refined }
+            if (candidate - best) * down < 0 { best = candidate }
+        }
+        newBottom.pointee = best
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustpagewidthnew(_:left:right:limit:)
-    @MainActor open func adjustPageWidthNew(_ newRight: UnsafeMutablePointer<CGFloat>, left oldLeft: CGFloat, right oldRight: CGFloat, limit rightLimit: CGFloat) { unimplemented() }
+    @MainActor open func adjustPageWidthNew(_ newRight: UnsafeMutablePointer<CGFloat>, left oldLeft: CGFloat, right oldRight: CGFloat, limit rightLimit: CGFloat) {
+        var best = oldRight
+        for sub in _subviews where !sub.isHidden {
+            let f = sub.frame
+            guard f.minX < oldRight, f.maxX > oldRight else { continue }
+            let candidate = max(f.minX, rightLimit)
+            if candidate < best { best = candidate }
+        }
+        newRight.pointee = best
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/adjustscroll(_:)
-    @MainActor open func adjustScroll(_ newVisible: NSRect) -> NSRect { unimplemented() }
+    /// The proposed rect unchanged: subclasses snap it (to rows, say).
+    @MainActor open func adjustScroll(_ newVisible: NSRect) -> NSRect { newVisible }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alignmentrect(forframe:)
     @MainActor open func alignmentRect(forFrame frame: NSRect) -> NSRect { frame }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/alignmentrectinsets
     @MainActor open var alignmentRectInsets: NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/allocategstate()
-    @MainActor open func allocateGState() { unimplemented() }
+    /// Deprecated; AppKit no longer keeps per-view graphics states and does nothing.
+    @MainActor open func allocateGState() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/allowedtouchtypes
     @available(macOS 10.12, *)
     @MainActor open var allowedTouchTypes: NSTouch.TouchTypeMask {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowedTouchTypes }
+        set { _allowedTouchTypes = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/allowsvibrancy
     @available(macOS 10.10, *)
@@ -605,14 +814,16 @@ import CoreText
         set { _autoresizingMask = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/autoscroll(with:)
-    @MainActor open func autoscroll(with event: NSEvent) -> Bool { unimplemented() }
+    /// Passed up to the superview; `NSClipView` scrolls.
+    @MainActor open func autoscroll(with event: NSEvent) -> Bool { _superview?.autoscroll(with: event) ?? false }
     // SKIPPED (unknown module (CoreImage CIFilter)): @MainActor var backgroundFilters: [CIFilter] { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/backingalignedrect(_:options:)
     @MainActor open func backingAlignedRect(_ rect: NSRect, options: AlignmentOptions = []) -> NSRect { centerScanRect(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/baselineoffsetfrombottom
     @MainActor open var baselineOffsetFromBottom: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindocument()
-    @MainActor open func beginDocument() { unimplemented() }
+    /// Called by `NSPrintOperation` before the first page; the default does nothing.
+    @MainActor open func beginDocument() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/begindraggingsession(with:event:source:)
     /// Starts a drag. Unlike AppKit this returns at once: the session tracks through the
     /// application's event stream and reports to `source` as it goes.
@@ -620,7 +831,27 @@ import CoreText
         _NSDragTracker.begin(items: items, event: event, source: source, view: self)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/beginpage(in:atplacement:)
-    @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) { unimplemented() }
+    /// Sets the current (printing) context up so that `rect` of this view lands with its
+    /// bottom-left corner at `location` on the paper, scaled by the print operation's
+    /// scale; `endPage` restores it. The context is left in the superview's coordinate
+    /// system, which is what the hierarchy drawing expects.
+    @MainActor open func beginPage(in rect: NSRect, atPlacement location: NSPoint) {
+        guard let cg = NSGraphicsContext.current?.cgContext else { return }
+        let scale = NSPrintOperation.current?._pageScale ?? NSPrintInfo.shared.scalingFactor
+        cg.saveGState()
+        cg.translateBy(x: location.x, y: location.y)
+        cg.scaleBy(x: scale, y: scale)
+        let sr = _rectInSuperviewSpace(rect)
+        if _superview?.isFlipped ?? false {
+            cg.translateBy(x: 0, y: sr.height)
+            cg.scaleBy(x: 1, y: -1)
+        }
+        cg.translateBy(x: -sr.minX, y: -sr.minY)
+        cg.clip(to: sr)
+    }
+    /// `rect` (bounds coordinates) in the superview's coordinate system (the window's
+    /// content space for a view without one).
+    internal func _rectInSuperviewSpace(_ rect: NSRect) -> NSRect { _convertRect(rect, _toSuperview) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bitmapimagerepforcachingdisplay(in:)
     @MainActor open func bitmapImageRepForCachingDisplay(in rect: NSRect) -> NSBitmapImageRep? {
         let scale = window?.backingScaleFactor ?? 1
@@ -634,7 +865,13 @@ import CoreText
     @MainActor open var bottomAnchor: NSLayoutYAxisAnchor { anchorY(.bottom) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/bounds
     @MainActor open var bounds: NSRect {
-        get { NSRect(origin: _boundsOrigin, size: _boundsSize ?? _frame.size) }
+        get {
+            let r = NSRect(origin: _boundsOrigin, size: _boundsSize ?? _frame.size)
+            guard _boundsRotation != 0 else { return r }
+            // Turned: the bounding box of the frame rectangle in bounds coordinates (AppKit).
+            let w = _frame.width, h = _frame.height
+            return NSView._boundingBox([_fromFrameSpace(.zero), _fromFrameSpace(NSPoint(x: w, y: 0)), _fromFrameSpace(NSPoint(x: 0, y: h)), _fromFrameSpace(NSPoint(x: w, y: h))])
+        }
         set {
             setBoundsOrigin(newValue.origin)
             setBoundsSize(newValue.size)
@@ -645,7 +882,20 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/boundsrotation
     @MainActor open var boundsRotation: CGFloat {
         get { _boundsRotation }
-        set { _boundsRotation = newValue }
+        set {
+            guard newValue != _boundsRotation else { return }
+            _boundsRotation = newValue
+            _geometryTransformDidChange()
+        }
+    }
+    /// A rotation or scale changed how bounds map to the window.
+    private func _geometryTransformDidChange() {
+        _setNeedsUpdateTrackingAreas()
+        _superview?.setNeedsDisplay(_superview?.bounds ?? .zero)
+        setNeedsDisplay(bounds)
+        if _postsBoundsChangedNotifications {
+            NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
+        }
     }
     /// True while `cacheDisplay(in:to:)` renders: a natively hosted layer tree is then
     /// composed in software into the bitmap instead of being left to the platform.
@@ -658,16 +908,24 @@ import CoreText
         let ctx = surface.context
         layoutSubtreeIfNeeded()
         ctx.saveGState()
-        // `_displayHierarchy` expects the superview's space; move `rect` to the origin.
-        ctx.translateBy(x: -(_frame.minX + rect.minX), y: -(_frame.minY + rect.minY))
+        // `_displayHierarchy` expects the superview's space: move `rect` (taken into that
+        // space) to the bitmap's origin, turning a flipped superview's y-down space the
+        // bitmap's way up (else every snapshot of an item in a collection view or a clip
+        // view came out upside down).
+        let sr = _rectInSuperviewSpace(rect)
+        if _superview?.isFlipped == true {
+            ctx.translateBy(x: 0, y: rect.height)
+            ctx.scaleBy(x: 1, y: -1)
+        }
+        ctx.translateBy(x: -sr.minX, y: -sr.minY)
         let previous = NSGraphicsContext.current
         let wasCaching = NSView._cachingDisplay
         NSView._cachingDisplay = true
         // Layer contents redrawn during the capture resolve dynamic colours under the
         // view's appearance (a dark window stays dark in the bitmap).
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
-        _displayHierarchy(in: ctx, dirtyRect: NSRect(x: _frame.minX + rect.minX, y: _frame.minY + rect.minY, width: rect.width, height: rect.height))
+        NSAppearance.current = _drawingAppearance
+        _displayHierarchy(in: ctx, dirtyRect: sr)
         NSAppearance.current = previousAppearance
         NSView._cachingDisplay = wasCaching
         NSGraphicsContext.current = previous
@@ -679,9 +937,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candraw
     @MainActor open var canDraw: Bool { _window != nil && !isHiddenOrHasHiddenAncestor }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candrawconcurrently
+    /// Recorded; the port draws every view on the main thread.
     @MainActor open var canDrawConcurrently: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _canDrawConcurrently }
+        set { _canDrawConcurrently = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candrawsubviewsintolayer
     @MainActor open var canDrawSubviewsIntoLayer: Bool {
@@ -690,7 +949,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/candidatelisttouchbaritem
     @available(macOS 10.12, *)
-    @MainActor open var candidateListTouchBarItem: NSCandidateListTouchBarItem<AnyObject>? { unimplemented() }
+    /// Nil: a plain view offers no candidate list (text views override).
+    @MainActor open var candidateListTouchBarItem: NSCandidateListTouchBarItem<AnyObject>? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/centerscanrect(_:)
     @MainActor open func centerScanRect(_ rect: NSRect) -> NSRect {
         let s = _window?.backingScaleFactor ?? 1
@@ -736,13 +996,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:from:)
     @MainActor open func convert(_ point: NSPoint, from view: NSView?) -> NSPoint { _fromWindow(view?._toWindow(point) ?? point) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:from:)
-    @MainActor open func convert(_ size: NSSize, from view: NSView?) -> NSSize { size }
+    @MainActor open func convert(_ size: NSSize, from view: NSView?) -> NSSize { _convertSize(size) { convert($0, from: view) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:from:)
     @MainActor open func convert(_ rect: NSRect, from view: NSView?) -> NSRect { _convertRect(rect) { convert($0, from: view) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:to:)
     @MainActor open func convert(_ point: NSPoint, to view: NSView?) -> NSPoint { let w = _toWindow(point); return view?._fromWindow(w) ?? w }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:to:)
-    @MainActor open func convert(_ size: NSSize, to view: NSView?) -> NSSize { size }
+    @MainActor open func convert(_ size: NSSize, to view: NSView?) -> NSSize { _convertSize(size) { convert($0, to: view) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convert(_:to:)
     @MainActor open func convert(_ rect: NSRect, to view: NSView?) -> NSRect { _convertRect(rect) { convert($0, to: view) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convertfrombacking(_:)
@@ -752,11 +1012,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convertfrombacking(_:)
     @MainActor open func convertFromBacking(_ rect: NSRect) -> NSRect { NSRect(origin: convertFromBacking(rect.origin), size: convertFromBacking(rect.size)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convertfromlayer(_:)
-    @MainActor open func convertFromLayer(_ point: NSPoint) -> NSPoint { unimplemented() }
+    /// The backing layer's bounds are the view's bounds, so layer space is the view's
+    /// own (AppKit answers the identity, flipped or scaled views included).
+    @MainActor open func convertFromLayer(_ point: NSPoint) -> NSPoint { point }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convertfromlayer(_:)
-    @MainActor open func convertFromLayer(_ size: NSSize) -> NSSize { unimplemented() }
+    @MainActor open func convertFromLayer(_ size: NSSize) -> NSSize { size }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/convertfromlayer(_:)
-    @MainActor open func convertFromLayer(_ rect: NSRect) -> NSRect { unimplemented() }
+    @MainActor open func convertFromLayer(_ rect: NSRect) -> NSRect { rect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttobacking(_:)
     @MainActor open func convertToBacking(_ point: NSPoint) -> NSPoint { let s = _window?.backingScaleFactor ?? 1; return NSPoint(x: point.x * s, y: point.y * s) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttobacking(_:)
@@ -764,24 +1026,32 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttobacking(_:)
     @MainActor open func convertToBacking(_ rect: NSRect) -> NSRect { NSRect(origin: convertToBacking(rect.origin), size: convertToBacking(rect.size)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttolayer(_:)
-    @MainActor open func convertToLayer(_ point: NSPoint) -> NSPoint { unimplemented() }
+    @MainActor open func convertToLayer(_ point: NSPoint) -> NSPoint { point }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttolayer(_:)
-    @MainActor open func convertToLayer(_ size: NSSize) -> NSSize { unimplemented() }
+    @MainActor open func convertToLayer(_ size: NSSize) -> NSSize { size }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/converttolayer(_:)
-    @MainActor open func convertToLayer(_ rect: NSRect) -> NSRect { unimplemented() }
+    @MainActor open func convertToLayer(_ rect: NSRect) -> NSRect { rect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/datawitheps(inside:)
-    @MainActor open func dataWithEPS(inside rect: NSRect) -> Data { unimplemented() }
+    /// Out of scope (ADR-0036): the port has no PostScript writer; PDF is `dataWithPDF`.
+    @MainActor open func dataWithEPS(inside rect: NSRect) -> Data { unimplemented("NSView.dataWithEPS(inside:) — no PostScript writer; use dataWithPDF(inside:)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/datawithpdf(inside:)
-    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data { unimplemented() }
+    /// A one-page PDF of `rect`, through `NSPrintOperation.pdfOperation`.
+    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data {
+        let data = NSMutableData()
+        _ = NSPrintOperation.pdfOperation(with: self, inside: rect, to: data).run()
+        return data as Data
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/defaultfocusringtype
     @MainActor class public var defaultFocusRingType: NSFocusRingType { NSFocusRingType(rawValue: 2)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/defaultmenu
-    @MainActor class public var defaultMenu: NSMenu? { unimplemented() }
+    /// Nil: a plain view class has no default contextual menu.
+    @MainActor class public var defaultMenu: NSMenu? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/didaddsubview(_:)
     @MainActor open func didAddSubview(_ subview: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/didclosemenu(_:with:)
     @available(macOS 10.11, *)
-    @MainActor open func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) { unimplemented() }
+    /// Called after the view's contextual menu closes; the default does nothing.
+    @MainActor open func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/didupdatetrackingareasnotification
     static public var didUpdateTrackingAreasNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSViewDidUpdateTrackingAreasNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/discardcursorrects()
@@ -798,9 +1068,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displayifneeded(_:)
     @MainActor open func displayIfNeeded(_ rect: NSRect) { if _needsDisplay { _window?.displayIfNeeded() } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displayifneededignoringopacity()
-    @MainActor open func displayIfNeededIgnoringOpacity() { unimplemented() }
+    @MainActor open func displayIfNeededIgnoringOpacity() { displayIfNeeded() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displayifneededignoringopacity(_:)
-    @MainActor open func displayIfNeededIgnoringOpacity(_ rect: NSRect) { unimplemented() }
+    @MainActor open func displayIfNeededIgnoringOpacity(_ rect: NSRect) { displayIfNeeded(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displayignoringopacity(_:)
     @MainActor open func displayIgnoringOpacity(_ rect: NSRect) { display(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/displayignoringopacity(_:in:)
@@ -816,22 +1086,58 @@ import CoreText
         return CADisplayLink { link in _ = ActionRegistry.perform(selector, on: t, with: link) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/dragfile(_:from:slideback:event:)
-    @MainActor open func dragFile(_ filename: String, from rect: NSRect, slideBack flag: Bool, event: NSEvent) -> Bool { unimplemented() }
+    /// Deprecated: drags the file's URL (with its icon-sized image of `rect`).
+    @MainActor open func dragFile(_ filename: String, from rect: NSRect, slideBack flag: Bool, event: NSEvent) -> Bool {
+        guard FileManager.default.fileExists(atPath: filename) else { return false }
+        let writer = NSPasteboardItem()
+        _ = writer.setString(URL(fileURLWithPath: filename).absoluteString, forType: .fileURL)
+        let item = NSDraggingItem(pasteboardWriter: writer)
+        item.draggingFrame = rect
+        _ = beginDraggingSession(with: [item], event: event, source: _NSFileDragSource.shared)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/dragpromisedfiles(oftypes:from:source:slideback:event:)
-    @MainActor open func dragPromisedFiles(ofTypes typeArray: [String], from rect: NSRect, source sourceObject: Any, slideBack flag: Bool, event: NSEvent) -> Bool { unimplemented() }
+    /// Out of scope (ADR-0036): deprecated promise drags; use `NSFilePromiseProvider`.
+    @MainActor open func dragPromisedFiles(ofTypes typeArray: [String], from rect: NSRect, source sourceObject: Any, slideBack flag: Bool, event: NSEvent) -> Bool { unimplemented("NSView.dragPromisedFiles — deprecated; use NSFilePromiseProvider") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/draw(_:)
     @MainActor open func draw(_ dirtyRect: NSRect) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawfocusringmask()
-    @MainActor open func drawFocusRingMask() { unimplemented() }
+    /// Draws nothing: a view with a custom focus ring shape fills it here.
+    @MainActor open func drawFocusRingMask() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawpageborder(with:)
-    @MainActor open func drawPageBorder(with borderSize: NSSize) { unimplemented() }
+    /// Draws `pageHeader` at the top margin and `pageFooter` at the bottom margin of a
+    /// page of `borderSize` (the current context is in paper coordinates).
+    @MainActor open func drawPageBorder(with borderSize: NSSize) {
+        let info = NSPrintOperation.current?.printInfo ?? NSPrintInfo.shared
+        let header = pageHeader, footer = pageFooter
+        let headerSize = header.size(), footerSize = footer.size()
+        if header.length > 0 {
+            header.draw(at: NSPoint(x: info.leftMargin, y: borderSize.height - info.topMargin + 6))
+        }
+        if footer.length > 0 {
+            footer.draw(at: NSPoint(x: (borderSize.width - footerSize.width) / 2, y: max(0, info.bottomMargin - footerSize.height - 6)))
+        }
+        _ = headerSize
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/drawsheetborder(with:)
-    @MainActor open func drawSheetBorder(with borderSize: NSSize) { unimplemented() }
+    /// Deprecated; AppKit draws sheets itself and this does nothing.
+    @MainActor open func drawSheetBorder(with borderSize: NSSize) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/edgeinsets(for:)
     @available(macOS 26.0, *)
-    @MainActor open func edgeInsets(for region: NSView.LayoutRegion) -> NSEdgeInsets { unimplemented() }
+    /// The safe area answers `safeAreaInsets`; the port's layout margins are zero (the margins
+    /// guide covers the bounds). Corner adaptation has no effect (ADR-0037).
+    @MainActor open func edgeInsets(for region: NSView.LayoutRegion) -> NSEdgeInsets {
+        switch region._kind {
+        case .safeArea: return safeAreaInsets
+        case .margins: return NSEdgeInsets()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enclosingmenuitem
-    @MainActor open var enclosingMenuItem: NSMenuItem? { unimplemented() }
+    @MainActor open var enclosingMenuItem: NSMenuItem? {
+        var v: NSView? = self
+        while let cur = v { if let item = cur._enclosingMenuItem { return item }; v = cur._superview }
+        return nil
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enclosingscrollview
     @MainActor open var enclosingScrollView: NSScrollView? {
         var v = _superview
@@ -839,15 +1145,47 @@ import CoreText
         return nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enddocument()
-    @MainActor open func endDocument() { unimplemented() }
+    /// Called by `NSPrintOperation` after the last page; the default does nothing.
+    @MainActor open func endDocument() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/endpage()
-    @MainActor open func endPage() { unimplemented() }
+    /// Undoes `beginPage(in:atPlacement:)`.
+    @MainActor open func endPage() { NSGraphicsContext.current?.cgContext.restoreGState() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/enterfullscreenmode(_:withoptions:)
-    @MainActor open func enterFullScreenMode(_ screen: NSScreen, withOptions options: [NSView.FullScreenModeOptionKey : Any]? = nil) -> Bool { unimplemented() }
+    /// Moves the view into a borderless window covering `screen` (its level from
+    /// `fullScreenModeWindowLevel`, else above the menu bar); `exitFullScreenMode` puts it back.
+    @MainActor open func enterFullScreenMode(_ screen: NSScreen, withOptions options: [NSView.FullScreenModeOptionKey : Any]? = nil) -> Bool {
+        guard _fullScreenState == nil else { return false }
+        let window = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        if let level = options?[.fullScreenModeWindowLevel] as? Int { window.level = NSWindow.Level(rawValue: level) }
+        else if let level = (options?[.fullScreenModeWindowLevel] as? NSNumber)?.intValue { window.level = NSWindow.Level(rawValue: level) }
+        else { window.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1) }
+        let sup = _superview
+        let index = sup?._subviews.firstIndex { $0 === self } ?? 0
+        _fullScreenState = (window, sup, _frame, index, _window)
+        removeFromSuperview()
+        window.contentView = self
+        window.makeKeyAndOrderFront(nil)
+        _ = window.makeFirstResponder(self)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/exerciseambiguityinlayout()
     @MainActor open func exerciseAmbiguityInLayout() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/exitfullscreenmode(options:)
-    @MainActor open func exitFullScreenMode(options: [NSView.FullScreenModeOptionKey : Any]? = nil) { unimplemented() }
+    @MainActor open func exitFullScreenMode(options: [NSView.FullScreenModeOptionKey : Any]? = nil) {
+        guard let state = _fullScreenState else { return }
+        _fullScreenState = nil
+        let placeholder = NSView(frame: .zero)
+        state.window.contentView = placeholder
+        state.window.orderOut(nil)
+        state.window.close()
+        if let sup = state.superview {
+            let others = sup._subviews
+            if state.index < others.count { sup.addSubview(self, positioned: .below, relativeTo: others[state.index]) } else { sup.addSubview(self) }
+        }
+        frame = state.frame
+        state.oldWindow?.makeKeyAndOrderFront(nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/firstbaselineanchor
     @available(macOS 10.11, *)
     @MainActor open var firstBaselineAnchor: NSLayoutYAxisAnchor { anchorY(.firstBaseline) }
@@ -856,24 +1194,33 @@ import CoreText
     @MainActor open var firstBaselineOffsetFromTop: CGFloat { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/fittingsize
     @MainActor open var fittingSize: NSSize {
+        if let cached = _fittingSizeCache { return cached }
+        let result: NSSize
         if _subtreeUsesConstraints {
             updateConstraintsForSubtreeIfNeeded()
             let engine = LayoutEngine(root: self)
             let s = engine.solve(root: self, fittingRoot: true, apply: false)
-            return NSSize(width: s.width.rounded(), height: s.height.rounded())
+            result = NSSize(width: s.width.rounded(), height: s.height.rounded())
+        } else {
+            let s = intrinsicContentSize
+            result = NSSize(width: max(0, s.width), height: max(0, s.height))
         }
-        let s = intrinsicContentSize
-        return NSSize(width: max(0, s.width), height: max(0, s.height))
+        _fittingSizeCache = result
+        return result
     }
+    /// The last `fittingSize`, until something in this subtree changes (`_setNeedsConstraintLayout`).
+    internal var _fittingSizeCache: NSSize?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringmaskbounds
-    @MainActor open var focusRingMaskBounds: NSRect { unimplemented() }
+    /// Empty: the default focus ring has no custom mask.
+    @MainActor open var focusRingMaskBounds: NSRect { .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusringtype
     @MainActor open var focusRingType: NSFocusRingType {
         get { _focusRingType }
         set { _focusRingType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/focusview
-    @MainActor class public var focusView: NSView? { unimplemented() }
+    /// The view `lockFocus` focused last, else the view drawing now.
+    @MainActor class public var focusView: NSView? { _focusStack.last?.view ?? _drawingView }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/frame
     @MainActor open var frame: NSRect {
         get { _frame }
@@ -885,19 +1232,37 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/frame(foralignmentrect:)
     @MainActor open func frame(forAlignmentRect alignmentRect: NSRect) -> NSRect { alignmentRect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/framecenterrotation
+    /// The frame rotation about the frame's centre: the rotation is the frame's, the
+    /// origin moves so the centre stays put (AppKit).
     @MainActor open var frameCenterRotation: CGFloat {
         get { _frameRotation }
-        set { _frameRotation = newValue }
+        set {
+            let c = NSPoint(x: _frame.width / 2, y: _frame.height / 2)
+            let before = NSView._rotate(c, degrees: _frameRotation)
+            let after = NSView._rotate(c, degrees: newValue)
+            frameRotation = newValue
+            setFrameOrigin(NSPoint(x: _frame.minX + before.x - after.x, y: _frame.minY + before.y - after.y))
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/framedidchangenotification
     static public var frameDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSViewFrameDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/framerotation
     @MainActor open var frameRotation: CGFloat {
         get { _frameRotation }
-        set { _frameRotation = newValue }
+        set {
+            guard newValue != _frameRotation else { return }
+            _frameRotation = newValue
+            _syncLayerGeometry()
+            _setNeedsUpdateTrackingAreas()
+            _superview?.setNeedsDisplay(_superview?.bounds ?? .zero)
+            if _postsFrameChangedNotifications {
+                NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
+            }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/gstate()
-    @MainActor open func gState() -> Int { unimplemented() }
+    /// Deprecated: 0, as AppKit answers (no per-view graphics states).
+    @MainActor open func gState() -> Int { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/gesturerecognizers
     @available(macOS 10.10, *)
     @MainActor open var gestureRecognizers: [NSGestureRecognizer] {
@@ -909,15 +1274,25 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/getrectsbeingdrawn(_:count:)
-    @MainActor open func getRectsBeingDrawn(_ rects: UnsafeMutablePointer<UnsafePointer<NSRect>?>?, count: UnsafeMutablePointer<Int>?) { unimplemented() }
+    /// One rect, the dirty rect of the current `draw(_:)` (the port tracks no region).
+    @MainActor open func getRectsBeingDrawn(_ rects: UnsafeMutablePointer<UnsafePointer<NSRect>?>?, count: UnsafeMutablePointer<Int>?) {
+        _rectsBeingDrawn.pointee = _dirtyRect ?? visibleRect
+        rects?.pointee = UnsafePointer(_rectsBeingDrawn)
+        count?.pointee = 1
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/getrectsexposedduringliveresize(_:count:)
-    @MainActor open func getRectsExposedDuringLiveResize(_ exposedRects: UnsafeMutablePointer<NSRect>, count: UnsafeMutablePointer<Int>) { unimplemented() }
+    /// The whole bounds: nothing is preserved during live resize.
+    @MainActor open func getRectsExposedDuringLiveResize(_ exposedRects: UnsafeMutablePointer<NSRect>, count: UnsafeMutablePointer<Int>) {
+        exposedRects.pointee = bounds
+        count.pointee = 1
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/globalframedidchangenotification
     static public var globalFrameDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSViewGlobalFrameDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/hasambiguouslayout
     @MainActor open var hasAmbiguousLayout: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightadjustlimit
-    @MainActor open var heightAdjustLimit: CGFloat { unimplemented() }
+    /// How far up a page break may move to keep a subview whole: a fraction of the page.
+    @MainActor open var heightAdjustLimit: CGFloat { 0.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/heightanchor
     @available(macOS 10.11, *)
     @MainActor open var heightAnchor: NSLayoutDimension { anchorDimension(.height) }
@@ -925,20 +1300,25 @@ import CoreText
     @MainActor open func hitTest(_ point: NSPoint) -> NSView? {
         guard !_isHidden else { return nil }
         let p = _fromSuperview(point)
-        guard bounds.contains(p) else { return nil }
+        guard _frameSpaceContains(p) else { return nil }
         for s in _subviews.reversed() { if let hit = s.hitTest(p) { return hit } }
         return self
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/inliveresize
     @MainActor open var inLiveResize: Bool { _window?.inLiveResize ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/inputcontext
-    @MainActor open var inputContext: NSTextInputContext? { unimplemented() }
+    /// Nil for a view that is not an `NSTextInputClient`; text input contexts are not
+    /// modelled yet (ADR-0036), so a client view still stops here.
+    @MainActor open var inputContext: NSTextInputContext? {
+        guard self is NSTextInputClient else { return nil }
+        unimplemented("NSView.inputContext for NSTextInputClient views — NSTextInputContext is a generated stub")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/intrinsiccontentsize
     @MainActor open var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/invalidateintrinsiccontentsize()
     @MainActor open func invalidateIntrinsicContentSize() { _superview?.needsLayout = true; _setNeedsConstraintLayout() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/iscompatiblewithresponsivescrolling
-    @MainActor class public var isCompatibleWithResponsiveScrolling: Bool { unimplemented() }
+    @MainActor class public var isCompatibleWithResponsiveScrolling: Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isdescendant(of:)
     @MainActor open func isDescendant(of view: NSView) -> Bool {
         var v: NSView? = self
@@ -946,7 +1326,9 @@ import CoreText
         return false
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isdrawingfindindicator
-    @MainActor open var isDrawingFindIndicator: Bool { unimplemented() }
+    /// False: the find bar (ADR-0030) highlights in the text view, not through a
+    /// find-indicator snapshot of this view.
+    @MainActor open var isDrawingFindIndicator: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isflipped
     @MainActor open var isFlipped: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishidden
@@ -964,21 +1346,43 @@ import CoreText
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
-            if _window != nil { _accessibilityStructureChanged() }
+            // As on macOS, descendants that are not hidden themselves hear about it too,
+            // when the change is visible (no hidden ancestor above this view).
+            if !(_superview?.isHiddenOrHasHiddenAncestor ?? false) {
+                for s in _subviews { s._ancestorHiddenDidChange(newValue) }
+            }
+            // A hidden effect view no longer asks for the system backdrop (nor do those
+            // under a hidden ancestor).
+            if let w = _window, w._hasEffectViews { w._updateBackdrop() }
+            if _window != nil { _accessibilityStructureChanged(newValue ? .removed : .added) }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishiddenorhashiddenancestor
     @MainActor open var isHiddenOrHasHiddenAncestor: Bool { _isHidden || (_superview?.isHiddenOrHasHiddenAncestor ?? false) }
+
+    /// `viewDidHide`/`viewDidUnhide` for a view whose ancestor was hidden or shown ("either
+    /// directly, or in response to an ancestor being hidden"); a hidden view's own subtree
+    /// does not change visibility, so it stops there.
+    @MainActor private func _ancestorHiddenDidChange(_ hidden: Bool) {
+        guard !_isHidden else { return }
+        if hidden { viewDidHide() } else { viewDidUnhide() }
+        for s in _subviews { s._ancestorHiddenDidChange(hidden) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ishorizontalcontentsizeconstraintactive
     @available(macOS 10.15, *)
+    /// When false the layout engine ignores the horizontal intrinsic size.
     @MainActor open var isHorizontalContentSizeConstraintActive: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _isHorizontalContentSizeConstraintActive }
+        set { _isHorizontalContentSizeConstraintActive = newValue; _setNeedsConstraintLayout() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isinfullscreenmode
-    @MainActor open var isInFullScreenMode: Bool { unimplemented() }
+    @MainActor open var isInFullScreenMode: Bool { _fullScreenState != nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/ismousepoint(_:in:)
-    @MainActor open func isMousePoint(_ point: NSPoint, in rect: NSRect) -> Bool { unimplemented() }
+    /// `NSMouseInRect`: the edge towards the top of the view belongs to the rect.
+    @MainActor open func isMousePoint(_ point: NSPoint, in rect: NSRect) -> Bool {
+        guard point.x >= rect.minX, point.x < rect.maxX else { return false }
+        return isFlipped ? (point.y >= rect.minY && point.y < rect.maxY) : (point.y > rect.minY && point.y <= rect.maxY)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isopaque
     @MainActor open var isOpaque: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isrotatedfrombase
@@ -988,11 +1392,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/isverticalcontentsizeconstraintactive
     @available(macOS 10.15, *)
     @MainActor open var isVerticalContentSizeConstraintActive: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _isVerticalContentSizeConstraintActive }
+        set { _isVerticalContentSizeConstraintActive = newValue; _setNeedsConstraintLayout() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/knowspagerange(_:)
-    @MainActor open func knowsPageRange(_ range: NSRangePointer) -> Bool { unimplemented() }
+    /// False: the print operation paginates the bounds itself. A view that lays its own
+    /// pages out returns true with the range and answers `rectForPage(_:)`.
+    @MainActor open func knowsPageRange(_ range: NSRangePointer) -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lastbaselineanchor
     @available(macOS 10.11, *)
     @MainActor open var lastBaselineAnchor: NSLayoutYAxisAnchor { anchorY(.lastBaseline) }
@@ -1033,15 +1439,21 @@ import CoreText
         set { _layerContentsRedrawPolicy = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layerusescoreimagefilters
+    /// Recorded; Core Image filters are not available on this port.
     @MainActor open var layerUsesCoreImageFilters: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _layerUsesCoreImageFilters }
+        set { _layerUsesCoreImageFilters = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layout()
     @MainActor open func layout() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutguide(for:)
     @available(macOS 26.0, *)
-    @MainActor open func layoutGuide(for region: NSView.LayoutRegion) -> NSLayoutGuide { unimplemented() }
+    @MainActor open func layoutGuide(for region: NSView.LayoutRegion) -> NSLayoutGuide {
+        switch region._kind {
+        case .safeArea: return safeAreaLayoutGuide
+        case .margins: return layoutMarginsGuide
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/layoutguides
     @available(macOS 10.11, *)
     @MainActor open var layoutGuides: [NSLayoutGuide] { _layoutGuides }
@@ -1066,13 +1478,91 @@ import CoreText
     @available(macOS 10.11, *)
     @MainActor open var leftAnchor: NSLayoutXAxisAnchor { anchorX(.left) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/locationofprintrect(_:)
-    @MainActor open func locationOfPrintRect(_ rect: NSRect) -> NSPoint { unimplemented() }
+    /// Where a page rect lands on the paper: centred in the printable area when the print
+    /// info centres, else at its top-left.
+    @MainActor open func locationOfPrintRect(_ rect: NSRect) -> NSPoint {
+        let info = NSPrintOperation.current?.printInfo ?? NSPrintInfo.shared
+        let printable = _NSPrintPagination.printableRect(for: info)
+        let scale = NSPrintOperation.current?._pageScale ?? info.scalingFactor
+        let w = rect.width * scale, h = rect.height * scale
+        let x = info.isHorizontallyCentered ? printable.minX + (printable.width - w) / 2 : printable.minX
+        let y = info.isVerticallyCentered ? printable.minY + (printable.height - h) / 2 : printable.maxY - h
+        return NSPoint(x: x, y: y)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocus()
-    @MainActor open func lockFocus() { unimplemented() }
+    /// Makes drawing go to this view. Inside a draw pass of its window the current context
+    /// takes the view's coordinates; otherwise the view draws into an offscreen copy of
+    /// itself that `unlockFocus` shows over the view until it next draws (what drawing
+    /// straight into the window's backing store does in AppKit).
+    @MainActor open func lockFocus() {
+        if let current = NSGraphicsContext.current, let drawing = NSView._drawingView, drawing._window === _window, _window != nil {
+            let ctx = current.cgContext
+            ctx.saveGState()
+            ctx.concatenate(_localToWindowTransform.concatenating(drawing._localToWindowTransform.inverted()))
+            NSView._focusStack.append(_NSFocusEntry(view: self, previous: current, context: ctx, surface: nil))
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
+            return
+        }
+        let scale = _window?.backingScaleFactor ?? 1
+        guard let surface = Platform.backend.image.makeOffscreen(size: _frame.size, scale: scale) else { return }
+        let ctx = surface.context
+        if _window != nil, let rep = bitmapImageRepForCachingDisplay(in: bounds) {
+            cacheDisplay(in: bounds, to: rep)
+            if let image = rep.cgImage { ctx.draw(image, in: NSRect(origin: .zero, size: _frame.size)) }
+        }
+        ctx.saveGState()
+        ctx.concatenate(_localToFocusSurface)
+        NSView._focusStack.append(_NSFocusEntry(view: self, previous: NSGraphicsContext.current, context: ctx, surface: surface))
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
+    }
+    /// Bounds coordinates to an unrotated y-up surface the size of the frame.
+    internal var _localToFocusSurface: CGAffineTransform {
+        var t = CGAffineTransform(rotationAngle: _boundsRotation * .pi / 180)
+        t = t.concatenating(CGAffineTransform(translationX: -_boundsOrigin.x, y: -_boundsOrigin.y))
+        let d = _boundsScale
+        t = t.concatenating(CGAffineTransform(scaleX: d.x, y: d.y))
+        if isFlipped { t = t.concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: _frame.height)) }
+        return t
+    }
+    /// Bounds coordinates to this view's superview's (the mapping `_toSuperview` applies).
+    internal var _localToSuperviewTransform: CGAffineTransform {
+        var t = CGAffineTransform(rotationAngle: _boundsRotation * .pi / 180)
+        t = t.concatenating(CGAffineTransform(translationX: -_boundsOrigin.x, y: -_boundsOrigin.y))
+        let d = _boundsScale
+        t = t.concatenating(CGAffineTransform(scaleX: d.x, y: d.y))
+        if _flipsRelativeToSuperview { t = t.concatenating(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: _frame.height)) }
+        t = t.concatenating(CGAffineTransform(rotationAngle: _frameRotation * .pi / 180))
+        return t.concatenating(CGAffineTransform(translationX: _frame.minX, y: _frame.minY))
+    }
+    internal var _localToWindowTransform: CGAffineTransform {
+        var t = CGAffineTransform.identity
+        var v: NSView? = self
+        while let cur = v { t = t.concatenating(cur._localToSuperviewTransform); v = cur._superview }
+        return t
+    }
+    /// The pixels the innermost offscreen `lockFocus` of this view has (for
+    /// `NSBitmapImageRep(focusedViewRect:)`).
+    internal var _focusSurfaceImage: CGImage? {
+        guard let e = NSView._focusStack.last, e.view === self, let s = e.surface else { return nil }
+        return s.makeImage()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocusifcandraw()
-    @MainActor open func lockFocusIfCanDraw() -> Bool { unimplemented() }
+    @MainActor open func lockFocusIfCanDraw() -> Bool {
+        guard canDraw else { return false }
+        lockFocus()
+        return NSView._focusStack.last?.view === self
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/lockfocusifcandraw(in:)
-    @MainActor open func lockFocusIfCanDraw(in context: NSGraphicsContext) -> Bool { unimplemented() }
+    /// Focuses into `context`, taken to be in the window's base coordinates.
+    @MainActor open func lockFocusIfCanDraw(in context: NSGraphicsContext) -> Bool {
+        guard canDraw else { return false }
+        let ctx = context.cgContext
+        ctx.saveGState()
+        ctx.concatenate(_localToWindowTransform)
+        NSView._focusStack.append(_NSFocusEntry(view: self, previous: NSGraphicsContext.current, context: ctx, surface: nil))
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: isFlipped)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/makebackinglayer()
     @MainActor open func makeBackingLayer() -> CALayer { CALayer() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/menu(for:)
@@ -1095,6 +1585,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needspaneltobecomekey
     @MainActor open var needsPanelToBecomeKey: Bool { false }
+    /// Whether a mouse down on the view makes it the first responder. Views that take the
+    /// keyboard (text, tables, lists) do; buttons, sliders, segmented controls and colour
+    /// wells act on the click without taking focus, as on macOS without Full Keyboard
+    /// Access, so the document's text view keeps the keyboard and the responder chain the
+    /// panels send through (`changeFont:`, `changeColor:`) still starts at it.
+    @MainActor internal var _takesFirstResponderOnMouseDown: Bool { acceptsFirstResponder }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needstodraw(_:)
     @MainActor open func needsToDraw(_ rect: NSRect) -> Bool { (_dirtyRect ?? bounds).intersects(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needsupdateconstraints
@@ -1103,17 +1599,31 @@ import CoreText
         set { _needsUpdateConstraints = newValue; if newValue { _setNeedsConstraintLayout() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/nextkeyview
+    /// Setting it makes this view the other's `previousKeyView` (AppKit keeps that link
+    /// when the chain is rewired elsewhere).
     @MainActor open var nextKeyView: NSView? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _nextKeyView }
+        set {
+            _nextKeyView = newValue
+            newValue?._previousKeyView = self
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/nextvalidkeyview
-    @MainActor open var nextValidKeyView: NSView? { unimplemented() }
+    /// The first view along the `nextKeyView` chain that can become key, nil if none.
+    @MainActor open var nextValidKeyView: NSView? {
+        var seen: Set<ObjectIdentifier> = [ObjectIdentifier(self)]
+        var v = _nextKeyView
+        while let cur = v, seen.insert(ObjectIdentifier(cur)).inserted {
+            if cur.canBecomeKeyView { return cur }
+            v = cur._nextKeyView
+        }
+        return nil
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/nointrinsicmetric
     @available(macOS 10.11, *)
     static public var noIntrinsicMetric: CGFloat { -1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/notefocusringmaskchanged()
-    @MainActor open func noteFocusRingMaskChanged() { unimplemented() }
+    @MainActor open func noteFocusRingMaskChanged() { setKeyboardFocusRingNeedsDisplay(bounds) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/opaqueancestor
     @MainActor open var opaqueAncestor: NSView? {
         var v: NSView? = self
@@ -1121,9 +1631,19 @@ import CoreText
         return nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/pagefooter
-    @MainActor open var pageFooter: NSAttributedString { unimplemented() }
+    /// "Page n of m" (drawn when the print info's `NSPrintHeaderAndFooter` is set).
+    @MainActor open var pageFooter: NSAttributedString {
+        let op = NSPrintOperation.current
+        let text = op.map { "Page \($0.currentPage) of \($0.pageRange.length)" } ?? ""
+        return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.black])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/pageheader
-    @MainActor open var pageHeader: NSAttributedString { unimplemented() }
+    /// The job title and the date.
+    @MainActor open var pageHeader: NSAttributedString {
+        let title = NSPrintOperation.current?.jobTitle ?? printJobTitle
+        let date = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .short)
+        return NSAttributedString(string: "\(title)    \(date)", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.black])
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/performkeyequivalent(with:)
     @MainActor open override func performKeyEquivalent(with event: NSEvent) -> Bool {
         for s in _subviews where !s._isHidden { if s.performKeyEquivalent(with: event) { return true } }
@@ -1142,11 +1662,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/preferscompactcontrolsizemetrics
     @available(macOS 26.0, *)
     @MainActor open var prefersCompactControlSizeMetrics: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _prefersCompactControlSizeMetrics }
+        set { _prefersCompactControlSizeMetrics = newValue; invalidateIntrinsicContentSize() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/preparecontent(in:)
-    @MainActor open func prepareContent(in rect: NSRect) { unimplemented() }
+    /// Records `rect` as the prepared content (subclasses draw ahead of scrolling here).
+    @MainActor open func prepareContent(in rect: NSRect) { preparedContentRect = rect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/prepareforreuse()
     @MainActor open func prepareForReuse() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/preparedcontentrect
@@ -1155,32 +1676,62 @@ import CoreText
         set { _preparedContentRect = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/preservescontentduringliveresize
-    @MainActor open var preservesContentDuringLiveResize: Bool { unimplemented() }
+    @MainActor open var preservesContentDuringLiveResize: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/pressureconfiguration
     @available(macOS 10.11, *)
     @MainActor open var pressureConfiguration: NSPressureConfiguration? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _pressureConfiguration }
+        set { _pressureConfiguration = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/previouskeyview
-    @MainActor open var previousKeyView: NSView? { unimplemented() }
+    @MainActor open var previousKeyView: NSView? { _previousKeyView }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/previousvalidkeyview
-    @MainActor open var previousValidKeyView: NSView? { unimplemented() }
+    @MainActor open var previousValidKeyView: NSView? {
+        var seen: Set<ObjectIdentifier> = [ObjectIdentifier(self)]
+        var v = _previousKeyView
+        while let cur = v, seen.insert(ObjectIdentifier(cur)).inserted {
+            if cur.canBecomeKeyView { return cur }
+            v = cur._previousKeyView
+        }
+        return nil
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/printjobtitle
-    @MainActor open var printJobTitle: String { unimplemented() }
+    /// The window's title, else "Untitled".
+    @MainActor open var printJobTitle: String {
+        if let t = _window?.title, !t.isEmpty { return t }
+        return "Untitled"
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/printview(_:)
-    @MainActor open func printView(_ sender: Any?) { unimplemented() }
+    /// Prints the view with the print panel (File > Print… lands here through the responder chain).
+    @MainActor open func printView(_ sender: Any?) {
+        let op = NSPrintOperation(view: self)
+        if let w = _window, w.isVisible {
+            op._runModal(for: w) { _ in }
+        } else {
+            _ = op.run()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rect(for:)
     @available(macOS 26.0, *)
-    @MainActor open func rect(for region: NSView.LayoutRegion) -> NSRect { unimplemented() }
+    @MainActor open func rect(for region: NSView.LayoutRegion) -> NSRect {
+        let b = bounds, i = edgeInsets(for: region)
+        return NSRect(x: b.minX + i.left, y: b.minY + (isFlipped ? i.top : i.bottom),
+                      width: max(0, b.width - i.left - i.right), height: max(0, b.height - i.top - i.bottom))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectforpage(_:)
-    @MainActor open func rectForPage(_ page: Int) -> NSRect { unimplemented() }
+    /// The rect of page `page` for a view that `knowsPageRange`; the default answers the
+    /// print operation's own pagination.
+    @MainActor open func rectForPage(_ page: Int) -> NSRect {
+        NSPrintOperation.current?._paginate().rect(forPage: page) ?? bounds
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectforsmartmagnification(at:in:)
-    @MainActor open func rectForSmartMagnification(at location: NSPoint, in visibleRect: NSRect) -> NSRect { unimplemented() }
+    /// Empty: no smart-magnification target (subclasses return the block to zoom to).
+    @MainActor open func rectForSmartMagnification(at location: NSPoint, in visibleRect: NSRect) -> NSRect { .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rectpreservedduringliveresize
-    @MainActor open var rectPreservedDuringLiveResize: NSRect { unimplemented() }
+    @MainActor open var rectPreservedDuringLiveResize: NSRect { .zero }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/reflectscrolledclipview(_:)
-    @MainActor open func reflectScrolledClipView(_ clipView: NSClipView) { unimplemented() }
+    /// Does nothing; `NSScrollView` updates its scrollers here.
+    @MainActor open func reflectScrolledClipView(_ clipView: NSClipView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/registerfordraggedtypes(_:)
     @MainActor open func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) { for t in newTypes where !_registeredDraggedTypes.contains(t) { _registeredDraggedTypes.append(t) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/registereddraggedtypes
@@ -1213,9 +1764,9 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsdraggingdestination/wantsperiodicdraggingupdates()
     @MainActor open func wantsPeriodicDraggingUpdates() -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/releasegstate()
-    @MainActor open func releaseGState() { unimplemented() }
+    @MainActor open func releaseGState() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removealltooltips()
-    @MainActor open func removeAllToolTips() { unimplemented() }
+    @MainActor open func removeAllToolTips() { _toolTipRects.removeAll(); _NSToolTipManager.shared.viewChanged(self) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removeconstraint(_:)
     @MainActor open func removeConstraint(_ constraint: NSLayoutConstraint) {
         guard let i = _constraints.firstIndex(where: { $0 === constraint }) else { return }
@@ -1248,7 +1799,7 @@ import CoreText
         }
         sup._setNeedsConstraintLayout(force: sup._engine != nil)
         viewWillMove(toSuperview: nil)
-        if _window != nil { _accessibilityStructureChanged() }
+        if _window != nil { _accessibilityStructureChanged(isHidden ? nil : .removed) }
         _superview = nil
         nextResponder = nil
         if let w = _window, w.firstResponder === self { _ = w.makeFirstResponder(nil) }
@@ -1273,7 +1824,7 @@ import CoreText
         _setNeedsConstraintLayout()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetooltip(_:)
-    @MainActor open func removeToolTip(_ tag: NSView.ToolTipTag) { unimplemented() }
+    @MainActor open func removeToolTip(_ tag: NSView.ToolTipTag) { _toolTipRects.removeAll { $0.tag == tag }; _NSToolTipManager.shared.viewChanged(self) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetrackingarea(_:)
     @MainActor open func removeTrackingArea(_ trackingArea: NSTrackingArea) {
         guard let i = _trackingAreas.firstIndex(where: { $0 === trackingArea }) else { return }
@@ -1283,9 +1834,12 @@ import CoreText
         _window?._trackingAreasDidChange()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/removetrackingrect(_:)
-    @MainActor open func removeTrackingRect(_ tag: NSView.TrackingRectTag) { unimplemented() }
+    @MainActor open func removeTrackingRect(_ tag: NSView.TrackingRectTag) {
+        guard let area = _trackingRectAreas.removeValue(forKey: tag) else { return }
+        removeTrackingArea(area)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/renewgstate()
-    @MainActor open func renewGState() { unimplemented() }
+    @MainActor open func renewGState() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/replacesubview(_:with:)
     @MainActor open func replaceSubview(_ oldView: NSView, with newView: NSView) {
         guard let i = _subviews.firstIndex(where: { $0 === oldView }) else { return }
@@ -1330,31 +1884,35 @@ import CoreText
     @available(macOS 10.11, *)
     @MainActor open var rightAnchor: NSLayoutXAxisAnchor { anchorX(.right) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rotate(bydegrees:)
-    @MainActor open func rotate(byDegrees angle: CGFloat) { unimplemented() }
+    /// Turns the bounds about the coordinate origin (adds to `boundsRotation`).
+    @MainActor open func rotate(byDegrees angle: CGFloat) { boundsRotation = _boundsRotation + angle }
+    // The ruler client methods (AppKit's informal protocol, ADR-0034): a view that does not
+    // override them lets markers be added, moved and removed where they are dragged, and
+    // maps locations to its own x (horizontal ruler) or y (vertical ruler).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didadd:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didmove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:didremove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:handlemousedownwith:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:locationfor:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, locationFor point: NSPoint) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, locationFor point: NSPoint) -> CGFloat { ruler.orientation == .horizontalRuler ? point.x : point.y }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:pointforlocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, pointForLocation point: CGFloat) -> NSPoint { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, pointForLocation point: CGFloat) -> NSPoint { ruler.orientation == .horizontalRuler ? NSPoint(x: point, y: 0) : NSPoint(x: 0, y: point) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldadd:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldmove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:shouldremove:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willadd:atlocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { location }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willmove:tolocation:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { location }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/rulerview(_:willsetclientview:)
-    @MainActor open func rulerView(_ ruler: NSRulerView, willSetClientView newClient: NSView) { unimplemented() }
+    @MainActor open func rulerView(_ ruler: NSRulerView, willSetClientView newClient: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/safeareainsets
     @available(macOS 11.0, *)
     @MainActor open var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }
@@ -1363,15 +1921,41 @@ import CoreText
     @MainActor open var safeAreaLayoutGuide: NSLayoutGuide { _edgeGuide(&_safeAreaGuide, name: "safeArea") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/safearearect
     @available(macOS 11.0, *)
-    @MainActor open var safeAreaRect: NSRect { unimplemented() }
+    @MainActor open var safeAreaRect: NSRect {
+        let b = bounds, i = safeAreaInsets
+        return NSRect(x: b.minX + i.left, y: b.minY + (isFlipped ? i.top : i.bottom),
+                      width: max(0, b.width - i.left - i.right), height: max(0, b.height - i.top - i.bottom))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scaleunitsquare(to:)
-    @MainActor open func scaleUnitSquare(to newUnitSize: NSSize) { unimplemented() }
+    /// Scales the coordinate system: one unit becomes `newUnitSize` of the old units.
+    @MainActor open func scaleUnitSquare(to newUnitSize: NSSize) {
+        guard newUnitSize.width != 0, newUnitSize.height != 0 else { return }
+        let b = NSRect(origin: _boundsOrigin, size: _boundsSize ?? _frame.size)
+        _boundsOrigin = NSPoint(x: b.minX / newUnitSize.width, y: b.minY / newUnitSize.height)
+        setBoundsSize(NSSize(width: b.width / newUnitSize.width, height: b.height / newUnitSize.height))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scroll(_:)
-    @MainActor open func scroll(_ point: NSPoint) { unimplemented() }
+    /// Scrolls the enclosing clip view so `point` is at its bounds origin.
+    @MainActor open func scroll(_ point: NSPoint) {
+        guard let clip = _enclosingClipView else { return }
+        let p = clip.constrainScroll(convert(point, to: clip))
+        clip.scroll(to: p)
+        (clip.superview as? NSScrollView)?.reflectScrolledClipView(clip)
+    }
+    internal var _enclosingClipView: NSClipView? {
+        var v = _superview
+        while let cur = v { if let c = cur as? NSClipView { return c }; v = cur._superview }
+        return nil
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scroll(_:by:)
-    @MainActor open func scroll(_ rect: NSRect, by delta: NSSize) { unimplemented() }
+    /// Deprecated bit-copy scroll: the port repaints instead, so the source and
+    /// destination are marked for display.
+    @MainActor open func scroll(_ rect: NSRect, by delta: NSSize) {
+        setNeedsDisplay(rect)
+        setNeedsDisplay(rect.offsetBy(dx: delta.width, dy: delta.height))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scroll(_:to:)
-    @MainActor open func scroll(_ clipView: NSClipView, to point: NSPoint) { unimplemented() }
+    @MainActor open func scroll(_ clipView: NSClipView, to point: NSPoint) { clipView.scroll(to: point) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/scrolltovisible(_:)
     @MainActor open func scrollToVisible(_ rect: NSRect) -> Bool {
         var v: NSView? = _superview
@@ -1400,9 +1984,10 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setboundssize(_:)
     @MainActor open func setBoundsSize(_ newSize: NSSize) {
-        // Bounds scaling (bounds.size != frame.size) is recorded but not yet applied as a
-        // drawing transform.
+        // Bounds scaling (bounds.size != frame.size) scales drawing and conversions.
         _boundsSize = newSize == _frame.size ? nil : newSize
+        _setNeedsUpdateTrackingAreas()
+        _superview?.setNeedsDisplay(_frame)
         _syncLayerGeometry()
         setNeedsDisplay(bounds)
         if _postsBoundsChangedNotifications {
@@ -1437,6 +2022,11 @@ import CoreText
         guard newSize != _frame.size else { return }
         let old = _frame
         let oldBounds = bounds
+        // A scaled bounds keeps its scale: the bounds size grows with the frame (AppKit).
+        if let bs = _boundsSize, old.width > 0, old.height > 0 {
+            let scaled = NSSize(width: bs.width * newSize.width / old.width, height: bs.height * newSize.height / old.height)
+            _boundsSize = scaled == newSize ? nil : scaled
+        }
         _frame.size = newSize
         _cursorRectsValid = false
         _setNeedsUpdateTrackingAreas()
@@ -1451,26 +2041,46 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setkeyboardfocusringneedsdisplay(_:)
-    @MainActor open func setKeyboardFocusRingNeedsDisplay(_ rect: NSRect) { unimplemented() }
+    /// Marks `rect` plus the focus ring's outset for display.
+    @MainActor open func setKeyboardFocusRingNeedsDisplay(_ rect: NSRect) { setNeedsDisplay(rect.insetBy(dx: -4, dy: -4)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setneedsdisplay(_:)
     @MainActor open func setNeedsDisplay(_ invalidRect: NSRect) { _invalidate(invalidRect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setupgstate()
-    @MainActor open func setUpGState() { unimplemented() }
+    @MainActor open func setUpGState() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/shadow
+    /// Drawn as the backing layer's shadow (AppKit only shows it for layer-backed views).
     @MainActor open var shadow: NSShadow? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _shadow }
+        set {
+            _shadow = newValue
+            if let l = _layer, !_layerIsHosted {
+                l.shadowOpacity = newValue == nil ? 0 : 1
+                l.shadowOffset = newValue?.shadowOffset ?? NSSize(width: 0, height: -3)
+                l.shadowRadius = newValue?.shadowBlurRadius ?? 3
+                l.shadowColor = newValue?.shadowColor?.cgColor
+            }
+            setNeedsDisplay(bounds)
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/shoulddelaywindowordering(for:)
     @MainActor open func shouldDelayWindowOrdering(for event: NSEvent) -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/shoulddrawcolor()
-    @MainActor open func shouldDrawColor() -> Bool { unimplemented() }
+    @MainActor open func shouldDrawColor() -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/showdefinition(for:at:)
-    @MainActor open func showDefinition(for attrString: NSAttributedString?, at textBaselineOrigin: NSPoint) { unimplemented() }
+    /// Out of scope (ADR-0036): the Dictionary lookup panel is a macOS service.
+    @MainActor open func showDefinition(for attrString: NSAttributedString?, at textBaselineOrigin: NSPoint) { appleOnlyUnavailable("NSView.showDefinition — no dictionary service on this platform") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/showdefinition(for:range:options:baselineoriginprovider:)
-    @MainActor open func showDefinition(for attrString: NSAttributedString?, range targetRange: NSRange, options: [NSView.DefinitionOptionKey : Any]? = nil, baselineOriginProvider originProvider: ((NSRange) -> NSPoint)? = nil) { unimplemented() }
+    @MainActor open func showDefinition(for attrString: NSAttributedString?, range targetRange: NSRange, options: [NSView.DefinitionOptionKey : Any]? = nil, baselineOriginProvider originProvider: ((NSRange) -> NSPoint)? = nil) { appleOnlyUnavailable("NSView.showDefinition — no dictionary service on this platform") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/sortsubviews(_:context:)
-    @MainActor open func sortSubviews(_ compare: (NSView, NSView, UnsafeMutableRawPointer?) -> ComparisonResult, context: UnsafeMutableRawPointer?) { unimplemented() }
+    /// Reorders the subviews (and their drawing order) by `compare`; stable for ties.
+    @MainActor open func sortSubviews(_ compare: (NSView, NSView, UnsafeMutableRawPointer?) -> ComparisonResult, context: UnsafeMutableRawPointer?) {
+        let sorted = _subviews.enumerated().sorted { a, b in
+            let r = compare(a.element, b.element, context)
+            return r == .orderedAscending || (r == .orderedSame && a.offset < b.offset)
+        }.map(\.element)
+        guard !zip(sorted, _subviews).allSatisfy({ $0 === $1 }) else { return }
+        for v in sorted { addSubview(v) }   // re-adding moves each to the top in turn
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/subviews
     @MainActor open var subviews: [NSView] {
         get { _subviews }
@@ -1487,7 +2097,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/tooltip
     @MainActor open var toolTip: String? {
         get { _toolTip }
-        set { _toolTip = newValue }
+        set { _toolTip = newValue; _NSToolTipManager.shared.viewChanged(self) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/topanchor
     @available(macOS 10.11, *)
@@ -1500,14 +2110,28 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translateorigin(to:)
     @MainActor open func translateOrigin(to translation: NSPoint) { setBoundsOrigin(NSPoint(x: _boundsOrigin.x - translation.x, y: _boundsOrigin.y - translation.y)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translaterectsneedingdisplay(in:by:)
-    @MainActor open func translateRectsNeedingDisplay(in clipRect: NSRect, by delta: NSSize) { unimplemented() }
+    /// Moves the pending dirty region inside `clipRect` by `delta` (the port keeps one
+    /// dirty rect per view, so both the old and the moved area stay marked).
+    @MainActor open func translateRectsNeedingDisplay(in clipRect: NSRect, by delta: NSSize) {
+        guard _needsDisplay else { return }
+        setNeedsDisplay(clipRect.offsetBy(dx: delta.width, dy: delta.height).intersection(clipRect))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/translatesautoresizingmaskintoconstraints
     @MainActor open var translatesAutoresizingMaskIntoConstraints: Bool {
         get { _translatesAutoresizingMaskIntoConstraints }
         set { _translatesAutoresizingMaskIntoConstraints = newValue; _setNeedsConstraintLayout() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/unlockfocus()
-    @MainActor open func unlockFocus() { unimplemented() }
+    @MainActor open func unlockFocus() {
+        guard let i = NSView._focusStack.lastIndex(where: { $0.view === self }) else { return }
+        let e = NSView._focusStack.remove(at: i)
+        e.context.restoreGState()
+        NSGraphicsContext.current = e.previous
+        if let surface = e.surface, _window != nil, let image = surface.makeImage() {
+            _focusOverlay = image
+            setNeedsDisplay(bounds)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/unregisterdraggedtypes()
     @MainActor open func unregisterDraggedTypes() { _registeredDraggedTypes = [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/updateconstraints()
@@ -1578,17 +2202,18 @@ import CoreText
         return bounds.intersection(convert(sup.visibleRect, from: sup))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsbestresolutionopenglsurface
+    /// Recorded for OpenGL views (there is no OpenGL surface on this port).
     @MainActor open var wantsBestResolutionOpenGLSurface: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _wantsBestResolutionOpenGLSurface }
+        set { _wantsBestResolutionOpenGLSurface = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsdefaultclipping
     @MainActor open var wantsDefaultClipping: Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsextendeddynamicrangeopenglsurface
     @available(macOS 10.11, *)
     @MainActor open var wantsExtendedDynamicRangeOpenGLSurface: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _wantsExtendedDynamicRangeOpenGLSurface }
+        set { _wantsExtendedDynamicRangeOpenGLSurface = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantslayer
     @MainActor open var wantsLayer: Bool {
@@ -1604,32 +2229,39 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsrestingtouches
     @MainActor open var wantsRestingTouches: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _wantsRestingTouches }
+        set { _wantsRestingTouches = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/wantsupdatelayer
     @MainActor open var wantsUpdateLayer: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/widthadjustlimit
-    @MainActor open var widthAdjustLimit: CGFloat { unimplemented() }
+    /// How far left a page break may move to keep a subview whole: a fraction of the page.
+    @MainActor open var widthAdjustLimit: CGFloat { 0.2 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/widthanchor
     @available(macOS 10.11, *)
     @MainActor open var widthAnchor: NSLayoutDimension { anchorDimension(.width) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/willopenmenu(_:with:)
     @available(macOS 10.11, *)
-    @MainActor open func willOpenMenu(_ menu: NSMenu, with event: NSEvent) { unimplemented() }
+    /// Called before the view's contextual menu opens; the default does nothing.
+    @MainActor open func willOpenMenu(_ menu: NSMenu, with event: NSEvent) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/willremovesubview(_:)
     @MainActor open func willRemoveSubview(_ subview: NSView) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/window
     @MainActor open var window: NSWindow? { _window }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writeeps(inside:to:)
-    @MainActor open func writeEPS(inside rect: NSRect, to pasteboard: NSPasteboard) { unimplemented() }
+    @MainActor open func writeEPS(inside rect: NSRect, to pasteboard: NSPasteboard) { unimplemented("NSView.writeEPS(inside:to:) — no PostScript writer; use writePDF(inside:to:)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writepdf(inside:to:)
-    @MainActor open func writePDF(inside rect: NSRect, to pasteboard: NSPasteboard) { unimplemented() }
+    @MainActor open func writePDF(inside rect: NSRect, to pasteboard: NSPasteboard) {
+        let data = dataWithPDF(inside: rect)
+        _ = pasteboard.declareTypes([.pdf], owner: nil)
+        _ = pasteboard.setData(data, forType: .pdf)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/writingtoolscoordinator
     @available(macOS 15.2, *)
+    /// Stored: Writing Tools are a macOS service, so nothing drives the coordinator.
     @MainActor open var writingToolsCoordinator: NSWritingToolsCoordinator? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _writingToolsCoordinator as? NSWritingToolsCoordinator }
+        set { _writingToolsCoordinator = newValue }
     }
     // MARK: Accessibility (ADR-0013)
     //
@@ -1791,6 +2423,20 @@ import CoreText
     open func accessibilityPerformCancel() -> Bool { false }
     open func accessibilityPerformPick() -> Bool { false }
     open func accessibilityPerformRaise() -> Bool { false }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/accessibilitycustomactions()
+    open func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { _a11y.customActions }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilitycustomactions(_:)
+    open func setAccessibilityCustomActions(_ accessibilityCustomActions: [NSAccessibilityCustomAction]?) {
+        _a11y.customActions = accessibilityCustomActions
+        // UI Automation shows them as child buttons: the element's children changed.
+        if window != nil { _accessibilityNotify(.structure(_accessibilityElementID)) }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/accessibilitycustomrotors()
+    /// Stored for assistive technology; UI Automation and AT-SPI do not navigate rotors yet
+    /// (ADR-0037, ROADMAP accessibility follow-ups).
+    open func accessibilityCustomRotors() -> [NSAccessibilityCustomRotor] { _a11y.customRotors }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilitycustomrotors(_:)
+    open func setAccessibilityCustomRotors(_ accessibilityCustomRotors: [NSAccessibilityCustomRotor]) { _a11y.customRotors = accessibilityCustomRotors }
 }
 
 
@@ -1804,7 +2450,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         let previous = NSGraphicsContext.current
         NSGraphicsContext.current = gc
         let previousAppearance = NSAppearance.current
-        NSAppearance.current = effectiveAppearance
+        NSAppearance.current = _drawingAppearance
         viewWillDraw()
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }
@@ -1847,4 +2493,21 @@ extension NSView: CALayerDelegate, CALayerHost {
             setNeedsDisplay(bounds)
         }
     }
+}
+
+/// One `lockFocus`: the view, the context it replaced, the context drawn into and, for
+/// focus outside a draw pass, the offscreen surface.
+@MainActor
+internal struct _NSFocusEntry {
+    let view: NSView
+    let previous: NSGraphicsContext?
+    let context: CGContext
+    let surface: PlatformOffscreenSurface?
+}
+
+/// The dragging source of `NSView.dragFile`: files copy anywhere.
+@MainActor
+internal final class _NSFileDragSource: NSObject, NSDraggingSource {
+    static let shared = _NSFileDragSource()
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { [.copy, .link, .generic] }
 }

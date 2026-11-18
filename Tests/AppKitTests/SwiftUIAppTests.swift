@@ -6,9 +6,21 @@ import XCTest
 @testable import SwiftUI
 
 final class SwiftUIAppTests: XCTestCase, @unchecked Sendable {
+    // These tests make `_AppRunner`s and close their windows; off macOS closing a runner's
+    // last window quits the app (App.swift), which would end the test process early.
+    override func setUp() {
+        super.setUp()
+        MainActor.assumeIsolated { _AppRunner._terminatesAfterLastWindowCloses = false }
+    }
+    override func tearDown() {
+        MainActor.assumeIsolated { _AppRunner._terminatesAfterLastWindowCloses = true }
+        super.tearDown()
+    }
+
     @MainActor private func items(_ menu: NSMenu?) -> [String] { (menu?.items ?? []).map { $0.isSeparatorItem ? "-" : $0.title } }
 
-    func testWindowResizabilityContentSize() {
+    func testWindowResizabilityContentSize() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             struct Fixed: View { var body: some View { Text("Fixed").frame(width: 240, height: 120) } }
             let runner = _AppRunner(name: "Fixed")

@@ -5,6 +5,18 @@ import XCTest
 @testable import AppKit
 
 final class TextEditingTests: XCTestCase, @unchecked Sendable {
+    // These tests drive the Mac key bindings (Option for words, End for the document); the PC
+    // bindings Windows and Linux default to have their own test (TextKit2Tests).
+    private var savedStyle: NSResponder._KeyBindingStyle = .mac
+    override func setUp() {
+        super.setUp()
+        savedStyle = NSResponder._keyBindingStyle
+        NSResponder._keyBindingStyle = .mac
+    }
+    override func tearDown() {
+        NSResponder._keyBindingStyle = savedStyle
+        super.tearDown()
+    }
     @MainActor private func key(_ w: NSWindow, _ chars: String, flags: NSEvent.ModifierFlags = [], plain: String? = nil) {
         let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: w.windowNumber, context: nil,
                                  characters: chars, charactersIgnoringModifiers: plain ?? chars, isARepeat: false, keyCode: 0)!
@@ -133,7 +145,8 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testInputMethodCompositionThroughTheSeam() {
+    func testInputMethodCompositionThroughTheSeam() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
             let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
@@ -172,6 +185,10 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
             for l in lines { XCTAssertLessThanOrEqual(l.width, 120) }
             tv.isHorizontallyResizable = true
             tv.isVerticallyResizable = true
+            // AppKit's defaults keep the initial frame as the minimum and its width as the
+            // maximum; a view that fits its text both ways says so.
+            tv.minSize = .zero
+            tv.maxSize = NSSize(width: 10_000_000, height: 10_000_000)
             tv.sizeToFit()
             XCTAssertEqual(tv._layoutLines().count, 1)
             XCTAssertGreaterThan(tv.frame.width, 120)
@@ -179,3 +196,4 @@ final class TextEditingTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

@@ -68,8 +68,15 @@ final class UTTypeRegistry: @unchecked Sendable {
 
     /// Declares `identifier` (an exported or imported type). Core types are never
     /// redeclared; a second declaration of an app type replaces the first.
+    /// `UTType(exportedAs:)` / `UTType(importedAs:)`: the type as the app declared it (its
+    /// Info.plist declaration, with its tags) when it is declared already, else a new
+    /// declaration with `parent` as its only supertype. Apple's initializers likewise
+    /// return the bundle's declaration rather than replace it.
     func declare(_ identifier: String, conformingTo parent: String?) -> UTTypeRecord {
-        declare(identifier, conformingTo: parent.map { [$0] } ?? [], extensions: [], mimeTypes: [], description: nil)
+        lock.lock()
+        if let existing = byIdentifier[identifier.lowercased()] { lock.unlock(); return existing }
+        lock.unlock()
+        return declare(identifier, conformingTo: parent.map { [$0] } ?? [], extensions: [], mimeTypes: [], description: nil)
     }
 
     /// A full declaration, as an Info.plist `UTExportedTypeDeclarations` entry gives it.

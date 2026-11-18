@@ -66,7 +66,28 @@ import CoreGraphics
         set { _textField = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscollectionviewitem/draggingimagecomponents
-    @MainActor open var draggingImageComponents: [NSDraggingImageComponent] { unimplemented() }
+    ///
+    /// As AppKit's: a component of the image view (keyed `.icon`) and one of the text field
+    /// (`.label`, or `.icon` when there is no image view), each a snapshot of that view at
+    /// its frame in the item's view measured from the bottom-left; with neither, one `.icon`
+    /// of the whole view (ADR-0041).
+    @MainActor open var draggingImageComponents: [NSDraggingImageComponent] {
+        let root = view
+        var out: [NSDraggingImageComponent] = []
+        func add(_ v: NSView) {
+            guard v === root || v.isDescendant(of: root) else { return }
+            let c = NSDraggingImageComponent(key: out.isEmpty ? .icon : .label)
+            var f = v === root ? root.bounds : root.convert(v.bounds, from: v)
+            if root.isFlipped { f.origin.y = root.bounds.height - f.maxY }
+            c.frame = f
+            c.contents = _NSCollectionViewDragImages.snapshot(of: v)
+            out.append(c)
+        }
+        if let iv = imageView { add(iv) }
+        if let tf = textField { add(tf) }
+        if out.isEmpty { add(root) }
+        return out
+    }
 
     // MARK: NSCollectionViewElement
 
@@ -85,6 +106,20 @@ import CoreGraphics
     @MainActor open func didTransition(from oldLayout: NSCollectionViewLayout, to newLayout: NSCollectionViewLayout) { }
 
     // Requirement of NSCopying (the legacy `itemPrototype` path)
-    open func copy(with zone: NSZone? = nil) -> Any { unimplemented() }
+    /// A new item of the same class and nib with the same represented object. AppKit
+    /// copies the view by archiving it; the port cannot archive views, so the copy loads
+    /// its own view (`loadView()`, as a subclass building its view in code does) at the
+    /// original view's size (ADR-0041).
+    open func copy(with zone: NSZone? = nil) -> Any {
+        MainActor.assumeIsolated {
+            let c = type(of: self).init(nibName: nibName, bundle: nibBundle)
+            c.representedObject = representedObject
+            if let v = viewIfLoaded {
+                let size = v.frame.size
+                if c.view.frame.size == .zero { c.view.setFrameSize(size) }
+            }
+            return c
+        }
+    }
     // SKIPPED (Foundation.NSExtensionContext not in corelibs): func beginRequest(with context: NSExtensionContext)
 }

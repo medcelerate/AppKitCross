@@ -16,7 +16,12 @@
 #include <dwrite.h>
 #include <wincodec.h>
 #include <shlwapi.h>
+#include <commdlg.h>
 #include <shobjidl.h>
+#include <winspool.h>
+#include <commdlg.h>
+#include <documenttarget.h>
+#include <prntvpt.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlguid.h>
@@ -821,11 +826,23 @@ bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, u
                 VARIANT v; VariantInit(&v); v.vt = VT_R4; v.fltVal = quality;
                 props->Write(1, &opt, &v);
             }
-            if (SUCCEEDED(frame->Initialize(props))) {
+            // The pixels are premultiplied BGRA. Encoders take what SetPixelFormat hands
+            // back (PNG: straight BGRA, JPEG: 24-bit BGR), so a WIC converter turns the
+            // pixels into that format (dividing the alpha out) rather than writing
+            // premultiplied bytes as if they were straight.
+            IWICBitmap *src = nullptr;
+            IWICFormatConverter *conv = nullptr;
+            if (SUCCEEDED(frame->Initialize(props)) &&
+                SUCCEEDED(f->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppPBGRA, stride, stride * height, const_cast<BYTE *>(pixels), &src))) {
                 WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppPBGRA;
                 frame->SetSize(width, height);
                 frame->SetPixelFormat(&fmt);
-                if (SUCCEEDED(frame->WritePixels(height, stride, stride * height, const_cast<BYTE *>(pixels))) &&
+                IWICBitmapSource *source = src;
+                if (!IsEqualGUID(fmt, GUID_WICPixelFormat32bppPBGRA) && SUCCEEDED(f->CreateFormatConverter(&conv)) &&
+                    SUCCEEDED(conv->Initialize(src, fmt, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                    source = conv;
+                }
+                if (SUCCEEDED(frame->WriteSource(source, nullptr)) &&
                     SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit())) {
                     STATSTG st = {};
                     if (SUCCEEDED(mem->Stat(&st, STATFLAG_NONAME))) {
@@ -839,6 +856,8 @@ bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, u
                     }
                 }
             }
+            if (conv) conv->Release();
+            if (src) src->Release();
             if (props) props->Release();
             frame->Release();
         }
@@ -1064,6 +1083,306 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *o, const uin
 
 void cd2d_file_dialog_free(uint16_t *paths) { free(paths); }
 
+// ---------------------------------------------------------------- Printing (ADR-0022)
+
+static bool copyUTF16(const std::wstring &joined, uint16_t **out, uint32_t *length) {
+    uint16_t *buf = (uint16_t *)malloc((joined.size() + 2) * sizeof(uint16_t));
+    if (!buf) return false;
+    memcpy(buf, joined.data(), joined.size() * sizeof(uint16_t));
+    buf[joined.size()] = 0;
+    buf[joined.size() + 1] = 0;
+    *out = buf;
+    *length = (uint32_t)joined.size();
+    return true;
+}
+
+bool cd2d_printer_names(uint16_t **names, uint32_t *length) {
+    if (!names || !length) return false;
+    DWORD needed = 0, count = 0;
+    EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, nullptr, 4, nullptr, 0, &needed, &count);
+    if (needed == 0) return false;
+    std::vector<BYTE> buffer(needed);
+    if (!EnumPrintersW(PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS, nullptr, 4, buffer.data(), needed, &needed, &count)) return false;
+    wchar_t defaultName[256] = {};
+    DWORD defaultLength = 256;
+    bool hasDefault = GetDefaultPrinterW(defaultName, &defaultLength) != 0;
+    PRINTER_INFO_4W *info = reinterpret_cast<PRINTER_INFO_4W *>(buffer.data());
+    std::wstring joined;
+    if (hasDefault) { joined += defaultName; joined.push_back(L'\0'); }
+    for (DWORD i = 0; i < count; i++) {
+        if (!info[i].pPrinterName) continue;
+        if (hasDefault && wcscmp(info[i].pPrinterName, defaultName) == 0) continue;
+        joined += info[i].pPrinterName;
+        joined.push_back(L'\0');
+    }
+    if (joined.empty()) return false;
+    return copyUTF16(joined, names, length);
+}
+
+void cd2d_print_free(void *buffer) { free(buffer); }
+
+bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDialogSettings *s, uint16_t **chosenName, uint32_t *chosenLength) {
+    if (!s) return false;
+    s->driverSettings = nullptr;
+    s->driverSettingsSize = 0;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    PRINTDLGEXW dlg = {};
+    dlg.lStructSize = sizeof(dlg);
+    dlg.hwndOwner = (HWND)ownerHwnd;
+    if (!dlg.hwndOwner) dlg.hwndOwner = GetDesktopWindow();
+    PRINTPAGERANGE range = { s->fromPage ? s->fromPage : 1, s->toPage ? s->toPage : (s->pageCount ? s->pageCount : 1) };
+    dlg.lpPageRanges = &range;
+    dlg.nMaxPageRanges = 1;
+    dlg.nPageRanges = s->fromPage ? 1 : 0;
+    dlg.nMinPage = 1;
+    dlg.nMaxPage = s->pageCount ? s->pageCount : 1;
+    dlg.nCopies = s->copies ? s->copies : 1;
+    dlg.nStartPage = START_PAGE_GENERAL;
+    dlg.Flags = PD_NOCURRENTPAGE | PD_NOSELECTION | (s->fromPage ? PD_PAGENUMS : PD_ALLPAGES) | (s->collate ? PD_COLLATE : 0);
+    // Preselect the printer and orientation through DEVNAMES / DEVMODE.
+    if (printerName && printerName[0]) {
+        const wchar_t *name = reinterpret_cast<const wchar_t *>(printerName);
+        size_t nameLength = wcslen(name);
+        size_t bytes = sizeof(DEVNAMES) + (nameLength + 1 + 1 + 1) * sizeof(wchar_t);
+        dlg.hDevNames = GlobalAlloc(GHND, bytes);
+        if (dlg.hDevNames) {
+            DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+            wchar_t *strings = reinterpret_cast<wchar_t *>(dn + 1);
+            dn->wDriverOffset = (WORD)(sizeof(DEVNAMES) / sizeof(wchar_t));
+            strings[0] = 0;
+            dn->wDeviceOffset = (WORD)(dn->wDriverOffset + 1);
+            wcscpy(strings + 1, name);
+            dn->wOutputOffset = (WORD)(dn->wDeviceOffset + nameLength + 1);
+            strings[1 + nameLength + 1] = 0;
+            dn->wDefault = 0;
+            GlobalUnlock(dlg.hDevNames);
+        }
+        HANDLE printer = nullptr;
+        if (OpenPrinterW(const_cast<wchar_t *>(name), &printer, nullptr)) {
+            LONG size = DocumentPropertiesW(dlg.hwndOwner, printer, const_cast<wchar_t *>(name), nullptr, nullptr, 0);
+            if (size > 0) {
+                dlg.hDevMode = GlobalAlloc(GHND, size);
+                if (dlg.hDevMode) {
+                    DEVMODEW *dm = (DEVMODEW *)GlobalLock(dlg.hDevMode);
+                    if (DocumentPropertiesW(dlg.hwndOwner, printer, const_cast<wchar_t *>(name), dm, nullptr, DM_OUT_BUFFER) == IDOK) {
+                        dm->dmFields |= DM_ORIENTATION;
+                        dm->dmOrientation = s->landscape ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+                    }
+                    GlobalUnlock(dlg.hDevMode);
+                }
+            }
+            ClosePrinter(printer);
+        }
+    }
+    HRESULT hr = PrintDlgExW(&dlg);
+    bool printed = SUCCEEDED(hr) && dlg.dwResultAction == PD_RESULT_PRINT;
+    if (printed) {
+        s->copies = dlg.nCopies ? dlg.nCopies : 1;
+        s->collate = (dlg.Flags & PD_COLLATE) != 0;
+        if ((dlg.Flags & PD_PAGENUMS) && dlg.nPageRanges > 0) { s->fromPage = range.nFromPage; s->toPage = range.nToPage; }
+        else { s->fromPage = 0; s->toPage = 0; }
+        s->printToFile = (dlg.Flags & PD_PRINTTOFILE) != 0;
+        if (dlg.hDevMode) {
+            DEVMODEW *dm = (DEVMODEW *)GlobalLock(dlg.hDevMode);
+            if (dm) {
+                // The whole DEVMODE goes back to the caller for the job's print ticket.
+                uint32_t size = dm->dmSize + dm->dmDriverExtra;
+                if (size > 0 && size <= (uint32_t)GlobalSize(dlg.hDevMode)) {
+                    s->driverSettings = malloc(size);
+                    if (s->driverSettings) { memcpy(s->driverSettings, dm, size); s->driverSettingsSize = size; }
+                }
+                if (dm->dmFields & DM_ORIENTATION) s->landscape = dm->dmOrientation == DMORIENT_LANDSCAPE;
+                if (dm->dmFields & DM_COPIES) s->copies = dm->dmCopies > 0 ? dm->dmCopies : s->copies;
+                if ((dm->dmFields & DM_PAPERWIDTH) && (dm->dmFields & DM_PAPERLENGTH) && dm->dmPaperWidth > 0 && dm->dmPaperLength > 0) {
+                    s->paperWidth = dm->dmPaperWidth / 10.0f * 72.0f / 25.4f;      // tenths of a millimetre to points
+                    s->paperHeight = dm->dmPaperLength / 10.0f * 72.0f / 25.4f;
+                } else if (dlg.hDevNames) {
+                    // The paper size by its DEVMODE paper code, from the driver's table.
+                    DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+                    if (dn) {
+                        const wchar_t *device = reinterpret_cast<const wchar_t *>(dn) + dn->wDeviceOffset;
+                        const wchar_t *port = reinterpret_cast<const wchar_t *>(dn) + dn->wOutputOffset;
+                        DWORD n = DeviceCapabilitiesW(device, port, DC_PAPERS, nullptr, nullptr);
+                        if (n > 0 && n < 4096) {
+                            std::vector<WORD> codes(n);
+                            std::vector<POINT> sizes(n);
+                            DeviceCapabilitiesW(device, port, DC_PAPERS, reinterpret_cast<LPWSTR>(codes.data()), nullptr);
+                            DeviceCapabilitiesW(device, port, DC_PAPERSIZE, reinterpret_cast<LPWSTR>(sizes.data()), nullptr);
+                            for (DWORD i = 0; i < n; i++) {
+                                if (codes[i] == dm->dmPaperSize && sizes[i].x > 0 && sizes[i].y > 0) {
+                                    s->paperWidth = sizes[i].x / 10.0f * 72.0f / 25.4f;
+                                    s->paperHeight = sizes[i].y / 10.0f * 72.0f / 25.4f;
+                                    break;
+                                }
+                            }
+                        }
+                        GlobalUnlock(dlg.hDevNames);
+                    }
+                }
+                GlobalUnlock(dlg.hDevMode);
+            }
+        }
+        if (dlg.hDevNames && chosenName && chosenLength) {
+            DEVNAMES *dn = (DEVNAMES *)GlobalLock(dlg.hDevNames);
+            if (dn) {
+                std::wstring device(reinterpret_cast<const wchar_t *>(dn) + dn->wDeviceOffset);
+                copyUTF16(device, chosenName, chosenLength);
+                GlobalUnlock(dlg.hDevNames);
+            }
+        }
+    }
+    if (dlg.hDevMode) GlobalFree(dlg.hDevMode);
+    if (dlg.hDevNames) GlobalFree(dlg.hDevNames);
+    if (dlg.hDC) DeleteDC(dlg.hDC);
+    return printed;
+}
+
+struct CD2DPrintJob {
+    ID3D11Device *d3dDevice = nullptr;
+    ID3D11DeviceContext *d3dContext = nullptr;
+    ID2D1Device *d2dDevice = nullptr;
+    ID2D1DeviceContext *dc = nullptr;
+    IPrintDocumentPackageTarget *target = nullptr;
+    ID2D1PrintControl *printControl = nullptr;
+    ID2D1CommandList *commandList = nullptr;
+    float pageWidth = 0, pageHeight = 0;
+    bool pageOpen = false;
+};
+
+static void releasePrintJob(CD2DPrintJob *job) {
+    if (!job) return;
+    safeRelease(job->commandList);
+    safeRelease(job->printControl);
+    safeRelease(job->target);
+    safeRelease(job->dc);
+    safeRelease(job->d2dDevice);
+    safeRelease(job->d3dContext);
+    safeRelease(job->d3dDevice);
+    delete job;
+}
+
+/// A print ticket (IStream of the PrintTicket XML) from a DEVMODE through the print
+/// ticket provider; NULL when the driver cannot convert it (the job then uses the
+/// printer's defaults).
+static IStream *printTicketFromDevMode(const wchar_t *printer, const void *devMode, uint32_t size) {
+    if (!devMode || size < sizeof(DEVMODEW)) return nullptr;
+    HPTPROVIDER provider = nullptr;
+    if (FAILED(PTOpenProvider(printer, 1, &provider)) || !provider) return nullptr;
+    IStream *stream = nullptr;
+    if (SUCCEEDED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) && stream) {
+        HRESULT hr = PTConvertDevModeToPrintTicket(provider, size, (PDEVMODE)const_cast<void *>(devMode), kPTJobScope, stream);
+        LARGE_INTEGER zero = {};
+        if (FAILED(hr) || FAILED(stream->Seek(zero, STREAM_SEEK_SET, nullptr))) { stream->Release(); stream = nullptr; }
+    }
+    PTCloseProvider(provider);
+    return stream;
+}
+
+CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName, const void *driverSettings, uint32_t driverSettingsSize) {
+    if (!factory || !factory->factory) return nullptr;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    wchar_t defaultName[256] = {};
+    DWORD defaultLength = 256;
+    const wchar_t *printer = reinterpret_cast<const wchar_t *>(printerName);
+    if (!printer || !printer[0]) {
+        if (!GetDefaultPrinterW(defaultName, &defaultLength)) return nullptr;
+        printer = defaultName;
+    }
+    const wchar_t *job = jobName && jobName[0] ? reinterpret_cast<const wchar_t *>(jobName) : L"Untitled";
+    ID2D1Factory1 *factory1 = nullptr;
+    if (FAILED(factory->factory->QueryInterface(__uuidof(ID2D1Factory1), reinterpret_cast<void **>(&factory1)))) return nullptr;
+    CD2DPrintJob *j = new CD2DPrintJob();
+    IPrintDocumentPackageTargetFactory *targetFactory = nullptr;
+    IDXGIDevice *dxgiDevice = nullptr;
+    IStream *ticket = printTicketFromDevMode(printer, driverSettings, driverSettingsSize);
+    bool ok = false;
+    do {
+        if (FAILED(CoCreateInstance(__uuidof(PrintDocumentPackageTargetFactory), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&targetFactory))) || !targetFactory) break;
+        if (FAILED(targetFactory->CreateDocumentPackageTargetForPrintJob(printer, job, nullptr, ticket, &j->target)) || !j->target) break;
+        if (FAILED(createD3DDevice(&j->d3dDevice, &j->d3dContext))) break;
+        if (FAILED(j->d3dDevice->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void **>(&dxgiDevice)))) break;
+        if (FAILED(factory1->CreateDevice(dxgiDevice, &j->d2dDevice))) break;
+        if (FAILED(j->d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &j->dc))) break;
+        D2D1_PRINT_CONTROL_PROPERTIES props = {};
+        props.fontSubset = D2D1_PRINT_FONT_SUBSET_MODE_DEFAULT;
+        props.rasterDPI = 300.0f;
+        props.colorSpace = D2D1_COLOR_SPACE_SRGB;
+        IWICImagingFactory *wic = wicFactory();
+        if (!wic) break;
+        if (FAILED(j->d2dDevice->CreatePrintControl(wic, j->target, &props, &j->printControl))) break;
+        ok = true;
+    } while (false);
+    safeRelease(dxgiDevice);
+    safeRelease(targetFactory);
+    safeRelease(factory1);
+    safeRelease(ticket);
+    if (!ok) { releasePrintJob(j); return nullptr; }
+    return j;
+}
+
+CD2DTarget *cd2d_print_job_begin_page(CD2DPrintJob *job, float widthDips, float heightDips) {
+    if (!job || !job->dc || job->pageOpen) return nullptr;
+    safeRelease(job->commandList);
+    if (FAILED(job->dc->CreateCommandList(&job->commandList))) return nullptr;
+    job->dc->SetTarget(job->commandList);
+    job->dc->SetDpi(96, 96);
+    job->dc->BeginDraw();
+    job->dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    job->pageWidth = widthDips;
+    job->pageHeight = heightDips;
+    job->pageOpen = true;
+    CD2DTarget *t = new CD2DTarget();
+    t->target = job->dc;
+    job->dc->AddRef();
+    t->dpi = 96;
+    return t;
+}
+
+bool cd2d_print_job_end_page(CD2DPrintJob *job) {
+    if (!job || !job->dc || !job->pageOpen) return false;
+    job->pageOpen = false;
+    HRESULT hr = job->dc->EndDraw();
+    job->dc->SetTarget(nullptr);
+    bool ok = SUCCEEDED(hr);
+    if (job->commandList) {
+        if (FAILED(job->commandList->Close())) ok = false;
+        if (ok && job->printControl && FAILED(job->printControl->AddPage(job->commandList, D2D1::SizeF(job->pageWidth, job->pageHeight), nullptr))) ok = false;
+        safeRelease(job->commandList);
+    }
+    return ok;
+}
+
+bool cd2d_print_job_close(CD2DPrintJob *job) {
+    if (!job) return false;
+    bool ok = job->printControl && SUCCEEDED(job->printControl->Close());
+    releasePrintJob(job);
+    return ok;
+}
+
+void cd2d_print_job_abort(CD2DPrintJob *job) {
+    if (!job) return;
+    if (job->pageOpen && job->dc) { job->dc->EndDraw(); job->dc->SetTarget(nullptr); }
+    if (job->target) job->target->Cancel();
+    releasePrintJob(job);
+}
+
+// ---------------------------------------------------------------- Colour dialog
+
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb) {
+    if (!rgb) return false;
+    static COLORREF custom[16] = { 0 };
+    CHOOSECOLORW cc;
+    ZeroMemory(&cc, sizeof(cc));
+    cc.lStructSize = sizeof(cc);
+    cc.hwndOwner = static_cast<HWND>(ownerHwnd);
+    cc.rgbResult = *rgb;
+    cc.lpCustColors = custom;
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN | CC_ANYCOLOR;
+    if (!ChooseColorW(&cc)) return false;
+    *rgb = cc.rgbResult;
+    return true;
+}
+
 // ---------------------------------------------------------------- DirectWrite
 
 struct CD2DTextFormat { IDWriteTextFormat *format = nullptr; };
@@ -1175,6 +1494,7 @@ struct CD2DCompVisual {
     uint32_t surfaceWidth = 0, surfaceHeight = 0;
     IUnknown *swapChain = nullptr;                 // foreign content (cd2d_comp_tree_set_swapchain), retained
     bool seen = false;                             // ensured in the current update
+    int64_t attachedTo = -1;                       // parent id it is added under (0: root, -1: none)
     std::vector<int64_t> children, newChildren;    // ids, back to front
 };
 
@@ -1192,6 +1512,12 @@ struct CD2DCompTree {
     IDXGISurface *surfaceDxgi = nullptr;
     CD2DTarget surfaceTarget;
     int64_t drawing = 0;                           // id of the surface between begin/end draw
+    uint32_t addFailures = 0, contentFailures = 0; // failed AddVisual / SetContent calls (trace aid)
+    int32_t lastDrawStage = 0, lastDrawError = 0;  // why the last surface_begin_draw failed
+    void *lastSurface = nullptr;                   // the last surface drawn and its atlas offset (trace aid)
+    int32_t lastOffsetX = 0, lastOffsetY = 0;
+    bool lastSurfaceCreated = false;
+    int32_t lastSurfaceRefs = 0;                   // the surface's reference count after the draw began
 };
 
 static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
@@ -1200,7 +1526,16 @@ static CD2DCompVisual *compVisual(CD2DCompTree *tree, int64_t id) {
     return it == tree->visuals.end() ? nullptr : it->second;
 }
 
-static void compDestroyVisual(CD2DCompVisual *v) {
+/// The children `ids` are no longer under any visual (their parent was emptied or destroyed).
+static void compDetachedChildren(CD2DCompTree *tree, const std::vector<int64_t> &ids) {
+    for (int64_t id : ids) {
+        auto it = tree->visuals.find(id);
+        if (it != tree->visuals.end()) it->second->attachedTo = -1;
+    }
+}
+
+static void compDestroyVisual(CD2DCompTree *tree, CD2DCompVisual *v) {
+    compDetachedChildren(tree, v->children);
     if (v->visual) {
         v->visual->RemoveAllVisuals();
         v->visual->SetContent(nullptr);
@@ -1217,14 +1552,27 @@ static void compDestroyVisual(CD2DCompVisual *v) {
     delete v;
 }
 
-/// Re-adds `children` under `parent` in order (each above the previous one).
-static void compPlaceChildren(CD2DCompTree *tree, IDCompositionVisual *parent, const std::vector<int64_t> &children) {
+/// Re-adds `children` under `parent` (id `parentId`, 0 for the root) in order, each above the
+/// previous one. A visual still added under another parent is taken off it first: AddVisual
+/// fails for a visual that has a parent, and the child would silently stay out of the tree.
+static void compPlaceChildren(CD2DCompTree *tree, int64_t parentId, IDCompositionVisual *parent, const std::vector<int64_t> &children) {
     IDCompositionVisual *previous = nullptr;
     for (int64_t id : children) {
         CD2DCompVisual *c = compVisual(tree, id);
         if (!c || !c->visual) continue;
-        parent->AddVisual(c->visual, TRUE, previous);
-        previous = c->visual;
+        if (c->attachedTo != -1 && c->attachedTo != parentId) {
+            IDCompositionVisual *old = nullptr;
+            if (c->attachedTo == 0) old = tree->root;
+            else if (CD2DCompVisual *o = compVisual(tree, c->attachedTo)) old = o->visual;
+            if (old) old->RemoveVisual(c->visual);
+            c->attachedTo = -1;
+        }
+        if (SUCCEEDED(parent->AddVisual(c->visual, TRUE, previous))) {
+            c->attachedTo = parentId;
+            previous = c->visual;
+        } else {
+            tree->addFailures++;
+        }
     }
 }
 
@@ -1254,8 +1602,11 @@ CD2DCompTree *cd2d_comp_tree_create(CD2DTarget *target) {
 void cd2d_comp_tree_release(CD2DCompTree *tree) {
     if (!tree) return;
     if (tree->drawing) cd2d_comp_tree_surface_end_draw(tree, tree->drawing);
-    for (auto &entry : tree->visuals) compDestroyVisual(entry.second);
+    // Out of the map first: destroying one visual updates its children's records.
+    std::vector<CD2DCompVisual *> all;
+    for (auto &entry : tree->visuals) all.push_back(entry.second);
     tree->visuals.clear();
+    for (CD2DCompVisual *v : all) compDestroyVisual(tree, v);
     if (tree->root) {
         tree->root->RemoveAllVisuals();
         if (tree->target && tree->target->dcompVisual) tree->target->dcompVisual->RemoveVisual(tree->root);
@@ -1388,7 +1739,9 @@ void cd2d_comp_tree_set_clip(CD2DCompTree *tree, int64_t id, bool enabled, float
 
 CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, uint32_t w, uint32_t h, float dpi) {
     CD2DCompVisual *v = compVisual(tree, id);
-    if (!v || !v->visual || !tree->dc || tree->drawing) return nullptr;
+    if (!tree) return nullptr;
+    tree->lastDrawStage = 0; tree->lastDrawError = 0;
+    if (!v || !v->visual || !tree->dc || tree->drawing) { tree->lastDrawStage = 1; return nullptr; }
     if (!w) w = 1;
     if (!h) h = 1;
     if (v->swapChain) {
@@ -1400,25 +1753,35 @@ CD2DTarget *cd2d_comp_tree_surface_begin_draw(CD2DCompTree *tree, int64_t id, ui
         v->visual->SetContent(nullptr);
         safeRelease(v->surface);
     }
+    tree->lastSurfaceCreated = !v->surface;
     if (!v->surface) {
-        if (FAILED(tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface))) return nullptr;
+        HRESULT hr = tree->device->CreateSurface(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &v->surface);
+        if (FAILED(hr)) { v->surface = nullptr; tree->lastDrawStage = 2; tree->lastDrawError = (int32_t)hr; return nullptr; }
         v->surfaceWidth = w; v->surfaceHeight = h;
-        v->visual->SetContent(v->surface);
+        if (FAILED(v->visual->SetContent(v->surface))) tree->contentFailures++;
     }
     POINT offset = {};
-    if (FAILED(v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset))) {
+    HRESULT beginHr = v->surface->BeginDraw(nullptr, __uuidof(IDXGISurface), reinterpret_cast<void **>(&tree->surfaceDxgi), &offset);
+    if (FAILED(beginHr)) {
         tree->surfaceDxgi = nullptr;
+        tree->lastDrawStage = 3; tree->lastDrawError = (int32_t)beginHr;
         return nullptr;
     }
     D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), dpi, dpi);
-    if (FAILED(tree->dc->CreateBitmapFromDxgiSurface(tree->surfaceDxgi, &props, &tree->surfaceBitmap))) {
+    HRESULT bitmapHr = tree->dc->CreateBitmapFromDxgiSurface(tree->surfaceDxgi, &props, &tree->surfaceBitmap);
+    if (FAILED(bitmapHr)) {
         safeRelease(tree->surfaceDxgi);
         v->surface->EndDraw();
+        tree->lastDrawStage = 4; tree->lastDrawError = (int32_t)bitmapHr;
         return nullptr;
     }
     tree->drawing = id;
+    tree->lastSurface = v->surface;
+    v->surface->AddRef();
+    tree->lastSurfaceRefs = (int32_t)v->surface->Release();
+    tree->lastOffsetX = offset.x; tree->lastOffsetY = offset.y;
     tree->dc->SetTarget(tree->surfaceBitmap);
     tree->dc->SetDpi(dpi, dpi);
     tree->dc->BeginDraw();
@@ -1490,7 +1853,7 @@ void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id) {
     auto rit = std::find(tree->rootChildren.begin(), tree->rootChildren.end(), id);
     if (rit != tree->rootChildren.end()) { tree->rootChildren.erase(rit); tree->root->RemoveVisual(v->visual); }
     tree->visuals.erase(id);
-    compDestroyVisual(v);
+    compDestroyVisual(tree, v);
     if (!tree->updating) tree->device->Commit();
 }
 
@@ -1503,20 +1866,31 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
     for (int64_t id : dead) {
         CD2DCompVisual *v = tree->visuals[id];
         tree->visuals.erase(id);
-        compDestroyVisual(v);       // RemoveAllVisuals drops its (possibly reparented) children
+        compDestroyVisual(tree, v); // RemoveAllVisuals drops its (possibly reparented) children
     }
     // 2. Parents whose child list changed detach everything first (a visual cannot be added
     //    under a new parent while the old one still holds it), then re-add in order.
     bool rootDirty = tree->rootChildren != tree->newRootChildren;
-    if (rootDirty) tree->root->RemoveAllVisuals();
+    if (rootDirty) { tree->root->RemoveAllVisuals(); compDetachedChildren(tree, tree->rootChildren); }
     for (auto &entry : tree->visuals) {
         CD2DCompVisual *v = entry.second;
-        if (v->children != v->newChildren) v->visual->RemoveAllVisuals();
+        if (v->children != v->newChildren) { v->visual->RemoveAllVisuals(); compDetachedChildren(tree, v->children); }
     }
-    if (rootDirty) { compPlaceChildren(tree, tree->root, tree->newRootChildren); tree->rootChildren = tree->newRootChildren; }
+    if (rootDirty) { compPlaceChildren(tree, 0, tree->root, tree->newRootChildren); tree->rootChildren = tree->newRootChildren; }
     for (auto &entry : tree->visuals) {
         CD2DCompVisual *v = entry.second;
-        if (v->children != v->newChildren) { compPlaceChildren(tree, v->visual, v->newChildren); v->children = v->newChildren; }
+        if (v->children != v->newChildren) { compPlaceChildren(tree, entry.first, v->visual, v->newChildren); v->children = v->newChildren; }
+    }
+    // A child listed under an unchanged parent but not attached to it (it was taken off a
+    // stale parent above, or an earlier AddVisual failed) is re-added in place.
+    for (auto &entry : tree->visuals) {
+        CD2DCompVisual *v = entry.second;
+        bool missing = false;
+        for (int64_t id : v->children) {
+            CD2DCompVisual *c = compVisual(tree, id);
+            if (c && c->attachedTo != entry.first) { missing = true; break; }
+        }
+        if (missing) { v->visual->RemoveAllVisuals(); compDetachedChildren(tree, v->children); compPlaceChildren(tree, entry.first, v->visual, v->children); }
     }
     tree->updating = false;
     tree->device->Commit();
@@ -1524,6 +1898,25 @@ void cd2d_comp_tree_end_update(CD2DCompTree *tree) {
 
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree) {
     return tree ? (uint32_t)tree->visuals.size() : 0;
+}
+
+void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *offsetX, int32_t *offsetY, bool *created) {
+    if (surface) *surface = tree ? tree->lastSurface : nullptr;
+    if (offsetX) *offsetX = tree ? tree->lastOffsetX : 0;
+    if (offsetY) *offsetY = tree ? tree->lastOffsetY : 0;
+    if (created) *created = tree ? tree->lastSurfaceCreated : false;
+}
+
+int32_t cd2d_comp_tree_last_surface_refs(CD2DCompTree *tree) { return tree ? tree->lastSurfaceRefs : 0; }
+
+void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr) {
+    if (stage) *stage = tree ? tree->lastDrawStage : 0;
+    if (hr) *hr = tree ? tree->lastDrawError : 0;
+}
+
+void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t *contentFailures) {
+    if (addFailures) *addFailures = tree ? tree->addFailures : 0;
+    if (contentFailures) *contentFailures = tree ? tree->contentFailures : 0;
 }
 
 }  // extern "C"
@@ -1777,7 +2170,9 @@ uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t
         BITMAPINFO bi = {};
         bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         bi.bmiHeader.biWidth = (LONG)width;
-        bi.bmiHeader.biHeight = -(LONG)height;
+        // Bottom-up rows: the shell's drag image helper draws a top-down DIB upside down
+        // (PR 86 PC round), so the top-down pixels are stored last row first below.
+        bi.bmiHeader.biHeight = (LONG)height;
         bi.bmiHeader.biPlanes = 1;
         bi.bmiHeader.biBitCount = 32;
         bi.bmiHeader.biCompression = BI_RGB;
@@ -1786,7 +2181,10 @@ uint32_t cd2d_dnd_do_drag(const CD2DDragEntry *entries, uint32_t count, uint32_t
         HBITMAP bitmap = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
         ReleaseDC(nullptr, dc);
         if (bitmap && bits) {
-            memcpy(bits, imageBGRA, (size_t)width * height * 4);
+            const size_t rowBytes = (size_t)width * 4;
+            for (uint32_t y = 0; y < height; y++) {
+                memcpy((uint8_t *)bits + (size_t)(height - 1 - y) * rowBytes, imageBGRA + (size_t)y * rowBytes, rowBytes);
+            }
             IDragSourceHelper *helper = nullptr;
             if (SUCCEEDED(CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&helper))) && helper) {
                 SHDRAGIMAGE image = {};

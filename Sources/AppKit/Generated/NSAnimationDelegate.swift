@@ -29,12 +29,12 @@ extension NSAnimationDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationdelegate/animation(_:didreachprogressmark:)
     public nonisolated func animation(_ animation: NSAnimation, didReachProgressMark progress: NSAnimation.Progress) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationdelegate/animation(_:valueforprogress:)
-    public nonisolated func animation(_ animation: NSAnimation, valueForProgress progress: NSAnimation.Progress) -> Float { unimplementedOptionalRequirement() }
+    public nonisolated func animation(_ animation: NSAnimation, valueForProgress progress: NSAnimation.Progress) -> Float { return animation._curveValue(forProgress: progress) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationdelegate/animationdidend(_:)
     public nonisolated func animationDidEnd(_ animation: NSAnimation) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationdelegate/animationdidstop(_:)
     public nonisolated func animationDidStop(_ animation: NSAnimation) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsanimationdelegate/animationshouldstart(_:)
-    public nonisolated func animationShouldStart(_ animation: NSAnimation) -> Bool { return false }
+    public nonisolated func animationShouldStart(_ animation: NSAnimation) -> Bool { return true }
 }
 

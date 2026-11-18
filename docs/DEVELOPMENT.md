@@ -15,7 +15,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Sources/CoreGraphics` (Windows and Linux only) | `CGContext`, `CGPath`, `CGColor`, `CGImage` over Direct2D or Cairo. |
 | `Sources/CoreText` (Windows and Linux only) | CoreText's API over DirectWrite or Pango/HarfBuzz (ADR-0007). |
 | `Sources/QuartzCore` | `CALayer` tree, animations and transactions over `CGContext` (software compositor; shadows Apple's module inside the package on macOS so tests cover it). |
-| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. On Windows `MTKView` presents through a DXGI composition swap chain shown by the window's DirectComposition tree; on the host backend (tests) frames are read back and drawn. |
+| `Sources/Metal`, `Sources/MetalKit` | Metal's API as protocols with a CPU reference device and `MTKView`; the Direct3D 12 backend in `Sources/CMetalD3D12` (ADR-0004) on Windows and the Vulkan backend in `Sources/CMetalVulkan` (ADR-0012) on Linux, each used unless `APPKITWIN_METAL_REFERENCE=1`. On Windows `MTKView` presents through a DXGI composition swap chain shown by the window's DirectComposition tree; on Linux through a `VkSwapchainKHR` on a child X window or a Wayland subsurface under the view (ADR-0012, ADR-0042); on the host backend (tests) frames are read back and drawn. |
 | `Sources/Combine` (Windows and Linux only) | Apple's Combine API as a port of OpenCombine (ADR-0008); on macOS the package uses Apple's Combine. |
 | `Sources/UniformTypeIdentifiers`, `Sources/ImageIO` (Windows and Linux only) | `UTType` over a table generated from the macOS SDK (`tools/uttypes`); `CGImageSource`/`CGImageDestination` over WIC or Cairo (ADR-0009). |
 | `Sources/SwiftUI` | SwiftUI over this AppKit (ADR-0010): runtime, layout, views and modifiers; built on every platform. |
@@ -27,7 +27,9 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `tools/linux` | Dockerfile, test and screenshot scripts for the Linux container. |
 | `Sources/AVFAudio`, `Sources/AVFoundation` | The audio engine under Apple's module names (ADR-0014), with the WASAPI, PipeWire and ALSA shims in `Sources/CWASAPI`, `CPipeWire`, `CALSA`. |
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
-| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable`, `AudioPlayer`, `TextEdit`, `Toolbar`, `Sheets` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
+| `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable`, `AudioPlayer`, `TextEdit`, `Toolbar`, `Sheets`, `Workspace` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
+| `Examples/DailyTodo` | A real third-party SwiftUI app (Daily To Do, MIT) vendored unmodified, with shims for the Apple frameworks the port lacks; the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
+| `Examples/MDVault` | A real document-based SwiftUI app (MD Vault, MIT) vendored with one `@MainActor`; its Info.plist under `Resources/` (named by `APPKITWIN_INFO_PLIST`); the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
 | `Examples/LibraryCompat` | A package of its own: third-party SwiftUI libraries as dependencies, one tab each, with the per-library verdicts and API gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Built by `tools/library-compat.sh` (see below). |
 
 ## Conventions
@@ -38,6 +40,12 @@ state is in [ROADMAP.md](ROADMAP.md).
   `tools/apigen/config.json` under `handwritten`, the generator stops emitting it. Seed a new
   hand-written type by moving its file from `Generated/` and regenerating (nested types move
   to `Generated/<Name>+Types.swift`).
+- A nested type that Core declares (in the type's body or an extension of it, in any Core
+  file) is never emitted in a `+Types` companion, and a hand-written type with all its nested
+  types in Core has no companion at all (ADR-0037). To take over a nested type, declare it in
+  Core and regenerate; no `skipMembers` entry or hand deletion is needed. A clean
+  `python3 tools/apigen/apigen.py` on main leaves `git status` clean (`GeneratorDriftTests`
+  checks the checked-in files).
 - Everything else under `Sources/AppKit/Generated` is machine-generated. Fix
   `tools/apigen/apigen.py` and regenerate rather than editing those files.
 - Unimplemented behaviour calls `unimplemented()`; stubs never return dummy values.
@@ -70,6 +78,12 @@ Metal tab (`APPKITWIN_LAYOUT_TAB=metal`, or `--metal`) is where swap-chain prese
 exercised; `--metal-log` prints the device, and every 30th frame's clear colour, read-back
 pixels, drawable size and presentation path (`swap chain` on a DirectComposition-hosted
 window, `readback` otherwise).
+
+If a Windows build of AppKit ends with exit code 1 and no `error:` right after its last
+`Compiling AppKit …` line, build with `-j 1` (CI always does).
+Swift 6.2's driver sometimes never starts AppKit's emit-module job and says nothing
+(`docs/ci-windows-runner.md`). `tools/windows/frontend-monitor.ps1` records every compiler
+process's exit code and peak memory when a build dies quietly again.
 
 Linux, in the container from `tools/linux/Dockerfile` (`swift:6.2-noble` with X11, Wayland,
 Cairo and Pango):
@@ -144,6 +158,9 @@ says what it demonstrates. CI builds every one on macOS, Windows and both Linux 
 | `Sheets` | Attached sheets (ADR-0019): `NSAlert`/`NSOpenPanel` sheets, a custom `beginSheet` window with a nested sheet, `runModal(for:)` over a sheet, queued sheets, SwiftUI `.sheet` and `.confirmationDialog` | `swift run Sheets` (`--alert`, `--custom`, `--swiftui-sheet`) |
 | `AudioPlayer` | `AVAudioEngine`, two `AVAudioPlayerNode`s (file, generated sine), play/pause/loop, `installTap` level meter, output device and latency, offline render through `AVAudioFile` | `swift run AudioPlayer` (`file.wav`, `--render out.wav`) |
 | `Toolbar` | `NSToolbar` (image items, `NSToolbarItemGroup`, `NSMenuToolbarItem`, `NSSearchToolbarItem`, validation, overflow, the customization sheet, autosave) and an `NSStatusItem` with a menu | `swift run Toolbar` |
+| `Workspace` | `NSWorkspace` (open a URL, reveal in the file manager, icons, recycle, `urlForApplication`), `NSRunningApplication` (frontmost, launch, activate, hide, terminate) and `NSDockTile` (a badge on the taskbar button) | `swift run Workspace` (`--report`) |
+| `DailyTodo` | Daily To Do, a real third-party SwiftUI app vendored unmodified: `NavigationStack` + toolbar, `DatePicker`s, a checkbox `List`, `ContentUnavailableView`, a `.sheet` with a grouped `Form`, `LabeledContent`, `Picker`, `environmentObject`, JSON persistence; `UserNotifications`/`ServiceManagement` shims off macOS; its self-checks as `DailyTodoChecks` | `swift run DailyTodo`, `swift run DailyTodoChecks` |
+| `MDVault` | MD Vault, a real document-based SwiftUI app: `DocumentGroup` + `FileDocument`, an `NSTextView` representable editor, a SwiftUI Markdown viewer, `@FocusedValue` commands, `@AppStorage` | `APPKITWIN_INFO_PLIST=Examples/MDVault/Resources/Info.plist swift run MDVault` |
 
 The port has no Observation framework (`@Observable`), so Observable uses `ObservableObject`;
 `UndoManager` and `FileWrapper` are missing from swift-corelibs-foundation and the port supplies
@@ -173,13 +190,18 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | Forces a Linux window backend. |
 | `APPKITWIN_WAYLAND_DECORATIONS=client\|server` | What Wayland windows ask xdg-decoration for (the compositor has the last word); `client` shows the package's own frame on a compositor that would draw one (ADR-0015). |
 | `APPKITWIN_DEMO_TAB=data` | Opens the HelloWindow SwiftUI demo on that tab (controls, navigation, presentation, data); screenshots are named by tab. |
-| `APPKITWIN_LAYOUT_TAB=table` | Opens the HelloWindow Layout Demo on that tab (form, split, table, metal); screenshots are named by tab. |
+| `APPKITWIN_LAYOUT_TAB=table` | Opens the HelloWindow Layout Demo on that tab (form, split, table, metal, combo, outline, controls, date, diffable, panels, popover); screenshots are named by tab. |
+| `APPKITWIN_PANELS_OPEN=color\|font` | With the Layout Demo's Panels tab, opens the Colors or Fonts panel at launch (screenshots `color-panel`, `font-panel`). |
+| `APPKITWIN_COLOR_PANEL=native` | `NSColorPanel.orderFront` runs the system colour dialog (Windows' ChooseColor) instead of the package-drawn panel (ADR-0031); ignored where there is none. |
 | `APPKITWIN_COMPAT_TAB=confetti` | Opens `LibraryCompat` on that library's tab (shimmer, confetti, wrapping, defaults, markdown, introspect, charts, nuke). |
-| `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. |
+| `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. Unset it before running an example: with it set no native window is created (the package says so on stderr). |
+| `APPKITWIN_PRINT_PANEL=native` | The platform's own print dialog (`PrintDlgEx` on Windows) instead of the package's print panel; Linux has none, so the package's panel shows either way (ADR-0022). |
 | `APPKITWIN_IME_LAYOUT=00000411` | Windows: activates that keyboard layout for the process and opens its IME in native mode on focus (00000411 is Japanese), for testing composition without changing the system's input settings. |
 | (gestures) | No switch: on Windows, Ctrl+wheel is delivered as a magnify gesture (a precision touchpad's pinch arrives that way) and touch screens send WM_GESTURE; on X11 gestures need XInput 2.4 (libinput); on Wayland the compositor must offer `zwp_pointer_gestures_v1`. |
 | `APPKITWIN_LAYOUT_DIRECTION=rtl\|ltr` | Forces the application's layout direction; otherwise the macOS defaults keys (`AppleTextDirection`, `NSForceRightToLeftWritingDirection`) and then the locale's language decide. |
 | `APPKITWIN_TRACE=1` | Logs every view invalidation, SwiftUI node update, root layout pass and ideal-size change (for repaint loops). |
+| `APPKITWIN_TRACE_FRAMES=1` | Logs what each frame costs, in ms: every constraint solve (`frames solve <root> N constraints`, with the gather and the intrinsic-size share and the text-measure cache hits), each window's layout and draw (`frames paint`), and how late each frame tick ran (`frames tick`). For a held stepper or an animation that stutters on one platform. |
+| `APPKITWIN_STEPPER_PROBE=1` | With `APPKITWIN_LAYOUT_TAB=controls`: prints the stepper's upper half in screen pixels (`stepper at X Y`) a second after the window is up, then each step of a hold with its offset since the first (`stepper value 5 +0.512s`). `APPKITWIN_STEPPER_HOLD=<seconds>` makes the demo hold its own stepper for that long (through the window's event path), lay out after each step, print `stepper hold done` and quit, so the offsets and the frame trace come from a script, no mouse needed. |
 
 ## Audio backends and the offline render switch
 
@@ -219,6 +241,9 @@ tools/apigen/extract.sh          # macOS only: dumps symbol graphs from the SDK
 tools/apigen/probe.sh            # macOS only: records enum raw values and string constants
 python3 tools/apigen/apigen.py   # emits Generated/, Stubs/Pending/ and docs/API-COVERAGE.md
 ```
+
+The symbol graphs in `api-inventory/raw/` are git-ignored; in a worktree copy them from the
+main checkout (`cp -R ../../../api-inventory/raw api-inventory/raw`) before regenerating.
 
 ## Rendering comparisons
 

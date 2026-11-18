@@ -18,60 +18,60 @@ import CoreText
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer
 open class NSSpeechSynthesizer: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/init(voice:)
-    public init?(voice: NSSpeechSynthesizer.VoiceName?) { unimplemented() }
+    public init?(voice: NSSpeechSynthesizer.VoiceName?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/addspeechdictionary(_:)
-    open func addSpeechDictionary(_ speechDictionary: [NSSpeechSynthesizer.DictionaryKey : Any]) { unimplemented() }
+    open func addSpeechDictionary(_ speechDictionary: [NSSpeechSynthesizer.DictionaryKey : Any]) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/attributes(forvoice:)
-    public class func attributes(forVoice voice: NSSpeechSynthesizer.VoiceName) -> [NSSpeechSynthesizer.VoiceAttributeKey : Any] { unimplemented() }
+    public class func attributes(forVoice voice: NSSpeechSynthesizer.VoiceName) -> [NSSpeechSynthesizer.VoiceAttributeKey : Any] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/availablevoices
-    class public var availableVoices: [NSSpeechSynthesizer.VoiceName] { unimplemented() }
+    class public var availableVoices: [NSSpeechSynthesizer.VoiceName] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/continuespeaking()
-    open func continueSpeaking() { unimplemented() }
+    open func continueSpeaking() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/defaultvoice
     class public var defaultVoice: NSSpeechSynthesizer.VoiceName { NSSpeechSynthesizer.VoiceName(rawValue: "com.apple.voice.enhanced.en-US.Evan") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/delegate
     open var delegate: (any NSSpeechSynthesizerDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/isanyapplicationspeaking
-    class public var isAnyApplicationSpeaking: Bool { unimplemented() }
+    class public var isAnyApplicationSpeaking: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/isspeaking
-    open var isSpeaking: Bool { unimplemented() }
+    open var isSpeaking: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/object(forproperty:)
-    open func object(forProperty property: NSSpeechSynthesizer.SpeechPropertyKey) throws -> Any { unimplemented() }
+    open func object(forProperty property: NSSpeechSynthesizer.SpeechPropertyKey) throws -> Any { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/pausespeaking(at:)
-    open func pauseSpeaking(at boundary: NSSpeechSynthesizer.Boundary) { unimplemented() }
+    open func pauseSpeaking(at boundary: NSSpeechSynthesizer.Boundary) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/phonemes(from:)
-    open func phonemes(from text: String) -> String { unimplemented() }
+    open func phonemes(from text: String) -> String { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/rate
     open var rate: Float {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/setobject(_:forproperty:)
-    open func setObject(_ object: Any?, forProperty property: NSSpeechSynthesizer.SpeechPropertyKey) throws { unimplemented() }
+    open func setObject(_ object: Any?, forProperty property: NSSpeechSynthesizer.SpeechPropertyKey) throws { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/setvoice(_:)
-    open func setVoice(_ voice: NSSpeechSynthesizer.VoiceName?) -> Bool { unimplemented() }
+    open func setVoice(_ voice: NSSpeechSynthesizer.VoiceName?) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/startspeaking(_:)
-    open func startSpeaking(_ string: String) -> Bool { unimplemented() }
+    open func startSpeaking(_ string: String) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/startspeaking(_:to:)
-    open func startSpeaking(_ string: String, to url: URL) -> Bool { unimplemented() }
+    open func startSpeaking(_ string: String, to url: URL) -> Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/stopspeaking()
-    open func stopSpeaking() { unimplemented() }
+    open func stopSpeaking() { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/stopspeaking(at:)
-    open func stopSpeaking(at boundary: NSSpeechSynthesizer.Boundary) { unimplemented() }
+    open func stopSpeaking(at boundary: NSSpeechSynthesizer.Boundary) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/usesfeedbackwindow
     open var usesFeedbackWindow: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/voice()
-    open func voice() -> NSSpeechSynthesizer.VoiceName? { unimplemented() }
+    open func voice() -> NSSpeechSynthesizer.VoiceName? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsspeechsynthesizer/volume
     open var volume: Float {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }
 

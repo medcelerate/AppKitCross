@@ -155,7 +155,7 @@ final class SwiftUILayoutProtocolTests: XCTestCase, @unchecked Sendable {
     }
 
     func testAttributedStringRunsBecomeTextRuns() throws {
-        #if os(Windows)
+        #if os(Windows) && !compiler(>=6.4)
         throw XCTSkip("the Windows 6.2 toolchain cannot link AttributedString run ranges; Text keeps the plain string there")
         #endif
         var s = AttributedString("plain ")

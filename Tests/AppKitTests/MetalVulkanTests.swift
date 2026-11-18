@@ -414,6 +414,7 @@ final class MetalVulkanRenderTests: XCTestCase, @unchecked Sendable {
     }
 
     func testMTKViewPresentsAVulkanFrameInAWindow() throws {
+        try requireHostBackend()
         let device = try MetalVulkanDeviceTests.vulkanDevice()
         try MainActor.assumeIsolated {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
@@ -480,3 +481,4 @@ final class MetalVulkanRenderTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

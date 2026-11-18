@@ -19,40 +19,40 @@ import CoreText
 @available(macOS 10.15, *)
 @MainActor open class NSButtonTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/init(identifier:image:target:action:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, image: NSImage, target: Any?, action: Selector?) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, image: NSImage, target: Any?, action: Selector?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/init(identifier:title:image:target:action:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, title: String, image: NSImage, target: Any?, action: Selector?) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, title: String, image: NSImage, target: Any?, action: Selector?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/init(identifier:title:target:action:)
-    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, title: String, target: Any?, action: Selector?) { unimplemented() }
+    @MainActor public convenience init(identifier: NSTouchBarItem.Identifier, title: String, target: Any?, action: Selector?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/action
     @MainActor open var action: Selector? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/bezelcolor
     @MainActor open var bezelColor: NSColor? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/image
     @MainActor open var image: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/isenabled
     @MainActor open var isEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/target
     @MainActor open var target: AnyObject? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttontouchbaritem/title
     @MainActor open var title: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

@@ -27,6 +27,11 @@ public struct PlatformDisplay: Sendable {
     public var maximumEDRValue: CGFloat
     public var maximumPotentialEDRValue: CGFloat
     public var maximumReferenceEDRValue: CGFloat
+    /// The display's refresh rate in hertz (`NSScreen.maximumFramesPerSecond` and the refresh
+    /// intervals) and its bits per colour sample (`NSScreen.depth`). 60 and 8 when the
+    /// platform does not say (X11 without RandR).
+    public var refreshRate: Double = 60
+    public var bitsPerSample: Int = 8
     public init(frame: NSRect, visibleFrame: NSRect, backingScaleFactor: CGFloat, localizedName: String, isMain: Bool,
                 maximumEDRValue: CGFloat = 1, maximumPotentialEDRValue: CGFloat = 1, maximumReferenceEDRValue: CGFloat = 0) {
         self.frame = frame
@@ -65,6 +70,11 @@ public protocol PlatformBackend: AnyObject {
     /// The operating system's open/save dialog (FileDialog.swift, ADR-0017); nil when the
     /// panels should draw themselves.
     var fileDialog: (any PlatformFileDialog)? { get }
+    /// Whether the platform has a system colour dialog (`NSColorPanel` uses it when
+    /// `APPKITWIN_COLOR_PANEL=native`); the package-drawn panel is the default everywhere.
+    var hasNativeColorDialog: Bool { get }
+    /// Shows the system colour dialog modally over `initial` (sRGB); nil when cancelled.
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)?
     /// Runs a nested event loop for a modal window until `stop` reports true.
     /// Other windows of the application do not receive input meanwhile.
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool)
@@ -82,6 +92,45 @@ public protocol PlatformBackend: AnyObject {
     var dragDrop: (any PlatformDragDrop)? { get }
     /// The status area for `NSStatusBar` items (see StatusItem.swift); nil when the platform has none.
     var statusItems: (any PlatformStatusItemHost)? { get }
+    /// The shell: opening, associations, icons, running applications, the dock tile
+    /// (Workspace.swift). A requirement, not only an extension default, so the backend's
+    /// own implementation is reached through the `any PlatformBackend` existential.
+    var workspace: any PlatformWorkspace { get }
+    /// Printers, PDF documents and device jobs (see Printing.swift, ADR-0022); nil when the
+    /// platform cannot print.
+    var printing: (any PlatformPrintBackend)? { get }
+
+    /// How the package draws the standard window buttons it supplies itself (content that
+    /// covers the title bar, client-side decorations): macOS traffic lights at the left, or
+    /// the platform's caption buttons at the right (ADR-0022). Default: traffic lights.
+    var windowButtonStyle: PlatformWindowButtonStyle { get }
+
+    /// The characters the key with this event key code types under the current keyboard
+    /// layout with `modifierFlags` (only .shift, .option, .control and .capsLock are passed)
+    /// held, for `NSEvent.characters(byApplyingModifiers:)` (ADR-0038). The key code is the
+    /// one the backend put in its key events: a Windows virtual-key code, an X keysym, the
+    /// macOS virtual key code on the host backend. Nil when the key types nothing.
+    func characters(forKeyCode keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> String?
+
+    /// Starts (`handler` non-nil) or stops reporting the mouse and keyboard events of `mask`
+    /// that go to other applications, for `NSEvent.addGlobalMonitorForEvents` (ADR-0038).
+    /// Locations are screen coordinates. Default: the platform does not show other
+    /// applications' input, and nothing is reported.
+    func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?)
+}
+
+/// The look and placement of the standard window buttons the package draws (ADR-0022).
+public enum PlatformWindowButtonStyle: Sendable, Equatable {
+    /// AppKit's close/miniaturize/zoom circles at the top-left (macOS, Linux).
+    case trafficLights
+    /// Windows caption buttons at the top-right: minimise, maximise/restore, close, with
+    /// Fluent glyphs, hover and pressed fills, close in red.
+    case caption
+}
+
+extension PlatformBackend {
+    public var hasNativeColorDialog: Bool { false }
+    public func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? { nil }
 }
 
 /// A native window. Frames are in AppKit screen coordinates.
@@ -151,6 +200,53 @@ public protocol PlatformWindow: AnyObject {
     /// and minimised with it, and listed nowhere (taskbar, window list). The core sets the
     /// frame after attaching and moves the sheet when the parent moves.
     func attachSheet(to parent: PlatformWindow?)
+    /// Whether the window system composites the window's alpha (a transparent window
+    /// shows what is behind it): DirectComposition and Wayland do, a plain X11 window
+    /// does not. A popover draws an opaque backing around its body where it does not.
+    var supportsTransparency: Bool { get }
+    /// `NSWindow.aspectRatio`/`contentAspectRatio`/`resizeIncrements`/
+    /// `contentResizeIncrements` changed: live resizes by the user keep to them (ADR-0036).
+    /// Programmatic frames do not, as in AppKit. The default ignores them (Wayland's
+    /// xdg-shell has no aspect or increment hints).
+    func setResizeConstraints(_ constraints: PlatformResizeConstraints)
+}
+
+/// What a user's live resize must keep to (`NSWindow` aspect ratios and increments).
+public struct PlatformResizeConstraints: Equatable, Sendable {
+    /// Frame proportion (width:height); zero for none.
+    public var aspectRatio = NSSize.zero
+    /// Content proportion; zero for none. AppKit keeps one of the two.
+    public var contentAspectRatio = NSSize.zero
+    /// Frame size steps.
+    public var resizeIncrements = NSSize(width: 1, height: 1)
+    /// Content size steps.
+    public var contentResizeIncrements = NSSize(width: 1, height: 1)
+    public init() {}
+
+    public var isUnconstrained: Bool { self == PlatformResizeConstraints() }
+
+    /// The size a user's drag may take, given the proposed content size and the frame's
+    /// extra size around it (title bar, borders). Increments snap each dimension to a
+    /// whole number of steps (at least one); an aspect ratio then derives the height from
+    /// the width, or the width from the height when only a top or bottom edge moves.
+    public func constrain(contentSize proposed: NSSize, frameExtra: NSSize, heightEdgeOnly: Bool) -> NSSize {
+        var frameSize = NSSize(width: proposed.width + frameExtra.width, height: proposed.height + frameExtra.height)
+        func snap(_ v: CGFloat, _ step: CGFloat) -> CGFloat { step > 1 ? max(step, (v / step).rounded() * step) : v }
+        frameSize.width = snap(frameSize.width, resizeIncrements.width)
+        frameSize.height = snap(frameSize.height, resizeIncrements.height)
+        var content = NSSize(width: frameSize.width - frameExtra.width, height: frameSize.height - frameExtra.height)
+        content.width = snap(content.width, contentResizeIncrements.width)
+        content.height = snap(content.height, contentResizeIncrements.height)
+        if contentAspectRatio.width > 0, contentAspectRatio.height > 0 {
+            let r = contentAspectRatio.width / contentAspectRatio.height
+            if heightEdgeOnly { content.width = (content.height * r).rounded() } else { content.height = (content.width / r).rounded() }
+        } else if aspectRatio.width > 0, aspectRatio.height > 0 {
+            let r = aspectRatio.width / aspectRatio.height
+            let fw = content.width + frameExtra.width, fh = content.height + frameExtra.height
+            if heightEdgeOnly { content.width = (fh * r).rounded() - frameExtra.width } else { content.height = (fw / r).rounded() - frameExtra.height }
+        }
+        return content
+    }
 }
 
 /// A native surface within a window's content area that a swap chain presents into
@@ -189,7 +285,9 @@ public struct PlatformPresentationSurfaceHandle: Sendable {
 public typealias PlatformLayerScene = _CALayerScene
 
 extension PlatformBackend {
+    public func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?) { }
     public func runNested(until stop: @escaping @MainActor () -> Bool) { runModal(for: nil, until: stop) }
+    public var windowButtonStyle: PlatformWindowButtonStyle { .trafficLights }
 }
 
 extension PlatformWindow {
@@ -198,6 +296,8 @@ extension PlatformWindow {
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
     public func attachSheet(to parent: PlatformWindow?) { }
+    public var supportsTransparency: Bool { true }
+    public func setResizeConstraints(_ constraints: PlatformResizeConstraints) { }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
     public func miniaturize() { }
@@ -266,6 +366,13 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public var transparentTitleBar = false
     /// System backdrop behind the content (from `NSVisualEffectView` materials).
     public var backdrop: Backdrop = .none
+    /// Whether the effect views asking for `backdrop` cover the whole content area. False
+    /// when none spans it, or one has a `maskImage`: a system backdrop that fills the window
+    /// rectangle (DWM's) would then show where the content draws nothing.
+    public var backdropCoversWindow = true
+    /// The largest corner radius (points) the layers of those effect views, or of their
+    /// ancestors, clip them to; 0 for square corners.
+    public var backdropCornerRadius: CGFloat = 0
     /// `!isOpaque`: the content is drawn with alpha over the backdrop.
     public var isTransparent = false
     public var hasShadow = true
@@ -278,7 +385,11 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     public init() {}
 }
 
-public enum PlatformWindowHitRegion: Sendable { case client, caption }
+/// What a point of the content area is to the window system: content, the draggable
+/// caption, or one of the standard buttons the package draws (Windows reports those as
+/// `HTCLOSE`/`HTMINBUTTON`/`HTMAXBUTTON`, which gives the Windows 11 snap layouts flyout
+/// on the maximise button; the backend still delivers their clicks as mouse events).
+public enum PlatformWindowHitRegion: Sendable { case client, caption, closeButton, miniaturizeButton, zoomButton }
 
 extension PlatformWindowOwner {
     public func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect) {}

@@ -28,10 +28,12 @@ open class NSScreen: NSObject {
     open override var hash: Int { Int(_display.frame.minX) ^ Int(_display.frame.minY) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/auxiliarytopleftarea
     @available(macOS 12.0, *)
-    open var auxiliaryTopLeftArea: NSRect? { unimplemented() }
+    /// Nil: only Mac displays with a camera housing have auxiliary areas (macOS returns nil
+    /// for every other screen).
+    open var auxiliaryTopLeftArea: NSRect? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/auxiliarytoprightarea
     @available(macOS 12.0, *)
-    open var auxiliaryTopRightArea: NSRect? { unimplemented() }
+    open var auxiliaryTopRightArea: NSRect? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/backingalignedrect(_:options:)
     open func backingAlignedRect(_ rect: NSRect, options: AlignmentOptions = []) -> NSRect {
         let s = backingScaleFactor
@@ -43,13 +45,17 @@ open class NSScreen: NSObject {
     open var backingScaleFactor: CGFloat { _display.backingScaleFactor }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/canrepresent(_:)
     @available(macOS 10.12, *)
-    open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { unimplemented() }
+    /// The port composes in sRGB on every platform (Direct2D, Cairo), so only the sRGB
+    /// gamut is representable (ADR-0037).
+    open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { displayGamut == .sRGB }
     /// The CGDirectDisplayID for this screen. This will return nil if there isn't one and will never return kCGNullDirectDisplay.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/cgdirectdisplayid
     @available(macOS 26.0, *)
-    open var cgDirectDisplayID: CGDirectDisplayID? { unimplemented() }
+    /// Nil: Quartz display IDs exist only on macOS ("nil if there isn't one").
+    open var cgDirectDisplayID: CGDirectDisplayID? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/colorspace
-    open var colorSpace: NSColorSpace? { unimplemented() }
+    /// sRGB: the port composes in sRGB on every platform (ADR-0037).
+    open var colorSpace: NSColorSpace? { .sRGB }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/colorspacedidchangenotification
     static public var colorSpaceDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSScreenColorSpaceDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/convertrectfrombacking(_:)
@@ -65,9 +71,18 @@ open class NSScreen: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/deepest
     class public var deepest: NSScreen? { main }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/depth
-    open var depth: NSWindow.Depth { unimplemented() }
+    /// 24-bit RGB for an 8-bit display (macOS: 520 on an SDR panel), 64-bit RGB for deeper output.
+    open var depth: NSWindow.Depth { _display.bitsPerSample > 8 ? .sixtyfourBitRGB : .twentyfourBitRGB }
+    /// The keys macOS 15 reports: bits per sample, calibrated RGB, a screen, resolution
+    /// (72 dpi × backing scale), size (the frame's) and the screen number (1-based).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/devicedescription
-    open var deviceDescription: [NSDeviceDescriptionKey : Any] { unimplemented() }
+    open var deviceDescription: [NSDeviceDescriptionKey : Any] {
+        let dpi = 72 * backingScaleFactor
+        let number = MainActor.assumeIsolated { Platform.backend.displays.firstIndex { $0.frame == _display.frame } ?? 0 } + 1
+        return [.bitsPerSample: _display.bitsPerSample, .colorSpaceName: NSColorSpaceName.calibratedRGB, .isScreen: "YES",
+                .resolution: NSValue(size: NSSize(width: dpi, height: dpi)), .size: NSValue(size: frame.size),
+                NSDeviceDescriptionKey(rawValue: "NSScreenNumber"): NSNumber(value: number)]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/displaylink(target:selector:)
     @available(macOS 14.0, *)
     @MainActor open func displayLink(target: Any, selector: Selector) -> CADisplayLink {
@@ -77,12 +92,15 @@ open class NSScreen: NSObject {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/displayupdategranularity
     @available(macOS 12.0, *)
-    open var displayUpdateGranularity: TimeInterval { unimplemented() }
+    /// One refresh interval: the port's displays refresh at a fixed rate (no variable refresh).
+    open var displayUpdateGranularity: TimeInterval { 1 / _display.refreshRate }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/frame
     open var frame: NSRect { _display.frame }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/lastdisplayupdatetimestamp
     @available(macOS 12.0, *)
-    open var lastDisplayUpdateTimestamp: TimeInterval { unimplemented() }
+    /// When the port's frame clock last ticked (the display-link clock, `CACurrentMediaTime`'s
+    /// timebase); 0 before the first frame.
+    open var lastDisplayUpdateTimestamp: TimeInterval { MainActor.assumeIsolated { CARuntime.lastTickTime } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/localizedname
     @available(macOS 10.15, *)
     open var localizedName: String { _display.localizedName }
@@ -99,7 +117,7 @@ open class NSScreen: NSObject {
     open var maximumExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumEDRValue }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumframespersecond
     @available(macOS 12.0, *)
-    open var maximumFramesPerSecond: Int { 60 }
+    open var maximumFramesPerSecond: Int { Int(_display.refreshRate.rounded()) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumpotentialextendeddynamicrangecolorcomponentvalue
     @available(macOS 10.15, *)
     open var maximumPotentialExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumPotentialEDRValue }
@@ -108,19 +126,21 @@ open class NSScreen: NSObject {
     open var maximumReferenceExtendedDynamicRangeColorComponentValue: CGFloat { _display.maximumReferenceEDRValue }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/maximumrefreshinterval
     @available(macOS 12.0, *)
-    open var maximumRefreshInterval: TimeInterval { unimplemented() }
+    /// The refresh interval (fixed-rate displays: the same as the minimum).
+    open var maximumRefreshInterval: TimeInterval { 1 / _display.refreshRate }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/minimumrefreshinterval
     @available(macOS 12.0, *)
-    open var minimumRefreshInterval: TimeInterval { unimplemented() }
+    open var minimumRefreshInterval: TimeInterval { 1 / _display.refreshRate }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/safeareainsets
     @available(macOS 12.0, *)
     open var safeAreaInsets: NSEdgeInsets { NSEdgeInsets() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/screens
     class public var screens: [NSScreen] { MainActor.assumeIsolated { Platform.backend.displays.map { NSScreen(display: $0) } } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/screenshaveseparatespaces
-    class public var screensHaveSeparateSpaces: Bool { unimplemented() }
+    /// False: Windows virtual desktops and X11/Wayland workspaces span every monitor.
+    class public var screensHaveSeparateSpaces: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/supportedwindowdepths
-    open var supportedWindowDepths: UnsafePointer<NSWindow.Depth> { unimplemented() }
+    open var supportedWindowDepths: UnsafePointer<NSWindow.Depth> { appleOnlyUnavailable("NSScreen.supportedWindowDepths — the macOS window server's depth list; a zero-terminated C list cannot be made of the port's NSWindow.Depth, a Swift enum with no 0 case whose storage is not its raw value") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscreen/visibleframe
     open var visibleFrame: NSRect { _display.visibleFrame }
 }

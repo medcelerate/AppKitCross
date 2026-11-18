@@ -16,6 +16,13 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield
 @MainActor open class NSTextField: NSControl, NSTextDelegate, NSUserInterfaceValidations, NSAccessibilityNavigableStaticText, NSAccessibilityStaticText, NSTextContent {
+    // MARK: Bindings (ADR-0032, NSKeyValueBinding+Views.swift)
+
+    internal override class var _definedViewBindings: [NSBindingName] { super._definedViewBindings + [.editable, .textColor] }
+    internal override func _applyViewBinding(_ b: _NSBinding) -> Bool { _applyTextFieldBinding(b) || super._applyViewBinding(b) }
+    internal override func _viewBindingDidAttach(_ b: _NSBinding) { _textFieldBindingDidAttach(b); super._viewBindingDidAttach(b) }
+    internal override func _bindingsWillFireAction() { _pushTextFieldValueBinding() }
+
     // MARK: Storage
     private weak var _delegate: (any NSTextFieldDelegate)?
     private var _maximumNumberOfLines = 1
@@ -60,7 +67,7 @@ import CoreText
         if _editor != nil { return true }
         guard let editor = w.fieldEditor(true, for: self) as? NSTextView else { return false }
         if let cell = _fieldCell { cell._hidesText = true }
-        editor.string = stringValue
+        editor.string = _editorInitialString
         editor.font = font
         editor.textColor = textColor
         editor.drawsBackground = false
@@ -78,6 +85,7 @@ import CoreText
         let became = w.makeFirstResponder(editor)
         _handingOffToEditor = false
         guard became else { _detachEditor(); return false }
+        _bindingEditingDidBegin()
         if let e = event { editor.mouseDown(with: e) } else { editor.selectAll(nil) }
         needsDisplay = true
         return true
@@ -88,8 +96,29 @@ import CoreText
         editor.delegate = nil
         editor.removeFromSuperview()
         _editor = nil
+        _bindingEditingDidEnd()
         if let cell = _fieldCell { cell._hidesText = false }
         needsDisplay = true
+    }
+
+    // MARK: Editor hooks for subclasses (the search and token fields)
+
+    /// The field editor, while editing (typed `NSTextView`).
+    @MainActor internal var _fieldEditor: NSTextView? { _editor }
+    /// Re-places the field editor over the (possibly changed) text rect.
+    @MainActor internal func _relayoutEditor() { _editor?.frame = _editorFrame() }
+    /// What the field editor starts with when editing begins.
+    @MainActor internal var _editorInitialString: String { stringValue }
+    /// The editor's text changed: keep the model current without redrawing the editor's text.
+    @MainActor internal func _editorTextDidChange(_ editor: NSTextView) { _cell?.stringValue = editor.string }
+    /// Editing ended (or Return was pressed): take the editor's text as the value.
+    @MainActor internal func _takeEditorValue(_ editor: NSTextView) { stringValue = editor.string }
+    /// A key-binding command the field editor is about to perform (`cancelOperation:`,
+    /// `moveUp:`, ...). The delegate's `control(_:textView:doCommandBy:)` sees it first;
+    /// subclasses then take what they need. Returns true when the command was handled.
+    @MainActor internal func _editorDoCommand(by selector: Selector) -> Bool {
+        guard let editor = _editor else { return false }
+        return _delegate?.control(self, textView: editor, doCommandBy: selector) ?? false
     }
 
     /// The editor reported the end of a session: take the text and send the action.
@@ -97,7 +126,8 @@ import CoreText
     /// focus; anything else detaches the editor.
     private func _finishEditing(movement: NSTextMovement) {
         guard let editor = _editor else { return }
-        stringValue = editor.string
+        _takeEditorValue(editor)
+        if movement != .cancel { _pushTextFieldValueBinding() }
         if movement == .return {
             _fireAction()
             _editedSinceBegin = false
@@ -122,17 +152,9 @@ import CoreText
         return _beginEditing()
     }
 
-    /// A command the field editor received (moveDown:, insertNewline:, ...): the delegate
-    /// may take it through `control(_:textView:doCommandBy:)`, as in AppKit; subclasses
-    /// (NSComboBox) take some themselves.
-    @MainActor internal func _editorDoCommand(by selector: Selector) -> Bool {
-        guard let editor = _editor else { return false }
-        return _delegate?.control(self, textView: editor, doCommandBy: selector) ?? false
-    }
-
     /// Sets the text, in the field editor too while editing (the editor's text is the
     /// model's source during a session).
-    @MainActor internal func _setStringValueUpdatingEditor(_ string: String) {
+    @MainActor public func _setStringValueUpdatingEditor(_ string: String) {
         stringValue = string
         if let e = _editor, e.string != string {
             e.string = string
@@ -228,15 +250,20 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/allowswritingtools
     @available(macOS 15.2, *)
+    /// Stored, true by default (macOS 15.2); no Writing Tools service exists to offer.
     @MainActor open var allowsWritingTools: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsWritingTools }
+        set { _allowsWritingTools = newValue }
     }
+    private var _allowsWritingTools = true
+    private var _allowsWritingToolsAffordance = false
+    private var _resolvesNaturalAlignment = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/allowswritingtoolsaffordance
     @available(macOS 15.4, *)
+    /// Stored, false by default (macOS 15.4).
     @MainActor open var allowsWritingToolsAffordance: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsWritingToolsAffordance }
+        set { _allowsWritingToolsAffordance = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/backgroundcolor
     @MainActor open var backgroundColor: NSColor? {
@@ -309,9 +336,15 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderattributedstrings
     @available(macOS 26.0, *)
+    /// Placeholders in order of preference; the field shows the first that fits its width
+    /// (the last when none fits). Setting also makes the first the `placeholderAttributedString`.
     @MainActor open var placeholderAttributedStrings: [NSAttributedString] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _fieldCell?._placeholderCandidates ?? [] }
+        set {
+            _fieldCell?._placeholderCandidates = newValue
+            _fieldCell?.placeholderAttributedString = newValue.first
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderstring
     @available(macOS 10.10, *)
@@ -321,9 +354,14 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/placeholderstrings
     @available(macOS 26.0, *)
+    /// `placeholderAttributedStrings` as plain strings (setting gives them the field's attributes).
     @MainActor open var placeholderStrings: [String] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { placeholderAttributedStrings.map(\.string) }
+        set {
+            _fieldCell?._placeholderCandidates = newValue.map { NSAttributedString(string: $0) }
+            _fieldCell?.placeholderString = newValue.first
+            needsDisplay = true
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/preferredmaxlayoutwidth
     @MainActor open var preferredMaxLayoutWidth: CGFloat {
@@ -332,9 +370,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/resolvesnaturalalignmentwithbasewritingdirection
     @available(macOS 26.0, *)
+    /// Stored (macOS 26; default unverified — no macOS 26 to probe, false assumed). Natural
+    /// alignment already follows the application's layout direction in the port.
     @MainActor open var resolvesNaturalAlignmentWithBaseWritingDirection: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _resolvesNaturalAlignment }
+        set { _resolvesNaturalAlignment = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfield/selecttext(_:)
     @MainActor open func selectText(_ sender: Any?) {
@@ -357,7 +397,8 @@ import CoreText
     @MainActor open func textDidChange(_ notification: Notification) {
         if let e = _editor, (notification.object as? NSTextView) === e {
             _editedSinceBegin = true
-            _cell?.stringValue = e.string      // keep the model current without redrawing the editor's text
+            _editorTextDidChange(e)
+            _bindingTextDidChange()
             _accessibilityValueChanged()
         }
         NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: self)

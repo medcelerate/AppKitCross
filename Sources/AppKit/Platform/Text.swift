@@ -17,6 +17,12 @@ public protocol PlatformFontHandle: AnyObject {
     var familyName: String { get }
     var postScriptName: String { get }
     var isFixedPitch: Bool { get }
+    /// The face's style name ("Bold Italic"); nil when the platform does not report one.
+    var styleName: String? { get }
+}
+
+extension PlatformFontHandle {
+    public var styleName: String? { nil }
 }
 
 @MainActor

@@ -8,6 +8,10 @@ import CoreGraphics
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsparagraphstyle
 open class NSParagraphStyle: NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCoding {
+    #if !canImport(Darwin)
+    /// First stored word: a non-zero CF type ID, see Support/CFBridgeLayout.swift.
+    private let _cfinfo = _swiftObjectCFInfo
+    #endif
     internal var _alignment: NSTextAlignment = .natural
     internal var _allowsDefaultTighteningForTruncation = false
     internal var _baseWritingDirection: NSWritingDirection = .natural
@@ -77,6 +81,12 @@ open class NSParagraphStyle: NSObject, NSCopying, NSMutableCopying, NSSecureCodi
             && o._headIndent == _headIndent && o._tailIndent == _tailIndent && o._firstLineHeadIndent == _firstLineHeadIndent
             && o._lineHeightMultiple == _lineHeightMultiple && o._minimumLineHeight == _minimumLineHeight && o._maximumLineHeight == _maximumLineHeight
             && o._baseWritingDirection == _baseWritingDirection
+            && o._defaultTabInterval == _defaultTabInterval && o._headerLevel == _headerLevel
+            && o._tabStops == _tabStops
+            // Lists and blocks compare by identity: two lists with the same format are
+            // still different lists (AppKit renumbers each on its own).
+            && o._textLists.count == _textLists.count && zip(o._textLists, _textLists).allSatisfy { $0 === $1 }
+            && o._textBlocks.count == _textBlocks.count && zip(o._textBlocks, _textBlocks).allSatisfy { $0 === $1 }
     }
     open override var hash: Int { Int(_alignment.rawValue) ^ Int(_lineBreakMode.rawValue) << 3 ^ Int(_lineSpacing * 8) }
 

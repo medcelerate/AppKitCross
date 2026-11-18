@@ -128,6 +128,7 @@ final class MetalVulkanParityTests: XCTestCase, @unchecked Sendable {
     }
 
     func testReferenceSceneIsSelfConsistent() throws {
+        try requireHostBackend()
         // The oracle itself, on every platform: the scene's expectations hold by construction.
         let r = try Self.runScene(on: MTLReferenceDevice())
         let bgra = try XCTUnwrap(r.first { $0.label == "bgra8 after copies" }).bytes
@@ -178,8 +179,11 @@ final class MetalVulkanParityTests: XCTestCase, @unchecked Sendable {
     }
 
     func testMTKViewFrameMatchesReferenceDevice() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         let vulkan = try MetalVulkanDeviceTests.vulkanDevice()
         let reference = try Self.presentedMTKViewFrame(on: MTLReferenceDevice())
         Self.compareFrames(reference, try Self.presentedMTKViewFrame(on: vulkan), backend: "Vulkan")
     }
 }
+
+

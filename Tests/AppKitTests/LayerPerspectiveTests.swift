@@ -89,7 +89,8 @@ final class LayerPerspectiveTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSoftwareAndHostedCompositesDrawThePerspectiveCard() {
+    func testSoftwareAndHostedCompositesDrawThePerspectiveCard() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, _, _) = makeWindow()
             defer { w.close() }
@@ -160,7 +161,8 @@ final class LayerPerspectiveTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSingleSidedLayerShowingItsBackIsCulled() {
+    func testSingleSidedLayerShowingItsBackIsCulled() throws {
+        try requireHostBackend("needs the host backend's rendered window (APPKITWIN_HOST_BACKEND=1)")
         MainActor.assumeIsolated {
             let (w, _, card) = makeWindow()
             defer { w.close() }
@@ -226,3 +228,4 @@ final class LayerPerspectiveTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

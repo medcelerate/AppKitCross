@@ -11,6 +11,12 @@ extension View {
     public func foregroundColor(_ color: Color?) -> some View { environment(\.foregroundColor, color) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:)
     public func foregroundStyle(_ color: Color) -> some View { environment(\.foregroundColor, color) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:)
+    /// A colour or a hierarchical level (`.secondary`, `.tertiary`, ...) sets the
+    /// foreground colour; a style that is not one colour leaves it unchanged.
+    public func foregroundStyle<S: ShapeStyle>(_ style: S) -> some View {
+        _EnvironmentView(content: self) { env in if let c = _foregroundColor(for: style, in: env) { env.foregroundColor = c } }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/foregroundstyle(_:_:)
     /// Only the primary style is applied (hierarchical secondary and tertiary levels are
     /// not drawn separately yet); a non-colour style leaves the foreground unchanged.
@@ -614,6 +620,12 @@ final class _AccessibilityPrimitive: _Primitive {
         /// `.accessibilityElement(children:)`: `.ignore` and `.combine` make the first
         /// backing view the element and hide the rest from assistive technology.
         var childBehavior: AccessibilityChildBehavior? = nil
+        /// Internal (views drawn from shapes that stand for a control, ProgressView): the
+        /// first backing view's role and numeric range.
+        var role: NSAccessibility.Role? = nil
+        var numericValue: Double? = nil
+        var minValue: Double? = nil
+        var maxValue: Double? = nil
     }
     var traits: Traits
     init(traits: Traits, content: _AnyViewBox) {
@@ -646,6 +658,10 @@ final class _AccessibilityPrimitive: _Primitive {
             if let id = traits.identifier { v.setAccessibilityIdentifier(id) }
             if let hint = traits.hint { v.setAccessibilityHelp(hint) }
             if let e = traits.isElement { v.setAccessibilityElement(e) }
+            if let r = traits.role, v.accessibilityRole() != r { v.setAccessibilityRole(r); v.setAccessibilityElement(true) }
+            if let d = traits.numericValue, (v.accessibilityValue() as? Double) != d { v.setAccessibilityValue(d) }
+            if let m = traits.minValue { v.setAccessibilityMinValue(m) }
+            if let m = traits.maxValue { v.setAccessibilityMaxValue(m) }
         }
     }
 }
@@ -658,6 +674,18 @@ struct _AccessibilityModified<Content: View>: View, _PrimitiveView {
 }
 
 extension View {
+    /// Internal: makes the content's first backing view an element with a role and a
+    /// numeric value in a range (a progress bar drawn from shapes).
+    func _accessibilityRange(role: NSAccessibility.Role, value: Double?, in range: ClosedRange<Double>, label: String?) -> some View {
+        _accessibility {
+            $0.role = role
+            $0.numericValue = value
+            $0.minValue = range.lowerBound
+            $0.maxValue = range.upperBound
+            if let label, !label.isEmpty { $0.label = label }
+            $0.childBehavior = .ignore
+        }
+    }
     private func _accessibility(_ change: (inout _AccessibilityPrimitive.Traits) -> Void) -> some View {
         var t = _AccessibilityPrimitive.Traits()
         change(&t)
@@ -715,7 +743,11 @@ extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textfieldstyle(_:)
     public func textFieldStyle<S: TextFieldStyle>(_ style: S) -> some View { environment(\.textFieldStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/togglestyle(_:)
-    public func toggleStyle<S: ToggleStyle>(_ style: S) -> some View { self }
+    public func toggleStyle<S: ToggleStyle>(_ style: S) -> some View { environment(\.toggleStyle, style._kind) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/progressviewstyle(_:)
+    public func progressViewStyle<S: ProgressViewStyle>(_ style: S) -> some View { environment(\.progressViewStyle, style.kind) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/datepickerstyle(_:)
+    public func datePickerStyle<S: DatePickerStyle>(_ style: S) -> some View { environment(\.datePickerStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/liststyle(_:)
     public func listStyle<S: ListStyle>(_ style: S) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/controlsize(_:)
@@ -777,7 +809,36 @@ extension EnvironmentValues {
     var buttonStyle: _ButtonStyleKind { get { self[ButtonStyleKey.self] } set { self[ButtonStyleKey.self] = newValue } }
     var textFieldStyle: _TextFieldStyleKind { get { self[TextFieldStyleKey.self] } set { self[TextFieldStyleKey.self] = newValue } }
     var _keyShortcut: (KeyEquivalent, EventModifiers)? { get { self[KeyShortcutKey.self] } set { self[KeyShortcutKey.self] = newValue } }
+    private struct ProgressViewStyleKey: EnvironmentKey { static let defaultValue: _ProgressViewStyleKind = .automatic }
+    private struct DatePickerStyleKey: EnvironmentKey { static let defaultValue: _DatePickerStyleKind = .automatic }
+    var progressViewStyle: _ProgressViewStyleKind { get { self[ProgressViewStyleKey.self] } set { self[ProgressViewStyleKey.self] = newValue } }
+    var datePickerStyle: _DatePickerStyleKind { get { self[DatePickerStyleKey.self] } set { self[DatePickerStyleKey.self] = newValue } }
 }
+
+public enum _ProgressViewStyleKind: Sendable { case automatic, linear, circular }
+public enum _DatePickerStyleKind: Sendable { case automatic, compact, field, stepperField, graphical }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/progressviewstyle
+public protocol ProgressViewStyle { var kind: _ProgressViewStyleKind { get } }
+public struct DefaultProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .automatic } }
+public struct LinearProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .linear } }
+public struct CircularProgressViewStyle: ProgressViewStyle { public init() {}; public var kind: _ProgressViewStyleKind { .circular } }
+extension ProgressViewStyle where Self == DefaultProgressViewStyle { public static var automatic: DefaultProgressViewStyle { DefaultProgressViewStyle() } }
+extension ProgressViewStyle where Self == LinearProgressViewStyle { public static var linear: LinearProgressViewStyle { LinearProgressViewStyle() } }
+extension ProgressViewStyle where Self == CircularProgressViewStyle { public static var circular: CircularProgressViewStyle { CircularProgressViewStyle() } }
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/datepickerstyle
+public protocol DatePickerStyle { var kind: _DatePickerStyleKind { get } }
+public struct DefaultDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .automatic } }
+public struct CompactDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .compact } }
+public struct FieldDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .field } }
+public struct StepperFieldDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .stepperField } }
+public struct GraphicalDatePickerStyle: DatePickerStyle { public init() {}; public var kind: _DatePickerStyleKind { .graphical } }
+extension DatePickerStyle where Self == DefaultDatePickerStyle { public static var automatic: DefaultDatePickerStyle { DefaultDatePickerStyle() } }
+extension DatePickerStyle where Self == CompactDatePickerStyle { public static var compact: CompactDatePickerStyle { CompactDatePickerStyle() } }
+extension DatePickerStyle where Self == FieldDatePickerStyle { public static var field: FieldDatePickerStyle { FieldDatePickerStyle() } }
+extension DatePickerStyle where Self == StepperFieldDatePickerStyle { public static var stepperField: StepperFieldDatePickerStyle { StepperFieldDatePickerStyle() } }
+extension DatePickerStyle where Self == GraphicalDatePickerStyle { public static var graphical: GraphicalDatePickerStyle { GraphicalDatePickerStyle() } }
 
 public enum _ButtonStyleKind: Sendable { case automatic, bordered, borderedProminent, borderless, plain, link }
 public enum _TextFieldStyleKind: Sendable { case automatic, roundedBorder, plain, squareBorder }
@@ -809,10 +870,20 @@ extension TextFieldStyle where Self == PlainTextFieldStyle { public static var p
 extension TextFieldStyle where Self == SquareBorderTextFieldStyle { public static var squareBorder: SquareBorderTextFieldStyle { SquareBorderTextFieldStyle() } }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/togglestyle
-public protocol ToggleStyle {}
+public protocol ToggleStyle {
+    /// Which control the toggle is (a requirement so the built-in styles dispatch dynamically).
+    var _kind: _ToggleStyleKind { get }
+}
+/// Which control a `Toggle` is: a check box (`NSButton`) or a switch (`NSSwitch`).
+public enum _ToggleStyleKind: Sendable { case automatic, `switch`, checkbox }
+extension ToggleStyle { public var _kind: _ToggleStyleKind { .automatic } }
 public struct DefaultToggleStyle: ToggleStyle { public init() {} }
-public struct SwitchToggleStyle: ToggleStyle { public init() {} }
-public struct CheckboxToggleStyle: ToggleStyle { public init() {} }
+public struct SwitchToggleStyle: ToggleStyle { public init() {}; public var _kind: _ToggleStyleKind { .switch } }
+public struct CheckboxToggleStyle: ToggleStyle { public init() {}; public var _kind: _ToggleStyleKind { .checkbox } }
+extension EnvironmentValues {
+    private struct ToggleStyleKey: EnvironmentKey { static let defaultValue: _ToggleStyleKind = .automatic }
+    var toggleStyle: _ToggleStyleKind { get { self[ToggleStyleKey.self] } set { self[ToggleStyleKey.self] = newValue } }
+}
 extension ToggleStyle where Self == DefaultToggleStyle { public static var automatic: DefaultToggleStyle { DefaultToggleStyle() } }
 extension ToggleStyle where Self == SwitchToggleStyle { public static var `switch`: SwitchToggleStyle { SwitchToggleStyle() } }
 extension ToggleStyle where Self == CheckboxToggleStyle { public static var checkbox: CheckboxToggleStyle { CheckboxToggleStyle() } }
@@ -829,3 +900,33 @@ extension ListStyle where Self == PlainListStyle { public static var plain: Plai
 extension ListStyle where Self == SidebarListStyle { public static var sidebar: SidebarListStyle { SidebarListStyle() } }
 extension ListStyle where Self == InsetListStyle { public static var inset: InsetListStyle { InsetListStyle() } }
 extension ListStyle where Self == BorderedListStyle { public static var bordered: BorderedListStyle { BorderedListStyle() } }
+
+// MARK: Text selection
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/textselectability
+public protocol TextSelectability {
+    /// Whether text under this selectability can be selected.
+    static var allowsSelection: Bool { get }
+}
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/enabledtextselectability
+public struct EnabledTextSelectability: TextSelectability { public static var allowsSelection: Bool { true } }
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/disabledtextselectability
+public struct DisabledTextSelectability: TextSelectability { public static var allowsSelection: Bool { false } }
+extension TextSelectability where Self == EnabledTextSelectability { public static var enabled: EnabledTextSelectability { EnabledTextSelectability() } }
+extension TextSelectability where Self == DisabledTextSelectability { public static var disabled: DisabledTextSelectability { DisabledTextSelectability() } }
+
+extension EnvironmentValues {
+    private struct TextSelectionKey: EnvironmentKey { static let defaultValue = false }
+    /// Whether `.textSelection(.enabled)` is in effect (read by the text primitive).
+    var _allowsTextSelection: Bool { get { self[TextSelectionKey.self] } set { self[TextSelectionKey.self] = newValue } }
+}
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/textselection(_:)
+    /// Recorded in the environment for the text below. Not yet acted on: `Text` draws
+    /// through a non-interactive view, so a drag does not select it and Copy has nothing
+    /// to copy (docs/compatibility/swiftui-apps.md, MD Vault, follow-up).
+    public func textSelection<S: TextSelectability>(_ selectability: S) -> some View {
+        _EnvironmentView(content: self) { $0._allowsTextSelection = S.allowsSelection }
+    }
+}

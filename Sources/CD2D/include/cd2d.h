@@ -255,6 +255,16 @@ void cd2d_comp_tree_remove_visual(CD2DCompTree *tree, int64_t id);
 void cd2d_comp_tree_end_update(CD2DCompTree *tree);
 /// Number of live visuals (debug aid).
 uint32_t cd2d_comp_tree_visual_count(CD2DCompTree *tree);
+/// Failed AddVisual and SetContent calls since the tree was created (debug aid).
+void cd2d_comp_tree_failures(CD2DCompTree *tree, uint32_t *addFailures, uint32_t *contentFailures);
+/// Why the last cd2d_comp_tree_surface_begin_draw returned NULL: stage 1 busy or no visual,
+/// 2 CreateSurface, 3 IDCompositionSurface::BeginDraw, 4 CreateBitmapFromDxgiSurface; and the HRESULT.
+void cd2d_comp_tree_last_draw_error(CD2DCompTree *tree, int32_t *stage, int32_t *hr);
+/// The surface the last successful surface_begin_draw drew into (IDCompositionSurface*), the
+/// atlas offset BeginDraw returned (pixels), and whether the surface was created for it (debug aid).
+void cd2d_comp_tree_last_draw_info(CD2DCompTree *tree, void **surface, int32_t *offsetX, int32_t *offsetY, bool *created);
+/// The reference count of the last surface drawn, while its draw was open (debug aid).
+int32_t cd2d_comp_tree_last_surface_refs(CD2DCompTree *tree);
 
 // File dialogs (IFileDialog)
 typedef struct CD2DFileDialogOptions {
@@ -273,6 +283,94 @@ bool cd2d_file_dialog(void *ownerHwnd, const CD2DFileDialogOptions *options, con
                       const uint16_t *defaultName, const uint16_t *directory, const uint16_t *extensions,
                       const uint16_t *labels, const uint16_t *defaultExtension, uint16_t **paths, uint32_t *length);
 void cd2d_file_dialog_free(uint16_t *paths);
+
+// The shell (ADR-0022: NSWorkspace). Strings are NUL-terminated UTF-16; buffers the
+// caller frees with cd2d_shell_free.
+/// The shell icon for a path (or, with useFileAttributes, for a name that need not
+/// exist: ".txt", a folder): the closest system image list to sizePx, as premultiplied
+/// BGRA top-down pixels. Returns false when the shell has none.
+bool cd2d_shell_icon(const uint16_t *path, bool useFileAttributes, bool isDirectory, uint32_t sizePx,
+                     uint8_t **bgra, uint32_t *width, uint32_t *height);
+/// Opens Explorer on the items' folder with the items selected (SHOpenFolderAndSelectItems,
+/// else `explorer /select`). `paths` holds `count` NUL-terminated paths back to back.
+bool cd2d_shell_reveal(const uint16_t *paths, uint32_t count);
+/// The Application User Model ID an app execution alias (a reparse point under
+/// %LOCALAPPDATA%\\Microsoft\\WindowsApps) activates; false for an ordinary file.
+bool cd2d_shell_app_exec_link(const uint16_t *path, uint16_t *aumid, uint32_t capacity);
+/// Launches a packaged application by Application User Model ID
+/// (IApplicationActivationManager) and answers the real process id, not a launcher stub's.
+bool cd2d_shell_activate_application(const uint16_t *aumid, const uint16_t *arguments, uint32_t *pid);
+/// Moves the item to the Recycle Bin (SHFileOperation, FO_DELETE with FOF_ALLOWUNDO).
+bool cd2d_shell_recycle(const uint16_t *path);
+/// The default handler's executable for a file extension (".txt") or a URL scheme
+/// (AssocQueryString ASSOCSTR_EXECUTABLE). Returns false when none is registered.
+bool cd2d_shell_default_handler(const uint16_t *assoc, bool isProtocol, uint16_t *buffer, uint32_t capacity);
+/// Every handler registered for a file extension (SHAssocEnumHandlers): executables back
+/// to back, NUL-terminated, `length` code units in all. NULL when none.
+uint16_t *cd2d_shell_handlers(const uint16_t *extension, uint32_t *length);
+/// Launches `file` (an executable, a document or a URL) through ShellExecuteEx with
+/// `parameters`; `show` is a SW_ constant. Answers the new process id when the shell
+/// reports one (0 otherwise).
+bool cd2d_shell_execute(void *ownerHwnd, const uint16_t *file, const uint16_t *parameters, int32_t show, uint32_t *pid);
+/// ITaskbarList3::SetOverlayIcon on a window (NULL icon clears it).
+bool cd2d_shell_set_overlay_icon(void *hwnd, void *hicon, const uint16_t *description);
+/// The Application User Model ID of a process (packaged applications), else false.
+bool cd2d_shell_app_user_model_id(uint32_t pid, uint16_t *buffer, uint32_t capacity);
+/// The FileDescription of an executable's version resource, else false.
+bool cd2d_shell_file_description(const uint16_t *exePath, uint16_t *buffer, uint32_t capacity);
+/// Registers the window for session (WTSRegisterSessionNotification) and console display
+/// state (RegisterPowerSettingNotification) broadcasts.
+void cd2d_shell_register_notifications(void *hwnd);
+/// For WM_POWERBROADCAST with PBT_POWERSETTINGCHANGE: whether lParam is the console
+/// display state, and its value (0 off, 1 on, 2 dimmed).
+bool cd2d_shell_display_state(const void *lParam, uint32_t *state);
+/// The machine of another process's executable as a NSBundleExecutableArchitecture value, or 0.
+int32_t cd2d_shell_process_architecture(uint32_t pid);
+void cd2d_shell_free(void *buffer);
+
+// Printing (ADR-0022): printer names, the PrintDlgEx dialog and print jobs through
+// Direct2D's print control (ID2D1PrintControl over an IPrintDocumentPackageTarget: each
+// page is a command list drawn through a CD2DTarget and added to the job as XPS).
+/// NUL-separated, double-NUL-terminated UTF-16 printer names, the default printer first;
+/// `length` is the number of code units. Free with cd2d_file_dialog_free. False when
+/// there are none.
+bool cd2d_printer_names(uint16_t **names, uint32_t *length);
+typedef struct CD2DPrintDialogSettings {
+    uint32_t copies;            // in and out
+    bool collate;
+    uint32_t fromPage, toPage;  // 1-based, 0 = all pages (in and out)
+    uint32_t pageCount;         // in: the document's page count
+    bool landscape;             // in and out
+    float paperWidth, paperHeight;   // points, portrait; out when the driver reports a size
+    bool printToFile;           // out
+    void *driverSettings;       // out: the DEVMODE the dialog returned (free with cd2d_print_free), NULL when none
+    uint32_t driverSettingsSize;
+} CD2DPrintDialogSettings;
+/// Frees a buffer cd2d_print_dialog handed out.
+void cd2d_print_free(void *buffer);
+/// Shows the system print dialog. `printerName` (in) preselects a printer; on return the
+/// chosen printer's name is in `chosenName` (free with cd2d_file_dialog_free). Returns
+/// true when the user chose Print, false when cancelled or on failure.
+bool cd2d_print_dialog(void *ownerHwnd, const uint16_t *printerName, CD2DPrintDialogSettings *settings, uint16_t **chosenName, uint32_t *chosenLength);
+typedef struct CD2DPrintJob CD2DPrintJob;
+/// Starts a job named `jobName` on `printerName` (NUL-terminated UTF-16; NULL = default printer).
+/// `driverSettings` (a DEVMODE from cd2d_print_dialog, or NULL) becomes the job's print
+/// ticket, so the paper, orientation and copies chosen in the dialog reach the driver.
+CD2DPrintJob *cd2d_print_job_create(CD2DFactory *factory, const uint16_t *printerName, const uint16_t *jobName, const void *driverSettings, uint32_t driverSettingsSize);
+/// Begins a page of the given size in DIPs: a command list the returned target draws into
+/// (release it with cd2d_target_release before cd2d_print_job_end_page). The size is in
+/// DIPs (1/96 inch; a caller drawing in points scales by 96/72). NULL on failure.
+CD2DTarget *cd2d_print_job_begin_page(CD2DPrintJob *job, float widthDips, float heightDips);
+/// Closes the page's command list and adds it to the job.
+bool cd2d_print_job_end_page(CD2DPrintJob *job);
+/// Closes the job (spools it) and frees it. False when the print control refused.
+bool cd2d_print_job_close(CD2DPrintJob *job);
+/// Abandons the job and frees it.
+void cd2d_print_job_abort(CD2DPrintJob *job);
+
+// The common colour dialog (ChooseColorW). `rgb` is COLORREF (0x00BBGGRR) in and out, with
+// the 16 custom colours kept for the process. Returns false when cancelled.
+bool cd2d_choose_color(void *ownerHwnd, uint32_t *rgb);
 
 // Drag and drop (OLE; ADR-0011 stage B)
 /// One representation of one dragged item. `type` is a NUL-terminated UTF-16 AppKit

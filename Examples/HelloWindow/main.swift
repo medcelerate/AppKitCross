@@ -154,6 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             canvas.circleColor = names[(sender as? NSPopUpButton)?.titleOfSelectedItem ?? ""] ?? .systemBlue
             return true
         case Selector(("quit:")): NSApp.terminate(sender); return true
+        case Selector(("exportPDF:")):
+            guard let content = NSApp.keyWindow?.contentView else { return true }
+            let save = NSSavePanel()
+            save.allowedFileTypes = ["pdf"]
+            save.nameFieldStringValue = (NSApp.keyWindow?.title ?? "HelloWindow") + ".pdf"
+            if save.runModal() == .OK, let url = save.url {
+                let data = content.dataWithPDF(inside: content.bounds)
+                try? data.write(to: url)
+                print("exported \(data.count) bytes of PDF to \(url.path)")
+            }
+            return true
         case Selector(("closeGlass:")):
             glassWindow?.close()
             glassWindow = nil
@@ -209,6 +220,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let file = NSMenu(title: "File")
         file.addItem(withTitle: "Open\u{2026}", action: Selector(("openFile:")), keyEquivalent: "o")
         file.addItem(withTitle: "Clear Dots", action: Selector(("clearDots:")), keyEquivalent: "k")
+        file.addItem(NSMenuItem.separator())
+        // Printing (ADR-0022): both reach the key window through the responder chain; Print…
+        // paginates its content view (the Layout Demo's tabs, the canvas) with the print panel
+        // as a sheet. Export PDF writes the key window's content with dataWithPDF(inside:).
+        // AppKit's shared print info clips a view wider than the printable area (its default
+        // horizontal pagination); the demo windows are wider than a portrait page, so they
+        // shrink to the page width instead, as a document app would set up its own info.
+        NSPrintInfo.shared.horizontalPagination = .fit
+        let pageSetup = file.addItem(withTitle: "Page Setup\u{2026}", action: Selector(("runPageLayout:")), keyEquivalent: "p")
+        pageSetup.keyEquivalentModifierMask = [.command, .shift]
+        file.addItem(withTitle: "Print\u{2026}", action: Selector(("print:")), keyEquivalent: "p")
+        file.addItem(withTitle: "Export as PDF\u{2026}", action: Selector(("exportPDF:")), keyEquivalent: "")
         file.addItem(NSMenuItem.separator())
         file.addItem(withTitle: "Quit", action: Selector(("quit:")), keyEquivalent: "q")
         fileItem.submenu = file
@@ -410,8 +433,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         if let i = CommandLine.arguments.firstIndex(of: "--screenshot"), i + 1 < CommandLine.arguments.count {
             writeScreenshots(to: CommandLine.arguments[i + 1])
         }
+        // `HelloWindow --print-pdf <file>` prints the Layout Demo's content view to a PDF
+        // without the panels (ADR-0022: pagination through NSPrintOperation, the platform's
+        // PDF writer) and exits; the container run checks the page count.
+        if let i = CommandLine.arguments.firstIndex(of: "--print-pdf"), i + 1 < CommandLine.arguments.count {
+            showLayoutDemo()
+            if let content = layoutWindowController?.window?.contentView {
+                let info = NSPrintInfo(dictionary: [.jobSavingURL: URL(fileURLWithPath: CommandLine.arguments[i + 1]),
+                                                    .jobDisposition: NSPrintInfo.JobDisposition.save.rawValue])
+                info.verticalPagination = .automatic
+                info.horizontalPagination = .fit
+                let op = NSPrintOperation(view: content, printInfo: info)
+                op.showsPrintPanel = false
+                op.showsProgressPanel = false
+                let ok = op.run()
+                print("print-pdf: \(ok ? "wrote" : "failed") \(CommandLine.arguments[i + 1]) (\(op.pageRange.length) page(s))")
+            }
+            NSApp.terminate(nil)
+        }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|browser|legacy|bindings|coredepth|notifications picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -420,16 +461,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = index
         }
+        // `HelloWindow --panels-selftest`: the Panels tab, then the Fonts panel made key (a real
+        // activation on this backend) and a size chosen in it; prints whether the text view's
+        // selection took the font and exits 0 or 1 (ADR-0031, the Windows PC check).
+        if CommandLine.arguments.contains("--panels-selftest") {
+            showLayoutDemo()
+            let tabs = layoutWindowController?.window?.contentViewController as? NSTabViewController
+            tabs?.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: "panels") ?? 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { PanelsSelfTest.run(step: 0) }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "browser", "legacy", "bindings", "coredepth", "notifications"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
+
+    /// Renders a popover's window (body, arrow and content) to <dir>/layout-popover-open-<platform>.png.
+    @MainActor static func writePopoverScreenshot(_ w: NSWindow, to dir: String, platform: String) {
+        guard let cv = w.contentView else { return }
+        w.display()
+        guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { return }
+        cv.cacheDisplay(in: cv.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        let path = "\(dir)/layout-popover-open-\(platform).png"
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("screenshot: \(path)")
+    }
 
     @MainActor func writeScreenshots(to dir: String) {
         #if os(Windows)
@@ -440,8 +502,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         let platform = "macos"
         #endif
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // APPKITWIN_POPOVER_OPEN=1 with the Popover tab: show the transient popover first so
+        // its window is rendered too.
+        if ProcessInfo.processInfo.environment["APPKITWIN_POPOVER_OPEN"] == "1",
+           let tabs = layoutWindowController?.window?.contentViewController as? NSTabViewController,
+           let demo = tabs.children.compactMap({ $0 as? PopoverDemoViewController }).first {
+            tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: "popover") ?? 0
+            demo.view.window?.layoutIfNeeded()
+            demo.view.window?.display()
+            demo.show(.transient, from: demo.transientButton)
+        }
         for w in NSApp.windows where w.isVisible {
             guard let cv = w.contentView else { continue }
+            // A popover's window renders as its own file: the body with the arrow.
+            if w._isPopoverWindow { AppDelegate.writePopoverScreenshot(w, to: dir, platform: platform); continue }
             // The Layout Demo's Form tab is the interesting one unless APPKITWIN_LAYOUT_TAB picks another.
             let layoutTab = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_TAB"] ?? "form"
             if let tabs = w.contentViewController as? NSTabViewController { tabs.selectedTabViewItemIndex = AppDelegate.layoutTabs.firstIndex(of: layoutTab) ?? 0 }
@@ -452,6 +526,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
                 let tab = ProcessInfo.processInfo.environment["APPKITWIN_DEMO_TAB"] ?? "controls"
                 name = tab == "controls" ? "swiftui-demo" : "swiftui-\(tab)"
             case "Layout Demo": name = layoutTab == "form" ? "layout-demo" : "layout-\(layoutTab)"
+            case "Colors": name = "color-panel"
+            case "Fonts": name = "font-panel"
             default: name = "hellowindow"
             }
             guard let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) else { continue }
@@ -559,7 +635,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(CollectionDemoViewController())
         tabs.addChild(GridDemoViewController())
         tabs.addChild(BoxDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 560, height: 300)   // wide enough for the ten tabs
+        tabs.addChild(ControlsDemoViewController())
+        tabs.addChild(DateDemoViewController())
+        tabs.addChild(DiffableDemoViewController())
+        tabs.addChild(PanelsDemoViewController())
+        tabs.addChild(PopoverDemoViewController())
+        tabs.addChild(BrowserDemoViewController())
+        tabs.addChild(LegacyDemoViewController())
+        tabs.addChild(BindingsDemoViewController())
+        tabs.addChild(CoreDepthDemoViewController())
+        tabs.addChild(NotificationsDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 1000, height: 300)   // wide enough for the twenty tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }
@@ -577,7 +663,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 // `HelloWindow --metal-selftest` checks the Metal device offscreen and exits with the
 // number of failed checks (the test target needs the host backend, so this is how the
 // Direct3D 12 device is verified on Windows).
-if CommandLine.arguments.contains("--metal-selftest") { exit(MetalSelfTest.run()) }
+if CommandLine.arguments.contains("--metal-selftest") {
+    let failures = MetalSelfTest.run()
+    #if os(Linux)
+    MetalSelfTest.checkPresentedFrame()   // exits with the offscreen and presented-frame failures
+    #endif
+    exit(failures)
+}
 
 let delegate = AppDelegate()
 let app = NSApplication.shared
@@ -804,6 +896,103 @@ enum MetalSelfTest {
             } catch { check("\(error)".contains("undefined_symbol"), "broken shader diagnostics: \(error)") }
         }
     }
+
+    #if os(Linux)
+    static let presentedClearColor = MTLClearColorMake(0.2, 0.6, 0.9, 1)
+
+    /// Draws one cleared frame for a presented-frame comparison and keeps its drawable.
+    final class PresentedFrameRenderer: MTKViewDelegate {
+        var drawable: (any MTLTexture)?
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+        func draw(in view: MTKView) {
+            view.clearColor = MetalSelfTest.presentedClearColor
+            guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable, let texture = view.currentTexture, let cb = view.device?.makeCommandQueue()?.makeCommandBuffer() else { return }
+            cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+            cb.present(drawable)
+            cb.commit()
+            cb.waitUntilCompleted()
+            self.drawable = texture
+        }
+    }
+
+    static func bytes(_ texture: any MTLTexture) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        texture.getBytes(&out, bytesPerRow: texture.width * 4, from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+        return out
+    }
+
+    /// The same clear on the reference device, `width` x `height` BGRA.
+    static func referenceFrame(width: Int, height: Int) -> [UInt8]? {
+        let device = MTLReferenceDevice()
+        let td = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        td.usage = [.renderTarget, .shaderRead]
+        guard let texture = device.makeTexture(descriptor: td), let cb = device.makeCommandQueue()?.makeCommandBuffer() else { return nil }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = presentedClearColor
+        cb.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        return bytes(texture)
+    }
+
+    /// A presented MTKView frame against the reference device's (ADR-0042), as
+    /// `MetalD3D12ParityTests` does on Windows: with a window system (X11 or Wayland) and a
+    /// presentable Vulkan device the frame must go through the swap chain and the chain's
+    /// image is read back after the present; headless (lavapipe in CI) the readback path's
+    /// drawable is compared. Exits with the failures of both parts.
+    @MainActor
+    static func checkPresentedFrame() -> Never {
+        let env = ProcessInfo.processInfo.environment
+        let windowSystem = env["APPKITWIN_HOST_BACKEND"] != "1" && (env["WAYLAND_DISPLAY"] != nil || env["DISPLAY"] != nil)
+        // Without a display the window goes to the headless host backend (the readback path);
+        // nothing has asked for the platform backend yet, so it is chosen from this.
+        if !windowSystem { setenv("APPKITWIN_HOST_BACKEND", "1", 1) }
+        guard let device = MTLCreateSystemDefaultDevice() else { check(false, "presented frame: no device"); exit(failures) }
+        let presentable = (device as? MTLVulkanDevice).map { !$0.isHeadless } ?? false
+        let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 96, height: 72), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Metal self-test"
+        let view = MTKView(frame: NSRect(x: 16, y: 12, width: 64, height: 48), device: device)
+        let renderer = PresentedFrameRenderer()
+        view.delegate = renderer
+        view.isPaused = true   // explicit drawing: only the check's draw() runs a frame
+        window.contentView!.addSubview(view)
+        window.makeKeyAndOrderFront(nil)
+        func finish() -> Never {
+            renderer.drawable = nil
+            view.draw()
+            let path = view._presentsThroughSwapChain ? "swap chain" : "readback"
+            print("presented frame: \(device.name) window system=\(windowSystem) presentable=\(presentable) path=\(path)\(view._presentationError.isEmpty ? "" : " error=\(view._presentationError)")")
+            if windowSystem && presentable && env["APPKITWIN_METAL_READBACK"] != "1" {
+                check(view._presentsThroughSwapChain, "presented frame goes through the swap chain (\(view._presentationError))")
+                check(view._swapChainPresentCount >= 1, "the swap chain presented \(view._swapChainPresentCount) frame(s)")
+            }
+            if let texture = renderer.drawable {
+                check(texture.width == Int(view.drawableSize.width) && texture.height == Int(view.drawableSize.height) && texture.pixelFormat == view.colorPixelFormat,
+                      "the drawable is \(texture.width)x\(texture.height) \(texture.pixelFormat), the view's drawableSize \(view.drawableSize) and colorPixelFormat")
+                let frame = bytes(texture)
+                if let reference = referenceFrame(width: texture.width, height: texture.height) {
+                    var worst = 0
+                    for (a, b) in zip(frame, reference) { worst = max(worst, abs(Int(a) - Int(b))) }
+                    check(frame.count == reference.count && worst <= 1, "presented \(path) frame matches the reference device within one level (worst \(worst), centre \(Array(frame[(texture.height / 2 * texture.width + texture.width / 2) * 4..<(texture.height / 2 * texture.width + texture.width / 2) * 4 + 4])))")
+                } else { check(false, "reference frame") }
+            } else { check(false, "presented frame: no drawable (\(view._presentationError))") }
+            withExtendedLifetime(renderer) { window.close() }
+            print("presented-frame check done")
+            fflush(nil)
+            exit(failures)
+        }
+        guard windowSystem else { finish() }
+        // Wayland shows a subsurface's frames once the window is mapped (the compositor's
+        // configure, a committed parent buffer): run the event loop briefly first.
+        nonisolated(unsafe) let finishOnMain = finish   // the timer fires on the main thread
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in MainActor.assumeIsolated { () -> Void in finishOnMain() } }
+        NSApplication.shared.run()
+        exit(failures)
+    }
+    #endif
 }
 
 
@@ -864,6 +1053,286 @@ final class FormViewController: NSViewController, NSSelectorHandling {
         case Selector(("reset:")): status.stringValue = "Fill in the form."; return true
         default: return false
         }
+    }
+}
+
+/// The everyday controls (search field, token field, path control, stepper, level
+/// indicators, progress indicators) on one tab, each wired to the status line.
+final class ControlsDemoViewController: NSViewController, NSSelectorHandling, NSTokenFieldDelegate {
+    let status = NSTextField(labelWithString: "Type in the search field; tokens split on commas.")
+    let search = NSSearchField(frame: .zero)
+    let tokens = NSTokenField(frame: .zero)
+    let path = NSPathControl(frame: .zero)
+    let popUpPath = NSPathControl(frame: .zero)
+    let stepper = NSStepper(frame: .zero)
+    let stepperValue = NSTextField(frame: .zero)
+    let capacity = NSLevelIndicator(frame: .zero)
+    let rating = NSLevelIndicator(frame: .zero)
+    let relevancy = NSLevelIndicator(frame: .zero)
+    let bar = NSProgressIndicator(frame: .zero)
+    let busy = NSProgressIndicator(frame: .zero)
+    let spinner = NSProgressIndicator(frame: .zero)
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Controls"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        func row(_ label: String, _ views: [NSView]) -> NSStackView {
+            let r = NSStackView()
+            r.orientation = .horizontal
+            r.spacing = 8
+            let l = NSTextField(labelWithString: label)
+            l.setContentHuggingPriority(.required, for: .horizontal)
+            r.addArrangedSubview(l)
+            for v in views { r.addArrangedSubview(v) }
+            return r
+        }
+
+        search.placeholderString = "Search planets"
+        search.target = self
+        search.action = Selector(("searched:"))
+        search.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        let menu = NSMenu(title: "Recents")
+        let recentsTitle = NSMenuItem(title: "Recent Searches", action: nil, keyEquivalent: ""); recentsTitle.tag = NSSearchField.recentsTitleMenuItemTag
+        let recents = NSMenuItem(title: "%@", action: nil, keyEquivalent: ""); recents.tag = NSSearchField.recentsMenuItemTag
+        let none = NSMenuItem(title: "No Recent Searches", action: nil, keyEquivalent: ""); none.tag = NSSearchField.noRecentsMenuItemTag
+        let clear = NSMenuItem(title: "Clear Recents", action: nil, keyEquivalent: ""); clear.tag = NSSearchField.clearRecentsMenuItemTag
+        for m in [recentsTitle, recents, none, clear] { menu.addItem(m) }
+        search.searchMenuTemplate = menu
+        stack.addArrangedSubview(row("Search:", [search]))
+
+        tokens.delegate = self
+        tokens.objectValue = ["Mercury", "Venus"]
+        tokens.placeholderString = "Planets, comma separated"
+        tokens.target = self
+        tokens.action = Selector(("tokensChanged:"))
+        tokens.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        stack.addArrangedSubview(row("Tokens:", [tokens]))
+
+        path.url = URL(fileURLWithPath: "/Users/jane/Documents/Planets/Mars.txt")
+        path.target = self
+        path.action = Selector(("pathClicked:"))
+        path.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        stack.addArrangedSubview(row("Path:", [path]))
+        popUpPath.pathStyle = .popUp
+        popUpPath.url = URL(fileURLWithPath: "/Users/jane/Documents")
+        popUpPath.isEditable = true
+        popUpPath.target = self
+        popUpPath.action = Selector(("pathClicked:"))
+        popUpPath.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        stack.addArrangedSubview(row("Pop-up:", [popUpPath]))
+
+        stepper.minValue = 0; stepper.maxValue = 10; stepper.integerValue = 3
+        stepper.target = self
+        stepper.action = Selector(("stepped:"))
+        stepperValue.integerValue = 3
+        stepperValue.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        stepperValue.target = self
+        stepperValue.action = Selector(("stepperTyped:"))
+        capacity.levelIndicatorStyle = .discreteCapacity
+        capacity.minValue = 0; capacity.maxValue = 10; capacity.warningValue = 6; capacity.criticalValue = 8
+        capacity.integerValue = 3
+        capacity.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        capacity.numberOfTickMarks = 11
+        stack.addArrangedSubview(row("Stepper:", [stepper, stepperValue, capacity]))
+
+        rating.levelIndicatorStyle = .rating
+        rating.minValue = 0; rating.maxValue = 5; rating.integerValue = 4
+        rating.isEditable = true
+        rating.target = self
+        rating.action = Selector(("rated:"))
+        relevancy.levelIndicatorStyle = .relevancy
+        relevancy.minValue = 0; relevancy.maxValue = 100; relevancy.doubleValue = 65
+        relevancy.widthAnchor.constraint(equalToConstant: 100).isActive = true
+        stack.addArrangedSubview(row("Levels:", [rating, relevancy]))
+
+        bar.isIndeterminate = false
+        bar.minValue = 0; bar.maxValue = 100; bar.doubleValue = 30
+        bar.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        busy.isIndeterminate = true
+        busy.widthAnchor.constraint(equalToConstant: 100).isActive = true
+        busy.startAnimation(nil)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        stack.addArrangedSubview(row("Progress:", [bar, busy, spinner]))
+
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+    }
+
+    /// `APPKITWIN_STEPPER_PROBE=1` prints the stepper's upper half in X screen pixels once
+    /// the window is up, and each stepped value with its offset since the first step of the hold
+    /// (tools/linux/stepper-hold.sh; on Windows, read stdout while holding the upper half).
+    let probing = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_PROBE"] != nil
+    /// The time of the first step of a hold, for the probe's offsets (reset a second after the last step).
+    private var probeStart: CFTimeInterval = 0
+    private var probeLast: CFTimeInterval = 0
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard probing else { return }
+        // A second later the window is placed and laid out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.printStepperProbe() }
+    }
+    private func printStepperProbe() {
+        guard let w = view.window, let screen = w.screen ?? NSScreen.main else { return }
+        w.layoutIfNeeded()      // a window not yet painted (occluded on the macOS host) has no frames yet
+        let r = stepper.convert(stepper.bounds, to: nil)
+        let s = w.convertToScreen(r)
+        // X screen coordinates: origin top-left, points to pixels at the backing scale.
+        let scale = w.backingScaleFactor
+        let x = Int((s.midX * scale).rounded())
+        let y = Int(((screen.frame.maxY - (s.minY + s.height * 0.75)) * scale).rounded())
+        print("stepper at \(x) \(y)"); fflush(nil)
+        // APPKITWIN_STEPPER_HOLD=<seconds>: the demo holds its own stepper (the events go
+        // through the window, as a press would) for that long, then quits, so a script
+        // reads the step offsets without a hand on the mouse.
+        if let hold = ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_HOLD"].flatMap(Double.init), hold > 0 {
+            let p = NSPoint(x: r.midX, y: r.minY + r.height * 0.75)
+            let down = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                          windowNumber: w.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)!
+            w.sendEvent(down)
+            DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
+                guard let self, let w = self.view.window else { return }
+                let up = NSEvent.mouseEvent(with: .leftMouseUp, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: w.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0)!
+                w.sendEvent(up)
+                print("stepper hold done"); fflush(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
+            }
+        }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action {
+        case Selector(("searched:")): status.stringValue = search.stringValue.isEmpty ? "Search cleared." : "Searching for \"\(search.stringValue)\""; return true
+        case Selector(("tokensChanged:")): status.stringValue = "Tokens: \((tokens.objectValue as? [Any] ?? []).map { "\($0)" }.joined(separator: " | "))"; return true
+        case Selector(("pathClicked:")):
+            let p = sender as? NSPathControl
+            status.stringValue = "Clicked \(p?.clickedPathItem?.title ?? "?") → \(p?.clickedPathItem?.url?.path ?? p?.url?.path ?? "")"
+            return true
+        case Selector(("stepped:")):
+            stepperValue.integerValue = stepper.integerValue
+            capacity.integerValue = stepper.integerValue
+            bar.doubleValue = Double(stepper.integerValue) * 10
+            status.stringValue = "Stepper: \(stepper.integerValue)"
+            if probing {
+                // "stepper value N +0.512s": the offset since the first step of this hold, so a
+                // log shows the autorepeat delay (0.5 s) and rate (10 per second) exactly.
+                let now = CACurrentMediaTime()
+                if now - probeLast > 1 { probeStart = now }
+                probeLast = now
+                print(String(format: "stepper value %d +%.3fs", stepper.integerValue, now - probeStart)); fflush(nil)
+                // A self-driven hold lays the window out at once, so the frame trace shows
+                // what each step costs even where the window is not being painted.
+                if ProcessInfo.processInfo.environment["APPKITWIN_STEPPER_HOLD"] != nil { view.window?.layoutIfNeeded() }
+            }
+            return true
+        case Selector(("stepperTyped:")):
+            stepper.integerValue = stepperValue.integerValue
+            capacity.integerValue = stepper.integerValue
+            return true
+        case Selector(("rated:")): status.stringValue = "Rating: \(rating.integerValue) of 5"; return true
+        default: return false
+        }
+    }
+
+    static let planets = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
+    func tokenField(_ tokenField: NSTokenField, completionsForSubstring substring: String, indexOfToken tokenIndex: Int, indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?) -> [Any]? {
+        let matches = ControlsDemoViewController.planets.filter { $0.lowercased().hasPrefix(substring.lowercased()) }
+        return matches.isEmpty ? nil : matches
+    }
+    func tokenField(_ tokenField: NSTokenField, hasMenuForRepresentedObject representedObject: Any) -> Bool { (representedObject as? String) == "Earth" }
+    func tokenField(_ tokenField: NSTokenField, menuForRepresentedObject representedObject: Any) -> NSMenu? {
+        let m = NSMenu(title: "")
+        m.addItem(NSMenuItem(title: "Home planet", action: nil, keyEquivalent: ""))
+        return m
+    }
+}
+
+/// The date picker's styles: textual with a stepper, plain textual (time only), and the
+/// graphical calendar and clock, all on one date.
+final class DateDemoViewController: NSViewController, NSSelectorHandling {
+    let status = NSTextField(labelWithString: "Pick a date.")
+    let textual = NSDatePicker(frame: .zero)
+    let timeOnly = NSDatePicker(frame: .zero)
+    let graphical = NSDatePicker(frame: .zero)
+    /// A fixed date so the renders compare across platforms.
+    static let demoDate: Date = {
+        var c = DateComponents(); c.year = 2026; c.month = 11; c.day = 10; c.hour = 14; c.minute = 30
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal.date(from: c)!
+    }()
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Date"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 300))
+        let posix = Locale(identifier: "en_US_POSIX")
+        let utc = TimeZone(identifier: "UTC")
+        for p in [textual, timeOnly, graphical] {
+            p.locale = posix
+            p.timeZone = utc
+            p.dateValue = DateDemoViewController.demoDate
+            p.target = self
+            p.action = Selector(("dateChanged:"))
+            p.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(p)
+        }
+        timeOnly.datePickerStyle = .textField
+        timeOnly.datePickerElements = .hourMinute
+        graphical.datePickerStyle = .clockAndCalendar
+        graphical.minDate = DateDemoViewController.demoDate.addingTimeInterval(-20 * 86400)
+        let l1 = NSTextField(labelWithString: "Stepper:"), l2 = NSTextField(labelWithString: "Time:")
+        for l in [l1, l2] { l.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(l) }
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            l1.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            l1.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            textual.leadingAnchor.constraint(equalTo: l1.trailingAnchor, constant: 8),
+            textual.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            l2.leadingAnchor.constraint(equalTo: textual.trailingAnchor, constant: 16),
+            l2.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            timeOnly.leadingAnchor.constraint(equalTo: l2.trailingAnchor, constant: 8),
+            timeOnly.centerYAnchor.constraint(equalTo: l1.centerYAnchor),
+            graphical.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            graphical.topAnchor.constraint(equalTo: textual.bottomAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action == Selector(("dateChanged:")), let p = sender as? NSDatePicker else { return false }
+        for other in [textual, timeOnly, graphical] where other !== p { other.dateValue = p.dateValue }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        status.stringValue = "Date: \(f.string(from: p.dateValue)) UTC"
+        return true
     }
 }
 
@@ -990,6 +1459,238 @@ final class TableDemoViewController: NSViewController, NSTableViewDataSource, NS
         case "rowClicked:": return true
         default: return false
         }
+    }
+}
+
+/// Popovers of each behaviour on push buttons (the application-defined one closes from
+/// its own button and detaches when dragged), and an NSSwitch. APPKITWIN_POPOVER_OPEN=1
+/// shows the transient popover on launch (for screenshots).
+final class PopoverDemoViewController: NSViewController, NSPopoverDelegate, NSSelectorHandling {
+    let transientButton = NSButton(title: "Transient", target: nil, action: nil)
+    let semitransientButton = NSButton(title: "Semitransient", target: nil, action: nil)
+    let definedButton = NSButton(title: "Application-defined", target: nil, action: nil)
+    let toggle = NSSwitch(frame: .zero)
+    let toggleLabel = NSTextField(labelWithString: "Wi-Fi")
+    let status = NSTextField(labelWithString: "Click a button for a popover; Space toggles the switch.")
+    var popovers: [NSPopover.Behavior: NSPopover] = [:]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Popover"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        for (b, action) in [(transientButton, "showTransient:"), (semitransientButton, "showSemitransient:"), (definedButton, "showDefined:")] {
+            b.target = self
+            b.action = Selector((action))
+            buttons.addArrangedSubview(b)
+        }
+        toggle.target = self
+        toggle.action = Selector(("switched:"))
+        toggle.state = .on
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.spacing = 8
+        row.addArrangedSubview(toggleLabel)
+        row.addArrangedSubview(toggle)
+        for v in [buttons, row, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
+            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            row.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 28),
+            row.leadingAnchor.constraint(equalTo: buttons.leadingAnchor),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+        ])
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        if ProcessInfo.processInfo.environment["APPKITWIN_POPOVER_OPEN"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+                view.window?.layoutIfNeeded()
+                show(.transient, from: transientButton)
+            }
+        }
+    }
+
+    /// One popover per behaviour, made on first use; the application-defined one carries
+    /// a Close button and detaches into a titled window when dragged.
+    func popover(for behavior: NSPopover.Behavior) -> NSPopover {
+        if let p = popovers[behavior] { return p }
+        let p = NSPopover()
+        p.behavior = behavior
+        p.delegate = self
+        let vc = NSViewController(nibName: nil, bundle: nil)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: behavior == .applicationDefined ? 96 : 64))
+        let name: String
+        switch behavior {
+        case .transient: name = "Transient: a click anywhere outside closes it."
+        case .semitransient: name = "Semitransient: a click in the parent window closes it."
+        default: name = "Application-defined: only Close closes it. Drag to detach."
+        }
+        let text = NSTextField(wrappingLabelWithString: name)
+        text.frame = NSRect(x: 12, y: content.frame.height - 48, width: 196, height: 40)
+        content.addSubview(text)
+        if behavior == .applicationDefined {
+            let close = NSButton(title: "Close", target: self, action: Selector(("closeDefined:")))
+            close.frame = NSRect(x: 12, y: 10, width: 80, height: 24)
+            content.addSubview(close)
+        }
+        vc.view = content
+        vc.title = "Popover"
+        p.contentViewController = vc
+        popovers[behavior] = p
+        return p
+    }
+
+    func show(_ behavior: NSPopover.Behavior, from button: NSButton) {
+        let p = popover(for: behavior)
+        if p.isShown { p.close(); return }
+        p.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
+    func popoverShouldDetach(_ popover: NSPopover) -> Bool { popover.behavior == .applicationDefined }
+    func popoverDidShow(_ notification: Notification) {
+        if let p = notification.object as? NSPopover { status.stringValue = "Popover shown (\(p.behavior == .transient ? "transient" : p.behavior == .semitransient ? "semitransient" : "application-defined"))" }
+    }
+    func popoverDidClose(_ notification: Notification) {
+        let reason = (notification.userInfo?[NSPopover.closeReasonUserInfoKey] as? NSPopover.CloseReason) == .detachToWindow ? "detached" : "closed"
+        status.stringValue = "Popover \(reason)"
+    }
+    func popoverDidDetach(_ popover: NSPopover) { status.stringValue = "Popover detached into a window" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "showTransient:": show(.transient, from: transientButton); return true
+        case "showSemitransient:": show(.semitransient, from: semitransientButton); return true
+        case "showDefined:": show(.applicationDefined, from: definedButton); return true
+        case "closeDefined:": popovers[.applicationDefined]?.performClose(sender); return true
+        case "switched:": status.stringValue = "Switch is \(toggle.state == .on ? "on" : "off")"; return true
+        default: return false
+        }
+    }
+}
+
+/// The legacy controls (ADR-0034): an NSGradient swatch (linear and radial), a text view
+/// with its horizontal NSRulerView (drag the tab stop and indent markers; click the rule
+/// to add a tab stop, drag one off to remove it), an NSDrawer on the window's right edge
+/// and an NSScrubber strip of twenty items with arrow buttons and a rounded selection.
+final class LegacyDemoViewController: NSViewController, NSScrubberDataSource, NSScrubberDelegate, NSSelectorHandling {
+    let scrubber = NSScrubber(frame: NSRect(x: 16, y: 56, width: 588, height: 32))
+    let status = NSTextField(labelWithString: "Drag the ruler markers, toggle the drawer, pick a scrubber item.")
+    lazy var drawer: NSDrawer = {
+        let d = NSDrawer(contentSize: NSSize(width: 160, height: 200), preferredEdge: .maxX)
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 200))
+        let label = NSTextField(wrappingLabelWithString: "A drawer slides out of the window's edge and follows the window.")
+        label.frame = NSRect(x: 8, y: 120, width: 144, height: 64)
+        label.autoresizingMask = [.minYMargin]
+        content.addSubview(label)
+        let close = NSButton(title: "Close", target: self, action: Selector(("closeDrawer:")))
+        close.frame = NSRect(x: 8, y: 80, width: 80, height: 24)
+        close.autoresizingMask = [.minYMargin]
+        content.addSubview(close)
+        d.contentView = content
+        d.minContentSize = NSSize(width: 100, height: 50)
+        d.maxContentSize = NSSize(width: 320, height: 2000)
+        for (name, text) in [(NSDrawer.didOpenNotification, "Drawer open"), (NSDrawer.didCloseNotification, "Drawer closed")] {
+            NotificationCenter.default.addObserver(forName: name, object: d, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.status.stringValue = text }
+            }
+        }
+        return d
+    }()
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Legacy"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 260))
+        // Everything keeps its distance from the top as the tab grows; the text view and the
+        // scrubber widen with it.
+        let swatch = GradientSwatch(frame: NSRect(x: 16, y: 104, width: 160, height: 140))
+        swatch.autoresizingMask = [.minYMargin]
+        root.addSubview(swatch)
+
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 192, y: 104, width: 412, height: 140)
+        scroll.borderType = .lineBorder
+        scroll.autoresizingMask = [.minYMargin, .width]
+        let tv = scroll.documentView as! NSTextView
+        let ps = NSMutableParagraphStyle()
+        ps.tabStops = [NSTextTab(textAlignment: .left, location: 72), NSTextTab(textAlignment: .right, location: 216)]
+        ps.headIndent = 12
+        tv.textStorage?.setAttributedString(NSAttributedString(string: "Name\tKind\tSize\nRuler\tview\t12\nDrawer\twindow\t160\nScrubber\tstrip\t20\n",
+                                                                attributes: [.paragraphStyle: ps, .font: NSFont.systemFont(ofSize: 12)]))
+        root.addSubview(scroll)
+        scroll.hasHorizontalRuler = true
+        scroll.rulersVisible = true
+        scroll.horizontalRulerView?.measurementUnits = .inches
+        scroll.horizontalRulerView?.clientView = tv
+        tv.setSelectedRange(NSRange(location: 0, length: 0))
+        tv.updateRuler()
+
+        scrubber.register(NSScrubberTextItemView.self, forItemIdentifier: NSUserInterfaceItemIdentifier("item"))
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSize = NSSize(width: 72, height: 28)
+        (scrubber.scrubberLayout as? NSScrubberFlowLayout)?.itemSpacing = 6
+        scrubber.selectionBackgroundStyle = .roundedBackground
+        scrubber.showsArrowButtons = true
+        scrubber.showsAdditionalContentIndicators = true
+        scrubber.autoresizingMask = [.minYMargin, .width]
+        scrubber.delegate = self
+        scrubber.dataSource = self
+        root.addSubview(scrubber)
+
+        let toggle = NSButton(title: "Toggle Drawer", target: self, action: Selector(("toggleDrawer:")))
+        toggle.frame = NSRect(x: 16, y: 16, width: 120, height: 24)
+        toggle.autoresizingMask = [.minYMargin]
+        root.addSubview(toggle)
+        status.frame = NSRect(x: 148, y: 18, width: 456, height: 20)
+        status.autoresizingMask = [.minYMargin, .width]
+        root.addSubview(status)
+        view = root
+    }
+
+    func numberOfItems(for scrubber: NSScrubber) -> Int { 20 }
+    func scrubber(_ scrubber: NSScrubber, viewForItemAt index: Int) -> NSScrubberItemView {
+        let item = scrubber.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("item"), owner: nil) as! NSScrubberTextItemView
+        item.title = "Item \(index + 1)"
+        return item
+    }
+    func scrubber(_ scrubber: NSScrubber, didSelectItemAt selectedIndex: Int) { status.stringValue = "Scrubber: Item \(selectedIndex + 1) selected" }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "toggleDrawer:":
+            if drawer.parentWindow == nil { drawer.parentWindow = view.window }
+            drawer.toggle(sender)
+            return true
+        case "closeDrawer:": drawer.close(sender); return true
+        default: return false
+        }
+    }
+}
+
+/// A linear gradient across the top half and a radial one below.
+final class GradientSwatch: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let top = NSRect(x: 0, y: bounds.midY + 2, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(colorsAndLocations: (.systemRed, 0), (.systemYellow, 0.5), (.systemBlue, 1))?.draw(in: NSBezierPath(roundedRect: top, xRadius: 8, yRadius: 8), angle: 0)
+        let bottom = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height / 2 - 2)
+        NSGradient(starting: .white, ending: .systemTeal)?.draw(in: bottom, relativeCenterPosition: NSPoint(x: -0.4, y: 0.4))
     }
 }
 
@@ -1291,9 +1992,81 @@ final class PagesDemoViewController: NSViewController, NSPageControllerDelegate,
 
 /// An `NSCollectionView` of colour swatches in two sections under a flow layout with
 /// section headers: click, Cmd and Shift select; arrows move; the header's button
-/// collapses its section.
+/// collapses its section. Insert, Delete, Move and Reload change the items (the Windows
+/// checklist for natively hosted windows: every swatch stays drawn after each); with
+/// Animate on, inserts fade in, deletes fade out and moves slide (ADR-0041).
+/// Drag swatches to reorder them (a bar marks the gap, a ring the swatch dropped on);
+/// drop text (from here or another application) on the grid to add a swatch; drag
+/// swatches to the well on the right, which takes text and the swatches' file promises.
 final class CollectionDemoViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegateFlowLayout, NSSelectorHandling {
+    static let swatchType = NSPasteboard.PasteboardType("com.appkitcross.demo.swatch")
+    /// Takes text and file promises; shows what arrived.
+    final class DropWell: NSView {
+        let label = NSTextField(wrappingLabelWithString: "Drop text or swatches here")
+        var targeted = false { didSet { needsDisplay = true } }
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            label.alignment = .center
+            label.font = NSFont.systemFont(ofSize: 11)
+            label.preferredMaxLayoutWidth = 96
+            label.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+                label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            registerForDraggedTypes([.filePromise, .string])
+        }
+        required init?(coder: NSCoder) { nil }
+        override func draw(_ dirtyRect: NSRect) {
+            (targeted ? NSColor.controlAccentColor.withAlphaComponent(0.15) : NSColor.controlBackgroundColor).setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 8, yRadius: 8).fill()
+            (targeted ? NSColor.controlAccentColor : NSColor.separatorColor).setStroke()
+            let p = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 8, yRadius: 8)
+            p.lineWidth = targeted ? 3 : 1
+            p.setLineDash([6, 4], count: 2, phase: 0)
+            p.stroke()
+        }
+        override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation { targeted = true; return .copy }
+        override func draggingExited(_ sender: (any NSDraggingInfo)?) { targeted = false }
+        override func draggingEnded(_ sender: any NSDraggingInfo) { targeted = false }
+        override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+            targeted = false
+            let pb = sender.draggingPasteboard
+            if pb.types?.contains(.filePromise) == true {
+                // The source writes the files here; read them back.
+                let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("AppKitCrossDrops")
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let names = sender.namesOfPromisedFilesDropped(atDestination: dir) ?? []
+                let contents = names.map { (try? String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) ?? "?" }
+                label.stringValue = names.isEmpty ? "No files arrived" : "Files: " + zip(names, contents).map { "\($0) (\($1))" }.joined(separator: ", ")
+                return !names.isEmpty
+            }
+            guard let text = pb.string(forType: .string) else { return false }
+            label.stringValue = "Text: \(text)"
+            return true
+        }
+    }
+    /// Tells the demo when a drag leaves the grid (the delegate has no exit message).
+    final class DemoCollectionView: NSCollectionView {
+        var onDragExit: (() -> Void)?
+        override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+            super.draggingExited(sender)
+            onDragExit?()
+        }
+    }
     final class SwatchItem: NSCollectionViewItem {
+        /// The whole swatch drags (AppKit's default would be the label alone, the item's only outlet).
+        override var draggingImageComponents: [NSDraggingImageComponent] {
+            let c = NSDraggingImageComponent(key: .icon)
+            c.frame = view.bounds
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            let image = NSImage(size: view.bounds.size)
+            if let rep { view.cacheDisplay(in: view.bounds, to: rep); image.addRepresentation(rep) }
+            c.contents = image
+            return [c]
+        }
         final class SwatchView: NSView {
             weak var item: SwatchItem?
             var color = NSColor.gray
@@ -1306,6 +2079,13 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
                 }
                 color.setFill()
                 NSBezierPath(roundedRect: bounds.insetBy(dx: 3, dy: 3), xRadius: 4, yRadius: 4).fill()
+                // The drop target ring (`.asDropTarget`, a drop "on" this swatch).
+                if item?.highlightState == .asDropTarget {
+                    NSColor.controlAccentColor.setStroke()
+                    let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
+                    ring.lineWidth = 3
+                    ring.stroke()
+                }
             }
         }
         override func loadView() {
@@ -1351,13 +2131,19 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
             NSBezierPath(rect: NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)).fill()
         }
     }
-    struct Swatch { let name: String; let color: NSColor }
-    let sections: [(String, [Swatch])] = [
+    struct Swatch { let name: String; let color: NSColor; var id = UUID() }
+    var sections: [(String, [Swatch])] = [
         ("Warm", [Swatch(name: "Red", color: .systemRed), Swatch(name: "Orange", color: .systemOrange), Swatch(name: "Yellow", color: .systemYellow), Swatch(name: "Pink", color: .systemPink), Swatch(name: "Brown", color: .systemBrown)]),
         ("Cool", [Swatch(name: "Green", color: .systemGreen), Swatch(name: "Teal", color: .systemTeal), Swatch(name: "Blue", color: .systemBlue), Swatch(name: "Indigo", color: .systemIndigo), Swatch(name: "Purple", color: .systemPurple), Swatch(name: "Mint", color: .systemMint)]),
     ]
-    let collection = NSCollectionView(frame: .zero)
-    let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move.")
+    let collection = DemoCollectionView(frame: .zero)
+    let status = NSTextField(labelWithString: "Click a swatch; Cmd and Shift extend the selection; arrows move; drag to reorder.")
+    let well = DropWell(frame: .zero)
+    let animate = NSButton(checkboxWithTitle: "Animate", target: nil, action: nil)
+    private var inserted = 0
+    private var dragged: [IndexPath] = []
+    private var dragNames = ""
+    private var droppedHere = false
 
     init() {
         super.init(nibName: nil, bundle: nil)
@@ -1382,22 +2168,57 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         collection.isSelectable = true
         collection.allowsMultipleSelection = true
         collection.backgroundColors = [.controlBackgroundColor]
+        // Drags: swatches reorder within the grid (move) and copy out as text and file
+        // promises; text dropped on the grid becomes a swatch.
+        collection.registerForDraggedTypes([CollectionDemoViewController.swatchType, .string])
+        collection.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        collection.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collection.onDragExit = { [unowned self] in
+            // Off the grid: drop the stale target from the status.
+            status.stringValue = dragged.isEmpty ? "" : "Dragging \(dragNames)"
+        }
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
         scroll.documentView = collection
         scroll.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(scroll)
+        well.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(well)
+        animate.state = .on
+        animate.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(animate)
         status.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(status)
-        NSLayoutConstraint.activate([
+        var buttons: [NSButton] = []
+        for (title, action) in [("Insert", "insertSwatch:"), ("Delete", "deleteSwatch:"), ("Move", "moveSwatch:"), ("Reload", "reloadSwatches:")] {
+            let b = NSButton(title: title, target: self, action: Selector((action)))
+            b.bezelStyle = .rounded
+            b.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(b)
+            buttons.append(b)
+        }
+        var constraints = [
             scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            scroll.trailingAnchor.constraint(equalTo: well.leadingAnchor, constant: -10),
+            scroll.bottomAnchor.constraint(equalTo: buttons[0].topAnchor, constant: -8),
+            well.topAnchor.constraint(equalTo: scroll.topAnchor),
+            well.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+            well.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            well.widthAnchor.constraint(equalToConstant: 110),
+            animate.leadingAnchor.constraint(equalTo: buttons[buttons.count - 1].trailingAnchor, constant: 12),
+            animate.centerYAnchor.constraint(equalTo: buttons[0].centerYAnchor),
+            buttons[0].leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            buttons[0].bottomAnchor.constraint(equalTo: status.topAnchor, constant: -6),
             status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
-        ])
+        ]
+        for (previous, b) in zip(buttons, buttons.dropFirst()) {
+            constraints.append(b.leadingAnchor.constraint(equalTo: previous.trailingAnchor, constant: 8))
+            constraints.append(b.centerYAnchor.constraint(equalTo: previous.centerYAnchor))
+        }
+        NSLayoutConstraint.activate(constraints)
         view = root
         // `APPKITWIN_COLLECTION_SELECT=1` selects two swatches on launch (for the screenshots).
         if ProcessInfo.processInfo.environment["APPKITWIN_COLLECTION_SELECT"] != nil {
@@ -1431,10 +2252,334 @@ final class CollectionDemoViewController: NSViewController, NSCollectionViewData
         let names = collection.selectionIndexPaths.sorted().map { sections[$0.section].1[$0.item].name }
         status.stringValue = names.isEmpty ? "Nothing selected." : "Selected: " + names.joined(separator: ", ")
     }
+
+    // MARK: Drag and drop (ADR-0041)
+
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
+        let swatch = sections[indexPath.section].1[indexPath.item]
+        let item = NSPasteboardItem()
+        _ = item.setString(swatch.name, forType: .string)
+        _ = item.setString(swatch.id.uuidString, forType: CollectionDemoViewController.swatchType)
+        _ = item.setPropertyList(["txt"], forType: .filePromise)
+        return item
+    }
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, willBeginAt screenPoint: NSPoint, forItemsAt indexPaths: Set<IndexPath>) {
+        dragged = indexPaths.sorted()
+        dragNames = dragged.map { sections[$0.section].1[$0.item].name }.joined(separator: ", ")
+        droppedHere = false
+        status.stringValue = "Dragging \(dragNames)"
+    }
+    func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
+        if operation.isEmpty { status.stringValue = "Drag of \(dragNames) cancelled." }
+        else if !droppedHere { status.stringValue = "Dragged \(dragNames) out (\(operation.contains(.move) ? "move" : "copy"))." }
+        dragged = []
+    }
+    func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        let fromHere = (draggingInfo.draggingSource as? NSCollectionView) === collection && !dragged.isEmpty
+        let p = proposedDropIndexPath.pointee
+        let where_ = "\(sections[p.index(atPosition: 0)].0) \(p.index(atPosition: 1))"
+        if fromHere {
+            // Reordering lands between swatches, never on one.
+            proposedDropOperation.pointee = .before
+            status.stringValue = "Dragging \(dragNames): move before \(where_)"
+            return .move
+        }
+        guard draggingInfo.draggingPasteboard.string(forType: .string) != nil else { return [] }
+        status.stringValue = proposedDropOperation.pointee == .on ? "Rename swatch \(where_)" : "Add a swatch before \(where_)"
+        return .copy
+    }
+    func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
+        let fromHere = (draggingInfo.draggingSource as? NSCollectionView) === collection && !dragged.isEmpty
+        if fromHere {
+            // Take the dragged swatches out, put them back at the target, and tell the
+            // collection view where each went.
+            let moving = dragged.map { sections[$0.section].1[$0.item] }
+            var target = indexPath
+            for ip in dragged.sorted(by: >) {
+                sections[ip.section].1.remove(at: ip.item)
+                if ip.section == target.section && ip.item < target.item { target.item -= 1 }
+            }
+            sections[target.section].1.insert(contentsOf: moving, at: target.item)
+            var newPaths: [UUID: IndexPath] = [:]
+            for (s, section) in sections.enumerated() { for (i, w) in section.1.enumerated() { newPaths[w.id] = IndexPath(item: i, section: s) } }
+            let moves = zip(dragged, moving).map { ($0, newPaths[$1.id]!) }
+            update { for (from, to) in moves where from != to { self.collection.moveItem(at: from, to: to) } }
+            droppedHere = true
+            status.stringValue = "Moved " + moving.map(\.name).joined(separator: ", ")
+            return true
+        }
+        guard let text = draggingInfo.draggingPasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return false }
+        let name = String(text.prefix(12))
+        if dropOperation == .on {
+            let old = sections[indexPath.section].1[indexPath.item]
+            sections[indexPath.section].1[indexPath.item] = Swatch(name: name, color: old.color)
+            update { self.collection.reloadItems(at: [indexPath]) }
+            status.stringValue = "Renamed \(old.name) to \(name)"
+        } else {
+            sections[indexPath.section].1.insert(Swatch(name: name, color: .systemGray), at: indexPath.item)
+            update { self.collection.insertItems(at: [indexPath]) }
+            status.stringValue = "Added \(name)"
+        }
+        return true
+    }
+    /// Writes a text file per dragged swatch for a destination that takes file promises.
+    nonisolated func collectionView(_ collectionView: NSCollectionView, namesOfPromisedFilesDroppedAtDestination dropURL: URL, forDraggedItemsAt indexPaths: Set<IndexPath>) -> [String] {
+        MainActor.assumeIsolated {
+            indexPaths.sorted().map { ip in
+                let swatch = sections[ip.section].1[ip.item]
+                let name = "\(swatch.name).txt"
+                try? "Swatch \(swatch.name) from section \(sections[ip.section].0)".write(to: dropURL.appendingPathComponent(name), atomically: true, encoding: .utf8)
+                return name
+            }
+        }
+    }
+
+    /// Runs a change as a batch update, animated when the checkbox is on.
+    private func update(_ changes: @escaping () -> Void) {
+        if animate.state == .on {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.35
+                collection.animator().performBatchUpdates(changes, completionHandler: nil)
+            }
+        } else {
+            collection.performBatchUpdates(changes, completionHandler: nil)
+        }
+    }
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        switch action.description {
+        case "insertSwatch:":
+            // A new grey swatch at the front of Warm.
+            inserted += 1
+            let grey = CGFloat(inserted % 4) * 0.2 + 0.2
+            sections[0].1.insert(Swatch(name: "New \(inserted)", color: NSColor(white: grey, alpha: 1)), at: 0)
+            update { self.collection.insertItems(at: [IndexPath(item: 0, section: 0)]) }
+            status.stringValue = "Inserted New \(inserted) at the front of Warm."
+            return true
+        case "deleteSwatch:":
+            // The selected swatches, or the first of Warm.
+            var doomed = collection.selectionIndexPaths
+            if doomed.isEmpty, !sections[0].1.isEmpty { doomed = [IndexPath(item: 0, section: 0)] }
+            guard !doomed.isEmpty else { return true }
+            for ip in doomed.sorted(by: >) { sections[ip.section].1.remove(at: ip.item) }
+            update { self.collection.deleteItems(at: doomed) }
+            status.stringValue = "Deleted \(doomed.count) swatch\(doomed.count == 1 ? "" : "es")."
+            return true
+        case "moveSwatch:":
+            // The first of Warm to the end of Warm.
+            guard sections[0].1.count > 1 else { return true }
+            sections[0].1.append(sections[0].1.removeFirst())
+            let last = IndexPath(item: sections[0].1.count - 1, section: 0)
+            update { self.collection.moveItem(at: IndexPath(item: 0, section: 0), to: last) }
+            status.stringValue = "Moved \(sections[0].1.last!.name) to the end of Warm."
+            return true
+        case "reloadSwatches:":
+            // Rotate Cool and reload everything.
+            if !sections[1].1.isEmpty { sections[1].1.append(sections[1].1.removeFirst()) }
+            collection.reloadData()
+            status.stringValue = "Reloaded (Cool rotated)."
+            return true
+        default:
+            break
+        }
         guard action.description == "toggleSection:", let button = sender as? NSButton else { return false }
         collection.toggleSectionCollapse(button.tag)
         button.title = (collection.collectionViewLayout as? NSCollectionViewFlowLayout)?.section(atIndexIsCollapsed: button.tag) == true ? "Show" : "Hide"
+        return true
+    }
+}
+
+// MARK: Diffable data sources tab (ADR-0029)
+
+/// A table (with section header rows) and a collection view, each driven by a diffable data
+/// source from the same snapshot. The buttons change the snapshot and apply it to both:
+/// Shuffle reorders the items across the two sections, Insert adds one, Delete removes the
+/// table's selected row (or the first item), Reload redraws every item with a new generation.
+/// `APPKITWIN_DIFFABLE_STEPS=shuffle,insert,delete,reload` runs steps on launch (screenshots).
+final class DiffableDemoViewController: NSViewController, NSSelectorHandling {
+    let table = NSTableView(frame: .zero)
+    let collection = NSCollectionView(frame: .zero)
+    let status = NSTextField(labelWithString: "Shuffle, insert, delete or reload: both views follow the snapshot.")
+    var tableSource: NSTableViewDiffableDataSource<String, Int>!
+    var collectionSource: NSCollectionViewDiffableDataSource<String, Int>!
+    var model: [(String, [Int])] = [("Warm", [1, 2, 3, 4]), ("Cool", [5, 6, 7, 8])]
+    var next = 9
+    var generation = 1
+    var seed: UInt64 = 2026
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Diffable"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    static func color(_ n: Int) -> NSColor {
+        NSColor(calibratedHue: CGFloat((n * 37) % 360) / 360, saturation: 0.55, brightness: 0.9, alpha: 1)
+    }
+    func label(_ n: Int) -> String { generation > 1 ? "Item \(n) · r\(generation)" : "Item \(n)" }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 260))
+        // The table: one column, a header row per section.
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("item"))
+        column.title = "Item"
+        column.width = 160
+        table.addTableColumn(column)
+        table.headerView = nil
+        table.rowHeight = 20
+        table.style = .fullWidth
+        tableSource = NSTableViewDiffableDataSource<String, Int>(tableView: table) { [unowned self] tableView, _, _, n in
+            let id = NSUserInterfaceItemIdentifier("diffableCell")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? Self.makeCell(id)
+            cell.textField?.stringValue = self.label(n)
+            cell.imageView?.image = Self.dot(Self.color(n))
+            return cell
+        }
+        tableSource.sectionHeaderViewProvider = { tableView, _, section in
+            let id = NSUserInterfaceItemIdentifier("diffableHeader")
+            let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView) ?? Self.makeCell(id, header: true)
+            cell.textField?.stringValue = section
+            return cell
+        }
+        let tableScroll = NSScrollView()
+        tableScroll.hasVerticalScroller = true
+        tableScroll.borderType = .bezelBorder
+        tableScroll.documentView = table
+        tableScroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(tableScroll)
+
+        // The collection: swatches in two sections.
+        let flow = NSCollectionViewFlowLayout()
+        flow.itemSize = NSSize(width: 56, height: 56)
+        flow.minimumInteritemSpacing = 6
+        flow.minimumLineSpacing = 6
+        flow.sectionInset = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
+        collection.collectionViewLayout = flow
+        collection.register(CollectionDemoViewController.SwatchItem.self, forItemWithIdentifier: NSUserInterfaceItemIdentifier("swatch"))
+        collection.backgroundColors = [.controlBackgroundColor]
+        collectionSource = NSCollectionViewDiffableDataSource<String, Int>(collectionView: collection) { [unowned self] cv, ip, n in
+            let item = cv.makeItem(withIdentifier: NSUserInterfaceItemIdentifier("swatch"), for: ip) as! CollectionDemoViewController.SwatchItem
+            (item.view as? CollectionDemoViewController.SwatchItem.SwatchView)?.color = Self.color(n)
+            item.textField?.stringValue = self.generation > 1 ? "\(n) r\(self.generation)" : "\(n)"
+            item.view.needsDisplay = true
+            return item
+        }
+        let collectionScroll = NSScrollView()
+        collectionScroll.hasVerticalScroller = true
+        collectionScroll.borderType = .bezelBorder
+        collectionScroll.documentView = collection
+        collectionScroll.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(collectionScroll)
+
+        let buttons = NSStackView(views: ["Shuffle", "Insert", "Delete", "Reload"].map { title in
+            let b = NSButton(title: title, target: self, action: Selector(("diffable\(title):")))
+            b.bezelStyle = .rounded
+            return b
+        })
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(buttons)
+        status.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            tableScroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 8),
+            tableScroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            tableScroll.widthAnchor.constraint(equalToConstant: 180),
+            tableScroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -8),
+            collectionScroll.topAnchor.constraint(equalTo: tableScroll.topAnchor),
+            collectionScroll.leadingAnchor.constraint(equalTo: tableScroll.trailingAnchor, constant: 10),
+            collectionScroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            collectionScroll.bottomAnchor.constraint(equalTo: tableScroll.bottomAnchor),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+        ])
+        view = root
+        apply(animating: false)
+        for step in (ProcessInfo.processInfo.environment["APPKITWIN_DIFFABLE_STEPS"] ?? "").split(separator: ",") {
+            perform(String(step))
+        }
+    }
+
+    static func makeCell(_ id: NSUserInterfaceItemIdentifier, header: Bool = false) -> NSTableCellView {
+        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: 160, height: 20))
+        cell.identifier = id
+        let text = NSTextField(labelWithString: "")
+        text.frame = NSRect(x: header ? 4 : 24, y: 2, width: 140, height: 16)
+        text.autoresizingMask = [.width]
+        if header { text.font = NSFont.boldSystemFont(ofSize: NSFont.smallSystemFontSize); text.textColor = .secondaryLabelColor }
+        cell.addSubview(text)
+        cell.textField = text
+        if !header {
+            let image = NSImageView(frame: NSRect(x: 4, y: 3, width: 14, height: 14))
+            cell.addSubview(image)
+            cell.imageView = image
+        }
+        return cell
+    }
+
+    static func dot(_ color: NSColor) -> NSImage {
+        let image = NSImage(size: NSSize(width: 14, height: 14))
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 1, y: 1, width: 12, height: 12)).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    func snapshot(reloading: Bool = false) -> NSDiffableDataSourceSnapshot<String, Int> {
+        var s = NSDiffableDataSourceSnapshot<String, Int>()
+        for (section, items) in model {
+            s.appendSections([section])
+            s.appendItems(items, toSection: section)
+        }
+        if reloading { s.reloadItems(s.itemIdentifiers) }
+        return s
+    }
+
+    func apply(animating: Bool, reloading: Bool = false) {
+        let s = snapshot(reloading: reloading)
+        tableSource.apply(s, animatingDifferences: animating)
+        collectionSource.apply(s, animatingDifferences: animating)
+        status.stringValue = "\(s.numberOfItems) items in \(s.numberOfSections) sections."
+    }
+
+    /// A small deterministic generator, so scripted runs render the same on every platform.
+    func random(_ n: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1442695040888963407
+        return Int((seed >> 33) % UInt64(max(1, n)))
+    }
+
+    func perform(_ step: String) {
+        switch step {
+        case "shuffle":
+            var all = model.flatMap { $0.1 }
+            for i in stride(from: all.count - 1, to: 0, by: -1) { all.swapAt(i, random(i + 1)) }
+            let split = all.count / 2
+            model = [(model[0].0, Array(all[..<split])), (model[1].0, Array(all[split...]))]
+        case "insert":
+            let section = random(2)
+            model[section].1.insert(next, at: random(model[section].1.count + 1))
+            next += 1
+        case "delete":
+            let selected = table.selectedRow >= 0 ? tableSource.itemIdentifier(forRow: table.selectedRow) : nil
+            guard let victim = selected ?? model.flatMap({ $0.1 }).first else { return }
+            for i in model.indices { model[i].1.removeAll { $0 == victim } }
+        case "reload":
+            generation += 1
+            apply(animating: true, reloading: true)
+            return
+        default:
+            return
+        }
+        apply(animating: true)
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        let name = action.description
+        guard name.hasPrefix("diffable"), name.hasSuffix(":") else { return false }
+        perform(String(name.dropFirst("diffable".count).dropLast()).lowercased())
         return true
     }
 }
@@ -2016,4 +3161,368 @@ struct ControlsDemo: View {
         }
         .padding(4)
     }
+}
+
+/// The Layout Demo's Panels tab (ADR-0022): colour wells in the three styles, buttons that
+/// open the Fonts and Colors panels, and a rich text view that both panels change through
+/// the responder chain (`changeFont:` and `changeColor:` reach the first responder).
+/// `APPKITWIN_PANELS_OPEN=color|font` opens a panel at launch for the comparison renders.
+final class PanelsDemoViewController: NSViewController, NSSelectorHandling {
+    let well = NSColorWell(frame: .zero)
+    let minimalWell: NSColorWell = {
+        if #available(macOS 13.0, *) { return NSColorWell(style: .minimal) }
+        return NSColorWell(frame: NSRect(x: 0, y: 0, width: 28, height: 20))
+    }()
+    let expandedWell: NSColorWell = {
+        if #available(macOS 13.0, *) { return NSColorWell(style: .expanded) }
+        return NSColorWell(frame: NSRect(x: 0, y: 0, width: 64, height: 24))
+    }()
+    let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 380, height: 120))
+    let status = NSTextField(labelWithString: "Click a well or open a panel; the selection in the text follows both.")
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Panels"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let wellLabel = NSTextField(labelWithString: "Color wells:")
+        well.color = NSColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+        minimalWell.color = NSColor(red: 0.9, green: 0.4, blue: 0.2, alpha: 1)
+        expandedWell.color = NSColor(red: 0.3, green: 0.7, blue: 0.3, alpha: 1)
+        for w in [well, minimalWell, expandedWell] {
+            w.target = self
+            w.action = Selector(("wellChanged:"))
+        }
+        let fonts = NSButton(title: "Fonts…", target: nil, action: Selector(("orderFrontFontPanel:")))
+        let colors = NSButton(title: "Colors…", target: nil, action: Selector(("orderFrontColorPanel:")))
+        let scroll = NSScrollView(frame: .zero)
+        textView.isRichText = true
+        textView.isEditable = true
+        textView.textStorage?.setAttributedString(NSAttributedString(string: "Select some of this text, then pick a font or a colour.\nThe panels change the selection; typing continues in it.", attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.textColor]))
+        textView.setSelectedRange(NSRange(location: 12, length: 17))
+        scroll.documentView = textView
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        status.font = NSFont.systemFont(ofSize: 11)
+        status.textColor = .secondaryLabelColor
+        for v in [wellLabel, well, minimalWell, expandedWell, fonts, colors, scroll, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            wellLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            wellLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            well.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            well.leadingAnchor.constraint(equalTo: wellLabel.trailingAnchor, constant: 8),
+            well.widthAnchor.constraint(equalToConstant: 44), well.heightAnchor.constraint(equalToConstant: 24),
+            minimalWell.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            minimalWell.leadingAnchor.constraint(equalTo: well.trailingAnchor, constant: 8),
+            minimalWell.widthAnchor.constraint(equalToConstant: 28), minimalWell.heightAnchor.constraint(equalToConstant: 20),
+            expandedWell.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            expandedWell.leadingAnchor.constraint(equalTo: minimalWell.trailingAnchor, constant: 8),
+            expandedWell.widthAnchor.constraint(equalToConstant: 64), expandedWell.heightAnchor.constraint(equalToConstant: 24),
+            colors.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            colors.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            fonts.centerYAnchor.constraint(equalTo: wellLabel.centerYAnchor),
+            fonts.trailingAnchor.constraint(equalTo: colors.leadingAnchor, constant: -8),
+            scroll.topAnchor.constraint(equalTo: wellLabel.bottomAnchor, constant: 16),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            scroll.heightAnchor.constraint(equalToConstant: 120),
+            status.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 12),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            status.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -12),
+        ])
+        view = root
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(textView)
+        let wantsColor: Bool
+        switch ProcessInfo.processInfo.environment["APPKITWIN_PANELS_OPEN"] {
+        case "color": wantsColor = true
+        case "font": wantsColor = false
+        default: return
+        }
+        @MainActor func open() { if wantsColor { NSApp.orderFrontColorPanel(nil) } else { NSFontManager.shared.orderFrontFontPanel(nil) } }
+        // Screenshots capture at once; a live run waits for the window to be mapped first.
+        if CommandLine.arguments.contains("--screenshot") { open() } else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { open() } }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard NSStringFromSelector(action) == "wellChanged:", let w = sender as? NSColorWell else { return false }
+        let c = w.color
+        status.stringValue = String(format: "Well: #%02X%02X%02X, alpha %.2f", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255), Double(c.alphaComponent))
+        return true
+    }
+}
+
+/// The scripted Fonts panel check (`--panels-selftest`), in steps a second apart so the
+/// window system's activation messages arrive between them, as they would for a user.
+@MainActor enum PanelsSelfTest {
+    static func run(step: Int) {
+        let app = NSApplication.shared
+        func describe(_ w: NSWindow?) -> String { w.map { "'\($0.title)' (first responder \(type(of: $0.firstResponder ?? $0)))" } ?? "nil" }
+        func report(_ s: String) { FileHandle.standardError.write(Data("panels-selftest: \(s)\n".utf8)) }
+        guard let demo = app.windows.first(where: { $0.title == "Layout Demo" }),
+              let tv = demo.contentView.flatMap({ v in allViews(v).compactMap { $0 as? NSTextView }.first }) else {
+            report("FAIL no Layout Demo text view"); exit(1)
+        }
+        switch step {
+        case 0:
+            demo.makeKeyAndOrderFront(nil)
+            _ = demo.makeFirstResponder(tv)
+            tv.setSelectedRange(NSRange(location: 0, length: 11))
+            report("selected \(tv.selectedRange) in \(describe(demo)); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
+            // Click the "Fonts…" button with mouse events, as the user does: the click must
+            // not move the keyboard focus off the text view.
+            guard let fonts = demo.contentView.flatMap({ v in allViews(v).compactMap { $0 as? NSButton }.first { $0.title == "Fonts…" } }) else { report("FAIL no Fonts button"); exit(1) }
+            let p = fonts.convert(NSPoint(x: fonts.bounds.midX, y: fonts.bounds.midY), to: nil)
+            for (type, pressure) in [(NSEvent.EventType.leftMouseDown, 1 as Float), (.leftMouseUp, 0)] {
+                if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: 0, windowNumber: demo.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: pressure) { app.sendEvent(e) }
+            }
+            report("clicked Fonts…; demo first responder \(type(of: demo.firstResponder ?? demo)); panel exists \(NSFontPanel.sharedFontPanelExists)")
+            NSFontPanel.shared.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { run(step: 1) }
+        case 1:
+            report("panel shown; key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow)) panel.isKey=\(NSFontPanel.shared.isKeyWindow) selection=\(tv.selectedRange)")
+            let before = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            // The same path as a click in the Size list: the panel's font and the manager's send.
+            let family = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.familyName ?? "Segoe UI"
+            let big = NSFont(name: family, size: 36) ?? NSFont.systemFont(ofSize: 36)
+            NSFontPanel.shared.setPanelFont(big, isMultiple: false)
+            NSFontManager.shared.modifyFontViaPanel(nil)
+            let after = (tv.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            let outside = (tv.textStorage?.attribute(.font, at: 20, effectiveRange: nil) as? NSFont)?.pointSize ?? 0
+            report("font at 2: \(before) -> \(after); outside the selection \(outside); key=\(describe(app.keyWindow)) main=\(describe(app.mainWindow))")
+            demo.display()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let ok = after == 36 && outside != 36 && demo.firstResponder === tv
+                report(ok ? "PASS" : "FAIL (first responder \(type(of: demo.firstResponder ?? demo)))")
+                exit(ok ? 0 : 1)
+            }
+        default: break
+        }
+    }
+    static func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allViews) }
+}
+
+// MARK: - Bindings (ADR-0032)
+
+#if canImport(ObjectiveC)
+/// A model object for the Bindings tab: on macOS Foundation's key-value coding and observing
+/// serve the bindings.
+final class DemoPerson: NSObject {
+    @objc dynamic var name: String
+    @objc dynamic var age: Int
+    @objc dynamic var isMember: Bool
+    init(_ name: String, _ age: Int, member: Bool = false) { self.name = name; self.age = age; self.isMember = member }
+    override var description: String { name }
+}
+#else
+/// Without the Objective-C runtime the model exposes its keys through NSKeyValueBindingCoding.
+final class DemoPerson: NSObject, NSKeyValueBindingCoding {
+    var name: String
+    var age: Int
+    var isMember: Bool
+    init(_ name: String, _ age: Int, member: Bool = false) { self.name = name; self.age = age; self.isMember = member }
+    override var description: String { name }
+    func bindingValue(forKey key: String) -> Any? {
+        switch key {
+        case "name": return name
+        case "age": return age
+        case "isMember": return isMember
+        default: return nil
+        }
+    }
+    func setBindingValue(_ value: Any?, forKey key: String) {
+        switch key {
+        case "name": name = (value as? String) ?? ""
+        case "age": age = (value as? Int) ?? Int((value as? String) ?? "") ?? age
+        case "isMember": isMember = (value as? Bool) ?? false
+        default: break
+        }
+    }
+}
+#endif
+
+/// New rows from the table's + button are people, not dictionaries (corelibs cannot construct
+/// an arbitrary objectClass, so the controller makes them itself, as AppKit apps often do).
+final class PeopleController: NSArrayController {
+    private var made = 0
+    override func newObject() -> Any {
+        made += 1
+        return DemoPerson("New person \(made)", 20 + made)
+    }
+}
+
+/// A rule-editor criterion: what it shows and the predicate parts it contributes.
+final class DemoCriterion: NSObject {
+    let title: String
+    let parts: [NSRuleEditor.PredicatePartKey: Any]
+    let children: [DemoCriterion]
+    let field: Bool
+    let numeric: Bool
+    init(_ title: String, _ parts: [NSRuleEditor.PredicatePartKey: Any] = [:], field: Bool = false, numeric: Bool = false, _ children: [DemoCriterion] = []) {
+        self.title = title; self.parts = parts; self.field = field; self.numeric = numeric; self.children = children
+    }
+    static func op(_ o: NSComparisonPredicate.Operator, _ options: NSComparisonPredicate.Options = []) -> [NSRuleEditor.PredicatePartKey: Any] {
+        [.operatorType: NSNumber(value: o.rawValue), .options: NSNumber(value: options.rawValue)]
+    }
+}
+
+/// The Layout Demo's Bindings tab: a table, detail fields, a pop-up and a checkbox bound to one
+/// NSArrayController, and a rule editor whose predicate filters the controller.
+final class BindingsDemoViewController: NSViewController, NSRuleEditorDelegate, NSSelectorHandling {
+    let people = PeopleController(content: [
+        DemoPerson("Ada", 36, member: true), DemoPerson("Grace", 45), DemoPerson("Alan", 41, member: true),
+        DemoPerson("Edsger", 72), DemoPerson("Barbara", 29), DemoPerson("Ken", 58, member: true),
+    ])
+    let table = NSTableView(frame: .zero)
+    let rules = NSRuleEditor(frame: NSRect(x: 0, y: 0, width: 340, height: 160))
+    let predicateLabel = NSTextField(labelWithString: "")
+    let simple: [DemoCriterion] = [
+        DemoCriterion("Name", [.leftExpression: "name"], [
+            DemoCriterion("begins with", DemoCriterion.op(.beginsWith, .caseInsensitive), [DemoCriterion("text", field: true)]),
+            DemoCriterion("contains", DemoCriterion.op(.contains, .caseInsensitive), [DemoCriterion("text", field: true)]),
+        ]),
+        DemoCriterion("Age", [.leftExpression: "age"], [
+            DemoCriterion("is over", DemoCriterion.op(.greaterThan), [DemoCriterion("number", field: true, numeric: true)]),
+            DemoCriterion("is under", DemoCriterion.op(.lessThan), [DemoCriterion("number", field: true, numeric: true)]),
+        ]),
+    ]
+    let compound: [DemoCriterion] = [
+        DemoCriterion("All", [.compoundType: NSNumber(value: NSCompoundPredicate.LogicalType.and.rawValue)], [DemoCriterion("of these are true")]),
+        DemoCriterion("Any", [.compoundType: NSNumber(value: NSCompoundPredicate.LogicalType.or.rawValue)], [DemoCriterion("of these are true")]),
+    ]
+
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "Bindings"
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 840, height: 270))
+        people.sortDescriptors = []
+
+        // Table: two columns bound to arrangedObjects; the table binds itself to the controller.
+        let scroll = NSScrollView(frame: NSRect(x: 16, y: 44, width: 250, height: 210))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let name = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
+        name.title = "Name"
+        name.width = 140
+        name.sortDescriptorPrototype = NSSortDescriptor(keyPath: \DemoPerson.name, ascending: true)
+        let age = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("age"))
+        age.title = "Age"
+        age.width = 60
+        age.sortDescriptorPrototype = NSSortDescriptor(keyPath: \DemoPerson.age, ascending: true)
+        table.addTableColumn(name)
+        table.addTableColumn(age)
+        table.allowsMultipleSelection = true
+        name.bind(.value, to: people, withKeyPath: "arrangedObjects.name")
+        age.bind(.value, to: people, withKeyPath: "arrangedObjects.age")
+        scroll.documentView = table
+        root.addSubview(scroll)
+
+        let add = NSButton(title: "+", target: people, action: Selector(("add:")))
+        add.frame = NSRect(x: 16, y: 12, width: 32, height: 24)
+        let remove = NSButton(title: "\u{2212}", target: people, action: Selector(("remove:")))
+        remove.frame = NSRect(x: 52, y: 12, width: 32, height: 24)
+        remove.bind(.enabled, to: people, withKeyPath: "canRemove")
+        let count = NSTextField(labelWithString: "")
+        count.frame = NSRect(x: 92, y: 15, width: 174, height: 18)
+        count.bind(.value, to: people, withKeyPath: "arrangedObjects.@count")
+        for v in [add, remove, count] { root.addSubview(v) }
+
+        // Detail: fields bound to the selection (placeholders for none or several).
+        var y: CGFloat = 228
+        func row(_ label: String, _ control: NSView, width: CGFloat = 150) {
+            let l = NSTextField(labelWithString: label)
+            l.alignment = .right
+            l.frame = NSRect(x: 276, y: y + 3, width: 56, height: 18)
+            control.frame = NSRect(x: 338, y: y, width: width, height: 24)
+            root.addSubview(l)
+            root.addSubview(control)
+            y -= 34
+        }
+        let nameField = NSTextField(frame: .zero)
+        nameField.bind(.value, to: people, withKeyPath: "selection.name")
+        row("Name", nameField)
+        let ageField = NSTextField(frame: .zero)
+        ageField.bind(.value, to: people, withKeyPath: "selection.age")
+        row("Age", ageField, width: 60)
+        let member = NSButton(checkboxWithTitle: "Member", target: nil, action: nil)
+        member.bind(.value, to: people, withKeyPath: "selection.isMember")
+        row("", member)
+        let pick = NSPopUpButton(frame: .zero, pullsDown: false)
+        pick.bind(.content, to: people, withKeyPath: "arrangedObjects")
+        pick.bind(.contentValues, to: people, withKeyPath: "arrangedObjects.name")
+        pick.bind(.selectedIndex, to: people, withKeyPath: "selectionIndex")
+        row("Pick", pick)
+
+        // Rule editor: its predicate becomes the controller's filter.
+        let rulesTitle = NSTextField(labelWithString: "Filter")
+        rulesTitle.frame = NSRect(x: 500, y: 236, width: 200, height: 18)
+        rules.frame = NSRect(x: 500, y: 60, width: 324, height: 172)
+        rules.nestingMode = .compound
+        rules.delegate = self
+        rules.target = self
+        rules.action = Selector(("rulesChanged:"))
+        rules.addRow(nil)
+        predicateLabel.frame = NSRect(x: 500, y: 12, width: 324, height: 40)
+        predicateLabel.lineBreakMode = .byWordWrapping
+        predicateLabel.font = NSFont.systemFont(ofSize: 11)
+        for v in [rulesTitle, rules, predicateLabel] { root.addSubview(v) }
+        applyRules()
+        view = root
+    }
+
+    func applyRules() {
+        let p = rules.predicate
+        // An empty text field matches everything rather than nothing.
+        people.filterPredicate = p.flatMap { _ in rulesHaveText ? p : nil }
+        predicateLabel.stringValue = "predicate: " + (p?.predicateFormat ?? "none")
+    }
+
+    private var rulesHaveText: Bool {
+        (0..<rules.numberOfRows).contains { row in
+            rules.displayValues(forRow: row).contains { ($0 as? NSTextField).map { !$0.stringValue.isEmpty } ?? false }
+        }
+    }
+
+    func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        guard action.description == "rulesChanged:" else { return false }
+        applyRules()
+        return true
+    }
+
+    // MARK: NSRuleEditorDelegate
+
+    private func children(_ criterion: Any?, _ type: NSRuleEditor.RowType) -> [DemoCriterion] {
+        if let c = criterion as? DemoCriterion { return c.children }
+        return type == .compound ? compound : simple
+    }
+    func ruleEditor(_ editor: NSRuleEditor, numberOfChildrenForCriterion criterion: Any?, with rowType: NSRuleEditor.RowType) -> Int { children(criterion, rowType).count }
+    func ruleEditor(_ editor: NSRuleEditor, child index: Int, forCriterion criterion: Any?, with rowType: NSRuleEditor.RowType) -> Any { children(criterion, rowType)[index] }
+    func ruleEditor(_ editor: NSRuleEditor, displayValueForCriterion criterion: Any, inRow row: Int) -> Any {
+        let c = criterion as! DemoCriterion
+        guard c.field else { return c.title }
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: c.numeric ? 50 : 90, height: 22))
+        f.placeholderString = c.numeric ? "0" : "text"
+        return f
+    }
+    func ruleEditor(_ editor: NSRuleEditor, predicatePartsForCriterion criterion: Any, withDisplayValue value: Any, inRow row: Int) -> [NSRuleEditor.PredicatePartKey: Any]? {
+        let c = criterion as! DemoCriterion
+        if c.field, let f = value as? NSTextField {
+            return [.rightExpression: c.numeric ? (Int(f.stringValue) ?? 0) as Any : f.stringValue as Any]
+        }
+        return c.parts
+    }
+    func ruleEditorRowsDidChange(_ notification: Notification) { if isViewLoaded { applyRules() } }
 }

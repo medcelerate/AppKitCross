@@ -8,6 +8,28 @@ Inputs (see tools/apigen/extract.sh and probe.sh):
   api-inventory/Foundation-windows-types.json (top-level types corelibs Foundation provides)
   tools/apigen/config.json                   (handwritten / pending / skip lists)
 
+config.json keys: `handwritten` (types owned by Sources/AppKit/Core), `pending`, `skipTypes`,
+`skipMembers` (dotted paths left out of the generated output, also nested types),
+`handwrittenGlobals` / `handwrittenMembers` (free functions and variables, and members of
+AppKit's extensions on Foundation types, that Core implements: left out of _Globals.swift and
+Foundation+AppKit.swift and reported under "Globals and Foundation extensions").
+`appleOnly` (ADR-0044): dotted paths of types or members that exist only on macOS (Touch Bar
+hardware, Apple services, deprecated macOS engines). Their declarations stay Apple-exact, but
+every stub body calls appleOnlyUnavailable() instead of unimplemented(), so they are reported
+apart from the "still to do" count. `appleOnlyReasons` gives each entry its one-line reason.
+The probe records the values of enum cases, typed constants and plain Int/String globals, so
+a constant with a probed value is emitted with that value instead of unimplemented().
+
+Hand-written types and their nested types (ADR-0037): a type listed under `handwritten` is
+not emitted at all. Its nested types (NSView.AutoresizingMask, NSToolbar.DisplayMode, ...)
+go to Generated/<Name>+Types.swift, EXCEPT any nested type Sources/AppKit/Core declares,
+inside the type's body or in an extension of it in any Core file (core_nested_types()). So a
+nested type moved into Core is never emitted again, and a hand-written type whose nested
+types all live in Core gets no +Types companion; nothing needs deleting after a run, and
+nested types need no skipMembers entry. Nested types are emitted clang-imported first, then
+Swift-overlay ones, so the order does not depend on the symbol graph's relationship order.
+Tests/AppKitTests GeneratorDriftTests checks the rule against the checked-in sources.
+
 Outputs:
   Sources/AppKit/Generated/*.swift   compiled stubs
   Stubs/Pending/AppKit/*.swift       stubs for types listed as pending in config.json
@@ -179,6 +201,19 @@ class Generator:
         self.pending = set(config.get("pending", []))
         self.skip_types = set(config.get("skipTypes", []))
         self.skip_members = set(config.get("skipMembers", []))
+        # Hand-written globals (Core/AppKitGlobals.swift) and members of AppKit's extensions
+        # on Foundation types (Core/Foundation+AppKitExtensions.swift): skipped like
+        # skipMembers, counted separately in the coverage report.
+        self.handwritten_globals = set(config.get("handwrittenGlobals", []))
+        self.handwritten_members = set(config.get("handwrittenMembers", []))
+        self.skip_members |= self.handwritten_globals | self.handwritten_members
+        self.global_stats = collections.Counter()
+        # ADR-0044: Apple-only types and members (stubbed with appleOnlyUnavailable()).
+        self.apple_only = list(config.get("appleOnly", []))
+        self.apple_only_set = set(self.apple_only)
+        self.apple_only_reasons = dict(config.get("appleOnlyReasons", {}))
+        self.apple_only_sites = collections.Counter()   # entry -> appleOnlyUnavailable() sites written
+        self.count_apple_only = True                      # off while emitting reference-only seeds
         self.cg_types = set(config.get("coreGraphicsTypes", []))
         self.qc_types = set(config.get("quartzCoreTypes", []))
         self.ct_types = set(config.get("coreTextTypes", []))
@@ -512,7 +547,39 @@ class Generator:
         return val
 
     # ---------- member emission ----------
+    APPLE_ONLY_STUBS = ("unimplemented()", "unimplementedOptionalRequirement()")
+    APPLE_ONLY_CALL = "appleOnlyUnavailable()"
+
+    def apple_only_entry(self, path):
+        """The appleOnly config entry covering a dotted symbol path (the path itself or the
+        nearest enclosing type), or None."""
+        for i in range(len(path), 0, -1):
+            dotted = ".".join(path[:i])
+            if dotted in self.apple_only_set:
+                return dotted
+        return None
+
+    def apple_only_body(self, lines, entry):
+        out = []
+        for l in lines:
+            if not l.lstrip().startswith("//"):
+                for stub in self.APPLE_ONLY_STUBS:
+                    n = l.count(stub)
+                    if n:
+                        l = l.replace(stub, self.APPLE_ONLY_CALL)
+                        if self.count_apple_only:
+                            self.apple_only_sites[entry] += n
+            out.append(l)
+        return out
+
     def emit_member(self, sym, ctx, indent):
+        out, status = self._emit_member(sym, ctx, indent)
+        entry = self.apple_only_entry(tuple(sym["pathComponents"])) if out and status == "emitted" else None
+        if entry:
+            out = self.apple_only_body(out, entry)
+        return out, status
+
+    def _emit_member(self, sym, ctx, indent):
         """ctx: dict(kind=class|struct|enum|protocol|extension, access=open|public,
         owner_path=tuple, raw_type=str|None, in_protocol_ext=bool)"""
         kind = sym["kind"]["identifier"]
@@ -710,6 +777,10 @@ class Generator:
                 return out, "emitted"
             if owner_kind == "protocol" and optional:
                 custom = self.config.get("optionalDefaults", {}).get(".".join(path))
+                if isinstance(custom, dict):
+                    # Overloads share a Swift name: the default is keyed by a fragment
+                    # of the declaration (a parameter type) that tells them apart.
+                    custom = next((v for k, v in custom.items() if k in decl), None)
                 body = ("{ %s }" % custom) if custom else self.default_body(decl)
                 attrs, decl = self.split_attrs(decl)
                 out.append("%s%s%s%s %s" % (indent, attrs, "public ", decl, body))
@@ -1147,6 +1218,9 @@ class Generator:
                 if status == "emitted":
                     key = re.sub(r"\s*\{.*$", "", out[0]).strip()
                     if key in emitted_sigs:
+                        dup_entry = self.apple_only_entry(tuple(m["pathComponents"]))
+                        if dup_entry and self.count_apple_only:
+                            self.apple_only_sites[dup_entry] -= sum(l.count(self.APPLE_ONLY_CALL) for l in out)
                         lines.append("%s// DUPLICATE: %s" % (inner, key))
                         stats["duplicate"] += 1
                         stats["emitted"] -= 1
@@ -1204,6 +1278,8 @@ class Generator:
         # Nested types are emitted at file scope as extensions of the parent so that
         # hand-written parents do not have to carry them (and nesting depth is unbounded).
         for nt in nested_types:
+            if ".".join(nt["pathComponents"]) in self.skip_members:
+                continue
             stats["nested"] += 1
             nl, ns = self.emit_type(nt, "", parent_sym=sym)
             lines.append("")
@@ -1213,6 +1289,9 @@ class Generator:
             lines.append("}")
             lines += nl[self.first_file_scope_index(nl):]
             stats.update(ns)
+        entry = self.apple_only_entry(path)
+        if entry:
+            lines = self.apple_only_body(lines, entry)
         return lines, stats
 
     @staticmethod
@@ -1262,12 +1341,20 @@ class Generator:
                     entries.append(path)
                 elif is_value_type:
                     entries.append(path)
+            elif k == "swift.var" and len(path) == 1:
+                # Global constants of a plain scalar or string type (NSUpArrowFunctionKey,
+                # NSOKButton, NSFontPanelAllModesMask, ...): imported C macros and enum constants.
+                m = re.search(r":\s*(Int|Int32|UInt32|UInt|String|Double)(?:\s*\{ get(?: set)? \})?$", frag_text(s["declarationFragments"]).strip())
+                if m:
+                    entries.append(path)
         for pid, s in self.inv.foreign_ext.items():
             k = s["kind"]["identifier"]
             if k == "swift.type.property" and not self.unavailable(s):
                 frags = s["declarationFragments"]
                 tids = [f for f in frags if f["kind"] == "typeIdentifier"]
-                if tids and (tids[-1].get("preciseIdentifier", "").startswith("c:@T@")):
+                # Typedef'd string constants, NS_OPTIONS/NS_ENUM members and Swift RawRepresentable
+                # structs (CocoaError.Code, NSString.DrawingOptions); anything else probes as "?".
+                if tids and tids[-1].get("preciseIdentifier", "").startswith(("c:@T@", "c:@E@", "s:")):
                     entries.append(s["pathComponents"])
         # keep the symbol so availability can be emitted
         by_path = {}
@@ -1284,6 +1371,12 @@ class Generator:
                  "import AppKit", "import Foundation", "",
                  "func rv<T: RawRepresentable>(_ v: T) -> String { \"\\(type(of: v.rawValue))|\\(v.rawValue)\" }",
                  "func rv(_ v: Any) -> String { \"?\" }",
+                 "func rv(_ v: Int) -> String { \"Int|\\(v)\" }",
+                 "func rv(_ v: Int32) -> String { \"Int32|\\(v)\" }",
+                 "func rv(_ v: UInt32) -> String { \"UInt32|\\(v)\" }",
+                 "func rv(_ v: UInt) -> String { \"UInt|\\(v)\" }",
+                 "func rv(_ v: Double) -> String { \"Double|\\(v)\" }",
+                 "func rv(_ v: String) -> String { \"String|\\(v)\" }",
                  "nonisolated(unsafe) var results: [String: String] = [:]",
                  ""]
         chunk = 150
@@ -1335,7 +1428,60 @@ class Generator:
                 "#if canImport(CoreText)", "import CoreText", "#endif",
                 ""]
 
+    def check_apple_only(self):
+        """ADR-0044: every appleOnly entry names an inventory symbol the generator emits, has a
+        reason, and is not owned by Core (Core marks its own Apple-only stubs by hand)."""
+        errors = []
+        for entry in self.apple_only:
+            path = tuple(entry.split("."))
+            if not self.inv.by_path.get(path):
+                errors.append("%s is not in the inventory" % entry)
+            top = path[0]
+            if top in self.skip_types:
+                errors.append("%s is also listed under skipTypes" % entry)
+            if top in self.pending:
+                errors.append("%s is also listed under pending" % entry)
+            if top in self.handwritten:
+                # Only a nested type that Generated/<Parent>+Types.swift still emits can be
+                # Apple-only under a hand-written parent; Core's own members are marked in Core.
+                syms = self.inv.by_path.get(path) or []
+                nested_type = len(path) == 2 and syms and syms[0]["kind"]["identifier"] in (
+                    "swift.class", "swift.struct", "swift.enum", "swift.protocol")
+                if not nested_type or entry in self.core_nested_types():
+                    errors.append("%s is owned by Core (handwritten %s)" % (entry, top))
+            if entry in self.skip_members:
+                errors.append("%s is also listed under skipMembers" % entry)
+            if not self.apple_only_reasons.get(entry):
+                errors.append("%s has no appleOnlyReasons entry" % entry)
+        for entry in self.apple_only_reasons:
+            if entry not in self.apple_only_set:
+                errors.append("appleOnlyReasons names %s, which is not in appleOnly" % entry)
+        if len(self.apple_only) != len(self.apple_only_set):
+            errors.append("appleOnly has duplicates")
+        if errors:
+            raise SystemExit("apigen: appleOnly config errors:\n  " + "\n  ".join(errors))
+
+    @staticmethod
+    def count_stub_sites(paths):
+        """(unimplemented, appleOnlyUnavailable) call sites on non-comment lines."""
+        u = a = 0
+        for p in paths:
+            for line in open(p, encoding="utf-8").read().split("\n"):
+                if line.lstrip().startswith("//"):
+                    continue
+                u += line.count("unimplemented(")
+                a += line.count("appleOnlyUnavailable(")
+        return u, a
+
+    @staticmethod
+    def swift_files(d):
+        res = []
+        for dp, _, fs in os.walk(d):
+            res += [os.path.join(dp, f) for f in sorted(fs) if f.endswith(".swift")]
+        return sorted(res)
+
     def run(self):
+        self.check_apple_only()
         gen_dir = os.path.join(ROOT, "Sources", "AppKit", "Generated")
         pend_dir = os.path.join(ROOT, "Stubs", "Pending", "AppKit")
         seed_dir = os.path.join(ROOT, "Stubs", "Seeds", "AppKit")
@@ -1351,7 +1497,9 @@ class Generator:
             if name in self.skip_types:
                 report.append((name, self.type_kind(s), "skipped", collections.Counter()))
                 continue
+            self.count_apple_only = name not in self.handwritten and name not in self.pending
             lines, stats = self.emit_type(s, "")
+            self.count_apple_only = True
             body = "\n".join(lines) + "\n"
             if name in self.handwritten:
                 with open(os.path.join(seed_dir, name + ".swift"), "w") as f:
@@ -1370,7 +1518,7 @@ class Generator:
             else:
                 with open(os.path.join(gen_dir, name + ".swift"), "w") as f:
                     f.write("\n".join(self.file_header(name)) + body)
-                status = "generated"
+                status = "apple-only" if name in self.apple_only_set else "generated"
             report.append((name, self.type_kind(s), status, stats))
             totals.update(stats)
         self.write_globals(gen_dir)
@@ -1381,9 +1529,18 @@ class Generator:
         pid = sym["identifier"]["precise"]
         path = tuple(sym["pathComponents"])
         out = []
-        for mid in self.inv.members.get(pid, []):
+        core_nested = self.core_nested_types()
+        # Clang-imported nested types first, then Swift-only overlay ones: the symbol graph's
+        # relationship order between the two groups is not stable across extractions.
+        mids = sorted(self.inv.members.get(pid, []), key=lambda mid: not mid.startswith("c:"))
+        for mid in mids:
             m = self.inv.sym(mid)
             if m and m["kind"]["identifier"] in ("swift.class", "swift.struct", "swift.enum", "swift.protocol", "swift.typealias"):
+                dotted = ".".join(m["pathComponents"])
+                # A nested type Core declares (or one listed in skipMembers) is hand-written
+                # next to its parent and never re-emitted here.
+                if dotted in self.skip_members or dotted in core_nested:
+                    continue
                 nl, _ = self.emit_type(m, "", parent_sym=sym)
                 k = self.first_file_scope_index(nl)
                 out += self.availability_line(m, "") or self.availability_line(sym, "")
@@ -1394,6 +1551,44 @@ class Generator:
                 out.append("")
         return "\n".join(out)
 
+    CORE_TYPE_DECL_RE = re.compile(
+        r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:open|public|internal|fileprivate|private|final|indirect)\s+)*"
+        r"(?:struct|enum|class|protocol|typealias|actor)\s+([A-Za-z_]\w*)\b")
+    CORE_CONTAINER_RE = re.compile(
+        r"^(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:open|public|internal|fileprivate|private|final)\s+)*"
+        r"(?:class|struct|enum|extension)\s+([A-Za-z_][\w.]*)")
+
+    def core_nested_types(self):
+        """Dotted paths ("NSToolbar.DisplayMode") of every nested type that Sources/AppKit/Core
+        declares, either inside the type's own body or in an extension of it, in any Core file.
+        nested_only() never emits these, so a hand-written class whose nested types all live in
+        Core gets no Generated/<Name>+Types.swift companion at all."""
+        if getattr(self, "_core_nested_cache", None) is not None:
+            return self._core_nested_cache
+        found = set()
+        core = os.path.join(ROOT, "Sources", "AppKit", "Core")
+        for dp, _, fs in os.walk(core):
+            for fn in sorted(fs):
+                if not fn.endswith(".swift"):
+                    continue
+                depth = 0
+                container = None
+                for line in open(os.path.join(dp, fn), encoding="utf-8").read().split("\n"):
+                    stripped = line.strip()
+                    if stripped.startswith("//"):
+                        continue
+                    if depth == 0:
+                        m = self.CORE_CONTAINER_RE.match(stripped)
+                        container = m.group(1) if m else None
+                    elif depth == 1 and container:
+                        m = self.CORE_TYPE_DECL_RE.match(stripped)
+                        if m:
+                            found.add(container + "." + m.group(1))
+                    code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', line.split("//")[0])
+                    depth += code.count("{") - code.count("}")
+        self._core_nested_cache = found
+        return found
+
     def handwritten_stats(self, name):
         c = collections.Counter()
         core = os.path.join(ROOT, "Sources", "AppKit", "Core")
@@ -1402,6 +1597,7 @@ class Generator:
                 if f == name + ".swift" or f.startswith(name + "+"):
                     txt = open(os.path.join(dp, f)).read()
                     c["unimplemented-calls"] += txt.count("unimplemented(")
+                    c["apple-only-calls"] += txt.count("appleOnlyUnavailable(")
         return c
 
     def pending_reason(self, name):
@@ -1420,8 +1616,10 @@ class Generator:
                 lines += self.doc_lines(s, "") if status == "emitted" else []
                 lines += out
                 lines.append("")
+        text = "\n".join(lines) + "\n"
+        self.global_stats["globals-stubbed"] = text.count("unimplemented()") - 1  # header comment
         with open(os.path.join(gen_dir, "_Globals.swift"), "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(text)
 
     def write_foreign_extensions(self, gen_dir):
         """AppKit's extensions on Foundation/other-module types (AppKit@Foundation graph)."""
@@ -1481,8 +1679,10 @@ class Generator:
             lines.append("// Extensions not emitted (owner type unavailable on Windows):")
             for mod, owner, n in skipped:
                 lines.append("//   %s.%s (%d members)" % (mod, owner, n))
+        text = "\n".join(lines) + "\n"
+        self.global_stats["foundation-stubbed"] = text.count("unimplemented()") - 1  # header comment
         with open(os.path.join(gen_dir, "Foundation+AppKit.swift"), "w") as f:
-            f.write("\n".join(lines) + "\n")
+            f.write(text)
 
     def write_report(self, report, totals):
         p = os.path.join(ROOT, "docs", "API-COVERAGE.md")
@@ -1494,22 +1694,51 @@ class Generator:
         n_types = len(report)
         by_status = collections.Counter(r[2] for r in report)
         lines.append("| Top-level types in SDK | %d |" % n_types)
-        for st in ("handwritten", "generated", "pending", "skipped"):
+        for st in ("handwritten", "generated", "apple-only", "pending", "skipped"):
             lines.append("| Types %s | %d |" % (st, by_status[st]))
         for k in ("emitted", "blocked", "unavailable", "synthesized", "duplicate", "nested",
                   "constrained-ext-skipped", "unparsed", "unimplemented-calls"):
             lines.append("| Members %s | %d |" % (k, totals[k]))
+        gen_u, gen_a = self.count_stub_sites(self.swift_files(os.path.join(ROOT, "Sources", "AppKit", "Generated")))
+        core_u, core_a = self.count_stub_sites(self.swift_files(os.path.join(ROOT, "Sources", "AppKit", "Core")))
+        lines += ["", "## Stub call sites", "",
+                  "Call sites on non-comment lines. **Still to do** counts `unimplemented()`; **Apple-only**",
+                  "counts `appleOnlyUnavailable()`, members that exist only on macOS and that the port does",
+                  "not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).", "",
+                  "| Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |",
+                  "| --- | ---: | ---: |",
+                  "| `Sources/AppKit/Generated` | %d | %d |" % (gen_u, gen_a),
+                  "| `Sources/AppKit/Core` | %d | %d |" % (core_u, core_a),
+                  "| Total | %d | %d |" % (gen_u + core_u, gen_a + core_a)]
         lines += ["", "Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real",
                   "implementation (the `unimplemented-calls` column counts members still stubbed);",
-                  "**generated** compiles as a stub; **pending** is generated but excluded from the",
+                  "**generated** compiles as a stub; **apple-only** compiles as a stub whose members call",
+                  "`appleOnlyUnavailable()` (ADR-0044); **pending** is generated but excluded from the",
                   "build (see reason); **blocked** members reference a type not yet available on Windows.",
+                  "", "## Globals and Foundation extensions", "",
+                  "| Group | Hand-written in Core | Still stubbed (unimplemented) |", "| --- | ---: | ---: |",
+                  "| Free functions and variables (`_Globals.swift`) | %d | %d |" % (
+                      len(self.handwritten_globals), self.global_stats["globals-stubbed"]),
+                  "| AppKit extensions on Foundation types (`Foundation+AppKit.swift`) | %d | %d |" % (
+                      len(self.handwritten_members), self.global_stats["foundation-stubbed"]),
                   "", "## Types", "",
-                  "| Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) |",
-                  "| --- | --- | --- | ---: | ---: | ---: | ---: |"]
+                  "| Type | Kind | Status | Emitted | Blocked | Nested | Still stubbed (handwritten) | Apple-only |",
+                  "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
         for name, kind, status, stats in report:
-            lines.append("| %s | %s | %s | %d | %d | %d | %s |" % (
+            if status == "handwritten":
+                apple = stats["apple-only-calls"] or ""
+            else:
+                apple = self.apple_only_sites.get(name, "") if name in self.apple_only_set else ""
+            lines.append("| %s | %s | %s | %d | %d | %d | %s | %s |" % (
                 name, kind, status, stats["emitted"], stats["blocked"], stats["nested"],
-                stats["unimplemented-calls"] if status == "handwritten" else ""))
+                stats["unimplemented-calls"] if status == "handwritten" else "", apple))
+        lines += ["", "## Apple-only (ADR-0044)", "",
+                  "Types and members listed under `appleOnly`. Their declarations match AppKit exactly so",
+                  "code that names them compiles; calling one stops with an \"only on macOS\" message.", "",
+                  "| Symbol | Stub sites | Reason |", "| --- | ---: | --- |"]
+        for entry in self.apple_only:
+            lines.append("| `%s` | %d | %s |" % (entry, self.apple_only_sites.get(entry, 0),
+                                                 self.apple_only_reasons.get(entry, "").replace("|", "\\|")))
         with open(p, "w") as f:
             f.write("\n".join(lines) + "\n")
         print("coverage: %d types (%s); members emitted=%d blocked=%d" % (

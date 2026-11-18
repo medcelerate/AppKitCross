@@ -27,7 +27,7 @@ extension NSPasteboardWriting {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardwriting/pasteboardpropertylist(fortype:)
     public func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? { return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardwriting/writabletypes(for:)
-    public func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { unimplementedOptionalRequirement() }
+    public func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] { return [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboardwriting/writingoptions(fortype:pasteboard:)
     public func writingOptions(forType type: NSPasteboard.PasteboardType, pasteboard: NSPasteboard) -> NSPasteboard.WritingOptions { unimplementedOptionalRequirement() }
 }

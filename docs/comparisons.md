@@ -9,15 +9,24 @@ by a capture of the live window.
 |---|---|---|---|
 | HelloWindow main window: paths, text, controls, scroll view, the Core Animation badge | ![macOS](images/compare/hellowindow-macos.png) | ![Linux](images/compare/hellowindow-linux.png) | ![Windows](images/compare/hellowindow-windows.png) |
 | Layout Demo, Form tab: Auto Layout, labels, text fields, buttons | ![macOS](images/compare/layout-demo-macos.png) | ![Linux](images/compare/layout-demo-linux.png) | ![Windows](images/compare/layout-demo-windows.png) |
+| Layout Demo, Controls tab: search field, token field, path controls, stepper, level and progress indicators (ADR-0021) | ![macOS](images/compare/layout-controls-macos.png) | ![Linux](images/compare/layout-controls-linux.png) | (Windows capture pending) |
+| Layout Demo, Date tab: the date picker's textual, stepper and graphical styles | ![macOS](images/compare/layout-date-macos.png) | ![Linux](images/compare/layout-date-linux.png) | (Windows capture pending) |
 | SwiftUI demo, Controls tab: stacks, text, controls, shapes, list | ![macOS](images/compare/swiftui-demo-macos.png) | ![Linux](images/compare/swiftui-demo-linux.png) | ![Windows](images/compare/swiftui-demo-windows.png) |
 | SwiftUI demo, Data tab: a sortable Table with selection | ![macOS](images/compare/swiftui-data-macos.png) | ![Linux](images/compare/swiftui-data-linux.png) | ![Windows](images/compare/swiftui-data-windows.png) |
 | Layout Demo, Collection tab: `NSCollectionView` with a flow layout, section headers and a selection (ADR-0020) | ![macOS](images/compare/layout-collection-macos.png) | ![Linux](images/compare/layout-collection-linux.png) | ![Windows](images/compare/layout-collection-windows.png) |
 | Layout Demo, Grid tab: an `NSGridView` form with a merged title row and trailing labels | ![macOS](images/compare/layout-grid-macos.png) | ![Linux](images/compare/layout-grid-linux.png) | ![Windows](images/compare/layout-grid-windows.png) |
 | Layout Demo, Box tab: `NSBox` types and title positions | ![macOS](images/compare/layout-box-macos.png) | ![Linux](images/compare/layout-box-linux.png) | ![Windows](images/compare/layout-box-windows.png) |
+| Layout Demo, Diffable tab after Shuffle, Insert, Delete and Reload (`APPKITWIN_DIFFABLE_STEPS`): a table with section header rows and a collection view driven by one snapshot (ADR-0029) | ![macOS](images/compare/layout-diffable-macos.png) | ![Linux](images/compare/layout-diffable-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Combo tab: two `NSComboBox`es (one over its items with completion, one over a data source) | ![macOS](images/compare/layout-combo-macos.png) | ![Linux](images/compare/layout-combo-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Outline tab: an `NSOutlineView` with disclosure triangles and two columns | ![macOS](images/compare/layout-outline-macos.png) | ![Linux](images/compare/layout-outline-linux.png) | awaiting a capture from the Windows machine |
 | Outline tab right to left (`APPKITWIN_LAYOUT_DIRECTION=rtl`): columns, indentation and triangles mirror | ![macOS](images/compare/layout-outline-rtl-macos.png) | ![Linux](images/compare/layout-outline-rtl-linux.png) | awaiting a capture from the Windows machine |
+| TextEdit `--sample-screenshot` (ADR-0030): a numbered list with a nested item, an `NSTextTable`, an image attachment on the baseline, a misspelling underlined by the spell checker | ![macOS](images/compare/textedit-sample-macos.png) | ![Linux](images/compare/textedit-sample-linux.png) | awaiting a capture from the Windows machine |
 | Layout Demo, Pages tab: an `NSPageController` over three pages (Back/Next, a segmented control through `takeSelectedIndexFrom:`, the transition style), pages that highlight under the pointer through `NSTrackingArea`; the window carries a trailing title bar accessory while the tab shows | ![macOS](images/compare/layout-pages-macos.png) | ![Linux](images/compare/layout-pages-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Panels tab: `NSColorWell`s in the three styles, buttons opening the panels, a rich text view both panels change | ![macOS](images/compare/layout-panels-macos.png) | ![Linux](images/compare/layout-panels-linux.png) | awaiting a capture from the Windows machine |
+| The Colors panel (`NSColorPanel`, ADR-0031), drawn by the package | ![macOS](images/compare/color-panel-macos.png) | ![Linux](images/compare/color-panel-linux.png) | awaiting a capture from the Windows machine |
+| The Fonts panel (`NSFontPanel`), listing the platform's families | ![macOS](images/compare/font-panel-macos.png) | ![Linux](images/compare/font-panel-linux.png) | awaiting a capture from the Windows machine |
+| Layout Demo, Popover tab: a button per `NSPopover` behaviour and an `NSSwitch` | ![macOS](images/compare/layout-popover-macos.png) | ![Linux](images/compare/layout-popover-linux.png) | awaiting a capture from the Windows machine |
+| The transient popover's own window (`APPKITWIN_POPOVER_OPEN=1`): body, arrow, content | ![macOS](images/compare/layout-popover-open-macos.png) | ![Linux](images/compare/layout-popover-open-linux.png) | awaiting a capture from the Windows machine |
 
 What to look for:
 
@@ -39,6 +48,10 @@ Regenerate the macOS and Linux columns with:
 swift run HelloWindow --swiftui --layout --screenshot docs/images/compare   # macOS, headless
 APPKITWIN_DEMO_TAB=data swift run HelloWindow --swiftui --screenshot docs/images/compare   # the Data tab
 APPKITWIN_LAYOUT_TAB=combo swift run HelloWindow --layout --screenshot docs/images/compare   # the Combo tab (outline: APPKITWIN_LAYOUT_TAB=outline)
+APPKITWIN_LAYOUT_TAB=controls swift run HelloWindow --layout --screenshot docs/images/compare   # the Controls tab
+APPKITWIN_LAYOUT_TAB=date swift run HelloWindow --layout --screenshot docs/images/compare       # the Date tab
+APPKITWIN_LAYOUT_TAB=panels APPKITWIN_PANELS_OPEN=color swift run HelloWindow --layout --screenshot docs/images/compare   # the Panels tab with the Colors panel (font: APPKITWIN_PANELS_OPEN=font)
+APPKITWIN_LAYOUT_TAB=popover APPKITWIN_POPOVER_OPEN=1 swift run HelloWindow --layout --screenshot docs/images/compare   # the Popover tab and the popover's window
 docker run --rm -v "$PWD":/src -w /src appkitwin-linux bash tools/linux/compare.sh  # Linux, Xvfb
 ```
 
@@ -47,6 +60,15 @@ include; `tools/linux/compare.sh` also captures the X screen with the Fruit list
 (`APPKITWIN_COMBO_POPUP=1`):
 
 ![Combo box list open on Linux](images/compare/layout-combo-open-linux.png)
+
+The panels are windows of their own too; the headless renders above show each panel's
+content, and `tools/linux/compare.sh` captures the X screen with the Colors panel open
+beside the Layout Demo (`APPKITWIN_PANELS_OPEN=color`):
+
+![Colors panel open on Linux](images/compare/color-panel-open-linux.png)
+The transient popover open on the Layout Demo's Popover tab under Xvfb (the popover is a transient window of the demo's; X11 shows no transparency, so its surround is the parent's background colour):
+
+![Popover open on Linux](images/compare/layout-popover-screen-linux.png)
 
 The Windows column is captured by the Windows test machine (window captures of the live
 app). More Windows captures show the SwiftUI demo's other tabs and the menus, which are drawn

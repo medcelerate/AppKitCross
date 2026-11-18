@@ -1,5 +1,5 @@
 // NSTextView (hand-written; seeded from the generated stub, see tools/apigen)
-// Members still marked unimplemented() are stubs awaiting implementation.
+// Members still marked unimplemented() say why (ADR-0038).
 //
 // Every member is either implemented (hand-written types only), stubbed with
 // unimplemented(), or listed as SKIPPED with the reason it cannot compile on Windows yet.
@@ -30,11 +30,19 @@ import CoreText
     private var _isGrammarCheckingEnabled = false
     private var _isAutomaticSpellingCorrectionEnabled = false
     // The text system (ADR-0007): storage → layout manager → container, created with the view.
-    private var _storage: NSTextStorage
-    private var _layoutManager: NSLayoutManager
+    internal var _storage: NSTextStorage
+    internal var _layoutManager: NSLayoutManager
     private var _container: NSTextContainer
+    // TextKit 2 (ADR-0040): set while the view lays out with an NSTextLayoutManager.
+    internal var _textLayoutManager: NSTextLayoutManager?
+    internal var _textContentStorage: NSTextContentStorage?
+    internal lazy var _tk2 = _NSTextViewTextKit2State()
+    /// The engine `init(usingTextLayoutManager:)` asked for (read by the designated init).
+    @MainActor private static var _requestedTextKit2: Bool? = nil
 
     private var _viewDelegate: (any NSTextViewDelegate)? { _textDelegate as? NSTextViewDelegate }
+    /// Find, spelling, substitution and the other editor settings (NSTextView+TextExtras).
+    internal lazy var _extras = _NSTextViewExtras()
 
     /// The field editor's Return key must reach it before key equivalents (default buttons).
     internal var _consumesReturnKey: Bool { isFieldEditor && isEditable }
@@ -50,45 +58,11 @@ import CoreText
     /// Returns false when the event is not handled here (key equivalents fall through).
     @discardableResult
     internal func _interpret(_ event: NSEvent) -> Bool {
-        let flags = event.modifierFlags
-        let shift = flags.contains(.shift)
-        let option = flags.contains(.option)
-        let command = flags.contains(.command) || flags.contains(.control)
-        let plain = event.charactersIgnoringModifiers ?? ""
-        var selector: String? = nil
-        switch plain {
-        case "\r", "\u{3}": selector = "insertNewline:"
-        case "\t": selector = shift ? "insertBacktab:" : "insertTab:"
-        case "\u{1B}": selector = "cancelOperation:"
-        case "\u{7F}", "\u{8}": selector = option ? "deleteWordBackward:" : "deleteBackward:"
-        case "\u{F728}": selector = option ? "deleteWordForward:" : "deleteForward:"
-        case "\u{F702}": selector = command ? (shift ? "moveToBeginningOfLineAndModifySelection:" : "moveToBeginningOfLine:") : option ? (shift ? "moveWordLeftAndModifySelection:" : "moveWordLeft:") : (shift ? "moveLeftAndModifySelection:" : "moveLeft:")
-        case "\u{F703}": selector = command ? (shift ? "moveToEndOfLineAndModifySelection:" : "moveToEndOfLine:") : option ? (shift ? "moveWordRightAndModifySelection:" : "moveWordRight:") : (shift ? "moveRightAndModifySelection:" : "moveRight:")
-        case "\u{F700}": selector = command ? (shift ? "moveToBeginningOfDocumentAndModifySelection:" : "moveToBeginningOfDocument:") : (shift ? "moveUpAndModifySelection:" : "moveUp:")
-        case "\u{F701}": selector = command ? (shift ? "moveToEndOfDocumentAndModifySelection:" : "moveToEndOfDocument:") : (shift ? "moveDownAndModifySelection:" : "moveDown:")
-        case "\u{F729}": selector = shift ? "moveToBeginningOfDocumentAndModifySelection:" : "moveToBeginningOfDocument:"
-        case "\u{F72B}": selector = shift ? "moveToEndOfDocumentAndModifySelection:" : "moveToEndOfDocument:"
-        case "\u{F72C}": selector = "pageUp:"
-        case "\u{F72D}": selector = "pageDown:"
-        default: break
+        switch NSResponder._standardKeyBinding(for: event) {
+        case .command(let s): doCommand(by: Selector((s))); return true
+        case .text(let text): insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)); return true
+        case nil: return false
         }
-        if selector == nil && command {
-            switch plain.lowercased() {
-            case "a": selector = "selectAll:"
-            case "c": selector = "copy:"
-            case "x": selector = "cut:"
-            case "v": selector = "paste:"
-            default: return false     // other key equivalents belong to menus
-            }
-        }
-        if let s = selector {
-            doCommand(by: Selector((s)))
-            return true
-        }
-        guard let text = event.characters, !text.isEmpty,
-              text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7F && ($0.value < 0xF700 || $0.value > 0xF8FF) }) else { return false }
-        insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-        return true
     }
 
     private func _move(to offset: Int, extend: Bool) {
@@ -137,14 +111,17 @@ import CoreText
     // MARK: Standard key-binding actions
 
     @MainActor open func moveLeft(_ sender: Any?) {
+        if _tk2Move(.left, .character, extending: false) { return }
         let sel = selectedRange
         _move(to: sel.length > 0 ? sel.location : max(0, sel.location - 1), extend: false)
     }
     @MainActor open func moveRight(_ sender: Any?) {
+        if _tk2Move(.right, .character, extending: false) { return }
         let sel = selectedRange
         _move(to: sel.length > 0 ? sel.location + sel.length : min(_length, sel.location + 1), extend: false)
     }
     @MainActor open func moveLeftAndModifySelection(_ sender: Any?) {
+        if _tk2Move(.left, .character, extending: true) { return }
         let sel = selectedRange
         let anchor = _selectionAnchor ?? sel.location + sel.length
         let head = anchor == sel.location ? sel.location + sel.length : sel.location
@@ -152,42 +129,55 @@ import CoreText
         _move(to: max(0, head - 1), extend: true)
     }
     @MainActor open func moveRightAndModifySelection(_ sender: Any?) {
+        if _tk2Move(.right, .character, extending: true) { return }
         let sel = selectedRange
         let anchor = _selectionAnchor ?? sel.location
         let head = anchor == sel.location ? sel.location + sel.length : sel.location
         _selectionAnchor = anchor
         _move(to: min(_length, head + 1), extend: true)
     }
-    @MainActor open func moveWordLeft(_ sender: Any?) { _move(to: _wordBoundaryLeft, extend: false) }
-    @MainActor open func moveWordRight(_ sender: Any?) { _move(to: _wordBoundaryRight, extend: false) }
-    @MainActor open func moveWordLeftAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _wordBoundaryLeft, extend: true) }
-    @MainActor open func moveWordRightAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _wordBoundaryRight, extend: true) }
-    @MainActor open func moveUp(_ sender: Any?) { _verticalMove(-1, extend: false) }
-    @MainActor open func moveDown(_ sender: Any?) { _verticalMove(1, extend: false) }
-    @MainActor open func moveUpAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _verticalMove(-1, extend: true) }
-    @MainActor open func moveDownAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _verticalMove(1, extend: true) }
-    @MainActor open func moveToBeginningOfLine(_ sender: Any?) { _move(to: _lineRange(at: selectedRange.location).location, extend: false) }
-    @MainActor open func moveToEndOfLine(_ sender: Any?) { let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: false) }
-    @MainActor open func moveToBeginningOfLineAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _lineRange(at: selectedRange.location).location, extend: true) }
-    @MainActor open func moveToEndOfLineAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: true) }
-    @MainActor open func moveToBeginningOfDocument(_ sender: Any?) { _move(to: 0, extend: false) }
-    @MainActor open func moveToEndOfDocument(_ sender: Any?) { _move(to: _length, extend: false) }
-    @MainActor open func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: 0, extend: true) }
-    @MainActor open func moveToEndOfDocumentAndModifySelection(_ sender: Any?) { _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _length, extend: true) }
-    @MainActor open func pageUp(_ sender: Any?) { _verticalMove(-max(1, Int(bounds.height / _lineHeight)), extend: false) }
-    @MainActor open func pageDown(_ sender: Any?) { _verticalMove(max(1, Int(bounds.height / _lineHeight)), extend: false) }
+    @MainActor open func moveWordLeft(_ sender: Any?) { if _tk2Move(.left, .word, extending: false) { return }; _move(to: _wordBoundaryLeft, extend: false) }
+    @MainActor open func moveWordRight(_ sender: Any?) { if _tk2Move(.right, .word, extending: false) { return }; _move(to: _wordBoundaryRight, extend: false) }
+    @MainActor open func moveWordLeftAndModifySelection(_ sender: Any?) { if _tk2Move(.left, .word, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _wordBoundaryLeft, extend: true) }
+    @MainActor open func moveWordRightAndModifySelection(_ sender: Any?) { if _tk2Move(.right, .word, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _wordBoundaryRight, extend: true) }
+    @MainActor open func moveUp(_ sender: Any?) { if _tk2Move(.up, .line, extending: false) { return }; _verticalMove(-1, extend: false) }
+    @MainActor open func moveDown(_ sender: Any?) { if _tk2Move(.down, .line, extending: false) { return }; _verticalMove(1, extend: false) }
+    @MainActor open func moveUpAndModifySelection(_ sender: Any?) { if _tk2Move(.up, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _verticalMove(-1, extend: true) }
+    @MainActor open func moveDownAndModifySelection(_ sender: Any?) { if _tk2Move(.down, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _verticalMove(1, extend: true) }
+    @MainActor open func moveToBeginningOfLine(_ sender: Any?) { if _tk2Move(.backward, .line, extending: false) { return }; _move(to: _lineRange(at: selectedRange.location).location, extend: false) }
+    @MainActor open func moveToEndOfLine(_ sender: Any?) { if _tk2Move(.forward, .line, extending: false) { return }; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: false) }
+    @MainActor open func moveToBeginningOfLineAndModifySelection(_ sender: Any?) { if _tk2Move(.backward, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: _lineRange(at: selectedRange.location).location, extend: true) }
+    @MainActor open func moveToEndOfLineAndModifySelection(_ sender: Any?) { if _tk2Move(.forward, .line, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; let r = _lineRange(at: selectedRange.location + selectedRange.length); _move(to: r.location + r.length, extend: true) }
+    @MainActor open func moveToBeginningOfDocument(_ sender: Any?) { if _tk2Move(.backward, .document, extending: false) { return }; _move(to: 0, extend: false) }
+    @MainActor open func moveToEndOfDocument(_ sender: Any?) { if _tk2Move(.forward, .document, extending: false) { return }; _move(to: _length, extend: false) }
+    @MainActor open func moveToBeginningOfDocumentAndModifySelection(_ sender: Any?) { if _tk2Move(.backward, .document, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location + selectedRange.length; _move(to: 0, extend: true) }
+    @MainActor open func moveToEndOfDocumentAndModifySelection(_ sender: Any?) { if _tk2Move(.forward, .document, extending: true) { return }; _selectionAnchor = _selectionAnchor ?? selectedRange.location; _move(to: _length, extend: true) }
+    @MainActor open func pageUp(_ sender: Any?) { if _tk2Page(down: false, extending: false) { return }; _verticalMove(-max(1, Int(bounds.height / _lineHeight)), extend: false) }
+    @MainActor open func pageDown(_ sender: Any?) { if _tk2Page(down: true, extending: false) { return }; _verticalMove(max(1, Int(bounds.height / _lineHeight)), extend: false) }
     @MainActor open func deleteBackward(_ sender: Any?) {
         guard isEditable else { return }
+        _asTyping { _deleteBackward() }
+    }
+    private func _deleteBackward() {
+        if let r = _tk2DeletionRange(.backward, .character) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, "") } else if sel.location > 0 { _editReplace(NSRange(location: sel.location - 1, length: 1), "") }
     }
     @MainActor open func deleteForward(_ sender: Any?) {
         guard isEditable else { return }
+        _asTyping { _deleteForward() }
+    }
+    private func _deleteForward() {
+        if let r = _tk2DeletionRange(.forward, .character) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, "") } else if sel.location < _length { _editReplace(NSRange(location: sel.location, length: 1), "") }
     }
     @MainActor open func deleteWordBackward(_ sender: Any?) {
         guard isEditable else { return }
+        _asTyping { _deleteWordBackward() }
+    }
+    private func _deleteWordBackward() {
+        if let r = _tk2DeletionRange(.backward, .word) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, ""); return }
         let b = _wordBoundaryLeft
@@ -195,36 +185,61 @@ import CoreText
     }
     @MainActor open func deleteWordForward(_ sender: Any?) {
         guard isEditable else { return }
+        _asTyping { _deleteWordForward() }
+    }
+    private func _deleteWordForward() {
+        if let r = _tk2DeletionRange(.forward, .word) { if r.length > 0 { _editReplace(r, "") }; return }
         let sel = selectedRange
         if sel.length > 0 { _editReplace(sel, ""); return }
         let b = _wordBoundaryRight
         _editReplace(NSRange(location: sel.location, length: b - sel.location), "")
     }
+    /// In a list item Return starts the next item (or ends the list on an empty one).
     @MainActor open func insertNewline(_ sender: Any?) {
         if isFieldEditor { _endEditing(movement: .return); return }
+        guard isEditable else { return }
+        if _listNewline() { return }
         insertText("\n")
     }
+    /// Tab at the start of a list item's text nests it; in a table it moves to the next cell.
     @MainActor open func insertTab(_ sender: Any?) {
         if isFieldEditor { _endEditing(movement: .tab); return }
+        guard isEditable else { return }
+        if _changeListLevel(by: 1, onlyAtItemStart: true) { return }
+        if _moveToAdjacentCell(forward: true) { return }
         insertText("\t")
     }
+    /// Shift-Tab brings a list item out one level; in a table it moves to the previous cell.
     @MainActor open func insertBacktab(_ sender: Any?) {
         if isFieldEditor { _endEditing(movement: .backtab); return }
+        guard isEditable else { return }
+        if _changeListLevel(by: -1, onlyAtItemStart: false) { return }
+        _ = _moveToAdjacentCell(forward: false)
     }
     @MainActor open func cancelOperation(_ sender: Any?) {
         if isFieldEditor { _endEditing(movement: .cancel); return }
         _selectionAnchor = nil
         selectedRange = NSRange(location: selectedRange.location + selectedRange.length, length: 0)
     }
-    @MainActor open func selectWord(_ sender: Any?) { selectedRange = _wordRange(at: selectedRange.location) }
-    @MainActor open func selectLine(_ sender: Any?) { selectedRange = _lineRange(at: selectedRange.location) }
-    @MainActor open func selectParagraph(_ sender: Any?) { selectLine(sender) }
+    @MainActor open func selectWord(_ sender: Any?) { if _tk2Select(.word) { return }; selectedRange = _wordRange(at: selectedRange.location) }
+    @MainActor open func selectLine(_ sender: Any?) { if _tk2Select(.line) { return }; selectedRange = _lineRange(at: selectedRange.location) }
+    @MainActor open func selectParagraph(_ sender: Any?) { if _tk2Select(.paragraph) { return }; selectLine(sender) }
 
     /// Replaces text after asking `shouldChangeText`, then reports the change.
     private func _editReplace(_ range: NSRange, _ text: String) {
         guard shouldChangeText(in: range, replacementString: text) else { return }
         _replace(range, with: text, notify: false)
         didChangeText()
+        _scrollToInsertionPoint()
+    }
+
+    /// After an edit the insertion point is scrolled into view, as AppKit's text view does
+    /// (a paste of many lines, typing on a new last line). The frame is fitted first so the
+    /// scroll is not clamped to the old height.
+    internal func _scrollToInsertionPoint() {
+        guard !isFieldEditor, enclosingScrollView != nil else { return }
+        if _textLayoutManager != nil { _tk2FitFrame() }
+        scrollRangeToVisible(NSRange(location: NSMaxRange(selectedRange), length: 0))
     }
 
     private static let _selectorDispatch: [String: (NSTextView, Any?) -> Void] = [
@@ -244,18 +259,165 @@ import CoreText
         "cancelOperation:": { $0.cancelOperation($1) }, "selectAll:": { $0.selectAll($1) }, "selectWord:": { $0.selectWord($1) },
         "selectLine:": { $0.selectLine($1) }, "selectParagraph:": { $0.selectParagraph($1) },
         "copy:": { $0.copy($1) }, "cut:": { $0.cut($1) }, "paste:": { $0.paste($1) }, "delete:": { $0.delete($1) },
+        "pasteAsPlainText:": { $0.pasteAsPlainText($1) }, "pasteAsRichText:": { $0.pasteAsRichText($1) },
+        "performFindPanelAction:": { $0.performFindPanelAction($1) }, "performTextFinderAction:": { $0.performTextFinderAction($1) },
+        "checkSpelling:": { $0.checkSpelling($1) }, "showGuessPanel:": { $0.showGuessPanel($1) },
+        "changeSpelling:": { $0.changeSpelling($1) }, "ignoreSpelling:": { $0.ignoreSpelling($1) },
+        "_learnSpellingFromMenu:": { tv, sender in
+            guard let word = (sender as? NSMenuItem)?.representedObject as? String else { return }
+            NSSpellChecker.shared.learnWord(word)
+            tv._spellingDidChange()
+        },
+        "checkTextInDocument:": { $0.checkTextInDocument($1) }, "checkTextInSelection:": { $0.checkTextInSelection($1) },
+        "toggleContinuousSpellChecking:": { $0.toggleContinuousSpellChecking($1) }, "toggleGrammarChecking:": { $0.toggleGrammarChecking($1) },
+        "toggleAutomaticSpellingCorrection:": { $0.toggleAutomaticSpellingCorrection($1) },
+        "orderFrontSubstitutionsPanel:": { $0.orderFrontSubstitutionsPanel($1) }, "toggleSmartInsertDelete:": { $0.toggleSmartInsertDelete($1) },
+        "toggleAutomaticQuoteSubstitution:": { $0.toggleAutomaticQuoteSubstitution($1) }, "toggleAutomaticDashSubstitution:": { $0.toggleAutomaticDashSubstitution($1) },
+        "toggleAutomaticTextReplacement:": { $0.toggleAutomaticTextReplacement($1) }, "toggleAutomaticTextCompletion:": { $0.toggleAutomaticTextCompletion($1) },
+        "toggleAutomaticLinkDetection:": { $0.toggleAutomaticLinkDetection($1) }, "toggleAutomaticDataDetection:": { $0.toggleAutomaticDataDetection($1) },
+        "complete:": { $0.complete($1) },
+        "_insertCompletionFromMenu:": { tv, sender in
+            guard let item = sender as? NSMenuItem, let r = (item.representedObject as? NSValue)?.rangeValue else { return }
+            tv.insertCompletion(item.title, forPartialWordRange: r, movement: NSTextMovement.return.rawValue, isFinal: true)
+        },
+        "orderFrontListPanel:": { $0.orderFrontListPanel($1) }, "orderFrontTablePanel:": { $0.orderFrontTablePanel($1) },
+        "alignJustified:": { $0.alignJustified($1) }, "alignLeft:": { $0.alignLeft($1) }, "alignCenter:": { $0.alignCenter($1) }, "alignRight:": { $0.alignRight($1) },
+        "loosenKerning:": { $0.loosenKerning($1) }, "tightenKerning:": { $0.tightenKerning($1) }, "useStandardKerning:": { $0.useStandardKerning($1) }, "turnOffKerning:": { $0.turnOffKerning($1) },
+        "raiseBaseline:": { $0.raiseBaseline($1) }, "lowerBaseline:": { $0.lowerBaseline($1) },
+        "useStandardLigatures:": { $0.useStandardLigatures($1) }, "useAllLigatures:": { $0.useAllLigatures($1) }, "turnOffLigatures:": { $0.turnOffLigatures($1) },
+        "changeFont:": { $0.changeFont($1) }, "changeColor:": { $0._changeColor(from: $1) },
+        // Format actions (ADR-0038).
+        "underline:": { $0.underline($1) }, "outline:": { $0.outline($1) }, "highlight:": { tv, s in if #available(macOS 15.0, *) { tv.highlight(s) } },
+        "toggleTraditionalCharacterShape:": { $0.toggleTraditionalCharacterShape($1) }, "orderFrontLinkPanel:": { $0.orderFrontLinkPanel($1) },
+        "changeAttributes:": { $0.changeAttributes($1) }, "changeDocumentBackgroundColor:": { $0.changeDocumentBackgroundColor($1) },
     ]
+
+    // MARK: Font and colour panels (ADR-0022)
+
+    /// The selection's attributes with `change` applied: the selected characters of rich
+    /// text, the typing attributes when the selection is empty, the whole text otherwise.
+    private func _changeSelectionAttributes(_ change: (inout [NSAttributedString.Key: Any]) -> Void) {
+        let range = selectedRange
+        if !isRichText || _storage.length == 0 {
+            var attrs = _attributes
+            change(&attrs)
+            if let f = attrs[.font] as? NSFont, !f.isEqual(_effectiveFont) { font = f }
+            if let c = attrs[.foregroundColor] as? NSColor, !c.isEqual(textColor) { textColor = c }
+            if let f = attrs[.font] { _typingAttributes[.font] = f }
+            if let c = attrs[.foregroundColor] { _typingAttributes[.foregroundColor] = c }
+            return
+        }
+        if range.length == 0 {
+            var attrs = typingAttributes
+            change(&attrs)
+            _typingAttributes = attrs
+            NotificationCenter.default.post(name: NSTextView.didChangeTypingAttributesNotification, object: self)
+            return
+        }
+        guard shouldChangeText(in: range, replacementString: nil) else { return }
+        var runs: [(NSRange, [NSAttributedString.Key: Any])] = []
+        _storage.enumerateAttributes(in: range, options: []) { attrs, r, _ in runs.append((r, attrs)) }
+        _storage.beginEditing()
+        for (r, attrs) in runs {
+            var a = attrs
+            if a[.font] == nil { a[.font] = _effectiveFont }
+            change(&a)
+            _storage.setAttributes(a, range: r)
+        }
+        _storage.endEditing()
+        var typing = typingAttributes
+        change(&typing)
+        _typingAttributes = typing
+        didChangeText()
+        needsDisplay = true
+    }
+
+    /// Tells the font manager (and so the panel) which font the selection has.
+    internal func _updateFontManagerSelection() {
+        guard usesFontPanel else { return }
+        let range = selectedRange
+        var fonts: [NSFont] = []
+        if isRichText, _storage.length > 0, range.length > 0 {
+            _storage.enumerateAttribute(.font, in: range, options: []) { v, _, _ in if let f = v as? NSFont, !fonts.contains(where: { $0.isEqual(f) }) { fonts.append(f) } }
+        }
+        let font = fonts.first ?? (typingAttributes[.font] as? NSFont) ?? _effectiveFont
+        NSFontManager.shared.setSelectedFont(font, isMultiple: fonts.count > 1)
+    }
+
+    /// `changeFont:` from the font manager: every font in the selection goes through
+    /// `NSFontManager.convert(_:)`, which applies what the panel or the Font menu asked.
+    open override func changeFont(_ sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeFont editable=\(isEditable) usesFontPanel=\(usesFontPanel) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) length=\(_storage.length) window='\(window?.title ?? "nil")'")
+        guard isEditable, usesFontPanel, _handlesPanelActions else { return }
+        let fm = (sender as? NSFontManager) ?? NSFontManager.shared
+        _changeSelectionAttributes { attrs in
+            let current = (attrs[.font] as? NSFont) ?? self._effectiveFont
+            let converted = fm.convert(current)
+            _NSPanelTrace.log("NSTextView.changeFont \(current) -> \(converted)")
+            attrs[.font] = converted
+        }
+        _updateFontManagerSelection()
+    }
+
+    /// `changeColor:` from the colour panel (or a colour well): the sender's colour
+    /// becomes the selection's text colour.
+    @MainActor open func changeColor(_ sender: Any?) { _changeColor(from: sender) }
+
+    /// Shared by both `changeColor` overloads (which must not call each other: the
+    /// compiler picks a different one per platform).
+    @MainActor internal func _changeColor(from sender: Any?) {
+        _NSPanelTrace.log("NSTextView.changeColor editable=\(isEditable) fieldEditor=\(isFieldEditor) richText=\(isRichText) selection=\(selectedRange) window='\(window?.title ?? "nil")'")
+        guard isEditable, _handlesPanelActions else { return }
+        let color: NSColor
+        if let p = sender as? NSColorPanel { color = p.color }
+        else if let w = sender as? NSColorWell { color = w.color }
+        else if let c = sender as? NSColor { color = c }
+        else if NSColorPanel.sharedColorPanelExists { color = NSColorPanel.shared.color }
+        else { return }
+        _changeSelectionAttributes { $0[.foregroundColor] = color }
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/setfont(_:range:)
+    open override func setFont(_ font: NSFont, range: NSRange) {
+        guard isRichText, _storage.length > 0 else { self.font = font; return }
+        let r = NSRange(location: max(0, min(range.location, _storage.length)), length: max(0, min(range.length, _storage.length - max(0, min(range.location, _storage.length)))))
+        _storage.addAttribute(.font, value: font, range: r)
+        needsDisplay = true
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/settextcolor(_:range:)
+    open override func setTextColor(_ color: NSColor?, range: NSRange) {
+        guard isRichText, _storage.length > 0 else { textColor = color; return }
+        let r = NSRange(location: max(0, min(range.location, _storage.length)), length: max(0, min(range.length, _storage.length - max(0, min(range.location, _storage.length)))))
+        if let c = color { _storage.addAttribute(.foregroundColor, value: c, range: r) } else { _storage.removeAttribute(.foregroundColor, range: r) }
+        needsDisplay = true
+    }
+
+    open override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { _updateFontManagerSelection() }
+        return ok
+    }
 
     // MARK: Responder-chain actions (menus, nil-target sends)
 
     /// The editing selectors double as responder-chain actions, so Edit menu items with a
     /// nil target reach the text view.
     public func respondsToSelectorAction(_ action: Selector) -> Bool {
-        NSTextView._selectorDispatch[NSStringFromSelector(action)] != nil
+        let name = NSStringFromSelector(action)
+        // A field editor inside the Fonts or Colors panel (the size or hex field) must not
+        // take the panel's own `changeFont:`/`changeColor:`: the panel is the key window
+        // while the user works in it, and the send has to go on to the main window's
+        // first responder, the document's text view.
+        if name == "changeFont:" || name == "changeColor:" { return _handlesPanelActions }
+        return NSTextView._selectorDispatch[name] != nil
+    }
+
+    internal var _handlesPanelActions: Bool {
+        !(isFieldEditor && (window is NSFontPanel || window is NSColorPanel))
     }
 
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
-        guard let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
+        guard respondsToSelectorAction(action), let handler = NSTextView._selectorDispatch[NSStringFromSelector(action)] else { return false }
         handler(self, sender)
         return true
     }
@@ -267,8 +429,41 @@ import CoreText
         switch NSStringFromSelector(action) {
         case "copy:": return isSelectable && hasSelection
         case "cut:", "delete:": return isEditable && hasSelection
-        case "paste:": return isEditable && NSPasteboard.general.string(forType: .string) != nil
+        case "paste:":
+            let available = NSPasteboard.general.availableType(from: readablePasteboardTypes)
+            if _PasteboardTrace.enabled {
+                _PasteboardTrace.log("NSTextView.validateMenuItem(paste:) on \(ObjectIdentifier(self)): isEditable \(isEditable), isRichText \(isRichText), importsGraphics \(importsGraphics), readable \(readablePasteboardTypes.map(\.rawValue)), pasteboard \((NSPasteboard.general.types ?? []).map(\.rawValue)), match \(available?.rawValue ?? "none") -> \(isEditable && available != nil)")
+            }
+            return isEditable && available != nil
         case "selectAll:": return isSelectable && !string.isEmpty
+        case "pasteAsPlainText:", "pasteAsRichText:":
+            // Paste and Match Style inserts the plain string (pasteAsPlainText reads .string);
+            // an image has none. Paste as rich text takes what Paste takes.
+            let types: [NSPasteboard.PasteboardType] = action == Selector(("pasteAsPlainText:")) ? [.string] : readablePasteboardTypes
+            let available = NSPasteboard.general.availableType(from: types)
+            _PasteboardTrace.log("NSTextView.validateMenuItem(\(NSStringFromSelector(action))) on \(ObjectIdentifier(self)): isEditable \(isEditable), isRichText \(isRichText), accepts \(types.map(\.rawValue)), match \(available?.rawValue ?? "none") -> \(isEditable && available != nil)")
+            return isEditable && available != nil
+        case "performFindPanelAction:", "performTextFinderAction:":
+            guard usesFindBar || usesFindPanel else { return false }
+            let action = NSTextFinder.Action(rawValue: menuItem.tag == 0 ? 1 : menuItem.tag) ?? .showFindInterface
+            return _makeFinderIfNeeded().validateAction(action)
+        case "toggleContinuousSpellChecking:": menuItem.state = isContinuousSpellCheckingEnabled ? .on : .off; return true
+        case "toggleGrammarChecking:": menuItem.state = isGrammarCheckingEnabled ? .on : .off; return true
+        case "toggleAutomaticSpellingCorrection:": menuItem.state = isAutomaticSpellingCorrectionEnabled ? .on : .off; return true
+        case "toggleSmartInsertDelete:": menuItem.state = smartInsertDeleteEnabled ? .on : .off; return true
+        case "toggleAutomaticQuoteSubstitution:": menuItem.state = isAutomaticQuoteSubstitutionEnabled ? .on : .off; return isEditable
+        case "toggleAutomaticDashSubstitution:": menuItem.state = isAutomaticDashSubstitutionEnabled ? .on : .off; return isEditable
+        case "toggleAutomaticTextReplacement:": menuItem.state = isAutomaticTextReplacementEnabled ? .on : .off; return isEditable
+        case "toggleAutomaticTextCompletion:": menuItem.state = isAutomaticTextCompletionEnabled ? .on : .off; return isEditable
+        case "toggleAutomaticLinkDetection:": menuItem.state = isAutomaticLinkDetectionEnabled ? .on : .off; return isEditable
+        case "toggleAutomaticDataDetection:": menuItem.state = isAutomaticDataDetectionEnabled ? .on : .off; return isEditable
+        case "checkSpelling:", "showGuessPanel:", "checkTextInDocument:": return !string.isEmpty || NSStringFromSelector(action) == "showGuessPanel:"
+        case "changeSpelling:", "ignoreSpelling:", "_learnSpellingFromMenu:": return isEditable
+        case "complete:": return isEditable && rangeForUserCompletion.location != NSNotFound
+        case "orderFrontListPanel:", "orderFrontTablePanel:": return isEditable && isRichText
+        case "underline:", "outline:", "toggleTraditionalCharacterShape:", "changeAttributes:": return isEditable
+        case "highlight:", "orderFrontLinkPanel:": return isEditable && isRichText && selectedRange.length > 0
+        case "changeDocumentBackgroundColor:": return isEditable && allowsDocumentBackgroundColorChange
         default: return true
         }
     }
@@ -277,11 +472,26 @@ import CoreText
 
     public func insertText(_ string: Any, replacementRange: NSRange) {
         guard isEditable else { return }
-        let text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
+        _asTyping { _insertText(string, replacementRange: replacementRange) }
+    }
+
+    private func _insertText(_ string: Any, replacementRange: NSRange) {
+        var text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
         var range = replacementRange.location == NSNotFound ? (_markedRange ?? selectedRange) : replacementRange
         if _markedRange != nil && replacementRange.location == NSNotFound { range = _markedRange! }
+        let typed = _markedRange == nil && replacementRange.location == NSNotFound
         _markedRange = nil
-        _editReplace(range, text)
+        // Smart quotes and dashes replace what was typed (ADR-0030).
+        if typed, range.length == 0, let (sub, r) = _smartSubstitution(for: text, at: range.location) {
+            text = sub
+            range = r
+        }
+        if let rich = string as? NSAttributedString, isRichText, rich.length > 0 {
+            _replaceAttributed(range, with: rich)
+        } else {
+            _editReplace(range, text)
+        }
+        if typed { _substituteAfterWord(typed: text) }
     }
 
     public func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -343,10 +553,21 @@ import CoreText
         return convert(caret, to: nil)
     }
 
+    /// Every edit: matches and misspellings are found again.
+    internal override func _noteDidChange() {
+        super._noteDidChange()
+        _extras.finder?.noteClientStringWillChange()
+        _spellingAfterEdit()
+    }
+
     internal override func _selectionDidChange() {
+        _tk2SyncSelection()
         let n = Notification(name: NSTextView.didChangeSelectionNotification, object: self)
         NotificationCenter.default.post(n)
         _viewDelegate?.textViewDidChangeSelection(n)
+        if window?.firstResponder === self { _updateFontManagerSelection() }
+        if usesRuler, !isFieldEditor { _takeRulerIfAvailable() }
+        _noteSelectionForUndo()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(coder:)
     public required init?(coder: NSCoder) {
@@ -371,17 +592,36 @@ import CoreText
             _storage = NSTextStorage()
         }
         super.init(frame: frameRect)
+        // AppKit's defaults: no smaller than the initial frame, as tall as the text needs.
+        minSize = frameRect.size
+        maxSize = NSSize(width: frameRect.width, height: 10_000_000)
+        // The engine (ADR-0040): a container with a text layout manager brings TextKit 2;
+        // `init(usingTextLayoutManager:)` chooses; otherwise `APPKITWIN_TEXTKIT` (TextKit 1
+        // by default in the port).
+        let requested = NSTextView._requestedTextKit2
+        NSTextView._requestedTextKit2 = nil
+        if let tlm = container?.textLayoutManager {
+            _wireTextKit2(layoutManager: tlm)
+        } else if container?.layoutManager == nil, requested ?? NSTextView._defaultEngineIsTextKit2 {
+            _wireTextKit2()
+        }
         _wireTextSystem()
     }
 
-    private func _wireTextSystem() {
+    /// TextKit 1 takes the storage and the container.
+    internal func _wireTextKit1() {
         if _layoutManager.textStorage !== _storage { _storage.addLayoutManager(_layoutManager) }
         if !_layoutManager.textContainers.contains(where: { $0 === _container }) { _layoutManager.addTextContainer(_container) }
+    }
+
+    private func _wireTextSystem() {
+        if _textLayoutManager == nil { _wireTextKit1() }
         _container.textView = self
         _container.widthTracksTextView = true
         _container.heightTracksTextView = false
         if _storage.length == 0 { _storage.setAttributedString(NSAttributedString(string: "", attributes: typingAttributes)) }
         _syncContainerSize()
+        updateDragTypeRegistration()
     }
 
     /// Container width follows the view unless the text runs on one line (field editors,
@@ -391,16 +631,20 @@ import CoreText
         let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
         let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         if _container.size != size { _container.size = size }
+        // An unbounded container still flushes right-aligned and centred text against the
+        // visible width; against the unbounded width the line would sit beyond any drawing.
+        _container._alignmentWidth = unbounded ? max(1, bounds.width - 2 * _textContainerInset.width) : nil
         let padding: CGFloat = isFieldEditor ? 0 : 5
         if _container.lineFragmentPadding != padding { _container.lineFragmentPadding = padding }
     }
 
-    private var _drawOrigin: NSPoint { NSPoint(x: textContainerOrigin.x - _scrollX, y: textContainerOrigin.y) }
+    internal var _drawOrigin: NSPoint { NSPoint(x: textContainerOrigin.x - _scrollX, y: textContainerOrigin.y) }
 
     // MARK: NSText model hooks, backed by the text storage
 
     internal override func _getString() -> String { _storage.string }
     internal override func _setString(_ s: String) {
+        breakUndoCoalescing()
         _storage.setAttributedString(NSAttributedString(string: s, attributes: typingAttributes))
     }
     internal override func _storageReplace(_ r: NSRange, with text: String) {
@@ -409,18 +653,68 @@ import CoreText
             let before = _storage.attributes(at: r.location - 1, effectiveRange: nil)
             if before[.font] != nil { attrs = before }
         }
+        // Text typed at the start of a paragraph takes that paragraph's style (a list item,
+        // a table cell), not the previous paragraph's; an attachment's attribute never spreads.
+        let s = _storage.string as NSString
+        let atParagraphStart = r.location == 0 || (r.location <= s.length && [0x0A, 0x0D, 0x2029].contains(s.character(at: r.location - 1)))
+        if atParagraphStart, r.location < s.length, let ps = _storage.attribute(.paragraphStyle, at: r.location, effectiveRange: nil) {
+            attrs[.paragraphStyle] = ps
+        } else if atParagraphStart, let pending = _extras.pendingParagraphStyle, pending.location == r.location {
+            attrs[.paragraphStyle] = pending.style
+        } else if atParagraphStart, r.location >= s.length, let ps = attrs[.paragraphStyle] as? NSParagraphStyle, !ps.textBlocks.isEmpty || !ps.textLists.isEmpty {
+            // A new last paragraph does not continue a table cell or a list item by itself
+            // (Return in a list makes the next item explicitly).
+            let plain = (ps.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            plain.textBlocks = []
+            plain.textLists = []
+            plain.headIndent = 0
+            plain.firstLineHeadIndent = 0
+            plain.tabStops = []
+            attrs[.paragraphStyle] = plain
+        }
+        _extras.pendingParagraphStyle = nil
+        attrs[.attachment] = nil
         _storage.replaceCharacters(in: r, with: NSAttributedString(string: text, attributes: attrs))
     }
 
     internal override func _invalidateLayout() {
         _syncContainerSize()
+        // A new frame reaches the layout through the container's size (which invalidates the
+        // layout itself when the wrapping width changes); a height change keeps every line.
+        if _fittingFrame || _resizingFrame { return }
+        if let tlm = _textLayoutManager {
+            // An empty document's line takes the typing font, which this may have changed.
+            if _storage.length == 0 { tlm.invalidateLayout(for: tlm.documentRange) }
+            // NSText calls this after every edit; edits reach TextKit 2 through the content
+            // storage and geometry through the container, so only fit and redisplay here
+            // (invalidating every fragment would put the text above the viewport back on
+            // estimates and move it).
+            needsLayout = true
+            needsDisplay = true
+            return
+        }
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
     }
 
     /// The layout manager laid the text out again (an edit, a geometry change).
     internal func _layoutManagerDidChange() { needsDisplay = true }
 
+    /// Layout finished: a resizable text view fits its frame to the laid-out text, between
+    /// `minSize` and `maxSize`, as AppKit's does (a scroll view's document view grows so the
+    /// text scrolls, and shrinks back to `minSize`). Field editors keep their frame.
+    internal func _layoutManagerDidLayout() {
+        guard !isFieldEditor, isVerticallyResizable || isHorizontallyResizable, !_fittingFrame else { return }
+        _fittingFrame = true
+        defer { _fittingFrame = false }
+        let content = _contentSize
+        let size = NSSize(width: isHorizontallyResizable ? max(minSize.width, min(maxSize.width, content.width)) : frame.width,
+                          height: isVerticallyResizable ? max(minSize.height, min(maxSize.height, content.height)) : frame.height)
+        if size != frame.size { setFrameSize(size) }
+    }
+    internal var _fittingFrame = false
+
     internal override func _layoutLines() -> [_Line] {
+        if _textLayoutManager != nil { return _tk2LayoutLines() }
         let origin = _drawOrigin
         var lines = _layoutManager._lineFragments.map { f in
             _Line(range: NSRange(location: f.charRange.location, length: f.charRange.length - f.newlineLength),
@@ -434,6 +728,7 @@ import CoreText
     }
 
     internal override func _caretRect(for offset: Int) -> NSRect {
+        if _textLayoutManager != nil { return _tk2CaretRect(for: offset) }
         let origin = _drawOrigin
         guard let c = _layoutManager._caret(forCharacter: offset) else {
             return NSRect(x: origin.x + _container.lineFragmentPadding, y: origin.y, width: 1, height: _lineHeight)
@@ -442,6 +737,7 @@ import CoreText
     }
 
     internal override func _offset(at point: NSPoint) -> Int {
+        if _textLayoutManager != nil { return _tk2Offset(at: point) }
         let origin = _drawOrigin
         var fraction: CGFloat = 0
         let p = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
@@ -452,6 +748,7 @@ import CoreText
     }
 
     internal override var _contentSize: NSSize {
+        if _textLayoutManager != nil { return _tk2ContentSize }
         let used = _layoutManager.usedRect(for: _container)
         let padding = isFieldEditor ? 0 : _container.lineFragmentPadding
         return NSSize(width: (used.width + 2 * padding + 2 * _textContainerInset.width).rounded(.up),
@@ -470,9 +767,28 @@ import CoreText
             NSBezierPath.fill(bounds)
         }
         let origin = _drawOrigin
-        let all = NSRange(location: 0, length: _storage.length)
+        if _textLayoutManager != nil {
+            _tk2Draw(dirtyRect)
+            if let m = _markedRange, m.length > 0 {
+                (textColor ?? .textColor).setFill()
+                for r in _tk2Rects(forCharacterRange: m) { NSBezierPath.fill(NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1)) }
+            }
+            let sel = selectedRange
+            if shouldDrawInsertionPoint && sel.length == 0 {
+                let caret = _caretRect(for: sel.location)
+                drawInsertionPoint(in: NSRect(x: caret.minX.rounded(), y: caret.minY, width: 1, height: caret.height), color: insertionPointColor, turnedOn: true)
+            }
+            return
+        }
+        // Only the lines in the dirty rect (drawing a long document whole on every keystroke
+        // made typing slow).
+        let dirty = dirtyRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let all = _layoutManager.glyphRange(forBoundingRect: dirty, in: _container)
         _layoutManager.drawBackground(forGlyphRange: all, at: origin)
+        _drawTextHighlights()
+        _drawFindHighlights(above: false)
         _layoutManager.drawGlyphs(forGlyphRange: all, at: origin)
+        _drawFindHighlights(above: true)
         if let m = _markedRange, m.length > 0 {
             (textColor ?? .textColor).setFill()
             _layoutManager.enumerateEnclosingRects(forGlyphRange: m, withinSelectedGlyphRange: m, in: _container) { r, _ in
@@ -480,28 +796,194 @@ import CoreText
             }
         }
         let sel = selectedRange
-        if window?.firstResponder === self && isEditable && sel.length == 0 {
+        if shouldDrawInsertionPoint && sel.length == 0 {
             let caret = _caretRect(for: sel.location)
-            insertionPointColor.setFill()
-            NSBezierPath.fill(NSRect(x: caret.minX.rounded(), y: caret.minY, width: 1, height: caret.height))
+            drawInsertionPoint(in: NSRect(x: caret.minX.rounded(), y: caret.minY, width: 1, height: caret.height), color: insertionPointColor, turnedOn: true)
         }
     }
 
+    // MARK: Context menu, links, pasteboard and dragging (ADR-0030)
+
+    open override func menu(for event: NSEvent) -> NSMenu? {
+        guard isSelectable, !isFieldEditor else { return super.menu(for: event) }
+        return _contextMenu(for: event)
+    }
+
+    open override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, !event.modifierFlags.contains(.shift), let st = textStorage, st.length > 0 {
+            let i = _offset(at: convert(event.locationInWindow, from: nil))
+            if i < st.length, let link = st.attribute(.link, at: i, effectiveRange: nil) {
+                clicked(onLink: link, at: i)
+                return
+            }
+            // A click on an attachment selects it, as AppKit's does (the caret position rounds
+            // to either side of the image, so both neighbours are tried).
+            let p = convert(event.locationInWindow, from: nil)
+            for k in [i, i - 1] where k >= 0 && k < st.length {
+                guard let a = st.attribute(.attachment, at: k, effectiveRange: nil) as? NSTextAttachment,
+                      let frame = _attachmentFrame(at: k), frame.contains(p) else { continue }
+                guard isSelectable || isEditable else { break }
+                if window?.firstResponder !== self { _ = window?.makeFirstResponder(self) }
+                _clickCount = 1
+                setSelectedRange(NSRange(location: k, length: 1))
+                _selectionAnchor = k
+                if let cell = a.attachmentCell { _viewDelegate?.textView(self, clickedOn: cell, in: frame, at: k) }
+                return
+            }
+        }
+        if _textLayoutManager != nil { _tk2MouseDown(with: event); return }
+        super.mouseDown(with: event)
+    }
+
+    open override func mouseDragged(with event: NSEvent) {
+        if _textLayoutManager != nil { _tk2MouseDragged(with: event); return }
+        super.mouseDragged(with: event)
+    }
+
+    open override func mouseUp(with event: NSEvent) {
+        if _textLayoutManager != nil { _tk2MouseUp() }
+        super.mouseUp(with: event)
+    }
+
+    /// An attachment's frame in view coordinates, from the active engine.
+    internal func _attachmentFrame(at index: Int) -> NSRect? {
+        if _textLayoutManager != nil { return _tk2AttachmentFrame(at: index) }
+        return _layoutManager._attachmentRect(at: index)?.offsetBy(dx: _drawOrigin.x, dy: _drawOrigin.y)
+    }
+
+    /// Fitting to the text needs all of it laid out (TextKit 2 estimates what is not).
+    open override func sizeToFit() {
+        if let tlm = _textLayoutManager { tlm.ensureLayout(for: tlm.documentRange) }
+        super.sizeToFit()
+    }
+
+    /// TextKit 2 lays the viewport out here, before drawing, and fits the frame to it.
+    open override func layout() {
+        super.layout()
+        if _textLayoutManager != nil {
+            _syncContainerSize()
+            _tk2LayoutViewport()
+        }
+    }
+
+    open override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        _followClipViewWidth()
+        if _textLayoutManager != nil { _tk2ObserveClipView(); needsLayout = true }
+    }
+
+    /// A document view that wraps (not horizontally resizable) and resizes its width with
+    /// its superview stays exactly as wide as the clip view, whatever changes that width
+    /// (a scroller appearing, a legacy scroller's width taken out, a window resize), so
+    /// lines never run under the vertical scroller. Both engines.
+    private func _followClipViewWidth() {
+        guard let clip = superview as? NSClipView else { return }
+        if _extras.trackedClipView !== clip {
+            if let o = _extras.clipFrameObserver { NotificationCenter.default.removeObserver(o) }
+            _extras.trackedClipView = clip
+            clip.postsFrameChangedNotifications = true
+            _extras.clipFrameObserver = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: clip, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?._matchClipViewWidth() }
+            }
+        }
+        _matchClipViewWidth()
+    }
+
+    private func _matchClipViewWidth() {
+        guard let clip = superview as? NSClipView, !isHorizontallyResizable, !isFieldEditor, autoresizingMask.contains(.width) else { return }
+        let width = clip.bounds.width
+        guard width > 0, abs(frame.width - width) > 0.5 else { return }
+        setFrameSize(NSSize(width: width, height: frame.height))
+    }
+
+    internal override func _lineRange(at offset: Int) -> NSRange {
+        guard let tlm = _textLayoutManager else { return super._lineRange(at: offset) }
+        guard let r = tlm.textRange(for: .line, enclosing: _NSTextIndexLocation(max(0, min(offset, _length))))?._nsRange else { return NSRange(location: offset, length: 0) }
+        let s = _storage.string as NSString
+        var end = NSMaxRange(r)
+        if end > r.location, end <= s.length, [0x0A, 0x0D, 0x2028, 0x2029, 0x0C].contains(s.character(at: end - 1)) {
+            end -= 1
+            if end > r.location, s.character(at: end) == 0x0A, s.character(at: end - 1) == 0x0D { end -= 1 }
+        }
+        return NSRange(location: r.location, length: end - r.location)
+    }
+
+    open override func copy(_ sender: Any?) {
+        guard selectedRange.length > 0 else { return }
+        _ = writeSelection(to: .general, types: writablePasteboardTypes)
+    }
+    open override func cut(_ sender: Any?) {
+        guard isEditable, selectedRange.length > 0 else { return }
+        copy(sender)
+        _withUndoName("Cut") { delete(sender) }
+    }
+    open override func delete(_ sender: Any?) {
+        guard isEditable, selectedRange.length > 0 else { return }
+        let r = smartDeleteRange(forProposedRange: selectedRange)
+        _replaceAttributed(r, with: NSAttributedString(string: ""))
+    }
+    open override func paste(_ sender: Any?) {
+        guard isEditable else { _PasteboardTrace.log("NSTextView.paste: not editable"); return }
+        let ok = _withUndoName("Paste") { readSelection(from: .general) }
+        _PasteboardTrace.log("NSTextView.paste: readSelection -> \(ok)")
+    }
+
+    open override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let op = _dragOperation(sender)
+        _PasteboardTrace.log("NSTextView drag entered at \(convert(sender.draggingLocation, from: nil)) (frame \(frame), visible \(visibleRect)) types \(sender.draggingPasteboard.types?.map(\.rawValue) ?? []) -> \(op.rawValue)")
+        return op
+    }
+    open override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let op = _dragOperation(sender)
+        if !op.isEmpty { setSelectedRange(NSRange(location: _offset(at: convert(sender.draggingLocation, from: nil)), length: 0)) }
+        return op
+    }
+    open override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        _PasteboardTrace.log("NSTextView drag exited")
+        super.draggingExited(sender)
+    }
+    open override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard isEditable else { _PasteboardTrace.log("NSTextView drop: not editable"); return false }
+        let point = convert(sender.draggingLocation, from: nil)
+        let at = _offset(at: point)
+        guard let content = _readContent(from: sender.draggingPasteboard) else {
+            _PasteboardTrace.log("NSTextView drop at \(point) (index \(at)): nothing readable in \(sender.draggingPasteboard.types?.map(\.rawValue) ?? []), file URL \(sender.draggingPasteboard.string(forType: .fileURL) ?? "none")")
+            return false
+        }
+        _PasteboardTrace.log("NSTextView drop at \(point) (frame \(frame), visible \(visibleRect)): inserting \(content.length) characters at index \(at) of \(_storage.length)")
+        setSelectedRange(NSRange(location: at, length: 0))
+        _ = window?.makeFirstResponder(self)
+        _insertPasted(content)
+        return true
+    }
+    private func _dragOperation(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard isEditable, let type = sender.draggingPasteboard.availableType(from: acceptableDragTypes) else { return [] }
+        return dragOperation(for: sender, type: type)
+    }
+
     open override func setFrameSize(_ newSize: NSSize) {
+        _resizingFrame = true
+        defer { _resizingFrame = false }
         super.setFrameSize(newSize)
         _syncContainerSize()
     }
+    private var _resizingFrame = false
 
     /// Colours were resolved at layout time, so a theme change lays the text out again.
     open override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        _textLayoutManager?._restyleLaidOutFragments()
         _invalidateLayout()
         needsDisplay = true
     }
 
     open override var isFieldEditor: Bool {
         get { super.isFieldEditor }
-        set { super.isFieldEditor = newValue; _syncContainerSize() }
+        set {
+            // Field editors lay out with TextKit 1 in the port (ADR-0040).
+            if newValue, _textLayoutManager != nil { _switchToTextKit1() }
+            super.isFieldEditor = newValue; _syncContainerSize()
+        }
     }
     open override var isHorizontallyResizable: Bool {
         get { super.isHorizontallyResizable }
@@ -534,42 +1016,66 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/init(usingtextlayoutmanager:)
-    @MainActor public convenience init(usingTextLayoutManager: Bool) { unimplemented() }
+    /// The port's text view always lays out with NSLayoutManager (TextKit 1), which is what
+    /// `usingTextLayoutManager: false` asks for; true still gives that view (its
+    /// `textLayoutManager` is nil, as for a TextKit 1 view on macOS).
+    @MainActor public convenience init(usingTextLayoutManager: Bool) {
+        NSTextView._requestedTextKit2 = usingTextLayoutManager
+        self.init(frame: .zero)
+    }
+    // The drag types follow what the view accepts, as AppKit's NSTextView re-registers when
+    // these change: a view made editable, rich or graphics-importing after init takes drops.
+    open override var isEditable: Bool {
+        get { super.isEditable }
+        set { super.isEditable = newValue; updateDragTypeRegistration() }
+    }
+    open override var isRichText: Bool {
+        get { super.isRichText }
+        set { super.isRichText = newValue; updateDragTypeRegistration() }
+    }
+    open override var importsGraphics: Bool {
+        get { super.importsGraphics }
+        set { super.importsGraphics = newValue; updateDragTypeRegistration() }
+    }
+
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/acceptabledragtypes
-    @MainActor open var acceptableDragTypes: [NSPasteboard.PasteboardType] { unimplemented() }
+    @MainActor open var acceptableDragTypes: [NSPasteboard.PasteboardType] {
+        isRichText && importsGraphics ? [.rtfd, .rtf, .fileURL, .png, .tiff, NSTextView._bmpType, .string] : isRichText ? [.rtf, .string] : [.string]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/acceptsglyphinfo
     @MainActor open var acceptsGlyphInfo: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.acceptsGlyphInfo }
+        set { _extras.acceptsGlyphInfo = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/alignjustified(_:)
-    @MainActor open func alignJustified(_ sender: Any?) { unimplemented() }
+    @MainActor open func alignJustified(_ sender: Any?) { alignment = .justified }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowedinputsourcelocales
     @MainActor open var allowedInputSourceLocales: [String]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.allowedInputSourceLocales }
+        set { _extras.allowedInputSourceLocales = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowedwritingtoolsresultoptions
     @available(macOS 15.0, *)
+    /// Stored; the port has no Writing Tools.
     @MainActor open var allowedWritingToolsResultOptions: NSWritingToolsResultOptions {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { NSWritingToolsResultOptions(rawValue: _extras.allowedWritingToolsResultOptionsRaw) }
+        set { _extras.allowedWritingToolsResultOptionsRaw = newValue.rawValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowscharacterpickertouchbaritem
     @available(macOS 10.12, *)
     @MainActor open var allowsCharacterPickerTouchBarItem: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.allowsCharacterPickerTouchBarItem }
+        set { _extras.allowsCharacterPickerTouchBarItem = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowsdocumentbackgroundcolorchange
     @MainActor open var allowsDocumentBackgroundColorChange: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.allowsDocumentBackgroundColorChange }
+        set { _extras.allowsDocumentBackgroundColorChange = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowsimageediting
     @MainActor open var allowsImageEditing: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.allowsImageEditing }
+        set { _extras.allowsImageEditing = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/allowsundo
     @MainActor open var allowsUndo: Bool {
@@ -578,35 +1084,83 @@ import CoreText
     }
     // SKIPPED (override type NSColor differs from superclass NSColor?): @MainActor var backgroundColor: NSColor { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/breakundocoalescing()
-    @MainActor open func breakUndoCoalescing() { unimplemented() }
+    /// Closes the open typing undo step: the next keystroke starts a new one.
+    @MainActor open func breakUndoCoalescing() { _extras.typingUndo = nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/candidatelisttouchbaritem
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changeattributes(_:)
-    @MainActor open func changeAttributes(_ sender: Any?) { unimplemented() }
-    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changecolor(_:)
-    @MainActor open func changeColor(_ sender: Any?) { unimplemented() }
+    /// `changeAttributes:` from the font manager (the Fonts panel's underline, strikethrough,
+    /// shadow and colour controls): each run's attributes go through
+    /// `NSFontManager.convertAttributes(_:)`.
+    @MainActor open func changeAttributes(_ sender: Any?) {
+        guard isEditable, _handlesPanelActions else { return }
+        let fm = (sender as? NSFontManager) ?? NSFontManager.shared
+        _withUndoName("Change Attributes") {
+            _changeSelectionAttributes { attrs in
+                var plain: [String: Any] = [:]
+                for (k, v) in attrs { plain[k.rawValue] = v }
+                var converted: [NSAttributedString.Key: Any] = [:]
+                for (k, v) in fm.convertAttributes(plain) { converted[NSAttributedString.Key(k)] = v }
+                attrs = converted
+            }
+        }
+    }
+    // changeColor(_:) and changeFont(_:): see "Font and colour panels" above.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changedocumentbackgroundcolor(_:)
-    @MainActor open func changeDocumentBackgroundColor(_ sender: Any?) { unimplemented() }
+    /// The sender's colour (a colour panel or well) becomes the view's background, when
+    /// `allowsDocumentBackgroundColorChange` (macOS ignores it otherwise).
+    @MainActor open func changeDocumentBackgroundColor(_ sender: Any?) {
+        guard allowsDocumentBackgroundColorChange else { return }
+        let color: NSColor
+        if let p = sender as? NSColorPanel { color = p.color }
+        else if let w = sender as? NSColorWell { color = w.color }
+        else if let c = sender as? NSColor { color = c }
+        else { return }
+        backgroundColor = color
+        drawsBackground = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/changelayoutorientation(_:)
-    @MainActor open func changeLayoutOrientation(_ sender: Any?) { unimplemented() }
+    /// The sender's tag picks the orientation (0 horizontal, 1 vertical).
+    @MainActor open func changeLayoutOrientation(_ sender: Any?) {
+        let tag = (sender as? NSMenuItem)?.tag ?? (sender as? NSControl)?.tag ?? 0
+        setLayoutOrientation(NSLayoutManager.TextLayoutOrientation(rawValue: tag) ?? .horizontal)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/characterindexforinsertion(at:)
     @MainActor open func characterIndexForInsertion(at point: NSPoint) -> Int { _offset(at: point) }
     // SKIPPED (Foundation.NSTextCheckingTypes not in corelibs): @MainActor func checkText(in range: NSRange, types checkingTypes: NSTextCheckingTypes, options: [NSSpellChecker.OptionKey : Any] = [:])
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/checktextindocument(_:)
-    @MainActor open func checkTextInDocument(_ sender: Any?) { unimplemented() }
+    @MainActor open func checkTextInDocument(_ sender: Any?) {
+        _markSpelling(in: NSRange(location: 0, length: (string as NSString).length))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/checktextinselection(_:)
-    @MainActor open func checkTextInSelection(_ sender: Any?) { unimplemented() }
+    @MainActor open func checkTextInSelection(_ sender: Any?) {
+        _markSpelling(in: selectedRange.length > 0 ? selectedRange : NSRange(location: 0, length: (string as NSString).length))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/cleanupafterdragoperation()
-    @MainActor open func cleanUpAfterDragOperation() { unimplemented() }
+    /// Nothing is left over: drops insert at once.
+    @MainActor open func cleanUpAfterDragOperation() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/clicked(onlink:at:)
-    @MainActor open func clicked(onLink link: Any, at charIndex: Int) { unimplemented() }
+    @MainActor open func clicked(onLink link: Any, at charIndex: Int) {
+        if _viewDelegate?.textView(self, clickedOnLink: link, at: charIndex) == true { return }
+        // No workspace to open URLs with here: an unhandled link click selects the link.
+        if let st = textStorage, charIndex < st.length {
+            var r = NSRange(location: 0, length: 0)
+            _ = st.attribute(.link, at: charIndex, effectiveRange: &r)
+            setSelectedRange(r)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/complete(_:)
-    @MainActor open func complete(_ sender: Any?) { unimplemented() }
+    @MainActor open func complete(_ sender: Any?) { _completeWord() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/completions(forpartialwordrange:indexofselecteditem:)
-    @MainActor open func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? { unimplemented() }
+    @MainActor open func completions(forPartialWordRange charRange: NSRange, indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? {
+        index.pointee = 0
+        let words = NSSpellChecker.shared.completions(forPartialWordRange: charRange, in: string, language: nil, inSpellDocumentWithTag: _spellTag) ?? []
+        let chosen = _viewDelegate?.textView(self, completions: words, forPartialWordRange: charRange, indexOfSelectedItem: index) ?? words
+        return chosen.isEmpty ? nil : chosen
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/defaultparagraphstyle
     @MainActor open var defaultParagraphStyle: NSParagraphStyle? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.defaultParagraphStyle }
+        set { _extras.defaultParagraphStyle = newValue; if let p = newValue { var t = typingAttributes; t[.paragraphStyle] = p; typingAttributes = t } }
     }
     // SKIPPED (override type (any NSTextViewDelegate)? differs from superclass (any NSTextDelegate)?): @MainActor var delegate: (any NSTextViewDelegate)? { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/didchangeselectionnotification
@@ -620,38 +1174,126 @@ import CoreText
     static public var didSwitchToNSLayoutManagerNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextViewDidSwitchToNSLayoutManagerNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/displayslinktooltips
     @MainActor open var displaysLinkToolTips: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.displaysLinkToolTips }
+        set { _extras.displaysLinkToolTips = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/dragimageforselection(with:origin:)
-    @MainActor open func dragImageForSelection(with event: NSEvent, origin: NSPointPointer?) -> NSImage? { unimplemented() }
+    /// The selected text drawn over its bounding rect; `origin` gets the image's bottom-left
+    /// corner in view coordinates. Nil without a selection.
+    @MainActor open func dragImageForSelection(with event: NSEvent, origin: NSPointPointer?) -> NSImage? {
+        let sel = selectedRange
+        guard sel.length > 0, let st = textStorage else { return nil }
+        let rects = _rects(forCharacterRange: sel)
+        guard let first = rects.first else { return nil }
+        let box = rects.dropFirst().reduce(first) { $0.union($1) }.integral
+        let text = st.attributedSubstring(from: sel)
+        let image = NSImage(size: box.size, flipped: true) { _ in
+            text.draw(with: NSRect(origin: .zero, size: box.size), options: [.usesLineFragmentOrigin], context: nil)
+            return true
+        }
+        origin?.pointee = NSPoint(x: box.minX, y: isFlipped ? box.maxY : box.minY)
+        return image
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/dragoperation(for:type:)
-    @MainActor open func dragOperation(for dragInfo: any NSDraggingInfo, type: NSPasteboard.PasteboardType) -> NSDragOperation { unimplemented() }
+    @MainActor open func dragOperation(for dragInfo: any NSDraggingInfo, type: NSPasteboard.PasteboardType) -> NSDragOperation {
+        isEditable && acceptableDragTypes.contains(type) ? (dragInfo.draggingSourceOperationMask.contains(.copy) || dragInfo.draggingSourceOperationMask.isEmpty ? .copy : dragInfo.draggingSourceOperationMask.intersection([.copy, .generic, .move])) : []
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/dragselection(with:offset:slideback:)
-    @MainActor open func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool { unimplemented() }
+    /// Starts a drag of the selected text (rich text when the view is rich) with the
+    /// selection's image; false without a selection.
+    @MainActor open func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool {
+        let sel = selectedRange
+        guard sel.length > 0, let st = textStorage else { return false }
+        var origin = NSPoint.zero
+        let image = dragImageForSelection(with: event, origin: &origin)
+        let text = st.attributedSubstring(from: sel)
+        let writer = NSPasteboardItem()
+        _ = writer.setString(text.string, forType: .string)
+        if isRichText, let rtf = text.rtf(from: NSRange(location: 0, length: text.length), documentAttributes: [:]) { _ = writer.setData(rtf, forType: .rtf) }
+        let item = NSDraggingItem(pasteboardWriter: writer)
+        let size = image?.size ?? .zero
+        item.setDraggingFrame(NSRect(x: origin.x + mouseOffset.width, y: (isFlipped ? origin.y - size.height : origin.y) + mouseOffset.height, width: size.width, height: size.height), contents: image)
+        let session = beginDraggingSession(with: [item], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = slideBack
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/drawbackground(in:)
-    @MainActor open func drawBackground(in rect: NSRect) { unimplemented() }
+    @MainActor open func drawBackground(in rect: NSRect) {
+        if drawsBackground, let bg = backgroundColor { bg.setFill(); NSBezierPath.fill(rect) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/drawinsertionpoint(in:color:turnedon:)
-    @MainActor open func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) { unimplemented() }
+    @MainActor open func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        if flag { color.setFill(); NSBezierPath.fill(rect) } else { needsDisplay = true }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/drawtexthighlightbackground(for:origin:)
     @available(macOS 15.0, *)
-    @MainActor open func drawTextHighlightBackground(for textRange: NSTextRange, origin: NSPoint) { unimplemented() }
+    /// Fills the highlight's segments (the text container's origin at `origin`) with the
+    /// highlight tint, as the view draws `NSTextHighlightStyle` runs.
+    @MainActor open func drawTextHighlightBackground(for textRange: NSTextRange, origin: NSPoint) {
+        let tint = (_extras.textHighlightAttributes[.foregroundColor] as? NSColor) ?? .controlAccentColor
+        tint.withAlphaComponent(0.2).setFill()
+        func fill(_ r: NSRect) { NSBezierPath(roundedRect: r.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -1, dy: 0), xRadius: 3, yRadius: 3).fill() }
+        if let tlm = _textLayoutManager {
+            tlm.enumerateTextSegments(in: textRange, type: .highlight, options: [.rangeNotRequired]) { _, r, _, _ in fill(r); return true }
+            return
+        }
+        guard let r = textRange._nsRange else { return }
+        _layoutManager.enumerateEnclosingRects(forGlyphRange: _clamped(r), withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: _container) { rect, _ in fill(rect) }
+    }
     // SKIPPED (Foundation.NSTextCheckingTypes not in corelibs): @MainActor var enabledTextCheckingTypes: NSTextCheckingTypes { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/fieldeditor()
     @available(macOS 10.14, *)
-    @MainActor public class func fieldEditor() -> Self { unimplemented() }
+    /// A new field editor: rich text, editable and selectable, no undo, zero frame (macOS 15).
+    @MainActor public class func fieldEditor() -> Self {
+        let editor = self.init(coder: NSCoder())!
+        editor.frame = .zero
+        editor.isFieldEditor = true
+        editor.isRichText = true
+        editor.isEditable = true
+        editor.isSelectable = true
+        editor.allowsUndo = false
+        editor.isHorizontallyResizable = false
+        return editor
+    }
     // SKIPPED (Foundation.NSTextCheckingTypes not in corelibs): @MainActor func handleTextCheckingResults(_ results: [NSTextCheckingResult], forRange range: NSRange, types checkingTypes: NSTextCheckingTypes, options: [NSSpellChecker.OptionKey : Any] = [:], orthography: NSOrthography, wordCount: Int)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/highlight(_:)
     @available(macOS 15.0, *)
-    @MainActor open func highlight(_ sender: Any?) { unimplemented() }
+    /// Toggles a text highlight (`.textHighlightStyle` default and `.textHighlightColorScheme`
+    /// default) over the selection, as macOS 15's Format > Highlight.
+    @MainActor open func highlight(_ sender: Any?) {
+        let r = selectedRange
+        guard isEditable, isRichText, r.length > 0, let st = textStorage, shouldChangeText(in: r, replacementString: nil) else { return }
+        let on = st.attribute(.textHighlightStyle, at: r.location, effectiveRange: nil) == nil
+        if on {
+            st.addAttributes([.textHighlightStyle: NSAttributedString.TextHighlightStyle.default.rawValue,
+                              .textHighlightColorScheme: NSAttributedString.TextHighlightColorScheme.default.rawValue], range: r)
+        } else {
+            st.removeAttribute(.textHighlightStyle, range: r)
+            st.removeAttribute(.textHighlightColorScheme, range: r)
+        }
+        _invalidateLayout()
+        didChangeText()
+        needsDisplay = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/inlinepredictiontype
     @available(macOS 14.0, *)
     @MainActor open var inlinePredictionType: NSTextInputTraitType {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.inlinePredictionType }
+        set { _extras.inlinePredictionType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/insertcompletion(_:forpartialwordrange:movement:isfinal:)
-    @MainActor open func insertCompletion(_ word: String, forPartialWordRange charRange: NSRange, movement: Int, isFinal flag: Bool) { unimplemented() }
+    @MainActor open func insertCompletion(_ word: String, forPartialWordRange charRange: NSRange, movement: Int, isFinal flag: Bool) {
+        // Not final: shown in place as the selection moves; final: inserted (or, on cancel, the
+        // partial word restored).
+        let r = _clamped(NSRange(location: charRange.location, length: max(charRange.length, selectedRange.location + selectedRange.length - charRange.location)))
+        let text = movement == NSTextMovement.cancel.rawValue ? (_extras.completionPartial ?? (string as NSString).substring(with: charRange)) : word
+        guard shouldChangeText(in: r, replacementString: text) else { return }
+        _finderReplace(r, with: text)
+        let end = r.location + (text as NSString).length
+        setSelectedRange(flag ? NSRange(location: end, length: 0) : NSRange(location: charRange.location + charRange.length, length: max(0, end - charRange.location - charRange.length)))
+        if flag { _extras.completionPartial = nil }
+        didChangeText()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/inserttext(_:)
     @MainActor open func insertText(_ insertString: Any) { insertText(insertString, replacementRange: NSRange(location: NSNotFound, length: 0)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/insertionpointcolor
@@ -660,21 +1302,23 @@ import CoreText
         set { _insertionPointColor = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/invalidatetextcontainerorigin()
-    @MainActor open func invalidateTextContainerOrigin() { unimplemented() }
+    @MainActor open func invalidateTextContainerOrigin() {
+        needsDisplay = true   // textContainerOrigin is computed from the inset on demand
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomaticdashsubstitutionenabled
     @MainActor open var isAutomaticDashSubstitutionEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.isAutomaticDashSubstitutionEnabled }
+        set { _extras.isAutomaticDashSubstitutionEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomaticdatadetectionenabled
     @MainActor open var isAutomaticDataDetectionEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.isAutomaticDataDetectionEnabled }
+        set { _extras.isAutomaticDataDetectionEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomaticlinkdetectionenabled
     @MainActor open var isAutomaticLinkDetectionEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.isAutomaticLinkDetectionEnabled }
+        set { _extras.isAutomaticLinkDetectionEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomaticquotesubstitutionenabled
     @MainActor open var isAutomaticQuoteSubstitutionEnabled: Bool {
@@ -689,21 +1333,27 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomatictextcompletionenabled
     @available(macOS 10.12, *)
     @MainActor open var isAutomaticTextCompletionEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.isAutomaticTextCompletionEnabled }
+        set { _extras.isAutomaticTextCompletionEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isautomatictextreplacementenabled
     @MainActor open var isAutomaticTextReplacementEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.isAutomaticTextReplacementEnabled }
+        set { _extras.isAutomaticTextReplacementEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/iscoalescingundo
-    @MainActor open var isCoalescingUndo: Bool { unimplemented() }
+    /// True while keystrokes are joining one undo step.
+    @MainActor open var isCoalescingUndo: Bool { _extras.typingUndo != nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/iscontinuousspellcheckingenabled
     @MainActor open var isContinuousSpellCheckingEnabled: Bool {
         get { _isContinuousSpellCheckingEnabled }
-        set { _isContinuousSpellCheckingEnabled = newValue }
+        set {
+            guard newValue != _isContinuousSpellCheckingEnabled else { return }
+            _isContinuousSpellCheckingEnabled = newValue
+            _spellingDidChange()
+        }
     }
+    /// Stored only: grammar checking is not implemented (NSSpellChecker finds nothing).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isgrammarcheckingenabled
     @MainActor open var isGrammarCheckingEnabled: Bool {
         get { _isGrammarCheckingEnabled }
@@ -711,23 +1361,31 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/isincrementalsearchingenabled
     @MainActor open var isIncrementalSearchingEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.incrementalSearching }
+        set { _extras.incrementalSearching = newValue; _extras.finder?.isIncrementalSearchingEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/iswritingtoolsactive
     @available(macOS 15.0, *)
-    @MainActor open var isWritingToolsActive: Bool { unimplemented() }
+    @MainActor open var isWritingToolsActive: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/layoutmanager
-    @MainActor open var layoutManager: NSLayoutManager? { _layoutManager }
+    /// Asking a TextKit 2 view for its layout manager switches it to TextKit 1 for good, as
+    /// AppKit's compatibility mode does (ADR-0040).
+    @MainActor open var layoutManager: NSLayoutManager? {
+        if _textLayoutManager != nil { _switchToTextKit1() }
+        return _layoutManager
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/linktextattributes
     @MainActor open var linkTextAttributes: [NSAttributedString.Key : Any]? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.linkTextAttributes }
+        set {
+            _extras.linkTextAttributes = newValue
+            _textLayoutManager?._restyleLaidOutFragments()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/loosenkerning(_:)
-    @MainActor open func loosenKerning(_ sender: Any?) { unimplemented() }
+    @MainActor open func loosenKerning(_ sender: Any?) { _adjustKern(by: 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/lowerbaseline(_:)
-    @MainActor open func lowerBaseline(_ sender: Any?) { unimplemented() }
+    @MainActor open func lowerBaseline(_ sender: Any?) { _adjustBaseline(by: -1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/markedtextattributes
     @MainActor open var markedTextAttributes: [NSAttributedString.Key : Any]? {
         get { _markedTextAttributes }
@@ -736,70 +1394,176 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/mathexpressioncompletiontype
     @available(macOS 15.0, *)
     @MainActor open var mathExpressionCompletionType: NSTextInputTraitType {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.mathExpressionCompletionType }
+        set { _extras.mathExpressionCompletionType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontlinkpanel(_:)
-    @MainActor open func orderFrontLinkPanel(_ sender: Any?) { unimplemented() }
+    /// Edit > Add Link: asks for a URL in an alert and links the selection to it (an empty
+    /// field removes the link).
+    @MainActor open func orderFrontLinkPanel(_ sender: Any?) {
+        let r = selectedRange
+        guard isEditable, isRichText, r.length > 0, let st = textStorage else { return }
+        let alert = NSAlert()
+        alert.messageText = "Link"
+        alert.informativeText = "Enter the destination URL for the selected text."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        if let existing = st.attribute(.link, at: r.location, effectiveRange: nil) { field.stringValue = (existing as? URL)?.absoluteString ?? "\(existing)" }
+        alert.accessoryView = field
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        setSelectedRange(r)
+        _applyLink(field.stringValue)
+    }
+
+    /// Links the selection to `text` (a URL when it parses as one), or removes the link when empty.
+    internal func _applyLink(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        _withUndoName("Link") { _setCharacterAttribute(.link, t.isEmpty ? nil : (URL(string: t) as Any?) ?? t) }
+        needsDisplay = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontlistpanel(_:)
-    @MainActor open func orderFrontListPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontListPanel(_ sender: Any?) {
+        // A menu item that names a marker format applies it at once; otherwise the panel opens.
+        if let format = ((sender as? NSMenuItem)?.representedObject as? String) {
+            _applyList(markerFormat: format.isEmpty ? nil : NSTextList.MarkerFormat(rawValue: format))
+            return
+        }
+        _NSListPanel.show(for: self)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontsharingservicepicker(_:)
-    @MainActor open func orderFrontSharingServicePicker(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontSharingServicePicker(_ sender: Any?) { appleOnlyUnavailable("NSTextView.orderFrontSharingServicePicker — sharing services are macOS system services") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontspacingpanel(_:)
-    @MainActor open func orderFrontSpacingPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontSpacingPanel(_ sender: Any?) { unimplemented("NSTextView.orderFrontSpacingPanel — the spacing panel is not built yet; line and paragraph spacing are set through the ruler and defaultParagraphStyle") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfrontsubstitutionspanel(_:)
-    @MainActor open func orderFrontSubstitutionsPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontSubstitutionsPanel(_ sender: Any?) {
+        NSSpellChecker.shared.substitutionsPanel.makeKeyAndOrderFront(sender)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/orderfronttablepanel(_:)
-    @MainActor open func orderFrontTablePanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontTablePanel(_ sender: Any?) {
+        // A menu item whose represented object is [rows, columns] inserts that table at once.
+        if let size = (sender as? NSMenuItem)?.representedObject as? [Int], size.count == 2 { _insertTable(rows: size[0], columns: size[1]); return }
+        _NSTablePanel.show(for: self)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/outline(_:)
-    @MainActor open func outline(_ sender: Any?) { unimplemented() }
+    /// Toggles outlined glyphs (stroke width 3, macOS's value) over the selection.
+    @MainActor open func outline(_ sender: Any?) {
+        _toggleCharacterAttribute(.strokeWidth, NSNumber(value: 3), name: "Outline") { (($0 as? NSNumber)?.doubleValue ?? 0) != 0 }
+    }
+
+    /// Toggles a single underline over the selection (Format > Font > Underline).
+    @MainActor open override func underline(_ sender: Any?) {
+        _toggleCharacterAttribute(.underlineStyle, NSNumber(value: NSUnderlineStyle.single.rawValue), name: "Underline") { (($0 as? NSNumber)?.intValue ?? 0) != 0 }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/pasteasplaintext(_:)
-    @MainActor open func pasteAsPlainText(_ sender: Any?) { unimplemented() }
+    @MainActor open func pasteAsPlainText(_ sender: Any?) {
+        guard isEditable, let s = NSPasteboard.general.string(forType: .string) else { return }
+        _insertPasted(NSAttributedString(string: s, attributes: typingAttributes))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/pasteasrichtext(_:)
-    @MainActor open func pasteAsRichText(_ sender: Any?) { unimplemented() }
+    @MainActor open func pasteAsRichText(_ sender: Any?) {
+        guard isEditable, let c = _readContent(from: .general) else { return }
+        _insertPasted(c)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/performfindpanelaction(_:)
-    @MainActor open func performFindPanelAction(_ sender: Any?) { unimplemented() }
+    @MainActor open func performFindPanelAction(_ sender: Any?) {
+        _performFind(tag: (sender as? NSMenuItem)?.tag ?? (sender as? NSControl)?.tag ?? 1)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/performvalidatedreplacement(in:with:)
     @available(macOS 10.14, *)
-    @MainActor open func performValidatedReplacement(in range: NSRange, with attributedString: NSAttributedString) -> Bool { unimplemented() }
+    @MainActor open func performValidatedReplacement(in range: NSRange, with attributedString: NSAttributedString) -> Bool {
+        let r = _clamped(range)
+        guard shouldChangeText(in: r, replacementString: attributedString.string) else { return false }
+        // Attributes the replacement does not give come from the text it replaces.
+        let base = r.length > 0 ? (textStorage?.attributes(at: r.location, effectiveRange: nil) ?? typingAttributes) : typingAttributes
+        let m = NSMutableAttributedString(string: attributedString.string, attributes: base)
+        attributedString.enumerateAttributes(in: NSRange(location: 0, length: attributedString.length), options: []) { a, sub, _ in m.addAttributes(a, range: sub) }
+        textStorage?.replaceCharacters(in: r, with: m)
+        _invalidateLayout()
+        setSelectedRange(NSRange(location: r.location + m.length, length: 0))
+        didChangeText()
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/preferredpasteboardtype(from:restrictedtotypesfrom:)
-    @MainActor open func preferredPasteboardType(from availableTypes: [NSPasteboard.PasteboardType], restrictedToTypesFrom allowedTypes: [NSPasteboard.PasteboardType]?) -> NSPasteboard.PasteboardType? { unimplemented() }
+    @MainActor open func preferredPasteboardType(from availableTypes: [NSPasteboard.PasteboardType], restrictedToTypesFrom allowedTypes: [NSPasteboard.PasteboardType]?) -> NSPasteboard.PasteboardType? {
+        readablePasteboardTypes.first { availableTypes.contains($0) && (allowedTypes?.contains($0) ?? true) }
+    }
     // SKIPPED (unknown module (QuickLook QLPreviewItem)): @MainActor func quickLookPreviewableItems(inRanges ranges: [NSValue]) -> [any QLPreviewItem]
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/raisebaseline(_:)
-    @MainActor open func raiseBaseline(_ sender: Any?) { unimplemented() }
+    @MainActor open func raiseBaseline(_ sender: Any?) { _adjustBaseline(by: 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangeforusercharacterattributechange
-    @MainActor open var rangeForUserCharacterAttributeChange: NSRange { unimplemented() }
+    @MainActor open var rangeForUserCharacterAttributeChange: NSRange {
+        isEditable && isRichText ? selectedRange : NSRange(location: NSNotFound, length: 0)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangeforusercompletion
-    @MainActor open var rangeForUserCompletion: NSRange { unimplemented() }
+    @MainActor open var rangeForUserCompletion: NSRange {
+        // The word ending at the insertion point.
+        let sel = selectedRange
+        guard sel.length == 0, sel.location > 0 else { return NSRange(location: NSNotFound, length: 0) }
+        let s = string as NSString
+        var a = sel.location
+        while a > 0 {
+            guard let u = UnicodeScalar(s.character(at: a - 1)), CharacterSet.alphanumerics.contains(u) || u == "'" else { break }
+            a -= 1
+        }
+        return a < sel.location ? NSRange(location: a, length: sel.location - a) : NSRange(location: NSNotFound, length: 0)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangeforuserparagraphattributechange
-    @MainActor open var rangeForUserParagraphAttributeChange: NSRange { unimplemented() }
+    @MainActor open var rangeForUserParagraphAttributeChange: NSRange {
+        isEditable && isRichText ? _paragraphsRange(selectedRange) : NSRange(location: NSNotFound, length: 0)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangeforusertextchange
-    @MainActor open var rangeForUserTextChange: NSRange { unimplemented() }
+    @MainActor open var rangeForUserTextChange: NSRange {
+        isEditable ? (_markedRange ?? selectedRange) : NSRange(location: NSNotFound, length: 0)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangesforusercharacterattributechange
-    @MainActor open var rangesForUserCharacterAttributeChange: [NSValue]? { unimplemented() }
+    @MainActor open var rangesForUserCharacterAttributeChange: [NSValue]? {
+        let r = rangeForUserCharacterAttributeChange; return r.location == NSNotFound ? nil : [NSValue(range: r)]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangesforuserparagraphattributechange
-    @MainActor open var rangesForUserParagraphAttributeChange: [NSValue]? { unimplemented() }
+    @MainActor open var rangesForUserParagraphAttributeChange: [NSValue]? {
+        let r = rangeForUserParagraphAttributeChange; return r.location == NSNotFound ? nil : [NSValue(range: r)]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/rangesforusertextchange
-    @MainActor open var rangesForUserTextChange: [NSValue]? { unimplemented() }
+    @MainActor open var rangesForUserTextChange: [NSValue]? {
+        let r = rangeForUserTextChange; return r.location == NSNotFound ? nil : [NSValue(range: r)]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/readselection(from:)
-    @MainActor open func readSelection(from pboard: NSPasteboard) -> Bool { unimplemented() }
+    @MainActor open func readSelection(from pboard: NSPasteboard) -> Bool {
+        guard let c = _readContent(from: pboard) else { return false }
+        _insertPasted(c, smart: pboard.types?.contains(NSTextView._smartPasteType) == true)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/readselection(from:type:)
-    @MainActor open func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool { unimplemented() }
+    @MainActor open func readSelection(from pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard let c = _readContent(from: pboard, type: type) else { return false }
+        _insertPasted(c, smart: pboard.types?.contains(NSTextView._smartPasteType) == true)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/readablepasteboardtypes
-    @MainActor open var readablePasteboardTypes: [NSPasteboard.PasteboardType] { unimplemented() }
+    @MainActor open var readablePasteboardTypes: [NSPasteboard.PasteboardType] { acceptableDragTypes }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/registerforservices()
-    @MainActor public class func registerForServices() { unimplemented() }
+    /// Does nothing: the Services menu is a macOS system service (ADR-0038).
+    @MainActor public class func registerForServices() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/replacetextcontainer(_:)
-    @MainActor open func replaceTextContainer(_ newContainer: NSTextContainer) { unimplemented() }
+    @MainActor open func replaceTextContainer(_ newContainer: NSTextContainer) {
+        guard newContainer !== _container else { return }
+        if let lm = newContainer.layoutManager, lm !== _layoutManager, let i = lm.textContainers.firstIndex(where: { $0 === newContainer }) { lm.removeTextContainer(at: i) }
+        if let i = _layoutManager.textContainers.firstIndex(where: { $0 === _container }) {
+            _layoutManager.removeTextContainer(at: i)
+            _layoutManager.insertTextContainer(newContainer, at: i)
+        }
+        textContainer = newContainer
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/scrollabledocumentcontenttextview()
     @available(macOS 10.14, *)
-    @MainActor public class func scrollableDocumentContentTextView() -> NSScrollView { unimplemented() }
+    @MainActor public class func scrollableDocumentContentTextView() -> NSScrollView { NSTextView._scrollable(rich: true) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/scrollableplaindocumentcontenttextview()
     @available(macOS 10.14, *)
-    @MainActor public class func scrollablePlainDocumentContentTextView() -> NSScrollView { unimplemented() }
+    @MainActor public class func scrollablePlainDocumentContentTextView() -> NSScrollView { NSTextView._scrollable(rich: false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/scrollabletextview()
     @available(macOS 10.14, *)
-    @MainActor public class func scrollableTextView() -> NSScrollView { unimplemented() }
+    @MainActor public class func scrollableTextView() -> NSScrollView { NSTextView._scrollable(rich: true, document: false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/selectedranges
     @MainActor open var selectedRanges: [NSValue] {
         get { [NSValue(range: selectedRange)] }
@@ -811,36 +1575,85 @@ import CoreText
         set { _selectedTextAttributes = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/selectionaffinity
-    @MainActor open var selectionAffinity: NSSelectionAffinity { unimplemented() }
+    @MainActor open var selectionAffinity: NSSelectionAffinity { .downstream }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/selectiongranularity
     @MainActor open var selectionGranularity: NSSelectionGranularity {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.selectionGranularity }
+        set { _extras.selectionGranularity = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/selectionrange(forproposedrange:granularity:)
-    @MainActor open func selectionRange(forProposedRange proposedCharRange: NSRange, granularity: NSSelectionGranularity) -> NSRange { unimplemented() }
+    @MainActor open func selectionRange(forProposedRange proposedCharRange: NSRange, granularity: NSSelectionGranularity) -> NSRange {
+        let r = _clamped(proposedCharRange)
+        switch granularity {
+        case .selectByWord:
+            let a = _wordRange(at: r.location), b = _wordRange(at: max(r.location, NSMaxRange(r) - (r.length > 0 ? 1 : 0)))
+            return NSUnionRange(a, b)
+        case .selectByParagraph: return _paragraphsRange(r)
+        default: return r
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setalignment(_:range:)
-    @MainActor open func setAlignment(_ alignment: NSTextAlignment, range: NSRange) { unimplemented() }
+    @MainActor open func setAlignment(_ alignment: NSTextAlignment, range: NSRange) {
+        let r = _paragraphsRange(range)
+        guard let st = textStorage, r.length > 0 else { return }
+        st.beginEditing()
+        st.enumerateAttribute(.paragraphStyle, in: r, options: []) { v, sub, _ in
+            let ps = ((v as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            ps.alignment = alignment
+            st.addAttribute(.paragraphStyle, value: ps, range: sub)
+        }
+        st.endEditing()
+        _invalidateLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setbasewritingdirection(_:range:)
-    @MainActor open func setBaseWritingDirection(_ writingDirection: NSWritingDirection, range: NSRange) { unimplemented() }
+    @MainActor open func setBaseWritingDirection(_ writingDirection: NSWritingDirection, range: NSRange) {
+        let r = _paragraphsRange(range)
+        guard let st = textStorage, r.length > 0 else { return }
+        st.beginEditing()
+        st.enumerateAttribute(.paragraphStyle, in: r, options: []) { v, sub, _ in
+            let ps = ((v as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            ps.baseWritingDirection = writingDirection
+            st.addAttribute(.paragraphStyle, value: ps, range: sub)
+        }
+        st.endEditing()
+        _invalidateLayout()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setconstrainedframesize(_:)
-    @MainActor open func setConstrainedFrameSize(_ desiredSize: NSSize) { unimplemented() }
+    @MainActor open func setConstrainedFrameSize(_ desiredSize: NSSize) {
+        setFrameSize(NSSize(width: isHorizontallyResizable ? max(minSize.width, min(maxSize.width, desiredSize.width)) : frame.width,
+                            height: isVerticallyResizable ? max(minSize.height, min(maxSize.height, desiredSize.height)) : frame.height))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setlayoutorientation(_:)
-    @MainActor open func setLayoutOrientation(_ orientation: NSLayoutManager.TextLayoutOrientation) { unimplemented() }
+    /// Horizontal is the port's layout; vertical text layout is not implemented.
+    @MainActor open func setLayoutOrientation(_ orientation: NSLayoutManager.TextLayoutOrientation) {
+        guard orientation == .horizontal else { unimplemented("NSTextView.setLayoutOrientation(.vertical) — the port's text layout is horizontal only") }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setneedsdisplay(_:avoidadditionallayout:)
-    @MainActor open func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) { unimplemented() }
+    @MainActor open func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) { setNeedsDisplay(rect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setselectedrange(_:)
     @MainActor open func setSelectedRange(_ charRange: NSRange) { _selectionAnchor = nil; selectedRange = charRange }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setselectedrange(_:affinity:stillselecting:)
     @MainActor open func setSelectedRange(_ charRange: NSRange, affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) { selectedRange = charRange }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setselectedranges(_:affinity:stillselecting:)
-    @MainActor open func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) { unimplemented() }
+    @MainActor open func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting stillSelectingFlag: Bool) {
+        if let first = ranges.first { setSelectedRange(first.rangeValue) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/setspellingstate(_:range:)
-    @MainActor open func setSpellingState(_ value: Int, range charRange: NSRange) { unimplemented() }
+    @MainActor open func setSpellingState(_ value: Int, range charRange: NSRange) {
+        let v = _viewDelegate?.textView(self, shouldSetSpellingState: value, range: charRange) ?? value
+        let r = _clamped(charRange)
+        _setSpellingMark(v, range: r)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shouldchangetext(in:replacementstring:)
+    /// The delegate's (`undoManager(for:)`), else the window's (ADR-0038).
+    @MainActor open override var undoManager: UndoManager? { _viewDelegate?.undoManager(for: self) ?? super.undoManager }
+    /// Approved changes register their undo step here (ADR-0038), as on macOS.
     @MainActor open func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         guard isEditable else { return false }
-        return _viewDelegate?.textView(self, shouldChangeTextIn: affectedCharRange, replacementString: replacementString) ?? true
+        guard _viewDelegate?.textView(self, shouldChangeTextIn: affectedCharRange, replacementString: replacementString) ?? true else { return false }
+        _recordUndo(for: affectedCharRange, replacementString: replacementString)
+        _noteSpellingDirty(affectedCharRange, replacementLength: replacementString.map { ($0 as NSString).length } ?? affectedCharRange.length)
+        return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shouldchangetext(inranges:replacementstrings:)
     @MainActor open func shouldChangeText(inRanges affectedRanges: [NSValue], replacementStrings: [String]?) -> Bool {
@@ -848,36 +1661,56 @@ import CoreText
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/shoulddrawinsertionpoint
-    @MainActor open var shouldDrawInsertionPoint: Bool { unimplemented() }
+    @MainActor open var shouldDrawInsertionPoint: Bool {
+        window?.firstResponder === self && isEditable && (window?.isKeyWindow ?? true)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/showfindindicator(for:)
-    @MainActor open func showFindIndicator(for charRange: NSRange) { unimplemented() }
+    @MainActor open func showFindIndicator(for charRange: NSRange) {
+        scrollRangeToVisible(charRange); _extras.finder?.findIndicatorNeedsUpdate = true; needsDisplay = true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/smartdeleterange(forproposedrange:)
-    @MainActor open func smartDeleteRange(forProposedRange proposedCharRange: NSRange) -> NSRange { unimplemented() }
+    @MainActor open func smartDeleteRange(forProposedRange proposedCharRange: NSRange) -> NSRange { _smartDeleteRange(_clamped(proposedCharRange)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/smartinsert(afterstringfor:replacing:)
-    @MainActor open func smartInsert(afterStringFor pasteString: String, replacing charRangeToReplace: NSRange) -> String? { unimplemented() }
+    @MainActor open func smartInsert(afterStringFor pasteString: String, replacing charRangeToReplace: NSRange) -> String? {
+        _smartInsert(pasteString, replacing: _clamped(charRangeToReplace)).after
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/smartinsert(beforestringfor:replacing:)
-    @MainActor open func smartInsert(beforeStringFor pasteString: String, replacing charRangeToReplace: NSRange) -> String? { unimplemented() }
+    @MainActor open func smartInsert(beforeStringFor pasteString: String, replacing charRangeToReplace: NSRange) -> String? {
+        _smartInsert(pasteString, replacing: _clamped(charRangeToReplace)).before
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/smartinsert(for:replacing:before:after:)
-    @MainActor open func smartInsert(for pasteString: String, replacing charRangeToReplace: NSRange, before beforeString: AutoreleasingUnsafeMutablePointer<NSString?>?, after afterString: AutoreleasingUnsafeMutablePointer<NSString?>?) { unimplemented() }
+    @MainActor open func smartInsert(for pasteString: String, replacing charRangeToReplace: NSRange, before beforeString: AutoreleasingUnsafeMutablePointer<NSString?>?, after afterString: AutoreleasingUnsafeMutablePointer<NSString?>?) {
+        let r = _smartInsert(pasteString, replacing: _clamped(charRangeToReplace))
+        beforeString?.pointee = r.before.map { $0 as NSString }
+        afterString?.pointee = r.after.map { $0 as NSString }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/smartinsertdeleteenabled
     @MainActor open var smartInsertDeleteEnabled: Bool {
         get { _smartInsertDeleteEnabled }
         set { _smartInsertDeleteEnabled = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/spellcheckerdocumenttag
-    @MainActor open var spellCheckerDocumentTag: Int { unimplemented() }
+    @MainActor open var spellCheckerDocumentTag: Int { _spellTag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/startspeaking(_:)
-    @MainActor open func startSpeaking(_ sender: Any?) { unimplemented() }
+    @MainActor open func startSpeaking(_ sender: Any?) { appleOnlyUnavailable("NSTextView.startSpeaking — speaks through the macOS speech engine (NSSpeechSynthesizer, Apple-only)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/stopspeaking(_:)
-    @MainActor open func stopSpeaking(_ sender: Any?) { unimplemented() }
+    @MainActor open func stopSpeaking(_ sender: Any?) { appleOnlyUnavailable("NSTextView.stopSpeaking — speaks through the macOS speech engine (NSSpeechSynthesizer, Apple-only)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/stronglyreferencestextstorage
     @available(macOS 10.12, *)
-    @MainActor class public var stronglyReferencesTextStorage: Bool { unimplemented() }
+    @MainActor class public var stronglyReferencesTextStorage: Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontainer
     @MainActor open var textContainer: NSTextContainer? {
         get { _container }
         set {
             guard let c = newValue, c !== _container else { return }
+            if let tlm = _textLayoutManager {
+                _container.textView = nil
+                _container = c
+                tlm.textContainer = c
+                _wireTextSystem()
+                needsDisplay = true
+                return
+            }
             if let i = _layoutManager.textContainers.firstIndex(where: { $0 === _container }) { _layoutManager.removeTextContainer(at: i) }
             _container.textView = nil
             _container = c
@@ -898,131 +1731,218 @@ import CoreText
     @MainActor open var textContainerOrigin: NSPoint { NSPoint(x: _textContainerInset.width, y: _textContainerInset.height) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textcontentstorage
     @available(macOS 12.0, *)
-    @MainActor open var textContentStorage: NSTextContentStorage? { unimplemented() }
+    /// Nil for a TextKit 1 view (ADR-0040).
+    @MainActor open var textContentStorage: NSTextContentStorage? { _textContentStorage }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/texthighlightattributes
     @available(macOS 15.0, *)
     @MainActor open var textHighlightAttributes: [NSAttributedString.Key : Any] {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.textHighlightAttributes }
+        set { _extras.textHighlightAttributes = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textlayoutmanager
     @available(macOS 12.0, *)
-    @MainActor open var textLayoutManager: NSTextLayoutManager? { unimplemented() }
+    /// Nil for a TextKit 1 view (ADR-0040).
+    @MainActor open var textLayoutManager: NSTextLayoutManager? { _textLayoutManager }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/textstorage
     @MainActor open var textStorage: NSTextStorage? { _storage }
+    @MainActor internal override func _richContents() -> NSAttributedString { _storage }
+    @MainActor internal override func _replaceRich(_ range: NSRange, with content: NSAttributedString) {
+        _replaceAttributed(range, with: isRichText ? content : NSAttributedString(string: content.string, attributes: typingAttributes), selectAfter: false)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/tightenkerning(_:)
-    @MainActor open func tightenKerning(_ sender: Any?) { unimplemented() }
+    @MainActor open func tightenKerning(_ sender: Any?) { _adjustKern(by: -1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticdashsubstitution(_:)
-    @MainActor open func toggleAutomaticDashSubstitution(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticDashSubstitution(_ sender: Any?) { isAutomaticDashSubstitutionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticdatadetection(_:)
-    @MainActor open func toggleAutomaticDataDetection(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticDataDetection(_ sender: Any?) { isAutomaticDataDetectionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticlinkdetection(_:)
-    @MainActor open func toggleAutomaticLinkDetection(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticLinkDetection(_ sender: Any?) { isAutomaticLinkDetectionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticquotesubstitution(_:)
-    @MainActor open func toggleAutomaticQuoteSubstitution(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticQuoteSubstitution(_ sender: Any?) { isAutomaticQuoteSubstitutionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomaticspellingcorrection(_:)
-    @MainActor open func toggleAutomaticSpellingCorrection(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticSpellingCorrection(_ sender: Any?) { isAutomaticSpellingCorrectionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomatictextcompletion(_:)
     @available(macOS 10.12, *)
-    @MainActor open func toggleAutomaticTextCompletion(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticTextCompletion(_ sender: Any?) { isAutomaticTextCompletionEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggleautomatictextreplacement(_:)
-    @MainActor open func toggleAutomaticTextReplacement(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleAutomaticTextReplacement(_ sender: Any?) { isAutomaticTextReplacementEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglecontinuousspellchecking(_:)
-    @MainActor open func toggleContinuousSpellChecking(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleContinuousSpellChecking(_ sender: Any?) { isContinuousSpellCheckingEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglegrammarchecking(_:)
-    @MainActor open func toggleGrammarChecking(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleGrammarChecking(_ sender: Any?) { isGrammarCheckingEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglequicklookpreviewpanel(_:)
-    @MainActor open func toggleQuickLookPreviewPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleQuickLookPreviewPanel(_ sender: Any?) { appleOnlyUnavailable("NSTextView.toggleQuickLookPreviewPanel — Quick Look is a macOS system service") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/togglesmartinsertdelete(_:)
-    @MainActor open func toggleSmartInsertDelete(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleSmartInsertDelete(_ sender: Any?) { smartInsertDeleteEnabled.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/toggletraditionalcharactershape(_:)
-    @MainActor open func toggleTraditionalCharacterShape(_ sender: Any?) { unimplemented() }
+    /// Sets the character shape attribute to traditional (1), or back to 0 (macOS).
+    @MainActor open func toggleTraditionalCharacterShape(_ sender: Any?) {
+        let key = NSAttributedString.Key.characterShapeAttributeName
+        let r = selectedRange
+        let current: Any? = r.length > 0 && r.location < (textStorage?.length ?? 0) ? textStorage?.attribute(key, at: r.location, effectiveRange: nil) : typingAttributes[key]
+        let traditional = ((current as? NSNumber)?.intValue ?? 0) == 1
+        _withUndoName("Character Shape") { _setCharacterAttribute(key, NSNumber(value: traditional ? 0 : 1)) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/turnoffkerning(_:)
-    @MainActor open func turnOffKerning(_ sender: Any?) { unimplemented() }
+    @MainActor open func turnOffKerning(_ sender: Any?) { _setCharacterAttribute(.kern, 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/turnoffligatures(_:)
-    @MainActor open func turnOffLigatures(_ sender: Any?) { unimplemented() }
+    @MainActor open func turnOffLigatures(_ sender: Any?) { _setCharacterAttribute(.ligature, 0) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/typingattributes
     @MainActor open var typingAttributes: [NSAttributedString.Key : Any] {
         get { _typingAttributes.isEmpty ? _attributes : _typingAttributes }
-        set { _typingAttributes = newValue; if let f = newValue[.font] as? NSFont { font = f }; if let c = newValue[.foregroundColor] as? NSColor { textColor = c } }
+        set {
+            _typingAttributes = newValue
+            // Plain text has one font and colour; rich text keeps what it has.
+            guard !isRichText else { return }
+            if let f = newValue[.font] as? NSFont { font = f }
+            if let c = newValue[.foregroundColor] as? NSColor { textColor = c }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatecandidates()
     @available(macOS 10.12, *)
-    @MainActor open func updateCandidates() { unimplemented() }
+    /// Does nothing: the port shows no candidate list (Touch Bar or completion candidates).
+    @MainActor open func updateCandidates() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatedragtyperegistration()
-    @MainActor open func updateDragTypeRegistration() { unimplemented() }
+    @MainActor open func updateDragTypeRegistration() {
+        unregisterDraggedTypes()
+        if isEditable { registerForDraggedTypes(acceptableDragTypes) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatefontpanel()
-    @MainActor open func updateFontPanel() { unimplemented() }
+    /// Tells the font manager the selection's font (the Fonts panel follows it).
+    @MainActor open func updateFontPanel() { _updateFontManagerSelection() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updateinsertionpointstateandrestarttimer(_:)
-    @MainActor open func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) { unimplemented() }
+    @MainActor open func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) { needsDisplay = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatequicklookpreviewpanel()
-    @MainActor open func updateQuickLookPreviewPanel() { unimplemented() }
+    /// Does nothing: there is no Quick Look panel to update.
+    @MainActor open func updateQuickLookPreviewPanel() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updateruler()
-    @MainActor open func updateRuler() { unimplemented() }
+    @MainActor open func updateRuler() { _updateRulerMarkers() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatetexttouchbaritems()
     @available(macOS 10.12, *)
-    @MainActor open func updateTextTouchBarItems() { unimplemented() }
+    /// Does nothing: there is no Touch Bar.
+    @MainActor open func updateTextTouchBarItems() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/updatetouchbaritemidentifiers()
     @available(macOS 10.12, *)
-    @MainActor open func updateTouchBarItemIdentifiers() { unimplemented() }
+    /// Does nothing: there is no Touch Bar.
+    @MainActor open func updateTouchBarItemIdentifiers() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/useallligatures(_:)
-    @MainActor open func useAllLigatures(_ sender: Any?) { unimplemented() }
+    @MainActor open func useAllLigatures(_ sender: Any?) { _setCharacterAttribute(.ligature, 2) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usestandardkerning(_:)
-    @MainActor open func useStandardKerning(_ sender: Any?) { unimplemented() }
+    @MainActor open func useStandardKerning(_ sender: Any?) { _setCharacterAttribute(.kern, nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usestandardligatures(_:)
-    @MainActor open func useStandardLigatures(_ sender: Any?) { unimplemented() }
+    @MainActor open func useStandardLigatures(_ sender: Any?) { _setCharacterAttribute(.ligature, nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesadaptivecolormappingfordarkappearance
     @available(macOS 10.14, *)
     @MainActor open var usesAdaptiveColorMappingForDarkAppearance: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.usesAdaptiveColorMappingForDarkAppearance }
+        set { _extras.usesAdaptiveColorMappingForDarkAppearance = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesfindbar
     @MainActor open var usesFindBar: Bool {
         get { _usesFindBar }
-        set { _usesFindBar = newValue }
+        set { _usesFindBar = newValue; if let f = _extras.finder { f.findBarContainer = nil; _ = _makeFinderIfNeeded() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesfindpanel
     @MainActor open var usesFindPanel: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.usesFindPanel }
+        set { _extras.usesFindPanel = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesinspectorbar
     @MainActor open var usesInspectorBar: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.usesInspectorBar }
+        set { _extras.usesInspectorBar = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesrolloverbuttonforselection
     @available(macOS 10.10, *)
     @MainActor open var usesRolloverButtonForSelection: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.usesRolloverButtonForSelection }
+        set { _extras.usesRolloverButtonForSelection = newValue }
     }
+    /// On by default: the text view takes its scroll view's horizontal ruler when the
+    /// rulers are shown (ADR-0034).
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/usesruler
     @MainActor open var usesRuler: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.usesRuler }
+        set {
+            _extras.usesRuler = newValue
+            if !newValue, let ruler = enclosingScrollView?.horizontalRulerView, ruler.clientView === self { ruler.clientView = nil }
+        }
     }
+
+    // MARK: Ruler client (ADR-0034; the work is in NSTextView+Ruler.swift)
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/isrulervisible
+    @MainActor open override var isRulerVisible: Bool { usesRuler && (enclosingScrollView?.rulersVisible ?? false) }
+    /// Shows or hides the scroll view's rulers, taking the horizontal one.
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/toggleruler(_:)
+    @MainActor open override func toggleRuler(_ sender: Any?) {
+        guard usesRuler, let sv = enclosingScrollView else { return }
+        if !sv.hasHorizontalRuler { sv.hasHorizontalRuler = true }
+        sv.rulersVisible.toggle()
+        if sv.rulersVisible { _takeRulerIfAvailable() }
+    }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didMove marker: NSRulerMarker) { _rulerDidMove(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didRemove marker: NSRulerMarker) { _rulerDidRemove(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, didAdd marker: NSRulerMarker) { _rulerDidAdd(marker) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldMove marker: NSRulerMarker) -> Bool { isEditable && isRichText }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldAdd marker: NSRulerMarker) -> Bool { isEditable && isRichText }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, shouldRemove marker: NSRulerMarker) -> Bool { marker.representedObject is NSTextTab }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, willMove marker: NSRulerMarker, toLocation location: CGFloat) -> CGFloat { _rulerClamp(marker, location) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, willAdd marker: NSRulerMarker, atLocation location: CGFloat) -> CGFloat { _rulerClamp(marker, location) }
+    @MainActor open override func rulerView(_ ruler: NSRulerView, handleMouseDownWith event: NSEvent) { _rulerHandleMouseDown(ruler, event) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/willchangenotifyingtextviewnotification
     static public var willChangeNotifyingTextViewNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextViewWillChangeNotifyingTextViewNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/willswitchtonslayoutmanagernotification
     @available(macOS 12.0, *)
     static public var willSwitchToNSLayoutManagerNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSTextViewWillSwitchToNSLayoutManagerNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/writablepasteboardtypes
-    @MainActor open var writablePasteboardTypes: [NSPasteboard.PasteboardType] { unimplemented() }
+    @MainActor open var writablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        isRichText ? (importsGraphics ? [.rtfd, .rtf, .string] : [.rtf, .string]) : [.string]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/writeselection(to:type:)
-    @MainActor open func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool { unimplemented() }
+    @MainActor open func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool { _writeSelection(to: pboard, types: [type]) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/writeselection(to:types:)
-    @MainActor open func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool { unimplemented() }
+    @MainActor open func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool { _writeSelection(to: pboard, types: types) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/writingtoolsbehavior
     @available(macOS 15.0, *)
     @MainActor open var writingToolsBehavior: NSWritingToolsBehavior {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { NSWritingToolsBehavior(rawValue: _extras.writingToolsBehaviorRaw) ?? .default }
+        set { _extras.writingToolsBehaviorRaw = newValue.rawValue }
     }
+    // MARK: Spelling actions (NSText, NSChangeSpelling, NSIgnoreMisspelledWords)
+
+    /// Selects the next misspelt word after the selection and shows it in the Spelling panel.
+    open override func checkSpelling(_ sender: Any?) { _checkSpellingFromSelection() }
+    /// Shows the Spelling panel on the next misspelling.
+    open override func showGuessPanel(_ sender: Any?) {
+        NSSpellChecker.shared.spellingPanel.makeKeyAndOrderFront(sender)
+        _checkSpellingFromSelection()
+    }
+    /// Replaces the selection with the sender's title or string value (a guess).
+    open override func changeSpelling(_ sender: Any?) {
+        guard isEditable else { return }
+        let word = (sender as? NSMenuItem)?.title ?? (sender as? NSControl)?.stringValue ?? ""
+        guard !word.isEmpty, selectedRange.length > 0 else { return }
+        let r = selectedRange
+        guard shouldChangeText(in: r, replacementString: word) else { return }
+        _finderReplace(r, with: word)
+        setSelectedRange(NSRange(location: r.location, length: (word as NSString).length))
+        didChangeText()
+        _setSpellingMark(0, range: NSRange(location: r.location, length: (word as NSString).length))
+    }
+    /// Ignores the word (the sender's string, or the selection) in this document.
+    open override func ignoreSpelling(_ sender: Any?) {
+        let word = ((sender as? NSMenuItem)?.representedObject as? String) ?? (sender as? NSControl)?.stringValue ?? (string as NSString).substring(with: selectedRange)
+        guard !word.isEmpty else { return }
+        NSSpellChecker.shared.ignoreWord(word, inSpellDocumentWithTag: _spellTag)
+        _spellingDidChange()
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsresponder/performtextfinderaction(_:)
+    open override func performTextFinderAction(_ sender: Any?) { performFindPanelAction(sender) }
+
     // Requirement of NSColorChanging (signature differs from the inherited member)
     // Requirement of NSColorChanging
-    open func changeColor(_ sender: NSColorPanel?) { unimplemented() }
+    open func changeColor(_ sender: NSColorPanel?) { MainActor.assumeIsolated { _changeColor(from: sender) } }
     // Requirement of NSTextInputClient
     open func doCommand(by selector: Selector) {
         MainActor.assumeIsolated {
@@ -1032,7 +1952,8 @@ import CoreText
         }
     }
     // Requirement of NSTextLayoutOrientationProvider
-    open var layoutOrientation: NSLayoutManager.TextLayoutOrientation { unimplemented() }
+    /// Horizontal: vertical layout is not implemented.
+    open var layoutOrientation: NSLayoutManager.TextLayoutOrientation { .horizontal }
     // MARK: Accessibility (ADR-0013)
     //
     // A text view is AXTextArea with its string as value and its selection; a field
@@ -1094,7 +2015,7 @@ import CoreText
     open func accessibilityInsertionPointLineNumber() -> Int { accessibilityLine(for: selectedRange.location) }
     // Requirement of NSTextContent
     open var contentType: NSTextContentType? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _extras.contentType }
+        set { _extras.contentType = newValue }
     }
 }

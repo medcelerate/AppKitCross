@@ -85,8 +85,16 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         let typed = event.charactersIgnoringModifiers ?? ""
         // An uppercase key equivalent implies Shift.
         if _keyEquivalent.count == 1, _keyEquivalent != _keyEquivalent.lowercased() { required.insert(.shift) }
-        guard event.modifierFlags.intersection(relevant) == required else { return false }
-        return typed.lowercased() == _keyEquivalent.lowercased()
+        let flags = event.modifierFlags.intersection(relevant)
+        if flags == required, typed.lowercased() == _keyEquivalent.lowercased() { return true }
+        // A symbol typed with Shift ("+" is Shift+= on most layouts) is its own key
+        // equivalent: the Shift that produced it is not one more modifier to require.
+        let isSymbol = _keyEquivalent.count == 1 && _keyEquivalent.lowercased() == _keyEquivalent.uppercased()
+        if isSymbol, flags == required.union(.shift), typed == _keyEquivalent { return true }
+        // "+" (zoom in) also answers the unshifted key it shares with "=", as Windows
+        // applications zoom with Ctrl+= as well as Ctrl+Plus.
+        if _keyEquivalent == "+", (typed == "=" || typed == "+"), flags == required || flags == required.union(.shift) { return true }
+        return false
     }
 
     /// Description for the platform menu bar.
@@ -226,13 +234,19 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// Items created using this method are non-interactive and do not perform an action.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/sectionheader(title:)
     @available(macOS 14.0, *)
-    public static func sectionHeader(title: String) -> NSMenuItem { unimplemented() }
+    public static func sectionHeader(title: String) -> NSMenuItem { sectionHeader(withTitle: title) }
     /// Creates a menu item representing a section header with the provided title.
     /// Section header items are used to provide context to a grouping of menu items.
     /// Items created using this method are non-interactive and do not perform an action.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/sectionheader(withtitle:)
     @available(macOS 14.0, *)
-    public static func sectionHeader(withTitle title: String) -> NSMenuItem { unimplemented() }
+    /// A header item: `isSectionHeader`, no action, enabled (macOS 14); the platform menus
+    /// show it as a disabled label.
+    public static func sectionHeader(withTitle title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item._isSectionHeader = true
+        return item
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/separator()
     public class func separator() -> NSMenuItem {
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -241,7 +255,21 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         return item
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/settitlewithmnemonic(_:)
-    open func setTitleWithMnemonic(_ stringWithAmpersand: String) { unimplemented() }
+    /// Drops the mnemonic marker — the first `&` that is not part of a `&&` pair — and keeps
+    /// the rest as typed (macOS 15: "Sa&ve && Quit" → "Save && Quit"; menus show no mnemonics).
+    open func setTitleWithMnemonic(_ stringWithAmpersand: String) {
+        var chars = Array(stringWithAmpersand)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "&" {
+                if i + 1 < chars.count, chars[i + 1] == "&" { i += 2; continue }
+                chars.remove(at: i)
+                break
+            }
+            i += 1
+        }
+        title = String(chars)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/state
     open var state: NSControl.StateValue {
         get { _state }
@@ -284,7 +312,14 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
         set { _toolTip = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/userkeyequivalent
-    open var userKeyEquivalent: String { unimplemented() }
+    /// The key the user assigned to this item's title in the `NSUserKeyEquivalents` defaults
+    /// (modifier marks `@$~^` dropped), when `usesUserKeyEquivalents`; else "" (macOS 15).
+    open var userKeyEquivalent: String {
+        guard NSMenuItem.usesUserKeyEquivalents,
+              let table = UserDefaults.standard.dictionary(forKey: "NSUserKeyEquivalents") as? [String: String],
+              let value = table[_title] else { return "" }
+        return String(value.drop { "@$~^".contains($0) })
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/usesuserkeyequivalents
     class public var usesUserKeyEquivalents: Bool {
         get { _usesUserKeyEquivalents }
@@ -293,11 +328,19 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/view
     open var view: NSView? {
         get { _view }
-        set { _view = newValue; _notifyChanged() }
+        set {
+            MainActor.assumeIsolated {
+                if _view?._enclosingMenuItem === self { _view?._enclosingMenuItem = nil }
+                newValue?._enclosingMenuItem = self
+            }
+            _view = newValue; _notifyChanged()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsmenuitem/writingtoolsitems
     @available(macOS 15.2, *)
-    class public var writingToolsItems: [NSMenuItem] { unimplemented() }
+    /// None: Writing Tools is an Apple Intelligence service with no Windows or Linux
+    /// counterpart, so there are no items to offer (macOS 15.2 returns one submenu item).
+    class public var writingToolsItems: [NSMenuItem] { [] }
     // Requirement of NSCopying
     open func copy(with zone: NSZone? = nil) -> Any {
         let c = NSMenuItem(title: _title, action: _action, keyEquivalent: _keyEquivalent)
@@ -308,12 +351,29 @@ open class NSMenuItem: NSObject, NSCopying, NSCoding, NSValidatedUserInterfaceIt
     }
     // Requirement of NSCoding
     open func encode(with coder: NSCoder) { }
+    // MARK: Accessibility (ADR-0013, NSMenuAccessibility.swift)
+    // AXMenuBarItem in the main menu, AXMenuItem elsewhere: the title, enabled state, check
+    // mark and key equivalent; the submenu is the child. Pressing performs the item or
+    // opens its submenu.
+    internal var _accessibilityID = 0
+    open func accessibilityRole() -> NSAccessibility.Role? { MainActor.assumeIsolated { _a11yRole } }
+    open func accessibilityTitle() -> String? { _title }
+    open func accessibilityLabel() -> String? { nil }
+    open func accessibilityHelp() -> String? { _toolTip }
+    open func isAccessibilityElement() -> Bool { !_isSeparator }
+    open func isAccessibilityEnabled() -> Bool { _isEnabled }
+    open func isAccessibilitySelected() -> Bool { MainActor.assumeIsolated { _a11yIsHighlighted } }
+    open func accessibilityChildren() -> [Any]? { _submenu.map { [$0] } ?? [] }
+    open func accessibilityPerformPress() -> Bool { MainActor.assumeIsolated { _a11yPress() } }
+    open func accessibilityPerformPick() -> Bool { accessibilityPerformPress() }
+    open func accessibilityPerformCancel() -> Bool { MainActor.assumeIsolated { _menu?._a11yCancel() ?? false } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityFrame() -> NSRect { unimplemented() }
+    open func accessibilityFrame() -> NSRect { MainActor.assumeIsolated { _a11yFrame } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityParent() -> Any? { unimplemented() }
+    open func accessibilityParent() -> Any? { _menu }
     // Requirement of NSAccessibilityElementProtocol
-    open func isAccessibilityFocused() -> Bool { unimplemented() }
+    /// The highlighted item of an open menu is the one keyboard navigation is on.
+    open func isAccessibilityFocused() -> Bool { MainActor.assumeIsolated { _a11yIsHighlighted } }
     // Requirement of NSAccessibilityElementProtocol
-    open func accessibilityIdentifier() -> String { unimplemented() }
+    open func accessibilityIdentifier() -> String { _identifier?.rawValue ?? "" }
 }

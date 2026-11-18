@@ -16,33 +16,53 @@ struct _PopUp: View, _PrimitiveView {
 @MainActor
 final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
     var titles: [String]
+    var selected: Int
     var onSelect: (Int) -> Void
+    /// Every body evaluation makes a fresh primitive whose control is thrown away once
+    /// `update(from:)` has copied its values into the attached one, so the items are
+    /// added only when the primitive attaches: a 400-item picker (every time zone) built
+    /// into a throwaway button on each pass cost hundreds of invalidations a second.
     init(titles: [String], selected: Int, onSelect: @escaping (Int) -> Void) {
         self.titles = titles
+        self.selected = selected
         self.onSelect = onSelect
         let b = NSPopUpButton(frame: .zero, pullsDown: false)
-        b.addItems(withTitles: titles)
-        b.selectItem(at: selected)
         super.init(control: b)
         b.target = b
         b.action = Selector(("swiftUIPopUpAction:"))
         b.setActionHandler(for: Selector(("swiftUIPopUpAction:"))) { [weak self] _ in
             guard let self else { return }
+            self.selected = self.control.indexOfSelectedItem
             self.onSelect(self.control.indexOfSelectedItem)
         }
-        b.sizeToFit()
+    }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        if control.numberOfItems != titles.count {
+            control.removeAllItems()
+            control.addItems(withTitles: titles)
+            control.selectItem(at: selected)
+            control.sizeToFit()
+        }
     }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _PopUpPrimitive else { return }
         onSelect = o.onSelect
+        var changed = false
         if o.titles != titles {
             titles = o.titles
             control.removeAllItems()
             control.addItems(withTitles: titles)
+            changed = true
         }
-        control.selectItem(at: o.control.indexOfSelectedItem)
-        control.sizeToFit()
+        if o.selected != selected || control.indexOfSelectedItem != o.selected {
+            selected = o.selected
+            control.selectItem(at: o.selected)
+            changed = true
+        }
+        // Resizing on every update invalidated the control (and so the frame) each pass.
+        if changed { control.sizeToFit() }
     }
 }
 
@@ -57,9 +77,19 @@ protocol _MenuItemConvertible {
 /// nested menus submenus, toggles checked items and plain text disabled items.
 @MainActor
 func _buildMenu(_ box: _AnyViewBox, into menu: NSMenu) {
-    for b in _flattenBoxes(box) {
+    for (b, environment) in _flattenMenuBoxes(box, environment: EnvironmentValues()) {
         let (meta, content) = _metadata(of: b)
         let before = menu.items.count
+        defer {
+            // `.disabled(true)` around an item (or a group of them) disables it: no action,
+            // so the menu's validation keeps it disabled too.
+            if !environment.isEnabled {
+                for item in menu.items.dropFirst(before) where !item.isSeparatorItem && item.submenu == nil {
+                    item.isEnabled = false
+                    item.action = nil
+                }
+            }
+        }
         if let c = content.value as? _MenuItemConvertible {
             c._addMenuItems(to: menu)
         } else if let t = content.value as? Text {
@@ -80,6 +110,16 @@ func _buildMenu(_ box: _AnyViewBox, into menu: NSMenu) {
             }
         }
     }
+}
+
+/// `_flattenBoxes` for menus: the leaves with the environment the wrappers above each
+/// set (`.disabled` is an environment wrapper, and must reach the item it disables).
+@MainActor
+func _flattenMenuBoxes(_ box: _AnyViewBox, environment: EnvironmentValues) -> [(_AnyViewBox, EnvironmentValues)] {
+    guard !(box.value is _MetadataView), box.isPrimitive, let p = box.makePrimitive(node: _ViewNode.placeholder), p.isLayoutTransparent, !(box.value is _LeafMarker) else { return [(box, environment)] }
+    var env = environment
+    p.environmentTransform?(&env)
+    return p.children.flatMap { _flattenMenuBoxes($0, environment: env) }
 }
 
 /// A menu item that runs a closure when chosen.

@@ -29,6 +29,14 @@ final class Win32Window: PlatformWindow {
     private(set) var isKey = false
     private var destroying = false
     private var pressedButtons = 0
+    /// `TrackMouseEvent` is armed for the client area / the non-client caption buttons, so
+    /// WM_MOUSELEAVE / WM_NCMOUSELEAVE will tell the owner the pointer left (hover ends).
+    private var trackingLeave = false
+    private var trackingNonClientLeave = false
+    /// Trace bookkeeping (APPKITWIN_TRACE): the last WM_NCHITTEST answer and whether the
+    /// current non-client hover over a caption button was reported.
+    private var lastTracedHitCode: Int32 = -1
+    private var tracedNonClientHover = false
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
     /// The Text Services Framework for this window's text input (ADR-0016), made on first focus
@@ -75,6 +83,8 @@ final class Win32Window: PlatformWindow {
     private var dpi: UINT = 96
     /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
     var uiaRoot: OpaquePointer? = nil
+    /// Whether the "no provider root yet" trace line has been written for this window (once is enough).
+    var tracedNoUIARoot = false
     var accessibilityOwner: PlatformWindowOwner? { owner }
     var accessibilityBackend: Win32Backend { backend }
     /// Changes waiting for the next turn of the event loop (Win32Accessibility.swift).
@@ -82,6 +92,8 @@ final class Win32Window: PlatformWindow {
     var accessibilityFlushScheduled = false
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
+    /// NSWindow aspect ratios and increments for user resizes (WM_SIZING, ADR-0036).
+    var resizeConstraints = PlatformResizeConstraints()
 
     init(backend: Win32Backend, owner: PlatformWindowOwner, contentRect: NSRect, styleMask: NSWindow.StyleMask) {
         self.backend = backend
@@ -99,7 +111,8 @@ final class Win32Window: PlatformWindow {
         // device), which blits into it, and for windows that carry the Win32 menu bar:
         // user32 draws the bar through GDI into the surface, a black strip without one.
         let redirection = Win32WindowPolicy.redirectionBitmap(styleMask: styleMask, applicationHasMenuBar: ownerWantsMenuBar,
-                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available())
+                                                              legacyTarget: Win32Window.useLegacyHwndTarget, presentationAvailable: cd2d_presentation_available(),
+                                                              requested: Win32Window.keepsRedirectionBitmapByRequest)
         if !redirection.keeps { ex |= Win32Window.wsExNoRedirectionBitmap }
         if NSView._traceInvalidation {
             let why: String
@@ -108,6 +121,7 @@ final class Win32Window: PlatformWindow {
             case .keptForLegacyTarget: why = "legacy HWND target"
             case .keptForMissingDevice: why = "no D3D11/DXGI 1.2 device: HWND target"
             case .keptForMenuBar: why = "window carries the Win32 menu bar"
+            case .keptByRequest: why = "APPKITWIN_REDIRECTION_BITMAP=1"
             }
             NSView._trace("win32 window create mask \(styleMask.rawValue) redirection bitmap \(redirection.keeps ? "kept" : "none") (\(why))")
         }
@@ -257,26 +271,32 @@ final class Win32Window: PlatformWindow {
         }
 
         // Frame: keep the DWM shadow, border and rounded corners while the client area
-        // covers the frame by extending the frame one pixel into the client area. A
-        // borderless window gets a frame to extend (WS_THICKFRAME) while it wants a
-        // shadow; without a shadow nothing is extended and DWM draws no frame at all.
+        // covers the frame by extending the frame into the client area. A borderless
+        // window gets a frame to extend (WS_THICKFRAME) while it wants a shadow; without
+        // a shadow nothing is extended and DWM draws no frame at all.
         updateShadowFrameStyle()
-        let shadowFrame = usesCustomFrame && _chrome.hasShadow
-        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: shadowFrame ? 1 : 0, cyBottomHeight: 0)
-        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        let margins = extendFrame()
         if previous.map({ $0.extendsContentIntoTitleBar != _chrome.extendsContentIntoTitleBar }) ?? false {
             SetWindowPos(hwnd, nil, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED))
         }
         // A borderless window shows no border line (macOS draws none), only the shadow;
         // so the extended pixel of a translucent window stays invisible too.
-        setDwmAttribute(Win32Window.dwmwaBorderColor, _styleMask.contains(.titled) ? Win32Window.dwmColorDefault : Win32Window.dwmColorNone)
+        // A non-opaque window drawing its own shape over a custom frame shows none either:
+        // the line would outline the rectangle around the shape.
+        setDwmAttribute(Win32Window.dwmwaBorderColor, Win32WindowPolicy.hidesBorder(styleMask: _styleMask, chrome: _chrome) ? Win32Window.dwmColorNone : Win32Window.dwmColorDefault)
         if NSView._traceInvalidation {
             let frame = _styleMask.contains(.titled) ? "system caption" : isResizable ? "thick frame" : wantsShadowFrame(_styleMask) ? "shadow frame (WS_THICKFRAME added)" : "none"
             NSView._trace("win32 chrome '\(_title)' shadow \(_chrome.hasShadow ? "on" : "off") frame \(frame) extended \(margins.cyTopHeight) px transparent \(_chrome.isTransparent)")
         }
 
+        // DWM's backdrop fills the window rectangle: a non-opaque window whose content
+        // leaves corners uncovered keeps them transparent instead (Win32WindowPolicy).
+        let systemBackdrop = Win32WindowPolicy.systemBackdrop(for: _chrome)
+        if NSView._traceInvalidation, systemBackdrop != _chrome.backdrop {
+            NSView._trace("win32 chrome '\(_title)' backdrop \(_chrome.backdrop) not applied: non-opaque window, effect views cover \(_chrome.backdropCoversWindow ? "the window" : "part of it") with corner radius \(_chrome.backdropCornerRadius) pt")
+        }
         let backdrop: Int32
-        switch _chrome.backdrop {
+        switch systemBackdrop {
         case .none: backdrop = Win32Window.dwmsbtNone
         case .mica: backdrop = Win32Window.dwmsbtMainWindow
         case .micaAlt: backdrop = Win32Window.dwmsbtTabbedWindow
@@ -289,6 +309,33 @@ final class Win32Window: PlatformWindow {
         setDwmAttribute(Win32Window.dwmwaNCRenderingPolicy, _chrome.hasShadow ? Win32Window.dwmncrpUseWindowStyle : Win32Window.dwmncrpDisabled)
         // hidesTitle / transparentTitleBar only have a visible effect together with
         // extendsContentIntoTitleBar, where the caption is not drawn at all.
+    }
+
+    /// `DwmExtendFrameIntoClientArea` for a custom frame. How far the frame comes in
+    /// matters to the shell: with a 1 px top margin Windows 11 never shows the snap
+    /// layouts flyout over a package-drawn maximise button that answers HTMAXBUTTON
+    /// (PC rounds of ADR-0022: 1 px no, 0 and 32 px yes). So, as Windows Terminal does,
+    /// an opaque window extends the frame by the title band (28 pt at the window's DPI:
+    /// DWM paints its frame under the band, which the window covers with opaque pixels),
+    /// and a translucent window, or one with a system backdrop, extends nothing (DWM's
+    /// frame would show through its content; the backdrop keeps the shadow).
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` overrides for experiments. Called when the chrome
+    /// changes and when the DPI does.
+    @discardableResult
+    private func extendFrame() -> MARGINS {
+        var margins = MARGINS(cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0)
+        guard let hwnd else { return margins }
+        if usesCustomFrame, _chrome.hasShadow {
+            if let forced = Win32Window.frameTopMarginOverride {
+                margins.cyTopHeight = forced
+            } else if _chrome.isTransparent || Win32WindowPolicy.systemBackdrop(for: _chrome) != .none {
+                margins.cyTopHeight = 0
+            } else {
+                margins.cyTopHeight = Int32((NSWindow._titleBarBandHeight * scale).rounded())
+            }
+        }
+        _ = DwmExtendFrameIntoClientArea(hwnd, &margins)
+        return margins
     }
 
     var scale: CGFloat { CGFloat(dpi) / 96 }
@@ -372,6 +419,9 @@ final class Win32Window: PlatformWindow {
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+    /// Whether a system key message (Alt held, or F10) is the menu bar's: the window carries
+    /// the native menu bar and Ctrl is not down.
+    private var ownsMenuKeyboard: Bool { hasMenuBar && GetKeyState(VK_CONTROL) >= 0 }
 
     // MARK: Sheets (ADR-0019)
 
@@ -447,7 +497,15 @@ final class Win32Window: PlatformWindow {
         return NSSize(width: CGFloat(r.right - r.left) / scale, height: CGFloat(r.bottom - r.top) / scale)
     }
 
-    func show() { if let hwnd { ShowWindow(hwnd, _styleMask.contains(.nonactivatingPanel) ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL); UpdateWindow(hwnd) } }
+    /// `orderFront(_:)`: shown and raised, never activated (`makeKey()` does that;
+    /// `Win32WindowPolicy.showCommand`).
+    func show() {
+        guard let hwnd else { return }
+        ShowWindow(hwnd, Win32WindowPolicy.showCommand)
+        // SW_SHOWNA leaves an already visible window where it is in the z-order.
+        SetWindowPos(hwnd, nil /* HWND_TOP */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE))
+        UpdateWindow(hwnd)
+    }
     func hide() { if let hwnd { ShowWindow(hwnd, SW_HIDE) } }
     func makeKey() { if let hwnd { SetForegroundWindow(hwnd); SetActiveWindow(hwnd); SetFocus(hwnd) } }
     func orderBack() { if let hwnd { SetWindowPos(hwnd, HWND(bitPattern: 1) /* HWND_BOTTOM */, 0, 0, 0, 0, UINT(SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) } }
@@ -538,6 +596,12 @@ final class Win32Window: PlatformWindow {
     /// `APPKITWIN_LEGACY_D2D=1` selects the Milestone 1 `ID2D1HwndRenderTarget` instead of
     /// the DXGI flip-model swap chain (Milestone 3).
     private static let useLegacyHwndTarget = ProcessInfo.processInfo.environment["APPKITWIN_LEGACY_D2D"] == "1"
+    /// Experiment knobs for the Windows 11 snap layouts investigation (ADR-0022, PC rounds):
+    /// `APPKITWIN_REDIRECTION_BITMAP=1` keeps the redirection surface on every window;
+    /// `APPKITWIN_FRAME_TOP_MARGIN=<px>` is the top margin `DwmExtendFrameIntoClientArea`
+    /// gets for custom frames instead of the default (`extendFrame()`).
+    private static let keepsRedirectionBitmapByRequest = ProcessInfo.processInfo.environment["APPKITWIN_REDIRECTION_BITMAP"] == "1"
+    private static let frameTopMarginOverride: Int32? = ProcessInfo.processInfo.environment["APPKITWIN_FRAME_TOP_MARGIN"].flatMap { Int32($0) }
     /// `APPKITWIN_DXGI_DEBUG=1` prints the DXGI debug layer's live-object report to stderr
     /// whenever a window target is released (and asks for the D3D11 debug layer).
     private static let reportsLiveObjects = ProcessInfo.processInfo.environment["APPKITWIN_DXGI_DEBUG"] == "1"
@@ -680,6 +744,27 @@ final class Win32Window: PlatformWindow {
     private var hostedScene: PlatformLayerScene?
     /// What each content node's surface holds: redrawn when any of these change.
     private var surfaceRasters: [Int: (version: Int, width: Int, height: Int, scale: CGFloat)] = [:]
+    /// A surface could not be drawn in the last scene update (retried on a later pass).
+    private var surfaceDrawFailed = false
+    private var surfaceRetries = 0
+    private var surfaceRetryScheduled = false
+
+    /// Re-applies the hosted scene after a failed surface draw: only the nodes without a
+    /// raster draw again. Not while painting (the window's own drawing holds the device);
+    /// gives up after a few consecutive failures (the next scene commit tries again).
+    private func scheduleSurfaceRetry() {
+        guard !surfaceRetryScheduled, surfaceRetries < 8 else { return }
+        surfaceRetryScheduled = true
+        surfaceRetries += 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.surfaceRetryScheduled = false
+            guard let scene = self.hostedScene, let rt = self.renderTarget, self.compositionTree != nil, !self.destroying else { return }
+            if self.painting { self.surfaceRetries -= 1; self.scheduleSurfaceRetry(); return }
+            if NSView._traceInvalidation { NSView._trace("win32 surface retry \(self.surfaceRetries)") }
+            _ = self.applyLayerScene(scene, to: rt)   // schedules another retry if a draw fails again
+        }
+    }
     /// Nodes whose visual shows a swap chain instead of a surface (MTKView, M7).
     private var nativeContents: [Int: UnsafeMutableRawPointer] = [:]
     private var painting = false
@@ -757,6 +842,7 @@ final class Win32Window: PlatformWindow {
             nativeContents.removeAll()
         }
         guard let tree = compositionTree else { return false }
+        surfaceDrawFailed = false
         let s = scale
         let dpi = Float(96 * s)
         cd2d_comp_tree_begin_update(tree)
@@ -771,7 +857,7 @@ final class Win32Window: PlatformWindow {
             }
             let t = node.transform
             if NSView._traceInvalidation, Win32Window.traceScene {
-                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) content \(node.content != nil) native \(node.nativeContent != nil) \(node.name ?? "")")
+                NSView._trace("win32 scene node \(node.id) parent \(node.parent.map { String(scene.nodes[$0].id) } ?? "root") size \(Int(node.size.width))x\(Int(node.size.height)) at \(Int(t.tx)),\(Int(t.ty)) d \(t.d) 3d \(node.transform3D != nil) clip \(node.clipsToBounds) opacity \(node.opacity) content \(node.content != nil) native \(node.nativeContent != nil) \(node.name ?? "")")
             }
             if let m = node.transform3D {
                 // The whole placement goes through the 3D effect; the 2D transform stays identity.
@@ -819,7 +905,15 @@ final class Win32Window: PlatformWindow {
             let height = max(1, Int((node.size.height * s).rounded(.up)))
             if let r = surfaceRasters[node.id], r.version == content.version, r.width == width, r.height == height, r.scale == s { continue }
             guard let surface = cd2d_comp_tree_surface_begin_draw(tree, id, UInt32(width), UInt32(height), dpi) else {
+                // The node shows nothing until it is drawn: try again on a later pass instead
+                // of leaving it blank until something else invalidates it.
                 surfaceRasters[node.id] = nil
+                surfaceDrawFailed = true
+                if NSView._traceInvalidation {
+                    var stage: Int32 = 0, hr: Int32 = 0
+                    cd2d_comp_tree_last_draw_error(tree, &stage, &hr)
+                    NSView._trace("win32 surface draw FAILED node \(node.id) \(width)x\(height) stage \(stage) hr 0x\(String(UInt32(bitPattern: hr), radix: 16)) painting \(painting)")
+                }
                 continue
             }
             do {
@@ -831,8 +925,21 @@ final class Win32Window: PlatformWindow {
             }
             cd2d_comp_tree_surface_end_draw(tree, id)
             surfaceRasters[node.id] = (content.version, width, height, s)
+            if NSView._traceInvalidation, Win32Window.traceScene {
+                var surfacePtr: UnsafeMutableRawPointer? = nil
+                var ox: Int32 = 0, oy: Int32 = 0
+                var created = false
+                cd2d_comp_tree_last_draw_info(tree, &surfacePtr, &ox, &oy, &created)
+                NSView._trace("win32 surface drawn node \(node.id) v\(content.version) \(width)x\(height) surface \(surfacePtr.map { String(UInt(bitPattern: $0), radix: 16) } ?? "nil") offset \(ox),\(oy) refs \(cd2d_comp_tree_last_surface_refs(tree))\(created ? " new" : "") \(node.name ?? "")")
+            }
         }
         cd2d_comp_tree_end_update(tree)
+        if surfaceDrawFailed { scheduleSurfaceRetry() } else { surfaceRetries = 0 }
+        if NSView._traceInvalidation, Win32Window.traceScene {
+            var addFailures: UInt32 = 0, contentFailures: UInt32 = 0
+            cd2d_comp_tree_failures(tree, &addFailures, &contentFailures)
+            NSView._trace("win32 scene committed: \(scene.nodes.count) nodes, \(cd2d_comp_tree_visual_count(tree)) visuals, failed AddVisual \(addFailures), failed SetContent \(contentFailures)")
+        }
         surfaceRasters = surfaceRasters.filter { live.contains($0.key) }
         nativeContents = nativeContents.filter { live.contains($0.key) }
         return true
@@ -855,8 +962,6 @@ final class Win32Window: PlatformWindow {
 
     private func timestamp() -> TimeInterval { TimeInterval(GetTickCount64()) / 1000 }
 
-    /// A WM_MOUSELEAVE is pending from TrackMouseEvent (one per entry of the client area).
-    private var mouseLeaveTracked = false
 
     private func mouse(_ type: NSEvent.EventType, _ lParam: LPARAM, button: Int, clickCount: Int = 1) {
         let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
@@ -864,6 +969,37 @@ final class Win32Window: PlatformWindow {
         let e = NSEvent._mouseEvent(type: type, location: contentPoint(x: x, y: y), modifierFlags: modifierFlags(),
                                     timestamp: timestamp(), windowNumber: windowNumber(), clickCount: clickCount, buttonNumber: button)
         owner?.platformWindowDispatch(e)
+    }
+
+    /// A non-client mouse message (screen coordinates in `lParam`) over a package-drawn
+    /// caption button, delivered as the left-button event the button tracks.
+    private func nonClientMouse(_ type: NSEvent.EventType, _ lParam: LPARAM, clickCount: Int) {
+        let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF))
+        let y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
+        let e = NSEvent._mouseEvent(type: type, location: contentPoint(screenX: x, screenY: y), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: clickCount, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// The pointer left the window (or moved into non-client area that is not a button):
+    /// a move far outside, as the Wayland backend reports it, ends hover states.
+    private func pointerLeft() {
+        let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
+                                    timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
+        owner?.platformWindowDispatch(e)
+    }
+
+    /// Arms WM_MOUSELEAVE (client) or WM_NCMOUSELEAVE (non-client) once per entry.
+    private func trackMouseLeave(nonClient: Bool) {
+        guard let hwnd else { return }
+        if nonClient ? trackingNonClientLeave : trackingLeave { return }
+        var tme = TRACKMOUSEEVENT()
+        tme.cbSize = DWORD(MemoryLayout<TRACKMOUSEEVENT>.size)
+        tme.dwFlags = DWORD(TME_LEAVE) | (nonClient ? DWORD(TME_NONCLIENT) : 0)
+        tme.hwndTrack = hwnd
+        tme.dwHoverTime = 0
+        _ = TrackMouseEvent(&tme)
+        if nonClient { trackingNonClientLeave = true } else { trackingLeave = true }
     }
 
     /// Virtual keys that AppKit reports as function-key characters (NSEvent.SpecialKey) or
@@ -880,10 +1016,13 @@ final class Win32Window: PlatformWindow {
 
     private func key(_ type: NSEvent.EventType, _ wParam: WPARAM, _ lParam: LPARAM) {
         let vk = Int32(truncatingIfNeeded: wParam)
-        if NSView._traceInvalidation { NSView._trace("win32 key \(type == .keyDown ? "down" : "up") vk \(vk) '\(title)' composing \(composing)") }
         // An active input method owns the keyboard: the keystrokes it consumes arrive as
         // VK_PROCESSKEY and come back as WM_IME_* messages, so they are not key events too.
         if vk == VK_PROCESSKEY || composing { return }
+        // The characters Windows itself translated for this key (the pump's TranslateMessage
+        // queued them as WM_CHAR before dispatching the key-down); taken off the queue
+        // whether or not they are needed, so none is left over for a later key.
+        let translated = type == .keyDown ? takeTranslatedUnits() : []
         var chars = "", plain = ""
         var keyCode = UInt16(truncatingIfNeeded: wParam)
         if let special = Win32Window.specialKeys[vk] {
@@ -911,12 +1050,53 @@ final class Win32Window: PlatformWindow {
                 owner?.platformWindowDispatch(e)
                 return
             }
+            // ToUnicode gave nothing but the translation did: Unicode input injected as
+            // VK_PACKET (SendInput's KEYEVENTF_UNICODE, used by the touch keyboard and by
+            // UI automation), or a keyboard state ToUnicode reads differently from the
+            // translation (a modifier the injecting process left down). The text field
+            // would otherwise drop the key, Backspace and the other special keys still
+            // working, which is how the print panels' fields refused typed digits.
+            // VK_PACKET (0xE7) carries its character in the message's scan code; ToUnicode
+            // answers with the thread's latest injected character instead, so a burst of
+            // SendInput keystrokes came out as the last character repeated. The translation
+            // is the message's own.
+            if !translated.isEmpty, vk == 0xE7 || chars.isEmpty {
+                var units = translated
+                if let high = pendingHighSurrogate { units.insert(high, at: 0); pendingHighSurrogate = nil }
+                if let last = units.last, UTF16.isLeadSurrogate(last) {
+                    // The first half of a pair: the second comes with the next key-down.
+                    pendingHighSurrogate = last
+                    units.removeLast()
+                    if units.isEmpty { return }
+                }
+                chars = String(decoding: units, as: UTF16.self)
+                if plain.isEmpty { plain = chars }
+            }
         }
+        if NSView._traceInvalidation { NSView._trace("win32 key \(type == .keyDown ? "down" : "up") vk \(vk) chars \(chars.unicodeScalars.map { String($0.value, radix: 16) }) plain \(plain.unicodeScalars.map { String($0.value, radix: 16) }) translated \(translated.map { String($0, radix: 16) }) flags \(modifierFlags().rawValue) '\(title)'") }
         let isRepeat = (lParam & 0x4000_0000) != 0
         let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifierFlags(), timestamp: timestamp(),
                                  windowNumber: windowNumber(), context: nil, characters: chars,
                                  charactersIgnoringModifiers: plain, isARepeat: isRepeat, keyCode: keyCode)!
         owner?.platformWindowDispatch(e)
+    }
+
+    /// The high half of a surrogate pair delivered as two VK_PACKET key-downs, until its low half arrives.
+    private var pendingHighSurrogate: UInt16? = nil
+
+    /// Removes and returns the WM_CHAR (WM_SYSCHAR with Alt down) code units the pump's
+    /// TranslateMessage posted for the key-down being dispatched. Posted messages come off
+    /// the queue before hardware input, so by the time a key-down is dispatched the
+    /// previous key's characters have already gone by: what is queued belongs to this key.
+    private func takeTranslatedUnits() -> [UInt16] {
+        guard let hwnd else { return [] }
+        var units: [UInt16] = []
+        var msg = MSG()
+        while true {
+            if PeekMessageW(&msg, hwnd, UINT(WM_CHAR), UINT(WM_CHAR), UINT(PM_REMOVE)) { units.append(UInt16(truncatingIfNeeded: msg.wParam)); continue }
+            if PeekMessageW(&msg, hwnd, UINT(WM_SYSCHAR), UINT(WM_SYSCHAR), UINT(PM_REMOVE)) { units.append(UInt16(truncatingIfNeeded: msg.wParam)); continue }
+            return units
+        }
     }
 
     // MARK: Input methods (IME)
@@ -1056,6 +1236,8 @@ final class Win32Window: PlatformWindow {
             }
         }
         switch Int32(msg) {
+        case WM_SIZING:
+            return handleSizing(edge: Int32(truncatingIfNeeded: wParam), rect: UnsafeMutablePointer<RECT>(bitPattern: Int(lParam)))
         case WM_ENTERSIZEMOVE:
             // DefWindowProc runs its own message loop while the user drags or resizes the
             // window, so the backend's pump (which fires animation frames) is not reached:
@@ -1088,6 +1270,7 @@ final class Win32Window: PlatformWindow {
             }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            accessibilityGeometryChanged()      // rectangles moved (ADR-0013)
             if reportedIconic { reportedIconic = false; owner?.platformWindowDidDeminiaturize() }
             checkPresentationMonitor()
             return 0
@@ -1095,6 +1278,9 @@ final class Win32Window: PlatformWindow {
             if let hwnd, IsIconic(hwnd) { return 0 }
             frameBeforeMinimize = frame
             owner?.platformWindowDidChangeFrame(frame)
+            // UI Automation clients hold providers across moves: their rectangles are
+            // recomputed on the next request rather than served from the old position.
+            accessibilityGeometryChanged()
             checkPresentationMonitor()
             return 0
         case WM_DISPLAYCHANGE:
@@ -1108,6 +1294,7 @@ final class Win32Window: PlatformWindow {
             // the new DPI rather than taking the suggested rect's size (which rounds).
             let pointSize = contentSize
             dpi = UINT(wParam & 0xFFFF)
+            extendFrame()           // the band's extension is in pixels
             if let rt = renderTarget {
                 cd2d_target_set_dpi(rt, Float(dpi))
                 // The content size in points is unchanged, so no scene commit follows: the
@@ -1122,6 +1309,7 @@ final class Win32Window: PlatformWindow {
                 SetWindowPos(hwnd, nil, r.left, r.top, width, height, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
             }
             owner?.platformWindowDidChangeBackingScaleFactor(scale)
+            accessibilityGeometryChanged()
             return 0
         case WM_GETMINMAXINFO:
             if let info = UnsafeMutablePointer<MINMAXINFO>(bitPattern: Int(lParam)) {
@@ -1175,10 +1363,71 @@ final class Win32Window: PlatformWindow {
                 ScreenToClient(hwnd, &pt)
             }
             // NSWindow decides: caption when movable by background or in the title bar
-            // band of content that extends into it, unless a control is under the mouse.
+            // band of content that extends into it, unless a control is under the mouse;
+            // the standard buttons it draws answer as the caption buttons (HTCLOSE,
+            // HTMINBUTTON, HTMAXBUTTON: Windows 11 shows snap layouts over the latter).
             let region = owner?.platformWindowHitTest(contentPoint(x: pt.x, y: pt.y)) ?? .client
             if NSView._traceInvalidation, _styleMask.contains(.nonactivatingPanel) { NSView._trace("win32 popup nchittest client \(pt.x),\(pt.y) -> \(region)") }
-            return LRESULT(region == .caption ? HTCAPTION : HTCLIENT)
+            let code = Win32WindowPolicy.hitCode(for: region)
+            if NSView._traceInvalidation, code != lastTracedHitCode {
+                // What the shell sees while the pointer crosses the caption buttons (the
+                // Windows 11 snap layouts flyout needs HTMAXBUTTON = 9 here), with the style
+                // bits it also checks: WS_MAXIMIZEBOX 0x10000, WS_THICKFRAME 0x40000, WS_CAPTION 0xC00000.
+                lastTracedHitCode = code
+                let style = DWORD(truncatingIfNeeded: GetWindowLongPtrW(hwnd, GWL_STYLE))
+                NSView._trace("win32 nchittest '\(_title)' client \(pt.x),\(pt.y) -> \(code) (\(region)) style 0x\(String(style, radix: 16)) active \(GetForegroundWindow() == hwnd)")
+            }
+            return LRESULT(code)
+        case WM_NCMOUSEMOVE:
+            // Over a package-drawn caption button the pointer is "non-client": the owner
+            // still sees it move (hover fills). Elsewhere in the non-client area (the resize
+            // band over the buttons) the pointer is reported gone, so no button stays lit.
+            // DefWindowProc gets the message either way: the Windows 11 snap layouts flyout
+            // comes from the shell's hot-tracking of HTMAXBUTTON through it (Windows
+            // Terminal's custom frame relies on the same), and with no non-client area
+            // (WM_NCCALCSIZE) it has nothing of its own to paint.
+            guard usesCustomFrame else { return nil }
+            trackMouseLeave(nonClient: true)
+            if Win32WindowPolicy.isCaptionButton(hitCode: Int32(truncatingIfNeeded: wParam)) {
+                if NSView._traceInvalidation, !tracedNonClientHover {
+                    tracedNonClientHover = true
+                    NSView._trace("win32 ncmousemove '\(_title)' over caption button \(wParam) -> DefWindowProc")
+                }
+                nonClientMouse(.mouseMoved, lParam, clickCount: 0)
+            } else {
+                tracedNonClientHover = false
+                pointerLeft()
+            }
+            return nil
+        case WM_NCLBUTTONDOWN, WM_NCLBUTTONDBLCLK:
+            // A press on a package-drawn caption button is the button's to track (DefWindowProc
+            // would track a system caption button the frame does not have): capture, so the
+            // drag and the release arrive as client messages like any control's. On a system
+            // frame the caption buttons are Windows' own and DefWindowProc tracks them: taking
+            // the press here left the close box showing its tooltip and never closing, and the
+            // minimise and maximise buttons doing nothing.
+            guard Win32WindowPolicy.takesNonClientMouse(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
+            if let hwnd { SetCapture(hwnd) }
+            pressedButtons |= 1
+            NSEvent._pressedMouseButtons = pressedButtons
+            nonClientMouse(.leftMouseDown, lParam, clickCount: 1)
+            return 0
+        case WM_NCLBUTTONUP:
+            guard Win32WindowPolicy.takesNonClientMouse(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
+            pressedButtons &= ~1
+            NSEvent._pressedMouseButtons = pressedButtons
+            if pressedButtons == 0 { ReleaseCapture() }
+            nonClientMouse(.leftMouseUp, lParam, clickCount: 1)
+            return 0
+        case WM_NCMOUSELEAVE:
+            trackingNonClientLeave = false
+            tracedNonClientHover = false
+            if pressedButtons == 0 { pointerLeft() }
+            return nil
+        case WM_MOUSELEAVE:
+            trackingLeave = false
+            if pressedButtons == 0 { pointerLeft() }
+            return 0
         case WM_CLOSE:
             // Route through NSWindow.close() so delegates, notifications and the
             // last-window-closed check run; NSWindow then calls close() here.
@@ -1269,22 +1518,8 @@ final class Win32Window: PlatformWindow {
             if pressedButtons == 0 { ReleaseCapture() }
             mouse(.otherMouseUp, lParam, button: 2)
             return 0
-        case WM_MOUSELEAVE:
-            // The pointer left the client area (asked for with TrackMouseEvent below): a
-            // far-away move lets the tracking areas and hover states exit.
-            mouseLeaveTracked = false
-            if pressedButtons == 0 {
-                let e = NSEvent._mouseEvent(type: .mouseMoved, location: NSPoint(x: -100_000, y: -100_000), modifierFlags: modifierFlags(),
-                                            timestamp: timestamp(), windowNumber: windowNumber(), clickCount: 0, buttonNumber: 0)
-                owner?.platformWindowDispatch(e)
-            }
-            return 0
         case WM_MOUSEMOVE:
-            if !mouseLeaveTracked, let hwnd {
-                var tme = TRACKMOUSEEVENT(cbSize: DWORD(MemoryLayout<TRACKMOUSEEVENT>.size), dwFlags: DWORD(TME_LEAVE), hwndTrack: hwnd, dwHoverTime: 0)
-                _ = TrackMouseEvent(&tme)
-                mouseLeaveTracked = true
-            }
+            trackMouseLeave(nonClient: false)
             if pressedButtons & 1 != 0 { mouse(.leftMouseDragged, lParam, button: 0) }
             else if pressedButtons & 2 != 0 { mouse(.rightMouseDragged, lParam, button: 1) }
             else if pressedButtons & 4 != 0 { mouse(.otherMouseDragged, lParam, button: 2) }
@@ -1358,11 +1593,21 @@ final class Win32Window: PlatformWindow {
         case WM_KEYDOWN, WM_SYSKEYDOWN:
             // The input method's keys go to the text services first; what they eat is not ours.
             if tsfOwnsInput, textServices?.key(wParam: wParam, lParam: lParam, down: true) == true { return 0 }
+            // Keyboard access to the native menu bar: Alt+letter (the mnemonics), F10, an
+            // Alt tap, Alt+F4 and Alt+Space are DefWindowProc's (it starts the menu loop from
+            // WM_SYSKEYDOWN / WM_SYSCHAR / WM_SYSKEYUP), as in every Windows application.
+            // Ctrl+Alt combinations stay AppKit key events. The Alt key itself still reaches
+            // AppKit for its modifier flags.
+            if Int32(msg) == WM_SYSKEYDOWN, ownsMenuKeyboard {
+                if Int32(truncatingIfNeeded: wParam) == VK_MENU { key(.keyDown, wParam, lParam) }
+                return nil
+            }
             key(.keyDown, wParam, lParam)
             return 0
         case WM_KEYUP, WM_SYSKEYUP:
             if tsfOwnsInput, textServices?.key(wParam: wParam, lParam: lParam, down: false) == true { return 0 }
             key(.keyUp, wParam, lParam)
+            if Int32(msg) == WM_SYSKEYUP, ownsMenuKeyboard { return nil }
             return 0
         default:
             return nil

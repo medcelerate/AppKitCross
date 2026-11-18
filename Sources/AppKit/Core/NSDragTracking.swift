@@ -63,7 +63,11 @@ final class _NSDraggingInfo: NSObject, NSDraggingInfo {
     func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions, for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey : Any], using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {
         session.enumerateDraggingItems(options: enumOpts, for: view, classes: classArray, searchOptions: searchOptions, using: block)
     }
-    nonisolated func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    /// The source makes the promised files: a collection view asks its delegate (AppKit's
+    /// legacy file promise path); other sources promise none.
+    nonisolated func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? {
+        MainActor.assumeIsolated { (source as? NSCollectionView)?._namesOfPromisedFilesDropped(atDestination: dropDestination) }
+    }
     var numberOfValidItemsForDrop: Int {
         get { _numberOfValidItems }
         set { _numberOfValidItems = newValue }
@@ -281,13 +285,28 @@ final class _NSDragTracker: PlatformDragSource {
         // The image: the leader item's first component, or a placeholder of its frame.
         let leader = session._items.indices.contains(session.draggingLeaderIndex) ? session._items[session.draggingLeaderIndex] : session._items.first
         let frameInView = leader?.draggingFrame ?? NSRect(x: -8, y: -8, width: 16, height: 16)
-        image = leader?.imageComponents?.first?.contents as? NSImage
+        image = _NSDragTracker.compositeImage(of: leader)
         imageSize = frameInView.size == .zero ? NSSize(width: 16, height: 16) : frameInView.size
         // Where the pointer sits inside the frame (frames are in the source view's space).
         let frameInWindow = view.convert(frameInView, to: nil)
         let pointerInWindow = event.locationInWindow
         imageOffset = NSPoint(x: frameInWindow.minX - pointerInWindow.x, y: frameInWindow.minY - pointerInWindow.y)
         if frameInView.size == .zero { imageOffset = NSPoint(x: -8, y: -8) }
+    }
+
+    /// The item's image: its components drawn at their frames (measured from the dragging
+    /// frame's bottom-left), so a component smaller than the frame (an item's label) keeps
+    /// its size and place instead of being stretched over the frame.
+    static func compositeImage(of item: NSDraggingItem?) -> NSImage? {
+        guard let item, let components = item.imageComponents, !components.isEmpty else { return nil }
+        let size = item.draggingFrame.size
+        guard size.width > 0, size.height > 0 else { return components[0].contents as? NSImage }
+        if components.count == 1, components[0].frame == NSRect(origin: .zero, size: size) { return components[0].contents as? NSImage }
+        let parts = components.compactMap { c in (c.contents as? NSImage).map { (c.frame, $0) } }
+        return NSImage(size: size, flipped: false) { _ in
+            for (frame, image) in parts { image.draw(in: frame) }
+            return true
+        }
     }
 
     private func start(event: NSEvent, view: NSView) {
@@ -452,10 +471,16 @@ final class _NSDragTracker: PlatformDragSource {
 @MainActor
 enum _NSPlatformDragDelivery {
     private static var foreign: _NSDragDestinationDriver?
+    /// The drag `foreign` was made for. A backend describes each drag with its own
+    /// PlatformDragInfo, so another one entering means the earlier drag left without a drop
+    /// (OLE sends no "drag over" to the application): its session must not carry the new
+    /// drag's drop, or the drop reads the earlier drag's data.
+    private static weak var foreignInfo: PlatformDragInfo?
 
     private static func driver(for drag: PlatformDragInfo) -> _NSDragDestinationDriver? {
         if drag.isFromThisApplication { return _NSDragTracker.current?.driver }
-        if let f = foreign { return f }
+        if let f = foreign, foreignInfo === drag { return f }
+        if foreign != nil { foreignDragLeft() }
         let load = drag.load
         let items: [NSPasteboardItem] = drag.items.enumerated().map { index, types in
             let item = NSPasteboardItem()
@@ -468,6 +493,7 @@ enum _NSPlatformDragDelivery {
         let session = NSDraggingSession(pasteboard: pb, items: items.map { NSDraggingItem(pasteboardWriter: $0) }, source: nil)
         let d = _NSDragDestinationDriver(info: _NSDraggingInfo(session: session, source: nil, mask: drag.sourceOperations))
         foreign = d
+        foreignInfo = drag
         return d
     }
 
@@ -513,13 +539,18 @@ enum _NSPlatformDragDelivery {
         if !drag.isFromThisApplication {
             d.end()
             foreign = nil
+            foreignInfo = nil
         }
         return performed
     }
 
     /// A foreign drag left the application without dropping (every window told).
     static func foreignDragLeft() {
-        foreign?.exit()
+        guard let d = foreign else { return }
+        d.exit()
+        d.end()
+        foreign = nil
+        foreignInfo = nil
     }
 }
 

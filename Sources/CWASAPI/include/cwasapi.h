@@ -1,4 +1,5 @@
-// C interface of the WASAPI output backend for the AVFAudio module (ADR-0014).
+// C interface of the WASAPI output and capture backend for the AVFAudio module (ADR-0014,
+// ADR-0028).
 //
 // Shared-mode, event-driven rendering on a multimedia-class thread. `cwasapi_open` uses
 // IAudioClient3's low-latency shared-mode periods when the device offers them and falls
@@ -53,6 +54,34 @@ bool cwasapi_start(CWASAPIStream *stream, char *error, size_t errorLength);
 /// Returns once the render thread has exited.
 void cwasapi_stop(CWASAPIStream *stream);
 void cwasapi_close(CWASAPIStream *stream);
+
+// Capture (ADR-0028): a shared-mode, event-driven IAudioCaptureClient stream delivering
+// the device's mix format as interleaved Float32 (Int16 mix formats are converted).
+typedef struct CWASAPICaptureStream CWASAPICaptureStream;
+typedef void (*cwasapi_capture_fn)(void *context, const float *interleaved, uint32_t frames);
+
+/// Re-enumerates the active capture endpoints; returns how many there are.
+uint32_t cwasapi_input_device_count(char *error, size_t errorLength);
+bool cwasapi_input_device(uint32_t index, CWASAPIDeviceInfo *info);
+bool cwasapi_default_input_device(CWASAPIDeviceInfo *info, char *error, size_t errorLength);
+
+/// Opens a shared-mode capture stream on `deviceID` (NULL: the default console endpoint).
+CWASAPICaptureStream *cwasapi_open_capture(const char *deviceID, cwasapi_capture_fn capture, void *context, char *error, size_t errorLength);
+void cwasapi_capture_info(CWASAPICaptureStream *stream, CWASAPIStreamInfo *info);
+bool cwasapi_capture_start(CWASAPICaptureStream *stream, char *error, size_t errorLength);
+/// Returns once the capture thread has exited.
+void cwasapi_capture_stop(CWASAPICaptureStream *stream);
+void cwasapi_capture_close(CWASAPICaptureStream *stream);
+
+// Device notifications (IMMNotificationClient). Events for the console role only.
+#define CWASAPI_DEFAULT_OUTPUT_CHANGED 0   // deviceID: the new default render endpoint ("" when none)
+#define CWASAPI_DEFAULT_INPUT_CHANGED 1    // deviceID: the new default capture endpoint
+#define CWASAPI_DEVICE_ADDED 2             // added, or its state became active
+#define CWASAPI_DEVICE_REMOVED 3           // removed, unplugged, disabled or not present
+/// Runs on a COM thread of the system's: must not block.
+typedef void (*cwasapi_device_fn)(void *context, int event, const char *deviceID);
+/// Registers `callback` (NULL unregisters). False when the enumerator cannot be created.
+bool cwasapi_watch_devices(cwasapi_device_fn callback, void *context);
 
 #ifdef __cplusplus
 }

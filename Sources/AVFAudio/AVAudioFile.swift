@@ -1,4 +1,4 @@
-// AVAudioFile: reads and writes WAV and AIFF/AIFF-C files, converting between the file's
+// AVAudioFile: reads and writes WAV, AIFF/AIFF-C and CAF files, converting between the file's
 // PCM encoding and a processing format (Float32 non-interleaved unless asked otherwise).
 
 import Foundation
@@ -68,6 +68,7 @@ open class AVAudioFile: NSObject, @unchecked Sendable {
         case "wav", "wave": kind = .wave
         case "aif", "aiff": kind = .aiff
         case "aifc": kind = .aifc
+        case "caf", "caff": kind = .caf
         default: throw _osStatusError(kAudioFileUnsupportedFileTypeError, "AVAudioFile: unsupported file type .\(fileURL.pathExtension)")
         }
         self.kind = kind
@@ -83,7 +84,12 @@ open class AVAudioFile: NSObject, @unchecked Sendable {
         if kind == .wave && (bits > 32 && !isFloat) || (bits < 8) || ![8, 16, 24, 32, 64].contains(bits) {
             throw _osStatusError(kAudioFileUnsupportedDataFormatError, "AVAudioFile: unsupported bit depth \(bits)")
         }
-        let bigEndian = kind == .wave ? false : (kind == .aiff ? true : d.mFormatFlags & kAudioFormatFlagIsBigEndian != 0 || isFloat)
+        let bigEndian: Bool
+        switch kind {
+        case .wave, .caf: bigEndian = false
+        case .aiff: bigEndian = true
+        case .aifc: bigEndian = d.mFormatFlags & kAudioFormatFlagIsBigEndian != 0 || isFloat
+        }
         encoding = _PCMEncoding(bitsPerSample: bits, isFloat: isFloat, isBigEndian: bigEndian, isSigned: !(kind == .wave && bits == 8), channels: Int(d.mChannelsPerFrame), sampleRate: d.mSampleRate)
         var asbd = encoding.asbd
         _fileFormat = AVAudioFormat(streamDescription: &asbd, channelLayout: ff.channelLayout)!

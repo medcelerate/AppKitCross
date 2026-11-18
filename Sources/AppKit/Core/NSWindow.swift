@@ -88,16 +88,28 @@ import CoreText
         case "performZoom:": return _styleMask.contains(.resizable)
         case "toggleToolbarShown:": return _toolbar != nil
         case "runToolbarCustomizationPalette:": return _toolbar?.allowsUserCustomization == true
+        case "print:", "printWindow:": return _contentView != nil && !_hasDocument
+        case "runPageLayout:": return !_hasDocument
+        // Edit > Undo/Redo go to the window's undo manager, as on macOS (ADR-0038).
+        case "undo:": return undoManager?.canUndo == true
+        case "redo:": return undoManager?.canRedo == true
         default: return false
         }
     }
+    /// A document's window leaves `print:` and `runPageLayout:` to the document, which is
+    /// next in the responder chain.
+    private var _hasDocument: Bool { (windowController?.document as? NSDocument) != nil }
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch NSStringFromSelector(action) {
+        case "print:", "printWindow:": guard !_hasDocument else { return false }; printWindow(sender)
+        case "runPageLayout:": guard !_hasDocument else { return false }; NSApplication.shared.runPageLayout(sender)
         case "performClose:": performClose(sender)
         case "performMiniaturize:": performMiniaturize(sender)
         case "performZoom:": performZoom(sender)
         case "toggleToolbarShown:": toggleToolbarShown(sender)
         case "runToolbarCustomizationPalette:": runToolbarCustomizationPalette(sender)
+        case "undo:": guard let m = undoManager, m.canUndo else { return false }; m.undo()
+        case "redo:": guard let m = undoManager, m.canRedo else { return false }; m.redo()
         default: return false
         }
         return true
@@ -112,12 +124,24 @@ import CoreText
     /// The platform draws no title bar: the frame has a band above the content that
     /// `platformWindowDrawTitleBar` paints (ClientSideDecoration.swift).
     internal var _hasClientSideTitleBar: Bool { _platform?.hasClientSideTitleBar ?? false }
+    /// Traffic lights at the left (macOS, Linux) or Windows caption buttons at the right (ADR-0022).
+    internal var _windowButtonStyle: PlatformWindowButtonStyle { Platform.windowButtonStyle }
+    /// What the standard buttons occupy at each edge of the title band (plus a gap), 0 when
+    /// no buttons show there: what a toolbar or a title bar accessory lays out inside.
+    internal var _windowButtonsLeadingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.leadingInset ?? _NSWindowButtonsView.leadingInset(for: _windowButtonStyle)
+    }
+    internal var _windowButtonsTrailingInset: CGFloat {
+        guard _showsWindowButtons else { return 0 }
+        return _windowButtons?.trailingInset ?? _NSWindowButtonsView.trailingInset(for: _windowButtonStyle)
+    }
 
     /// Creates the overlay when first needed and keeps it placed and styled.
     @discardableResult
     internal func _ensureWindowButtons(create: Bool = false) -> _NSWindowButtonsView? {
         if _windowButtons == nil, create || _showsWindowButtons {
-            let v = _NSWindowButtonsView()
+            let v = _NSWindowButtonsView(style: _windowButtonStyle)
             v.nextResponder = self
             v._setWindow(self)
             v.close.isDocumentEdited = _isDocumentEdited
@@ -133,6 +157,7 @@ import CoreText
             // and at the top of the frame (in the band above the content) when the package
             // draws the title bar.
             let top = _hasClientSideTitleBar && !_styleMask.contains(.fullSizeContentView) ? frame.size : _platformContentSize
+            v.style = _windowButtonStyle
             v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
         }
@@ -155,7 +180,8 @@ import CoreText
     /// How the toolbar is placed and sized for this window; nil when none is shown.
     internal var _toolbarMetrics: _NSToolbarMetrics? {
         guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
-        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView))
+        return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView),
+                                         buttonStyle: _windowButtonStyle)
     }
     /// The height the toolbar takes out of the content area (below the title band). Zero
     /// when the content covers the title bar: the toolbar then overlays the content.
@@ -230,10 +256,13 @@ import CoreText
             top -= NSWindow._titleBarBandHeight
         }
         // Leading and trailing accessories stack outward from their edge of the title row;
-        // the buttons keep the left edge whatever the direction, as on macOS.
+        // the standard buttons keep their edge whatever the direction (left for the traffic
+        // lights as on macOS, right for Windows caption buttons; ADR-0022), and the
+        // accessories keep clear of them through the band insets.
         let rtl = windowTitlebarLayoutDirection == .rightToLeft
-        let buttonsInset: CGFloat = _showsWindowButtons ? _NSWindowButtonsView.width + 4 : 8
-        var leftX = buttonsInset, rightX = pc.width - 8
+        let leadingInset: CGFloat = _showsWindowButtons ? max(8, _windowButtonsLeadingInset) : 8
+        let trailingInset: CGFloat = _showsWindowButtons ? max(8, _windowButtonsTrailingInset) : 8
+        var leftX = leadingInset, rightX = pc.width - trailingInset
         for a in _visibleAccessories where a.layoutAttribute != .bottom {
             let size = a._measuredSize
             let height = min(size.height, l.titleRow.height > 0 ? l.titleRow.height : size.height)
@@ -256,7 +285,7 @@ import CoreText
         if fullSize, let t = l.toolbar, t.maxY == pc.height, _toolbarMetrics?.topInset == 0 {
             // A unified toolbar shares the row: its items start after the left-hand
             // accessories and stop before the right-hand ones.
-            l.toolbarInsets = (max(0, leftX - buttonsInset), max(0, pc.width - 8 - rightX))
+            l.toolbarInsets = (max(0, leftX - leadingInset), max(0, pc.width - trailingInset - rightX))
         }
         for a in _visibleAccessories where a.layoutAttribute == .bottom {
             let h = a._measuredSize.height
@@ -432,7 +461,12 @@ import CoreText
     private var _appearance: NSAppearance? = nil
     private var _fieldEditor: NSTextView? = nil
     /// Backdrop requested by an NSVisualEffectView blending behind the window.
-    internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { _updateChrome() } }
+    internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { if _backdrop != oldValue { _updateChrome() } } }
+    /// The shape of the views asking for `_backdrop` (`NSWindow._updateBackdrop`).
+    internal var _backdropCoversWindow = true { didSet { if _backdropCoversWindow != oldValue { _updateChrome() } } }
+    internal var _backdropCornerRadius: CGFloat = 0 { didSet { if _backdropCornerRadius != oldValue { _updateChrome() } } }
+    /// An NSVisualEffectView has been in this window: hiding views re-evaluates the backdrop.
+    internal var _hasEffectViews = false
     private weak var _windowController: NSWindowController?
     private var _contentViewController: NSViewController? = nil
     private var _lastFrame = NSRect.zero
@@ -453,11 +487,52 @@ import CoreText
     private var _preservesContentDuringLiveResize = true
     private var _displaysWhenScreenProfileChanges = false
     private var _isAutodisplay = true
-    private var _autorecalculatesKeyViewLoop = true
+    private var _autorecalculatesKeyViewLoop = false
     private var _resizeIncrements = NSSize(width: 1, height: 1)
     private var _aspectRatio = NSSize.zero
     private var _toolbarStyle: NSWindow.ToolbarStyle = .automatic
     private var _cursorRectsEnabled = true
+    // MARK: Core depth (ADR-0036)
+    nonisolated(unsafe) private static var _allowsAutomaticWindowTabbing = true
+    private var _allowsConcurrentViewDrawing = true
+    private var _anchorAttributes: [NSLayoutConstraint.Orientation: NSLayoutConstraint.Attribute] = [.horizontal: .left, .vertical: .top]
+    private weak var _appearanceSource: NSObject?
+    private var _contentBorderThickness: [NSRectEdge: CGFloat] = [:]
+    private var _autorecalculatesContentBorderThickness: [NSRectEdge: Bool] = [:]
+    private var _backingType: NSWindow.BackingStoreType = .buffered
+    private var _canBecomeVisibleWithoutLogin = false
+    private var _colorSpace: NSColorSpace? = nil
+    private var _contentAspectRatio = NSSize.zero
+    private var _contentResizeIncrements = NSSize(width: 1, height: 1)
+    private var _contentLayoutGuide: NSLayoutGuide? = nil
+    private var _depthLimit: NSWindow.Depth? = nil
+    private var _hasDynamicDepthLimit = true
+    private var _flushDisabledCount = 0
+    private var _snapshotRestorationDisabledCount = 0
+    private var _isOneShot = false
+    private var _keyViewSelectionDirection: NSWindow.SelectionDirection = .directSelection
+    private var _minFullScreenContentSize = NSSize(width: 73, height: 29)
+    private var _maxFullScreenContentSize = NSSize(width: 100_000, height: 100_000)
+    private var _miniwindowImage: NSImage? = nil
+    private var _miniwindowTitle: String? = nil
+    private var _preferredBackingLocation: NSWindow.BackingLocation = .default
+    private var _preventsApplicationTerminationWhenModal = true
+    private var _restorationClass: (any NSWindowRestoration.Type)? = nil
+    private var _sharingType: NSWindow.SharingType = .readOnly
+    private var _showsResizeIndicator = false
+    private var _tabbingIdentifier: NSWindow.TabbingIdentifier? = nil
+    private var _titlebarSeparatorStyle: NSTitlebarSeparatorStyle = .automatic
+    private var _registeredDraggedTypes: [NSPasteboard.PasteboardType] = []
+    /// The button cell whose key equivalent `disableKeyEquivalentForDefaultButtonCell` cleared.
+    private var _suspendedDefaultButton: (cell: NSButtonCell, key: String)? = nil
+    /// Frame before `zoom(_:)` went to a delegate-supplied standard frame.
+    private var _userStateFrame: NSRect? = nil
+    /// Frame and style before `toggleFullScreen(_:)`.
+    private var _fullScreenRestore: (frame: NSRect, style: NSWindow.StyleMask, level: NSWindow.Level)? = nil
+    /// Drawers whose parent is this window (NSDrawer keeps the list).
+    internal var _drawers: [_NSWeakDrawer] = []
+    /// Frame autosave names in use by live windows (AppKit refuses a second owner).
+    @MainActor private static var _autosaveOwners: [String: _NSWeakWindow] = [:]
 
     /// Chooses the cursor for the mouse position (content coordinates) from cursor rects.
     @MainActor private func _updateCursor(at location: NSPoint) {
@@ -681,8 +756,10 @@ import CoreText
         c.hidesTitle = _titleVisibility == .hidden || !_styleMask.contains(.titled)
         c.transparentTitleBar = _titlebarAppearsTransparent
         c.backdrop = _backdrop
+        c.backdropCoversWindow = _backdropCoversWindow
+        c.backdropCornerRadius = _backdropCornerRadius
         c.isTransparent = !_isOpaque
-        c.hasShadow = _hasShadow
+        c.hasShadow = _hasShadow && _sheetSlide == nil
         c.movableByBackground = _isMovableByWindowBackground
         c.hasDraggableBand = _toolbarView.map { !$0.isHidden } ?? false
         return c
@@ -698,7 +775,23 @@ import CoreText
     public func platformWindowHitTest(_ point: NSPoint) -> PlatformWindowHitRegion {
         guard let content = _contentView else { return .client }
         let hit = _hitTest(point) ?? content.hitTest(point)
-        if let v = hit, !v.mouseDownCanMoveWindow { return .client }
+        // A standard button the package draws: Windows reports it as the caption button it
+        // stands for (snap layouts over maximise); a disabled one is plain content.
+        if _showsWindowButtons, let b = hit as? _NSWindowButton, b.superview === _windowButtons, b.isEnabled {
+            switch b.kind {
+            case .closeButton: return .closeButton
+            case .miniaturizeButton: return .miniaturizeButton
+            default: return .zoomButton
+            }
+        }
+        // The hit view or any ancestor that takes the click keeps it from moving the window:
+        // a label inside a custom button (SwiftUI's Button with a Label body) is the button's.
+        var v = hit
+        while let view = v {
+            if !view.mouseDownCanMoveWindow { return .client }
+            if view === content || view === _toolbarView || view === _accessoryHost { break }
+            v = view.superview
+        }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
         if let a = _accessoryHost, !a.isHidden, let v = hit, v === a || v.isDescendant(of: a) { return .caption }
         if _isMovableByWindowBackground { return .caption }
@@ -746,10 +839,12 @@ import CoreText
             let color = _isKey ? NSColor.windowFrameTextColor : NSColor.secondaryLabelColor
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let size = _title.size(withAttributes: attributes)
-            // Centred in the band, kept clear of the buttons on the left.
-            let buttonsEnd = _NSWindowButtonsView.width + 8
+            // Centred in the band, kept clear of the buttons at whichever edge they sit.
+            let buttonStyle = _windowButtons?.style ?? _windowButtonStyle
+            let buttonsEnd = buttonStyle == .trafficLights ? _NSWindowButtonsView.width + 8 : 8
+            let trailingEnd = buttonStyle == .caption ? _NSWindowButtonsView.captionWidth + 8 : 8
             let x = max(buttonsEnd, band.midX - size.width / 2)
-            let width = min(size.width, band.maxX - 8 - x)
+            let width = min(size.width, band.maxX - trailingEnd - x)
             if width > 0 {
                 context.saveGState()
                 context.clip(to: NSRect(x: x, y: band.minY, width: width, height: band.height))
@@ -845,6 +940,7 @@ import CoreText
         }
         _noteScreen()
         if !_sheets.isEmpty { _layoutSheets() }
+        if !_frameAutosaveName.isEmpty, old != frame { saveFrame(usingName: _frameAutosaveName) }
     }
 
     /// Posts `didChangeScreenNotification` when the move or resize put the window on
@@ -908,8 +1004,13 @@ import CoreText
             context.setFillColor(_backgroundColor.cgColor)
             context.fill(dirtyRect)
         }
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?.layoutSubtreeIfNeeded()
+        let t1 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        if NSView._traceFrames {
+            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height))
+        }
         if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
             t.layoutSubtreeIfNeeded()
             t._displayHierarchy(in: context, dirtyRect: dirtyRect)
@@ -968,7 +1069,8 @@ import CoreText
         if let t = contentViewController.title { title = t }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/init(windowref:)
-    @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { unimplemented() }
+    /// Out of scope (ADR-0036): Carbon window references exist only on macOS.
+    @MainActor public convenience init?(windowRef: UnsafeMutableRawPointer) { appleOnlyUnavailable("NSWindow(windowRef:) — Carbon WindowRef is macOS-only") }
     /// The end of the `cursorUpdate(with:)` chain: nothing above set a cursor, so the arrow shows.
     @MainActor open override func cursorUpdate(with event: NSEvent) { NSCursor.arrow.set() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/acceptsmousemovedevents
@@ -984,20 +1086,24 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/addtabbedwindow(_:ordered:)
     @available(macOS 10.12, *)
-    @MainActor open func addTabbedWindow(_ window: NSWindow, ordered: NSWindow.OrderingMode) { unimplemented() }
+    /// Window tabs are not modelled (ADR-0036): the window is ordered next to this one as
+    /// a separate window, which is what AppKit shows with tabbing turned off.
+    @MainActor open func addTabbedWindow(_ window: NSWindow, ordered: NSWindow.OrderingMode) {
+        window.order(ordered == .below ? .below : .above, relativeTo: windowNumber)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/addtitlebaraccessoryviewcontroller(_:)
     @available(macOS 10.10, *)
     @MainActor open func addTitlebarAccessoryViewController(_ childViewController: NSTitlebarAccessoryViewController) { _insertTitlebarAccessory(childViewController, at: _titlebarAccessories.count) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/allowsautomaticwindowtabbing
     @available(macOS 10.12, *)
     @MainActor class public var allowsAutomaticWindowTabbing: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsAutomaticWindowTabbing }
+        set { _allowsAutomaticWindowTabbing = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/allowsconcurrentviewdrawing
     @MainActor open var allowsConcurrentViewDrawing: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _allowsConcurrentViewDrawing }
+        set { _allowsConcurrentViewDrawing = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/allowstooltipswhenapplicationisinactive
     @MainActor open var allowsToolTipsWhenApplicationIsInactive: Bool {
@@ -1010,26 +1116,45 @@ import CoreText
         set { _alphaValue = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/anchorattribute(for:)
-    @MainActor open func anchorAttribute(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Attribute { unimplemented() }
+    /// Which edge stays put when constraints resize the window: left and top by default.
+    @MainActor open func anchorAttribute(for orientation: NSLayoutConstraint.Orientation) -> NSLayoutConstraint.Attribute { _anchorAttributes[orientation] ?? (orientation == .horizontal ? .left : .top) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/animationbehavior
     @MainActor open var animationBehavior: NSWindow.AnimationBehavior {
         get { _animationBehavior }
         set { _animationBehavior = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/animationresizetime(_:)
-    @MainActor open func animationResizeTime(_ newFrame: NSRect) -> TimeInterval { unimplemented() }
+    /// AppKit's curve: 0 for no change, growing with the logarithm of the farthest edge's
+    /// travel d (≈0.17 s at 100 pt, ≈0.33 s at 300 pt): k·ln(1 + d/100), k scaled by
+    /// the `NSWindowResizeTime` user default (0.2 s) as AppKit scales it.
+    @MainActor open func animationResizeTime(_ newFrame: NSRect) -> TimeInterval {
+        let f = frame
+        let d = max(abs(newFrame.minX - f.minX), abs(newFrame.maxX - f.maxX), abs(newFrame.minY - f.minY), abs(newFrame.maxY - f.maxY))
+        guard d > 0 else { return 0 }
+        let base = UserDefaults.standard.object(forKey: "NSWindowResizeTime") as? Double ?? 0.2
+        return 0.16727951957513346 / log(2) * (base / 0.2) * log(1 + Double(d) / 100)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/appearancesource
     @available(macOS 10.14, *)
     @MainActor open var appearanceSource: (any NSAppearanceCustomization)! {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _appearanceSource as? any NSAppearanceCustomization }
+        set { _appearanceSource = newValue as? NSObject }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/arecursorrectsenabled
     @MainActor open var areCursorRectsEnabled: Bool { _cursorRectsEnabled }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/aspectratio
     @MainActor open var aspectRatio: NSSize {
         get { _aspectRatio }
-        set { _aspectRatio = newValue }
+        set { _aspectRatio = newValue; if newValue != .zero { _contentAspectRatio = .zero }; _applyResizeConstraints() }
+    }
+    /// Hands the aspect ratios and increments to the platform for user resizes.
+    private func _applyResizeConstraints() {
+        var c = PlatformResizeConstraints()
+        c.aspectRatio = _aspectRatio
+        c.contentAspectRatio = _contentAspectRatio
+        c.resizeIncrements = _resizeIncrements
+        c.contentResizeIncrements = _contentResizeIncrements
+        _platform?.setResizeConstraints(c)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/attachedsheet
     @MainActor open var attachedSheet: NSWindow? { _sheets.first { $0._sheetIsPresented } }
@@ -1045,7 +1170,13 @@ import CoreText
     /// Presented (attached, ordered in) rather than waiting in the parent's queue.
     private var _sheetIsPresented = false
     /// The slide in or out running on this sheet.
-    private var _sheetSlide: _NSSheetSlide? = nil
+    /// While a sheet slides it shows no shadow: on Win32 a borderless window's shadow is a
+    /// WS_THICKFRAME frame (ADR-0016), and Windows never sizes such a window below its
+    /// border width (about 14 px), so the slide could not start 1 point tall (the drawer
+    /// hit the same, PR 68). `hasShadow` itself is unchanged; the chrome follows.
+    private var _sheetSlide: _NSSheetSlide? = nil {
+        didSet { if (oldValue == nil) != (_sheetSlide == nil) { _updateChrome() } }
+    }
     /// Escape ends this sheet with `.cancel` when no key equivalent took it (SwiftUI's
     /// `.sheet`, as on macOS). Not part of Apple's API: SwiftUI sets it on its sheets.
     public var _cancelsSheetOnEscape = false
@@ -1123,7 +1254,11 @@ import CoreText
     /// Where the sheet goes: centred on the top of `contentLayoutRect` (under the title bar
     /// and the toolbar band), unless the delegate moves the attachment rect.
     private func _sheetFrame(for sheet: NSWindow) -> NSRect {
-        let size = sheet.contentRect(forFrameRect: sheet.frame).size
+        // The attached sheet is frameless, so its frame is its content plus its own toolbar
+        // band; converting to the content rect here dropped the band from the frame on
+        // every layout (a sheet with a toolbar shrank by the band each time its parent
+        // reported a frame, until nothing but the toolbar was left).
+        let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
         var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
@@ -1148,11 +1283,26 @@ import CoreText
         let h = max(1, (target.height * min(max(fraction, 0), 1)).rounded())
         let partial = NSRect(x: target.minX, y: target.maxY - h, width: target.width, height: h)
         if let cv = _contentView {
-            if cv.frame.size != target.size { cv.setFrameSize(target.size) }
+            // The content keeps its full size (the frame less this sheet's toolbar band),
+            // pinned to the top so it emerges from under the parent's title bar.
+            let full = contentRect(forFrameRect: target).size
+            if cv.frame.size != full { cv.setFrameSize(full) }
             cv.setFrameOrigin(NSPoint(x: 0, y: h - target.height))
         }
         if p.frame != partial { p.frame = partial }
         p.setNeedsDisplay(nil)
+    }
+
+    /// After the slide's last step: the window's final size lands with that step, and on
+    /// Windows the top rows of the sheet kept whatever the resized surface held (the
+    /// parent's content showed through until the next repaint), so the whole sheet is
+    /// invalidated again once the step has been processed.
+    fileprivate func _repaintAfterSheetSlide() {
+        Platform.backend.post { [weak self] in
+            guard let self, let p = self._platform else { return }
+            self._contentView?.needsDisplay = true
+            p.setNeedsDisplay(nil)
+        }
     }
 
     /// Ends the sheet session on this sheet's parent with `.cancel` (a sheet closed or
@@ -1161,7 +1311,7 @@ import CoreText
         if let p = _sheetParent { p.endSheet(self, returnCode: .cancel) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculatescontentborderthickness(for:)
-    @MainActor open func autorecalculatesContentBorderThickness(for edge: NSRectEdge) -> Bool { unimplemented() }
+    @MainActor open func autorecalculatesContentBorderThickness(for edge: NSRectEdge) -> Bool { _autorecalculatesContentBorderThickness[edge] ?? true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/autorecalculateskeyviewloop
     @MainActor open var autorecalculatesKeyViewLoop: Bool {
         get { _autorecalculatesKeyViewLoop }
@@ -1173,15 +1323,30 @@ import CoreText
         set { _backgroundColor = newValue ?? .windowBackgroundColor; _platform?.setNeedsDisplay(nil) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backingalignedrect(_:options:)
-    @MainActor open func backingAlignedRect(_ rect: NSRect, options: AlignmentOptions = []) -> NSRect { unimplemented() }
+    /// Aligns the rect's edges to backing pixels (in window coordinates), each edge
+    /// rounded as `options` asks; nearest when no option names it.
+    @MainActor open func backingAlignedRect(_ rect: NSRect, options: AlignmentOptions = []) -> NSRect {
+        let b = convertToBacking(rect)
+        func align(_ v: CGFloat, inward: AlignmentOptions, outward: AlignmentOptions, nearest: AlignmentOptions, isMin: Bool) -> CGFloat {
+            if options.contains(inward) { return isMin ? v.rounded(.up) : v.rounded(.down) }
+            if options.contains(outward) { return isMin ? v.rounded(.down) : v.rounded(.up) }
+            return v.rounded(.toNearestOrAwayFromZero)
+        }
+        let minX = align(b.minX, inward: .alignMinXInward, outward: .alignMinXOutward, nearest: .alignMinXNearest, isMin: true)
+        let maxX = align(b.maxX, inward: .alignMaxXInward, outward: .alignMaxXOutward, nearest: .alignMaxXNearest, isMin: false)
+        let minY = align(b.minY, inward: .alignMinYInward, outward: .alignMinYOutward, nearest: .alignMinYNearest, isMin: true)
+        let maxY = align(b.maxY, inward: .alignMaxYInward, outward: .alignMaxYOutward, nearest: .alignMaxYNearest, isMin: false)
+        return convertFromBacking(NSRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, maxY - minY)))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backinglocation
-    @MainActor open var backingLocation: NSWindow.BackingLocation { unimplemented() }
+    /// Deprecated: every window's backing lives in main memory here.
+    @MainActor open var backingLocation: NSWindow.BackingLocation { .mainMemory }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backingscalefactor
     @MainActor open var backingScaleFactor: CGFloat { _platform?.backingScaleFactor ?? 1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backingtype
     @MainActor open var backingType: NSWindow.BackingStoreType {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _backingType }
+        set { _backingType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomekey()
     @MainActor open func becomeKey() {
@@ -1207,6 +1372,11 @@ import CoreText
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
         _trackingActivityDidChange()
+        // A window the window system activated (a click on it) is the main window too when
+        // it can be one, as on macOS; a utility panel (the Fonts or Colors panel) cannot, so
+        // the document window stays main and nil-target actions sent while the panel is
+        // key still reach the document's first responder.
+        if canBecomeMain, !_isMain { makeMain() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/becomemain()
     @MainActor open func becomeMain() {
@@ -1228,22 +1398,27 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/begindraggingsession(items:event:source:)
     @available(macOS 15.0, *)
-    @MainActor open func beginDraggingSession(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession { unimplemented() }
+    /// Starts the drag from the content view.
+    @MainActor open func beginDraggingSession(items: [NSDraggingItem], event: NSEvent, source: any NSDraggingSource) -> NSDraggingSession {
+        guard let view = _contentView else { preconditionFailure("NSWindow.beginDraggingSession: the window has no content view") }
+        return view.beginDraggingSession(with: items, event: event, source: source)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/beginsheet(_:)
     @MainActor open func beginSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse {
         await withCheckedContinuation { c in beginSheet(sheetWindow) { c.resume(returning: $0) } }
     }
     // DUPLICATE: @MainActor open func beginSheet(_ sheetWindow: NSWindow) async -> NSApplication.ModalResponse
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/cacheimage(in:)
-    @MainActor open func cacheImage(in rect: NSRect) { unimplemented() }
+    /// Deprecated; AppKit's layer-backed windows ignore it, and so does the port.
+    @MainActor open func cacheImage(in rect: NSRect) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomekey
     @MainActor open var canBecomeKey: Bool { _styleMask.contains(.titled) || _styleMask.contains(.resizable) || _sheetParent != nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomemain
     @MainActor open var canBecomeMain: Bool { canBecomeKey && !_styleMask.contains(.utilityWindow) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canbecomevisiblewithoutlogin
     @MainActor open var canBecomeVisibleWithoutLogin: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _canBecomeVisibleWithoutLogin }
+        set { _canBecomeVisibleWithoutLogin = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canhide
     @MainActor open var canHide: Bool {
@@ -1252,14 +1427,32 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canrepresent(_:)
     @available(macOS 10.12, *)
-    @MainActor open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { unimplemented() }
+    /// Whether the window's screen shows the gamut (sRGB everywhere; P3 where the screen says so).
+    @MainActor open func canRepresent(_ displayGamut: NSDisplayGamut) -> Bool { displayGamut == .sRGB || (screen?.canRepresent(displayGamut) ?? false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/canstorecolor()
-    @MainActor open func canStoreColor() -> Bool { unimplemented() }
+    /// True: every backing store here is colour.
+    @MainActor open func canStoreColor() -> Bool { true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/cascadetopleft(from:)
-    @MainActor open func cascadeTopLeft(from topLeftPoint: NSPoint) -> NSPoint { unimplemented() }
+    /// Places the window's top-left corner at `topLeftPoint` (keeping it where it is for
+    /// `.zero`) and returns the point for the next window, 29 pt right and down as on
+    /// macOS. A window that would leave the screen's visible area starts again at its
+    /// top-left corner.
+    @MainActor open func cascadeTopLeft(from topLeftPoint: NSPoint) -> NSPoint {
+        var topLeft = topLeftPoint
+        if topLeft != .zero {
+            if let visible = (NSScreen.screens.first { $0.frame.contains(topLeft) } ?? screen ?? NSScreen.main)?.visibleFrame,
+               topLeft.x + frame.width > visible.maxX || topLeft.y - frame.height < visible.minY {
+                topLeft = NSPoint(x: visible.minX, y: visible.maxY)
+            }
+            setFrameTopLeftPoint(topLeft)
+        } else {
+            topLeft = NSPoint(x: frame.minX, y: frame.maxY)
+        }
+        return NSPoint(x: topLeft.x + 29, y: topLeft.y - 29)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/cascadingreferenceframe
     @available(macOS 15.0, *)
-    @MainActor open var cascadingReferenceFrame: NSRect { unimplemented() }
+    @MainActor open var cascadingReferenceFrame: NSRect { frame }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/center()
     @MainActor open func center() {
         guard let s = (screen ?? NSScreen.main)?.visibleFrame else { return }
@@ -1306,9 +1499,10 @@ import CoreText
         set { _collectionBehavior = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/colorspace
+    /// The screen's colour space unless one was set.
     @MainActor open var colorSpace: NSColorSpace? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _colorSpace ?? screen?.colorSpace ?? .sRGB }
+        set { _colorSpace = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/constrainframerect(_:to:)
     @MainActor open func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
@@ -1323,15 +1517,34 @@ import CoreText
         return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentaspectratio
+    /// Live resizes keep this content proportion; zero means none. Setting it clears
+    /// `aspectRatio` (AppKit keeps one of the two).
     @MainActor open var contentAspectRatio: NSSize {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _contentAspectRatio }
+        set { _contentAspectRatio = newValue; if newValue != .zero { _aspectRatio = .zero }; _applyResizeConstraints() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentborderthickness(for:)
-    @MainActor open func contentBorderThickness(for edge: NSRectEdge) -> CGFloat { unimplemented() }
+    @MainActor open func contentBorderThickness(for edge: NSRectEdge) -> CGFloat { _contentBorderThickness[edge] ?? 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentlayoutguide
     @available(macOS 10.10, *)
-    @MainActor open var contentLayoutGuide: Any? { unimplemented() }
+    /// A guide on the content view covering `contentLayoutRect`.
+    @MainActor open var contentLayoutGuide: Any? {
+        guard let cv = _contentView else { return nil }
+        if let g = _contentLayoutGuide, g.owningView === cv { return g }
+        let g = NSLayoutGuide()
+        g.identifier = NSUserInterfaceItemIdentifier("NSWindow-contentLayoutGuide")
+        cv.addLayoutGuide(g)
+        let r = contentLayoutRect
+        let flipped = cv.isFlipped
+        NSLayoutConstraint.activate([
+            g.leadingAnchor.constraint(equalTo: cv.leadingAnchor, constant: r.minX),
+            g.trailingAnchor.constraint(equalTo: cv.trailingAnchor, constant: r.maxX - cv.bounds.width),
+            g.topAnchor.constraint(equalTo: cv.topAnchor, constant: flipped ? r.minY : cv.bounds.height - r.maxY),
+            g.bottomAnchor.constraint(equalTo: cv.bottomAnchor, constant: flipped ? r.maxY - cv.bounds.height : -r.minY),
+        ])
+        _contentLayoutGuide = g
+        return g
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentlayoutrect
     @available(macOS 10.10, *)
     /// The content's bounds less the toolbar band and the title bar accessories that
@@ -1367,8 +1580,8 @@ import CoreText
     @MainActor public class func contentRect(forFrameRect fRect: NSRect, styleMask style: NSWindow.StyleMask) -> NSRect { Platform.backend.contentRect(forFrameRect: fRect, styleMask: style) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentresizeincrements
     @MainActor open var contentResizeIncrements: NSSize {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _contentResizeIncrements }
+        set { _contentResizeIncrements = newValue; _applyResizeConstraints() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/contentview
     @MainActor open var contentView: NSView? {
@@ -1400,10 +1613,10 @@ import CoreText
     @MainActor open func convertPoint(toScreen point: NSPoint) -> NSPoint { let c = contentRect(forFrameRect: frame); return NSPoint(x: point.x + c.minX, y: point.y + c.minY) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/convertpointfrombacking(_:)
     @available(macOS 10.14, *)
-    @MainActor open func convertPointFromBacking(_ point: NSPoint) -> NSPoint { unimplemented() }
+    @MainActor open func convertPointFromBacking(_ point: NSPoint) -> NSPoint { let s = backingScaleFactor; return NSPoint(x: point.x / s, y: point.y / s) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/convertpointtobacking(_:)
     @available(macOS 10.14, *)
-    @MainActor open func convertPointToBacking(_ point: NSPoint) -> NSPoint { unimplemented() }
+    @MainActor open func convertPointToBacking(_ point: NSPoint) -> NSPoint { let s = backingScaleFactor; return NSPoint(x: point.x * s, y: point.y * s) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/converttobacking(_:)
     @MainActor open func convertToBacking(_ rect: NSRect) -> NSRect { let s = backingScaleFactor; return NSRect(x: rect.minX * s, y: rect.minY * s, width: rect.width * s, height: rect.height * s) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/converttoscreen(_:)
@@ -1411,15 +1624,35 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/currentevent
     @MainActor open var currentEvent: NSEvent? { _currentEvent ?? NSApplication.shared.currentEvent }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/datawitheps(inside:)
-    @MainActor open func dataWithEPS(inside rect: NSRect) -> Data { unimplemented() }
+    @MainActor open func dataWithEPS(inside rect: NSRect) -> Data { unimplemented("NSWindow.dataWithEPS(inside:) — no PostScript writer; use dataWithPDF(inside:)") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/datawithpdf(inside:)
-    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data { unimplemented() }
+    /// The content view's PDF of `rect` (window coordinates).
+    @MainActor open func dataWithPDF(inside rect: NSRect) -> Data {
+        guard let cv = _contentView else { return Data() }
+        return cv.dataWithPDF(inside: cv.convert(rect, from: nil))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/deepestscreen
-    @MainActor open var deepestScreen: NSScreen? { unimplemented() }
+    /// The deepest screen the window overlaps: the one it is on (the port's screens share a depth).
+    @MainActor open var deepestScreen: NSScreen? { screen }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/defaultbuttoncell
+    /// The cell of the button whose key equivalent is Return; setting another moves Return to it.
     @MainActor open var defaultButtonCell: NSButtonCell? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get {
+            if let s = _suspendedDefaultButton { return s.cell }
+            func find(_ v: NSView) -> NSButtonCell? {
+                if let b = v as? NSButton, b.keyEquivalent == "\r", let c = b.cell as? NSButtonCell { return c }
+                for s in v.subviews { if let c = find(s) { return c } }
+                return nil
+            }
+            return _contentView.flatMap(find)
+        }
+        set {
+            let old = defaultButtonCell
+            guard old !== newValue else { return }
+            if let old { (old.controlView as? NSButton)?.keyEquivalent = ""; old.keyEquivalent = "" }
+            _suspendedDefaultButton = nil
+            if let newValue { if let b = newValue.controlView as? NSButton { b.keyEquivalent = "\r" } else { newValue.keyEquivalent = "\r" } }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/defaultdepthlimit
     @MainActor class public var defaultDepthLimit: NSWindow.Depth { NSWindow.Depth(rawValue: 520)! }
@@ -1434,12 +1667,19 @@ import CoreText
         _noteDeminiaturized()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/depthlimit
+    /// The window's depth: the default (24-bit RGB here) unless one was set.
     @MainActor open var depthLimit: NSWindow.Depth {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _depthLimit ?? NSWindow.defaultDepthLimit }
+        set { _depthLimit = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/devicedescription
-    @MainActor open var deviceDescription: [NSDeviceDescriptionKey : Any] { unimplemented() }
+    /// The window's screen as a device: resolution (72 dpi × backing scale), size (the
+    /// window's), colour space name, a screen.
+    @MainActor open var deviceDescription: [NSDeviceDescriptionKey : Any] {
+        let dpi = 72 * backingScaleFactor
+        return [.resolution: NSValue(size: NSSize(width: dpi, height: dpi)), .size: NSValue(size: frame.size),
+                .isScreen: "YES", .colorSpaceName: NSColorSpaceName.calibratedRGB, .bitsPerSample: 8]
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/didbecomekeynotification
     static public var didBecomeKeyNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSWindowDidBecomeKeyNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/didbecomemainnotification
@@ -1483,22 +1723,29 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablecursorrects()
     @MainActor open func disableCursorRects() { _cursorRectsEnabled = false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disableflushing()
-    @MainActor open func disableFlushing() { unimplemented() }
+    /// Deprecated: flushing nests and is counted; the port presents on display anyway.
+    @MainActor open func disableFlushing() { _flushDisabledCount += 1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablekeyequivalentfordefaultbuttoncell()
-    @MainActor open func disableKeyEquivalentForDefaultButtonCell() { unimplemented() }
+    /// Return stops reaching the default button until `enableKeyEquivalentForDefaultButtonCell`.
+    @MainActor open func disableKeyEquivalentForDefaultButtonCell() {
+        guard _suspendedDefaultButton == nil, let cell = defaultButtonCell else { return }
+        _suspendedDefaultButton = (cell, "\r")
+        if let b = cell.controlView as? NSButton { b.keyEquivalent = "" } else { cell.keyEquivalent = "" }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablescreenupdatesuntilflush()
     @MainActor open func disableScreenUpdatesUntilFlush() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/disablesnapshotrestoration()
-    @MainActor open func disableSnapshotRestoration() { unimplemented() }
+    /// Counted; the port restores no window snapshots at launch either way.
+    @MainActor open func disableSnapshotRestoration() { _snapshotRestorationDisabledCount += 1 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardcachedimage()
-    @MainActor open func discardCachedImage() { unimplemented() }
+    @MainActor open func discardCachedImage() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardcursorrects()
     @MainActor open func discardCursorRects() {
         func visit(_ v: NSView) { v.discardCursorRects(); v.subviews.forEach(visit) }
         if let cv = _contentView { visit(cv) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/discardevents(matching:before:)
-    @MainActor open func discardEvents(matching mask: NSEvent.EventTypeMask, before lastEvent: NSEvent?) { unimplemented() }
+    @MainActor open func discardEvents(matching mask: NSEvent.EventTypeMask, before lastEvent: NSEvent?) { NSApplication.shared.discardEvents(matching: mask, before: lastEvent) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/display()
     @MainActor open func display() { _commitLayerSceneIfNeeded(); _platform?.display() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/displayifneeded()
@@ -1516,19 +1763,41 @@ import CoreText
         set { _displaysWhenScreenProfileChanges = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/docktile
-    @MainActor open var dockTile: NSDockTile { unimplemented() }
+    @MainActor open var dockTile: NSDockTile {
+        if let t = _dockTile { return t }
+        let t = NSDockTile(owner: self)
+        _dockTile = t
+        return t
+    }
+    private var _dockTile: NSDockTile? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/drag(_:at:offset:event:pasteboard:source:slideback:)
-    @MainActor open func drag(_ image: NSImage, at baseLocation: NSPoint, offset initialOffset: NSSize, event: NSEvent, pasteboard pboard: NSPasteboard, source sourceObj: Any, slideBack slideFlag: Bool) { unimplemented() }
+    /// Deprecated: a drag of `pboard`'s contents with `image`, from the content view.
+    @MainActor open func drag(_ image: NSImage, at baseLocation: NSPoint, offset initialOffset: NSSize, event: NSEvent, pasteboard pboard: NSPasteboard, source sourceObj: Any, slideBack slideFlag: Bool) {
+        guard let view = _contentView else { return }
+        let writer = NSPasteboardItem()
+        for type in pboard.types ?? [] { if let data = pboard.data(forType: type) { _ = writer.setData(data, forType: type) } }
+        let item = NSDraggingItem(pasteboardWriter: writer)
+        let at = view.convert(baseLocation, from: nil)
+        item.setDraggingFrame(NSRect(origin: NSPoint(x: at.x + initialOffset.width, y: at.y + initialOffset.height), size: image.size), contents: image)
+        _ = view.beginDraggingSession(with: [item], event: event, source: (sourceObj as? NSDraggingSource) ?? _NSFileDragSource.shared)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/drawers
-    @MainActor open var drawers: [NSDrawer]? { unimplemented() }
+    @MainActor open var drawers: [NSDrawer]? {
+        let list = _drawers.compactMap(\.drawer)
+        return list.isEmpty ? nil : list
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablecursorrects()
     @MainActor open func enableCursorRects() { _cursorRectsEnabled = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enableflushing()
-    @MainActor open func enableFlushing() { unimplemented() }
+    @MainActor open func enableFlushing() { _flushDisabledCount = max(0, _flushDisabledCount - 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablekeyequivalentfordefaultbuttoncell()
-    @MainActor open func enableKeyEquivalentForDefaultButtonCell() { unimplemented() }
+    @MainActor open func enableKeyEquivalentForDefaultButtonCell() {
+        guard let s = _suspendedDefaultButton else { return }
+        _suspendedDefaultButton = nil
+        if let b = s.cell.controlView as? NSButton { b.keyEquivalent = s.key } else { s.cell.keyEquivalent = s.key }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/enablesnapshotrestoration()
-    @MainActor open func enableSnapshotRestoration() { unimplemented() }
+    @MainActor open func enableSnapshotRestoration() { _snapshotRestorationDisabledCount = max(0, _snapshotRestorationDisabledCount - 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endediting(for:)
     @MainActor open func endEditing(for object: Any?) {
         guard let e = _fieldEditor, e.superview != nil, firstResponder === e else { return }
@@ -1590,15 +1859,20 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/firstresponder
     @MainActor open var firstResponder: NSResponder? { _firstResponder ?? self }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/flush()
-    @MainActor open func flush() { unimplemented() }
+    /// Deprecated: shows what was drawn (a pending display), unless flushing is disabled.
+    @MainActor open func flush() { if _flushDisabledCount == 0 { displayIfNeeded() } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/flushifneeded()
-    @MainActor open func flushIfNeeded() { unimplemented() }
+    @MainActor open func flushIfNeeded() { flush() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/frame
     @MainActor open var frame: NSRect { _platform?.frame ?? _lastFrame }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/frameautosavename
     @MainActor open var frameAutosaveName: NSWindow.FrameAutosaveName { _frameAutosaveName }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framedescriptor
-    @MainActor open var frameDescriptor: NSWindow.PersistableFrameDescriptor { unimplemented() }
+    /// "x y w h sx sy sw sh " (window frame, then its screen's frame), as AppKit writes it.
+    @MainActor open var frameDescriptor: NSWindow.PersistableFrameDescriptor {
+        let f = frame, s = (screen ?? NSScreen.main)?.frame ?? .zero
+        return [f.minX, f.minY, f.width, f.height, s.minX, s.minY, s.width, s.height].map { String(Int($0.rounded())) }.joined(separator: " ") + " "
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framerect(forcontentrect:)
     @MainActor open func frameRect(forContentRect contentRect: NSRect) -> NSRect {
         var c = contentRect
@@ -1609,26 +1883,30 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/framerect(forcontentrect:stylemask:)
     @MainActor public class func frameRect(forContentRect cRect: NSRect, styleMask style: NSWindow.StyleMask) -> NSRect { Platform.backend.frameRect(forContentRect: cRect, styleMask: style) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/gstate()
-    @MainActor open func gState() -> Int { unimplemented() }
+    /// Deprecated: 0, as AppKit answers.
+    @MainActor open func gState() -> Int { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/graphicscontext
-    @MainActor open var graphicsContext: NSGraphicsContext? { unimplemented() }
+    /// The context the window is drawing into now (nil between draws: the port keeps no
+    /// persistent backing context).
+    @MainActor open var graphicsContext: NSGraphicsContext? { NSView._drawingView?.window === self ? NSGraphicsContext.current : nil }
     // SKIPPED (Foundation.NSCloseCommand not in corelibs): @MainActor func handleClose(_ command: NSCloseCommand) -> Any?
     // SKIPPED (Foundation.NSScriptCommand not in corelibs): @MainActor func handlePrint(_ command: NSScriptCommand) -> Any?
     // SKIPPED (Foundation.NSScriptCommand not in corelibs): @MainActor func handleSave(_ command: NSScriptCommand) -> Any?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hasactivewindowsharingsession
     @available(macOS 13.3, *)
-    @MainActor open var hasActiveWindowSharingSession: Bool { unimplemented() }
+    /// False: window sharing sessions are a macOS service.
+    @MainActor open var hasActiveWindowSharingSession: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hasclosebox
-    @MainActor open var hasCloseBox: Bool { unimplemented() }
+    @MainActor open var hasCloseBox: Bool { _styleMask.contains(.closable) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hasdynamicdepthlimit
-    @MainActor open var hasDynamicDepthLimit: Bool { unimplemented() }
+    @MainActor open var hasDynamicDepthLimit: Bool { _hasDynamicDepthLimit }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hasshadow
     @MainActor open var hasShadow: Bool {
         get { _hasShadow }
         set { _hasShadow = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hastitlebar
-    @MainActor open var hasTitleBar: Bool { unimplemented() }
+    @MainActor open var hasTitleBar: Bool { _styleMask.contains(.titled) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/hidesondeactivate
     @MainActor open var hidesOnDeactivate: Bool {
         get { _hidesOnDeactivate }
@@ -1679,19 +1957,20 @@ import CoreText
         set { _isExcludedFromWindowsMenu = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isfloatingpanel
-    @MainActor open var isFloatingPanel: Bool { unimplemented() }
+    /// False for a window (`NSPanel` answers its own).
+    @MainActor open var isFloatingPanel: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isflushwindowdisabled
-    @MainActor open var isFlushWindowDisabled: Bool { unimplemented() }
+    @MainActor open var isFlushWindowDisabled: Bool { _flushDisabledCount > 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iskeywindow
     @MainActor open var isKeyWindow: Bool { _isKey }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismainwindow
     @MainActor open var isMainWindow: Bool { _isMain }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isminiaturizable
-    @MainActor open var isMiniaturizable: Bool { unimplemented() }
+    @MainActor open var isMiniaturizable: Bool { _styleMask.contains(.miniaturizable) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isminiaturized
     @MainActor open var isMiniaturized: Bool { _platform?.isMiniaturized ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismodalpanel
-    @MainActor open var isModalPanel: Bool { unimplemented() }
+    @MainActor open var isModalPanel: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/ismovable
     @MainActor open var isMovable: Bool {
         get { _isMovable }
@@ -1703,11 +1982,13 @@ import CoreText
         set { _isMovableByWindowBackground = newValue; _updateChrome() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isonactivespace
-    @MainActor open var isOnActiveSpace: Bool { unimplemented() }
+    /// True while shown: there is one space per screen on Windows and Linux as the port
+    /// sees them (virtual desktops are not reported).
+    @MainActor open var isOnActiveSpace: Bool { isVisible }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isoneshot
     @MainActor open var isOneShot: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _isOneShot }
+        set { _isOneShot = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isopaque
     @MainActor open var isOpaque: Bool {
@@ -1720,7 +2001,7 @@ import CoreText
         set { _isReleasedWhenClosed = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isresizable
-    @MainActor open var isResizable: Bool { unimplemented() }
+    @MainActor open var isResizable: Bool { _styleMask.contains(.resizable) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isrestorable
     @MainActor open var isRestorable: Bool {
         get { _isRestorable }
@@ -1731,11 +2012,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isvisible
     @MainActor open var isVisible: Bool { _platform?.isVisible ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iszoomable
-    @MainActor open var isZoomable: Bool { unimplemented() }
+    /// A resizable window that can show a zoom control.
+    @MainActor open var isZoomable: Bool { _styleMask.contains(.resizable) && _styleMask.contains(.titled) && !_styleMask.contains(.utilityWindow) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/iszoomed
-    @MainActor open var isZoomed: Bool { _platform?.isZoomed ?? false }
+    @MainActor open var isZoomed: Bool { _userStateFrame != nil || (_platform?.isZoomed ?? false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/keyviewselectiondirection
-    @MainActor open var keyViewSelectionDirection: NSWindow.SelectionDirection { unimplemented() }
+    /// Which way the key view loop is moving while a view becomes first responder.
+    @MainActor open var keyViewSelectionDirection: NSWindow.SelectionDirection { _keyViewSelectionDirection }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/layoutifneeded()
     @MainActor open func layoutIfNeeded() { _contentView?.layoutSubtreeIfNeeded() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/level
@@ -1781,8 +2064,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/maxfullscreencontentsize
     @available(macOS 10.11, *)
     @MainActor open var maxFullScreenContentSize: NSSize {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _maxFullScreenContentSize }
+        set { _maxFullScreenContentSize = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/maxsize
     @MainActor open var maxSize: NSSize {
@@ -1790,17 +2073,27 @@ import CoreText
         set { _platform?.maxSize = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/menuchanged(_:)
-    @MainActor public class func menuChanged(_ menu: NSMenu) { unimplemented() }
+    /// The port's menus observe their own changes (the menu bar and pop-ups rebuild), so
+    /// there is nothing more to tell.
+    @MainActor public class func menuChanged(_ menu: NSMenu) { menu._menuTreeChanged() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/mergeallwindows(_:)
     @available(macOS 10.12, *)
-    @MainActor open func mergeAllWindows(_ sender: Any?) { unimplemented() }
+    /// Tabs are not modelled (ADR-0036): nothing to merge.
+    @MainActor open func mergeAllWindows(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/minframewidth(withtitle:stylemask:)
-    @MainActor public class func minFrameWidth(withTitle title: String, styleMask style: NSWindow.StyleMask) -> CGFloat { unimplemented() }
+    /// The narrowest frame that shows the title: the title bar's buttons and padding (69
+    /// pt, as macOS) plus the title in the title bar font; 4 pt without a title bar.
+    @MainActor public class func minFrameWidth(withTitle title: String, styleMask style: NSWindow.StyleMask) -> CGFloat {
+        guard style.contains(.titled) else { return 4 }
+        guard !title.isEmpty else { return 69 }
+        let font = NSFont.titleBarFont(ofSize: NSFont.systemFontSize)
+        return 69 + 8 + NSAttributedString(string: title, attributes: [.font: font]).size().width
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/minfullscreencontentsize
     @available(macOS 10.11, *)
     @MainActor open var minFullScreenContentSize: NSSize {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _minFullScreenContentSize }
+        set { _minFullScreenContentSize = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/minsize
     @MainActor open var minSize: NSSize {
@@ -1832,30 +2125,35 @@ import CoreText
     public func platformWindowDidMiniaturize() { _noteMiniaturized() }
     public func platformWindowDidDeminiaturize() { _noteDeminiaturized() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/miniwindowimage
+    /// Recorded: taskbar and dock thumbnails are the platform's own.
     @MainActor open var miniwindowImage: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _miniwindowImage }
+        set { _miniwindowImage = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/miniwindowtitle
+    /// The title unless one was set.
     @MainActor open var miniwindowTitle: String! {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _miniwindowTitle ?? _title }
+        set { _miniwindowTitle = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/mouselocationoutsideofeventstream
-    @MainActor open var mouseLocationOutsideOfEventStream: NSPoint { unimplemented() }
+    /// The pointer now, in window base coordinates.
+    @MainActor open var mouseLocationOutsideOfEventStream: NSPoint { convertPoint(fromScreen: NSEvent.mouseLocation) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/movetabtonewwindow(_:)
     @available(macOS 10.12, *)
-    @MainActor open func moveTabToNewWindow(_ sender: Any?) { unimplemented() }
+    @MainActor open func moveTabToNewWindow(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/nextevent(matching:)
     @MainActor open func nextEvent(matching mask: NSEvent.EventTypeMask) -> NSEvent? { NSApplication.shared.nextEvent(matching: mask, until: nil, inMode: .default, dequeue: true) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/nextevent(matching:until:inmode:dequeue:)
-    @MainActor open func nextEvent(matching mask: NSEvent.EventTypeMask, until expiration: Date?, inMode mode: RunLoop.Mode, dequeue deqFlag: Bool) -> NSEvent? { unimplemented() }
+    @MainActor open func nextEvent(matching mask: NSEvent.EventTypeMask, until expiration: Date?, inMode mode: RunLoop.Mode, dequeue deqFlag: Bool) -> NSEvent? { NSApplication.shared.nextEvent(matching: mask, until: expiration, inMode: mode, dequeue: deqFlag) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/occlusionstate
-    @MainActor open var occlusionState: NSWindow.OcclusionState { unimplemented() }
+    /// Visible while ordered in and not minimised (the port does not track other windows
+    /// covering it).
+    @MainActor open var occlusionState: NSWindow.OcclusionState { isVisible && !isMiniaturized ? .visible : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/oldcolorspaceuserinfokey
-    static public var oldColorSpaceUserInfoKey: String { unimplemented() }
+    static public var oldColorSpaceUserInfoKey: String { "NSBackingPropertyOldColorSpaceKey" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/oldscalefactoruserinfokey
-    static public var oldScaleFactorUserInfoKey: String { unimplemented() }
+    static public var oldScaleFactorUserInfoKey: String { "NSBackingPropertyOldScaleFactorKey" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/order(_:relativeto:)
     @MainActor open func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
         switch place {
@@ -1871,6 +2169,7 @@ import CoreText
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.orderBack()
+        NSApplication.shared._windowOrdered(self, front: false)
         if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfront(_:)
@@ -1880,6 +2179,7 @@ import CoreText
         if appearing { _contentView?._windowVisibilityWillChange(true) }
         _platform?.show()
         _platform?.displayIfNeeded()
+        NSApplication.shared._windowOrdered(self, front: true)
         if appearing { _contentView?._windowVisibilityDidChange(true) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderfrontregardless()
@@ -1895,9 +2195,14 @@ import CoreText
         if disappearing { _contentView?._windowVisibilityDidChange(false) }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/orderedindex
+    /// The position among the application's windows front to back.
     @MainActor open var orderedIndex: Int {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { NSApplication.shared.orderedWindows.firstIndex { $0 === self } ?? -1 }
+        set {
+            let others = NSApplication.shared.orderedWindows.filter { $0 !== self }
+            if newValue <= 0 || others.isEmpty { orderFront(nil) }
+            else { order(.below, relativeTo: others[min(newValue, others.count) - 1].windowNumber) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/parent
     @MainActor open var parent: NSWindow? {
@@ -1918,7 +2223,16 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performdrag(with:)
     @available(macOS 10.11, *)
-    @MainActor open func performDrag(with event: NSEvent) { unimplemented() }
+    /// Moves the window with the pointer from `event` (a mouse-down) until the button is released.
+    @MainActor open func performDrag(with event: NSEvent) {
+        let start = NSEvent.mouseLocation, origin = frame.origin
+        trackEvents(matching: [.leftMouseDragged, .leftMouseUp], timeout: .greatestFiniteMagnitude, mode: .eventTracking) { e, stop in
+            guard let e else { stop.pointee = true; return }
+            let p = NSEvent.mouseLocation
+            setFrameOrigin(NSPoint(x: origin.x + p.x - start.x, y: origin.y + p.y - start.y))
+            if e.type == .leftMouseUp { stop.pointee = true }
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/performminiaturize(_:)
     @MainActor open func performMiniaturize(_ sender: Any?) {
         guard _styleMask.contains(.miniaturizable) else { return }
@@ -1933,8 +2247,8 @@ import CoreText
     @MainActor open func postEvent(_ event: NSEvent, atStart flag: Bool) { NSApplication.shared.postEvent(event, atStart: flag) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/preferredbackinglocation
     @MainActor open var preferredBackingLocation: NSWindow.BackingLocation {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _preferredBackingLocation }
+        set { _preferredBackingLocation = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/preservescontentduringliveresize
     @MainActor open var preservesContentDuringLiveResize: Bool {
@@ -1943,22 +2257,44 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/preventsapplicationterminationwhenmodal
     @MainActor open var preventsApplicationTerminationWhenModal: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _preventsApplicationTerminationWhenModal }
+        set { _preventsApplicationTerminationWhenModal = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/printwindow(_:)
-    @MainActor open func printWindow(_ sender: Any?) { unimplemented() }
+    /// File > Print… reaching the window: prints the content view (ADR-0022).
+    @MainActor open func printWindow(_ sender: Any?) { _contentView?.printView(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/recalculatekeyviewloop()
-    @MainActor open func recalculateKeyViewLoop() { unimplemented() }
+    /// Links the content's key views into a loop in reading order: top to bottom, then
+    /// left to right (window coordinates), the last back to the first.
+    @MainActor open func recalculateKeyViewLoop() {
+        guard let content = _contentView else { return }
+        var views: [NSView] = []
+        func visit(_ v: NSView) {
+            if v !== content, !v.isHidden, v.canBecomeKeyView || v.acceptsFirstResponder { views.append(v) }
+            for s in v.subviews { visit(s) }
+        }
+        visit(content)
+        let keyed = views.map { ($0, $0.convert($0.bounds, to: nil)) }.sorted { a, b in
+            if abs(a.1.maxY - b.1.maxY) > 0.5 { return a.1.maxY > b.1.maxY }
+            return a.1.minX < b.1.minX
+        }.map(\.0)
+        for (i, v) in keyed.enumerated() { v.nextKeyView = keyed[(i + 1) % keyed.count] }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/registerfordraggedtypes(_:)
-    @MainActor open func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) { unimplemented() }
+    /// Registers the content view (drags are delivered to views here).
+    @MainActor open func registerForDraggedTypes(_ newTypes: [NSPasteboard.PasteboardType]) {
+        _registeredDraggedTypes = Array(Set(_registeredDraggedTypes + newTypes))
+        _contentView?.registerForDraggedTypes(newTypes)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/removechildwindow(_:)
     @MainActor open func removeChildWindow(_ childWin: NSWindow) {
         _childWindows.removeAll { $0 === childWin }
         childWin._parent = nil
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/removeframe(usingname:)
-    @MainActor public class func removeFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
+    @MainActor public class func removeFrame(usingName name: NSWindow.FrameAutosaveName) {
+        UserDefaults.standard.removeObject(forKey: "NSWindow Frame \(name)")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/removetitlebaraccessoryviewcontroller(at:)
     @available(macOS 10.10, *)
     @MainActor open func removeTitlebarAccessoryViewController(at index: Int) {
@@ -1981,11 +2317,11 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/requestsharingofwindow(_:)
     @available(macOS 15.0, *)
-    @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws { unimplemented() }
+    @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws { appleOnlyUnavailable("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func requestSharingOfWindow(_ window: NSWindow) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/requestsharingofwindow(usingpreview:title:)
     @available(macOS 15.0, *)
-    @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws { unimplemented() }
+    @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws { appleOnlyUnavailable("NSWindow.requestSharingOfWindow — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func requestSharingOfWindow(usingPreview image: NSImage, title: String) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resetcursorrects()
     @MainActor open func resetCursorRects() { discardCursorRects() }
@@ -2014,23 +2350,28 @@ import CoreText
         delegate?.windowDidResignMain(Notification(name: NSWindow.didResignMainNotification, object: self))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resizeflags
-    @MainActor open var resizeFlags: NSEvent.ModifierFlags { unimplemented() }
+    /// The modifier keys held while a live resize runs.
+    @MainActor open var resizeFlags: NSEvent.ModifierFlags { inLiveResize ? NSEvent.modifierFlags : [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resizeincrements
     @MainActor open var resizeIncrements: NSSize {
         get { _resizeIncrements }
-        set { _resizeIncrements = newValue }
+        set { _resizeIncrements = newValue; _applyResizeConstraints() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/restorationclass
     @MainActor open var restorationClass: (any NSWindowRestoration.Type)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _restorationClass }
+        set { _restorationClass = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/restorecachedimage()
-    @MainActor open func restoreCachedImage() { unimplemented() }
+    @MainActor open func restoreCachedImage() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/runtoolbarcustomizationpalette(_:)
     @MainActor open func runToolbarCustomizationPalette(_ sender: Any?) { _toolbar?.runCustomizationPalette(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/saveframe(usingname:)
-    @MainActor open func saveFrame(usingName name: NSWindow.FrameAutosaveName) { unimplemented() }
+    /// Writes `frameDescriptor` to the user defaults under "NSWindow Frame <name>".
+    @MainActor open func saveFrame(usingName name: NSWindow.FrameAutosaveName) {
+        guard !name.isEmpty else { return }
+        UserDefaults.standard.set(frameDescriptor, forKey: "NSWindow Frame \(name)")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/screen
     @MainActor open var screen: NSScreen? {
         // A backend that knows which monitor holds the window answers directly (its scale
@@ -2071,6 +2412,21 @@ import CoreText
         guard !views.isEmpty else { return }
         var current: NSView? = start ?? (firstResponder as? NSView)
         if let t = current as? NSText, let owner = t.superview { current = owner }
+        // An explicit key view loop (nextKeyView set by the app or by
+        // recalculateKeyViewLoop) wins over the default order.
+        if _autorecalculatesKeyViewLoop { recalculateKeyViewLoop() }
+        if let cur = current, cur.nextKeyView != nil || cur.previousKeyView != nil {
+            var candidate = forward ? cur.nextValidKeyView : cur.previousValidKeyView
+            var seen = Set<ObjectIdentifier>()
+            while let c = candidate, seen.insert(ObjectIdentifier(c)).inserted {
+                _keyViewSelectionDirection = forward ? .selectingNext : .selectingPrevious
+                defer { _keyViewSelectionDirection = .directSelection }
+                if c !== cur, makeFirstResponder(c) { return }
+                candidate = forward ? c.nextValidKeyView : c.previousValidKeyView
+            }
+        }
+        _keyViewSelectionDirection = forward ? .selectingNext : .selectingPrevious
+        defer { _keyViewSelectionDirection = .directSelection }
         var index = current.flatMap { c in views.firstIndex { $0 === c } } ?? (forward ? -1 : views.count)
         for _ in 0..<views.count {
             index = (index + (forward ? 1 : -1) + views.count) % views.count
@@ -2079,12 +2435,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectnexttab(_:)
     @available(macOS 10.12, *)
-    @MainActor open func selectNextTab(_ sender: Any?) { unimplemented() }
+    @MainActor open func selectNextTab(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectpreviouskeyview(_:)
     @MainActor open func selectPreviousKeyView(_ sender: Any?) { _selectKeyView(forward: false, from: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/selectprevioustab(_:)
     @available(macOS 10.12, *)
-    @MainActor open func selectPreviousTab(_ sender: Any?) { unimplemented() }
+    @MainActor open func selectPreviousTab(_ sender: Any?) { }
     /// The event's location, or nil for the far-away location the backends send when
     /// the pointer leaves the window.
     private func _pointerLocation(of event: NSEvent) -> NSPoint? {
@@ -2096,6 +2452,19 @@ import CoreText
     @MainActor open func sendEvent(_ event: NSEvent) {
         _currentEvent = event
         defer { _currentEvent = nil }
+        switch event.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .scrollWheel: _NSToolTipManager.shared.dismiss()
+        case .mouseExited where _pointerLocation(of: event) == nil: _NSToolTipManager.shared.dismiss()
+        default: break
+        }
+        // A child window that is key (a popover) takes the keyboard: on Wayland its keys
+        // arrive here, focus staying with the toplevel (ADR-0025).
+        if let child = _childWindows.last(where: { $0._isKey && $0.isVisible && $0 !== self }) {
+            switch event.type {
+            case .keyDown, .keyUp, .flagsChanged: child.sendEvent(event); return
+            default: break
+            }
+        }
         // Blocked by a sheet: the keyboard goes to the sheet (on Wayland the key events
         // arrive here, focus staying with the toplevel), the content takes no mouse.
         if let sheet = attachedSheet, sheet.isVisible {
@@ -2113,7 +2482,7 @@ import CoreText
             let hit = _hitTest(event.locationInWindow)
             if NSView._traceInvalidation { NSView._trace("mouse down '\(_title)' at \(event.locationInWindow) -> \(hit.map { String(describing: type(of: $0)) } ?? "window") accessory host \(_accessoryHost.map { "\($0.frame) hidden \($0.isHidden) bands \($0.paintedBands)" } ?? "none")") }
             _mouseDownView = hit
-            if let v = hit, v.acceptsFirstResponder, firstResponder !== v { _ = makeFirstResponder(v) }
+            if let v = hit, v._takesFirstResponderOnMouseDown, firstResponder !== v { _ = makeFirstResponder(v) }
             _dispatchMouse(event, to: hit ?? self)
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             _lastMouseLocation = _pointerLocation(of: event)
@@ -2131,9 +2500,11 @@ import CoreText
             let cursorOwned = _evaluateTrackingAreas(at: _lastMouseLocation, event: event, dragging: false)
             if !cursorOwned { _updateCursor(at: event.locationInWindow) }
             _windowButtons?.updateHover(event.locationInWindow)
+            if let p = _lastMouseLocation { _NSToolTipManager.shared.mouseMoved(in: self, at: p) } else { _NSToolTipManager.shared.dismiss() }
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
+            if event.type == .mouseExited { _windowButtons?.updateHover(event.locationInWindow) }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
             // Gestures go to the view under the pointer, or to the one tracking a press.
@@ -2171,18 +2542,19 @@ import CoreText
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setanchorattribute(_:for:)
-    @MainActor open func setAnchorAttribute(_ attr: NSLayoutConstraint.Attribute, for orientation: NSLayoutConstraint.Orientation) { unimplemented() }
+    @MainActor open func setAnchorAttribute(_ attr: NSLayoutConstraint.Attribute, for orientation: NSLayoutConstraint.Orientation) { _anchorAttributes[orientation] = attr }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setautorecalculatescontentborderthickness(_:for:)
-    @MainActor open func setAutorecalculatesContentBorderThickness(_ flag: Bool, for edge: NSRectEdge) { unimplemented() }
+    @MainActor open func setAutorecalculatesContentBorderThickness(_ flag: Bool, for edge: NSRectEdge) { _autorecalculatesContentBorderThickness[edge] = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setcontentborderthickness(_:for:)
-    @MainActor open func setContentBorderThickness(_ thickness: CGFloat, for edge: NSRectEdge) { unimplemented() }
+    /// Recorded per edge; the port draws no textured bottom bar, so it only reports back.
+    @MainActor open func setContentBorderThickness(_ thickness: CGFloat, for edge: NSRectEdge) { _contentBorderThickness[edge] = thickness }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setcontentsize(_:)
     @MainActor open func setContentSize(_ size: NSSize) {
         let cr = contentRect(forFrameRect: frame)
         setFrame(frameRect(forContentRect: NSRect(origin: cr.origin, size: size)), display: true)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setdynamicdepthlimit(_:)
-    @MainActor open func setDynamicDepthLimit(_ flag: Bool) { unimplemented() }
+    @MainActor open func setDynamicDepthLimit(_ flag: Bool) { _hasDynamicDepthLimit = flag }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframe(_:display:)
     @MainActor open func setFrame(_ frameRect: NSRect, display flag: Bool) {
         if NSView._traceInvalidation { NSView._trace("setFrame \'\(_title)\' \(frameRect)") }
@@ -2194,34 +2566,103 @@ import CoreText
         if flag { display() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframe(_:display:animate:)
-    @MainActor open func setFrame(_ frameRect: NSRect, display displayFlag: Bool, animate animateFlag: Bool) { setFrame(frameRect, display: displayFlag) }
+    /// Animated, the frame moves there over `animationResizeTime(_:)` and the call returns
+    /// when it has arrived, as AppKit's does (events are processed meanwhile).
+    @MainActor open func setFrame(_ frameRect: NSRect, display displayFlag: Bool, animate animateFlag: Bool) {
+        let duration = animateFlag && isVisible ? animationResizeTime(frameRect) : 0
+        guard duration > 0 else { setFrame(frameRect, display: displayFlag); return }
+        let start = frame, began = Date()
+        let done = _NSAnimationDone()
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { t in
+            MainActor.assumeIsolated {
+                let f = min(1, CGFloat(Date().timeIntervalSince(began) / duration))
+                let e = f < 0.5 ? 2 * f * f : 1 - pow(-2 * f + 2, 2) / 2   // ease in-out
+                func lerp(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * e }
+                self.setFrame(NSRect(x: lerp(start.minX, frameRect.minX), y: lerp(start.minY, frameRect.minY),
+                                     width: lerp(start.width, frameRect.width), height: lerp(start.height, frameRect.height)), display: displayFlag)
+                if f >= 1 { t.invalidate(); done.value = true }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        Platform.backend.runNested { done.value }
+        if frame != frameRect { setFrame(frameRect, display: displayFlag) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframe(from:)
-    @MainActor open func setFrame(from string: NSWindow.PersistableFrameDescriptor) { unimplemented() }
+    /// Applies a `frameDescriptor`: the saved frame moved by however far the saved screen
+    /// is from the screen with that origin now, then kept on screen. A window that cannot
+    /// resize keeps its size and its top-left corner goes where the saved one was.
+    @MainActor open func setFrame(from string: NSWindow.PersistableFrameDescriptor) {
+        guard let saved = NSWindow._parseFrameDescriptor(string) else { return }
+        setFrame(_restoredFrame(saved.frame, savedScreen: saved.screen), display: true)
+    }
+    internal static func _parseFrameDescriptor(_ s: String) -> (frame: NSRect, screen: NSRect?)? {
+        let n = s.split(separator: " ").compactMap { Double($0) }.map { CGFloat($0) }
+        guard n.count >= 4, n[2] > 0, n[3] > 0 else { return nil }
+        return (NSRect(x: n[0], y: n[1], width: n[2], height: n[3]), n.count >= 8 ? NSRect(x: n[4], y: n[5], width: n[6], height: n[7]) : nil)
+    }
+    private func _restoredFrame(_ savedFrame: NSRect, savedScreen: NSRect?) -> NSRect {
+        var f = savedFrame
+        if !_styleMask.contains(.resizable) {
+            f = NSRect(x: f.minX, y: f.maxY - frame.height, width: frame.width, height: frame.height)
+        }
+        let target = NSScreen.screens.first { $0.frame.intersects(f) } ?? screen ?? NSScreen.main
+        if let s = savedScreen, let now = target?.frame, s.origin != now.origin {
+            f.origin.x += now.minX - s.minX
+            f.origin.y += now.minY - s.minY
+        }
+        return constrainFrameRect(f, to: target)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframeautosavename(_:)
-    @MainActor open func setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool { _frameAutosaveName = name; return true }
+    /// Claims `name` (false if another live window has it), restores the frame saved
+    /// under it, and saves the frame there whenever it changes from now on.
+    @MainActor open func setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
+        if !name.isEmpty, let owner = NSWindow._autosaveOwners[name]?.window, owner !== self { return false }
+        if !_frameAutosaveName.isEmpty { NSWindow._autosaveOwners[_frameAutosaveName] = nil }
+        _frameAutosaveName = name
+        guard !name.isEmpty else { return true }
+        NSWindow._autosaveOwners[name] = _NSWeakWindow(self)
+        if !setFrameUsingName(name) { saveFrame(usingName: name) }
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframeorigin(_:)
     @MainActor open func setFrameOrigin(_ point: NSPoint) { setFrame(NSRect(origin: point, size: frame.size), display: false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframetopleftpoint(_:)
     @MainActor open func setFrameTopLeftPoint(_ point: NSPoint) { setFrameOrigin(NSPoint(x: point.x, y: point.y - frame.height)) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframeusingname(_:)
-    @MainActor open func setFrameUsingName(_ name: NSWindow.FrameAutosaveName) -> Bool { unimplemented() }
+    @MainActor open func setFrameUsingName(_ name: NSWindow.FrameAutosaveName) -> Bool { setFrameUsingName(name, force: false) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframeusingname(_:force:)
-    @MainActor open func setFrameUsingName(_ name: NSWindow.FrameAutosaveName, force: Bool) -> Bool { unimplemented() }
+    /// Restores the frame saved under `name`; false if there is none. `force` applies
+    /// the saved size to a window that cannot resize too.
+    @MainActor open func setFrameUsingName(_ name: NSWindow.FrameAutosaveName, force: Bool) -> Bool {
+        guard !name.isEmpty, let s = UserDefaults.standard.string(forKey: "NSWindow Frame \(name)"),
+              let saved = NSWindow._parseFrameDescriptor(s) else { return false }
+        var f = _restoredFrame(saved.frame, savedScreen: saved.screen)
+        if force { f.size = saved.frame.size; f = constrainFrameRect(f, to: screen) }
+        setFrame(f, display: true)
+        return true
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setisminiaturized(_:)
-    @MainActor open func setIsMiniaturized(_ flag: Bool) { unimplemented() }
+    @MainActor open func setIsMiniaturized(_ flag: Bool) {
+        guard flag != isMiniaturized else { return }
+        if flag { miniaturize(nil) } else { deminiaturize(nil) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setisvisible(_:)
     @MainActor open func setIsVisible(_ flag: Bool) { if flag { orderFront(nil) } else { orderOut(nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setiszoomed(_:)
-    @MainActor open func setIsZoomed(_ flag: Bool) { unimplemented() }
+    @MainActor open func setIsZoomed(_ flag: Bool) {
+        guard flag != isZoomed else { return }
+        zoom(nil)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/settitlewithrepresentedfilename(_:)
     @MainActor open func setTitleWithRepresentedFilename(_ filename: String) {
         representedFilename = filename
         title = (filename as NSString).lastPathComponent
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sharingtype
+    /// Recorded: whether other processes may read the window is the platform's policy.
     @MainActor open var sharingType: NSWindow.SharingType {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _sharingType }
+        set { _sharingType = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/sheetparent
     @MainActor open var sheetParent: NSWindow? { _sheetParent }
@@ -2229,8 +2670,8 @@ import CoreText
     @MainActor open var sheets: [NSWindow] { _sheets }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/showsresizeindicator
     @MainActor open var showsResizeIndicator: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _showsResizeIndicator }
+        set { _showsResizeIndicator = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/showstoolbarbutton
     @MainActor open var showsToolbarButton: Bool {
@@ -2251,7 +2692,7 @@ import CoreText
     @MainActor public class func standardWindowButton(_ b: NSWindow.ButtonType, for styleMask: NSWindow.StyleMask) -> NSButton? {
         switch b {
         case .closeButton, .miniaturizeButton, .zoomButton:
-            let button = _NSWindowButton(kind: b)
+            let button = _NSWindowButton(kind: b, style: Platform.windowButtonStyle)
             button.isEnabled = b == .closeButton ? styleMask.contains(.closable) : b == .miniaturizeButton ? styleMask.contains(.miniaturizable) : styleMask.contains(.resizable)
             return button
         default: return nil
@@ -2270,18 +2711,22 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tab
     @available(macOS 10.13, *)
-    @MainActor open var tab: NSWindowTab { unimplemented() }
+    /// Out of scope (ADR-0036): window tabs are not modelled (`NSWindowTab` is a stub).
+    @MainActor open var tab: NSWindowTab { unimplemented("NSWindow.tab — window tabs are not modelled") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tabgroup
     @available(macOS 10.13, *)
-    @MainActor open var tabGroup: NSWindowTabGroup? { unimplemented() }
+    /// Nil: the port does not group windows into tabs.
+    @MainActor open var tabGroup: NSWindowTabGroup? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tabbedwindows
     @available(macOS 10.12, *)
-    @MainActor open var tabbedWindows: [NSWindow]? { unimplemented() }
+    /// Nil: the window is in no tab group.
+    @MainActor open var tabbedWindows: [NSWindow]? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tabbingidentifier
     @available(macOS 10.12, *)
+    /// AppKit derives the default from the window's class and controller; this one from the class.
     @MainActor open var tabbingIdentifier: NSWindow.TabbingIdentifier {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _tabbingIdentifier ?? "\(type(of: self))-\(_windowController.map { "\(type(of: $0))" } ?? "(null)")-(null)-VT-" }
+        set { _tabbingIdentifier = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tabbingmode
     @available(macOS 10.12, *)
@@ -2318,17 +2763,44 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebarseparatorstyle
     @available(macOS 11.0, *)
     @MainActor open var titlebarSeparatorStyle: NSTitlebarSeparatorStyle {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _titlebarSeparatorStyle }
+        set { _titlebarSeparatorStyle = newValue; _contentView?.needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/togglefullscreen(_:)
-    @MainActor open func toggleFullScreen(_ sender: Any?) { unimplemented() }
+    /// Fills the screen (`.fullScreen` in the style mask, frame = the screen's frame,
+    /// above other windows) or goes back, with the will/did notifications and delegate
+    /// calls. The platform's own full-screen state is not entered (ADR-0036): a native
+    /// title bar stays where the platform draws one.
+    @MainActor open func toggleFullScreen(_ sender: Any?) {
+        if let restore = _fullScreenRestore {
+            post(NSWindow.willExitFullScreenNotification)
+            delegate?.windowWillExitFullScreen(Notification(name: NSWindow.willExitFullScreenNotification, object: self))
+            _fullScreenRestore = nil
+            styleMask = restore.style
+            level = restore.level
+            setFrame(restore.frame, display: true)
+            post(NSWindow.didExitFullScreenNotification)
+            delegate?.windowDidExitFullScreen(Notification(name: NSWindow.didExitFullScreenNotification, object: self))
+            return
+        }
+        guard !collectionBehavior.contains(.fullScreenNone), let s = screen ?? NSScreen.main else { return }
+        post(NSWindow.willEnterFullScreenNotification)
+        delegate?.windowWillEnterFullScreen(Notification(name: NSWindow.willEnterFullScreenNotification, object: self))
+        _fullScreenRestore = (frame, _styleMask, level)
+        styleMask = _styleMask.union(.fullScreen)
+        var target = s.frame
+        if let proposed = delegate?.window(self, willUseFullScreenContentSize: s.frame.size) { target.size = proposed }
+        level = .statusBar
+        setFrame(target, display: true)
+        post(NSWindow.didEnterFullScreenNotification)
+        delegate?.windowDidEnterFullScreen(Notification(name: NSWindow.didEnterFullScreenNotification, object: self))
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toggletabbar(_:)
     @available(macOS 10.12, *)
-    @MainActor open func toggleTabBar(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleTabBar(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toggletaboverview(_:)
     @available(macOS 10.13, *)
-    @MainActor open func toggleTabOverview(_ sender: Any?) { unimplemented() }
+    @MainActor open func toggleTabOverview(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toggletoolbarshown(_:)
     @MainActor open func toggleToolbarShown(_ sender: Any?) { _toolbar?.isVisible.toggle() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/toolbar
@@ -2344,33 +2816,51 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/trackevents(matching:timeout:mode:handler:)
     @available(macOS 10.10, *)
-    @MainActor open func trackEvents(matching mask: NSEvent.EventTypeMask, timeout: TimeInterval, mode: RunLoop.Mode, handler trackingHandler: (NSEvent?, UnsafeMutablePointer<ObjCBool>) -> Void) { unimplemented() }
+    /// Runs `trackingHandler` for each matching event until it sets the stop flag; a
+    /// timeout with no event hands it nil.
+    @MainActor open func trackEvents(matching mask: NSEvent.EventTypeMask, timeout: TimeInterval, mode: RunLoop.Mode, handler trackingHandler: (NSEvent?, UnsafeMutablePointer<ObjCBool>) -> Void) {
+        var stop = ObjCBool(false)
+        while !stop.boolValue {
+            let until = timeout.isFinite && timeout < 1e9 ? Date(timeIntervalSinceNow: timeout) : Date.distantFuture
+            let e = NSApplication.shared.nextEvent(matching: mask, until: until, inMode: mode, dequeue: true)
+            withUnsafeMutablePointer(to: &stop) { trackingHandler(e, $0) }
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/transferwindowsharing(to:)
     @available(macOS 13.3, *)
-    @MainActor open func transferWindowSharing(to window: NSWindow) async throws { unimplemented() }
+    @MainActor open func transferWindowSharing(to window: NSWindow) async throws { appleOnlyUnavailable("NSWindow.transferWindowSharing — window sharing is a macOS service") }
     // DUPLICATE: @MainActor open func transferWindowSharing(to window: NSWindow) async throws
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/trytoperform(_:with:)
     @MainActor open override func tryToPerform(_ action: Selector, with object: Any?) -> Bool { super.tryToPerform(action, with: object) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/unregisterdraggedtypes()
-    @MainActor open func unregisterDraggedTypes() { unimplemented() }
+    @MainActor open func unregisterDraggedTypes() {
+        _registeredDraggedTypes = []
+        _contentView?.unregisterDraggedTypes()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/update()
     @MainActor open func update() { post(NSWindow.didUpdateNotification) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/updateconstraintsifneeded()
-    @MainActor open func updateConstraintsIfNeeded() { unimplemented() }
+    @MainActor open func updateConstraintsIfNeeded() { _contentView?.updateConstraintsForSubtreeIfNeeded() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/useoptimizeddrawing(_:)
-    @MainActor open func useOptimizedDrawing(_ flag: Bool) { unimplemented() }
+    /// Deprecated; AppKit ignores it.
+    @MainActor open func useOptimizedDrawing(_ flag: Bool) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/usertabbingpreference
     @available(macOS 10.12, *)
     @MainActor class public var userTabbingPreference: NSWindow.UserTabbingPreference { NSWindow.UserTabbingPreference(rawValue: 2)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/validrequestor(forsendtype:returntype:)
-    @MainActor open override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? { unimplemented() }
+    /// The delegate gets a say (when it is a responder), then the application.
+    @MainActor open override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        if let d = delegate as? NSResponder, let r = d.validRequestor(forSendType: sendType, returnType: returnType) { return r }
+        return NSApplication.shared.validRequestor(forSendType: sendType, returnType: returnType)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/viewsneeddisplay
     @MainActor open var viewsNeedDisplay: Bool {
         get { _contentView?.needsDisplay ?? false }
         set { if newValue { _platform?.setNeedsDisplay(nil) } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/visualizeconstraints(_:)
-    @MainActor open func visualizeConstraints(_ constraints: [NSLayoutConstraint]?) { unimplemented() }
+    /// Out of scope (ADR-0036): the constraint debugging overlay is a macOS developer tool.
+    @MainActor open func visualizeConstraints(_ constraints: [NSLayoutConstraint]?) { unimplemented("NSWindow.visualizeConstraints — constraint debugging overlay not available") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/willbeginsheetnotification
     static public var willBeginSheetNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSWindowWillBeginSheetNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/willclosenotification
@@ -2412,20 +2902,47 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windownumber
     @MainActor open var windowNumber: Int { _windowNumber }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windownumber(at:belowwindowwithwindownumber:)
-    @MainActor public class func windowNumber(at point: NSPoint, belowWindowWithWindowNumber windowNumber: Int) -> Int { unimplemented() }
+    /// The frontmost of this application's windows under `point` (screen), skipping those
+    /// at or in front of `windowNumber` when it is non-zero; 0 if none.
+    @MainActor public class func windowNumber(at point: NSPoint, belowWindowWithWindowNumber windowNumber: Int) -> Int {
+        var windows = NSApplication.shared.orderedWindows
+        if windowNumber != 0, let i = windows.firstIndex(where: { $0.windowNumber == windowNumber }) { windows = Array(windows[(i + 1)...]) }
+        return windows.first { $0.frame.contains(point) && !$0.ignoresMouseEvents }?.windowNumber ?? 0
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windownumbers(options:)
-    @MainActor public class func windowNumbers(options: NSWindow.NumberListOptions = []) -> [NSNumber]? { unimplemented() }
+    /// This application's visible windows front to back (other applications' windows are
+    /// not visible to the port, so `.allApplications` lists the same).
+    @MainActor public class func windowNumbers(options: NSWindow.NumberListOptions = []) -> [NSNumber]? {
+        NSApplication.shared.orderedWindows.map { NSNumber(value: $0.windowNumber) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowref
-    @MainActor open var windowRef: UnsafeMutableRawPointer { unimplemented() }
+    @MainActor open var windowRef: UnsafeMutableRawPointer { appleOnlyUnavailable("NSWindow.windowRef — Carbon WindowRef is macOS-only") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/windowtitlebarlayoutdirection
     @available(macOS 10.12, *)
     @MainActor open var windowTitlebarLayoutDirection: NSUserInterfaceLayoutDirection { _contentView?.userInterfaceLayoutDirection ?? NSApplication._resolvedLayoutDirection }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/workswhenmodal
-    @MainActor open var worksWhenModal: Bool { unimplemented() }
+    /// False for a window (`NSPanel` answers its own).
+    @MainActor open var worksWhenModal: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/zoom(_:)
+    /// Toggles between the user's frame and the standard frame: the screen's visible
+    /// frame (the platform maximises), or what the delegate's
+    /// `windowWillUseStandardFrame(_:defaultFrame:)` makes of it (the window is framed there).
     @MainActor open func zoom(_ sender: Any?) {
-        guard delegate?.windowShouldZoom(self, toFrame: screen?.visibleFrame ?? frame) ?? true else { return }
-        _platform?.zoom()
+        let defaultFrame = screen?.visibleFrame ?? frame
+        let standard = delegate?.windowWillUseStandardFrame(self, defaultFrame: defaultFrame) ?? defaultFrame
+        if let user = _userStateFrame {
+            _userStateFrame = nil
+            guard delegate?.windowShouldZoom(self, toFrame: user) ?? true else { _userStateFrame = user; return }
+            setFrame(user, display: true, animate: true)
+            return
+        }
+        guard delegate?.windowShouldZoom(self, toFrame: standard) ?? true else { return }
+        if standard == defaultFrame {
+            _platform?.zoom()
+        } else {
+            _userStateFrame = frame
+            setFrame(standard, display: true, animate: true)
+        }
     }
     // MARK: Accessibility (ADR-0013)
 
@@ -2488,6 +3005,8 @@ import CoreText
     open func accessibilityTopLevelUIElement() -> Any? { self }
     open func accessibilityActivationPoint() -> NSPoint { NSPoint(x: frame.midX, y: frame.midY) }
     open func accessibilityPerformRaise() -> Bool { makeKeyAndOrderFront(nil); return true }
+    /// Nothing to cancel on a plain window; an open menu's window closes the menu.
+    open func accessibilityPerformCancel() -> Bool { false }
     /// The element with keyboard focus: the first responder view, or the text field a
     /// focused field editor edits. Nil when focus is on a view that is not an element.
     open func accessibilityApplicationFocusedUIElement() -> Any? {
@@ -2527,11 +3046,9 @@ extension NSWindow: PlatformAccessibilityProvider {
         e.isEnabled = isAccessibilityEnabled()
         e.isFocusable = canBecomeKey
         e.isFocused = _isKey
-        e.actions = [.raise]
-        e.children = (accessibilityChildren() ?? []).compactMap { c -> PlatformAccessibilityElement? in
-            guard let v = c as? NSView, !v.isHidden, !v.isAccessibilityHidden() else { return nil }
-            return v._accessibilityElement()
-        }
+        e.actions = NSAccessibility._actions(for: accessibilityRole() ?? .window)
+        e.clientFrame = _platform?.contentRect(forFrameRect: e.frame) ?? contentRect(forFrameRect: e.frame)
+        e.children = NSAccessibility._childElements(accessibilityChildren())
         return e
     }
 
@@ -2543,9 +3060,17 @@ extension NSWindow: PlatformAccessibilityProvider {
     }
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {
-        if elementID == _accessibilityElementID { return action == .raise ? accessibilityPerformRaise() : false }
+        if elementID == _accessibilityElementID {
+            switch action {
+            case .raise: return accessibilityPerformRaise()
+            case .cancel: return accessibilityPerformCancel()
+            default: return false
+            }
+        }
         guard let v = _accessibilityView(withID: elementID) else {
-            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilityPerform(action) ?? false
+            if let e = _contentView?._accessibilityVirtualElement(withID: elementID) { return e._accessibilityPerform(action) }
+            // Custom actions, and virtual elements outside the content view (menu items).
+            return NSAccessibility._performOnRegistered(action, id: elementID) ?? false
         }
         switch action {
         case .press: return v.accessibilityPerformPress() || v._accessibilityPressThroughContainer()
@@ -2564,7 +3089,10 @@ extension NSWindow: PlatformAccessibilityProvider {
     }
 
     public func accessibilitySetValue(_ value: PlatformAccessibilityValue, on elementID: Int) -> Bool {
-        guard let v = _accessibilityView(withID: elementID), v.isAccessibilityEnabled() else { return false }
+        guard let v = _accessibilityView(withID: elementID) else {
+            return _contentView?._accessibilityVirtualElement(withID: elementID)?._accessibilitySetValue(value) ?? false
+        }
+        guard v.isAccessibilityEnabled() else { return false }
         return v._accessibilitySetValue(value)
     }
 
@@ -2640,6 +3168,22 @@ extension NSWindow: PlatformAccessibilityProvider {
         link?.invalidate()
         link = nil
         apply(1)
+        if direction == .in { sheet._repaintAfterSheetSlide() }
         completion()
     }
+}
+
+
+/// Weak references for NSWindow's registries.
+@MainActor internal final class _NSWeakWindow {
+    weak var window: NSWindow?
+    init(_ window: NSWindow) { self.window = window }
+}
+@MainActor internal final class _NSWeakDrawer {
+    weak var drawer: NSDrawer?
+    init(_ drawer: NSDrawer) { self.drawer = drawer }
+}
+/// A flag an animation's timer sets for the nested loop waiting on it.
+@MainActor internal final class _NSAnimationDone {
+    var value = false
 }

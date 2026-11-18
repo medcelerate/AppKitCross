@@ -14,37 +14,74 @@ extension AVAudioPlayerDelegate {
     public func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {}
 }
 
-/// The engine every `AVAudioPlayer` (and `NSSound`) plays through.
-final class _SharedPlayerEngine {
+/// The engines `AVAudioPlayer` (and `NSSound`) play through: one per output device (the
+/// key "" follows the system default), every player a node on its main mixer. When a
+/// device change stops an engine, it is restarted on the device now current and its
+/// playing players resume.
+final class _SharedPlayerEngine: @unchecked Sendable {
     static let shared = _SharedPlayerEngine()
-    let engine = AVAudioEngine()
-    private let lock = NSLock()
-    private var users = 0
+    private let lock = NSRecursiveLock()
+    private var engines: [String: AVAudioEngine] = [:]
+    private var users: [String: Int] = [:]
+    private struct WeakPlayer { weak var player: AVAudioPlayer? }
+    private var players: [ObjectIdentifier: WeakPlayer] = [:]
+    private var observer: NSObjectProtocol?
 
-    func attach(_ node: AVAudioPlayerNode, format: AVAudioFormat) {
+    func engine(forDevice key: String) -> AVAudioEngine {
         lock.lock(); defer { lock.unlock() }
+        if let e = engines[key] { return e }
+        let e = AVAudioEngine()
+        if !key.isEmpty { e._outputDeviceUID = key }
+        engines[key] = e
+        if observer == nil {
+            observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil) { [weak self] note in
+                guard let engine = note.object as? AVAudioEngine else { return }
+                self?._recover(engine)
+            }
+        }
+        return e
+    }
+
+    func attach(_ node: AVAudioPlayerNode, format: AVAudioFormat, device: String, player: AVAudioPlayer) {
+        lock.lock(); defer { lock.unlock() }
+        let engine = engine(forDevice: device)
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
+        players[ObjectIdentifier(player)] = WeakPlayer(player: player)
     }
 
-    func detach(_ node: AVAudioPlayerNode) {
+    func detach(_ node: AVAudioNode, device: String) {
         lock.lock(); defer { lock.unlock() }
-        engine.detach(node)
+        engines[device]?.detach(node)
     }
 
-    /// Starts the engine for a player; false when there is no output.
-    func acquire() -> Bool {
+    func forget(_ player: AVAudioPlayer) {
+        lock.lock(); players[ObjectIdentifier(player)] = nil; lock.unlock()
+    }
+
+    /// Starts the device's engine for a player; false when there is no output.
+    func acquire(device: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        let engine = engine(forDevice: device)
         if !engine.isRunning {
             do { try engine.start() } catch { return false }
         }
-        users += 1
+        users[device, default: 0] += 1
         return true
     }
 
-    func release() {
+    func release(device: String) {
         lock.lock(); defer { lock.unlock() }
-        users = max(0, users - 1)
+        users[device] = max(0, (users[device] ?? 0) - 1)
+    }
+
+    private func _recover(_ engine: AVAudioEngine) {
+        lock.lock()
+        guard engines.values.contains(where: { $0 === engine }) else { lock.unlock(); return }
+        let live = players.values.compactMap { $0.player }
+        lock.unlock()
+        do { try engine.start() } catch { return }
+        for p in live where p._engine === engine { p._resumeAfterConfigurationChange() }
     }
 }
 
@@ -73,6 +110,9 @@ open class AVAudioPlayer: NSObject {
     private var _meterAverage: [Float] = []
     private var _fadeTimer: DispatchSourceTimer?
     private var _delayedStart: DispatchWorkItem?
+    /// The device key of the shared engine the player is on ("" follows the default).
+    private var _device = ""
+    private var _timePitch: AVAudioUnitTimePitch?
     open weak var delegate: (any AVAudioPlayerDelegate)?
 
     public convenience init(contentsOf url: URL) throws { try self.init(contentsOf: url, fileTypeHint: nil) }
@@ -102,11 +142,21 @@ open class AVAudioPlayer: NSObject {
     deinit {
         _fadeTimer?.cancel()
         node.stop()
-        _SharedPlayerEngine.shared.detach(node)
+        _SharedPlayerEngine.shared.detach(node, device: _device)
+        if let t = _timePitch { _SharedPlayerEngine.shared.detach(t, device: _device) }
+        _SharedPlayerEngine.shared.forget(self)
+    }
+
+    var _engine: AVAudioEngine? { node.engine }
+
+    /// After a device change restarted the engine: carry on where the node paused.
+    func _resumeAfterConfigurationChange() {
+        lock.lock(); defer { lock.unlock() }
+        if _isPlaying { node.play() }
     }
 
     private func _attach() {
-        _SharedPlayerEngine.shared.attach(node, format: buffer.format)
+        _SharedPlayerEngine.shared.attach(node, format: buffer.format, device: _device, player: self)
         let channels = Int(buffer.format.channelCount)
         _peak = Array(repeating: -160, count: channels); _average = _peak; _meterPeak = _peak; _meterAverage = _peak
     }
@@ -117,7 +167,16 @@ open class AVAudioPlayer: NSObject {
     open func prepareToPlay() -> Bool {
         lock.lock(); defer { lock.unlock() }
         if _prepared { return true }
-        _prepared = _SharedPlayerEngine.shared.acquire()
+        if _rateEnabled && _timePitch == nil, let engine = node.engine {
+            // Rate needs time stretching: player -> time pitch -> mixer.
+            let unit = AVAudioUnitTimePitch()
+            unit.rate = _rate
+            engine.attach(unit)
+            engine.connect(node, to: unit, format: buffer.format)
+            engine.connect(unit, to: engine.mainMixerNode, format: buffer.format)
+            _timePitch = unit
+        }
+        _prepared = _SharedPlayerEngine.shared.acquire(device: _device)
         return _prepared
     }
 
@@ -126,7 +185,6 @@ open class AVAudioPlayer: NSObject {
         lock.lock(); defer { lock.unlock() }
         guard prepareToPlay() else { return false }
         if _isPlaying { return true }
-        if _rateEnabled && _rate != 1 { unimplemented("AVAudioPlayer.rate (time stretching)") }
         _isPlaying = true
         _generation += 1
         _loopsRemaining = _numberOfLoops
@@ -214,7 +272,7 @@ open class AVAudioPlayer: NSObject {
         _pausedAtFrame = 0
         _startFrame = 0
         node.stop()
-        _SharedPlayerEngine.shared.release()
+        _SharedPlayerEngine.shared.release(device: _device)
         _prepared = false
         let delegate = self.delegate
         lock.unlock()
@@ -239,7 +297,7 @@ open class AVAudioPlayer: NSObject {
         _isPlaying = false
         _generation += 1
         node.stop()
-        if _prepared { _SharedPlayerEngine.shared.release(); _prepared = false }
+        if _prepared { _SharedPlayerEngine.shared.release(device: _device); _prepared = false }
     }
 
     private func _currentFrame() -> Int64 {
@@ -255,9 +313,30 @@ open class AVAudioPlayer: NSObject {
     open var isPlaying: Bool { lock.withLock { _isPlaying } }
     open var numberOfChannels: Int { Int(buffer.format.channelCount) }
     open var duration: TimeInterval { Double(buffer.frameLength) / buffer.format.sampleRate }
+    /// The UID of the output device (a `PlatformAudioDevice.id`); nil selects the
+    /// system default. Setting it moves the player, carrying on where it was if playing.
     open var currentDevice: String? {
-        get { nil }
-        set { }
+        get {
+            lock.lock(); defer { lock.unlock() }
+            let engine = _SharedPlayerEngine.shared.engine(forDevice: _device)
+            return engine._currentOutputDeviceUID ?? (_device.isEmpty ? (try? PlatformAudio.backend.defaultOutputDevice())?.id : _device)
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            let key = newValue ?? ""
+            guard key != _device else { return }
+            let wasPlaying = _isPlaying
+            let position = _currentFrame()
+            if wasPlaying { _isPlaying = false; _generation += 1 }
+            node.stop()
+            if _prepared { _SharedPlayerEngine.shared.release(device: _device); _prepared = false }
+            if let t = _timePitch { _SharedPlayerEngine.shared.detach(t, device: _device); _timePitch = nil }
+            _SharedPlayerEngine.shared.detach(node, device: _device)
+            _device = key
+            _attach()
+            _pausedAtFrame = position
+            if wasPlaying { _ = play() }
+        }
     }
     open var url: URL? { _url }
     open var data: Data? { _data }
@@ -289,14 +368,20 @@ open class AVAudioPlayer: NSObject {
         timer.resume()
     }
 
+    /// Set before `prepareToPlay()`/`play()` to allow `rate` changes (a time-pitch unit
+    /// joins the player's chain).
     open var enableRate: Bool {
-        get { _rateEnabled }
-        set { _rateEnabled = newValue }
+        get { lock.withLock { _rateEnabled } }
+        set { lock.withLock { _rateEnabled = newValue } }
     }
-    /// Time stretching is not implemented: a rate other than 1 traps at `play()`.
+    /// Playback rate, 0.5 to 2, at constant pitch; takes effect when `enableRate` is on.
     open var rate: Float {
-        get { _rate }
-        set { _rate = newValue }
+        get { lock.withLock { _rate } }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            _rate = max(0.5, min(2, newValue))
+            _timePitch?.rate = _rate
+        }
     }
 
     open var currentTime: TimeInterval {
@@ -311,7 +396,7 @@ open class AVAudioPlayer: NSObject {
 
     /// The shared output's clock, in seconds.
     open var deviceCurrentTime: TimeInterval {
-        let engine = _SharedPlayerEngine.shared.engine
+        let engine = _SharedPlayerEngine.shared.engine(forDevice: _device)
         guard let t = engine.outputNode.lastRenderTime, t.sampleRate > 0 else { return 0 }
         return Double(t.sampleTime) / t.sampleRate
     }

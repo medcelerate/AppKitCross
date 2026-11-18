@@ -30,6 +30,8 @@ import CoreText
     private var _presented: [NSViewController] = []
     private weak var _presenting: NSViewController? = nil
     internal var _presentedWindow: NSWindow? = nil
+    /// The popover `present(_:asPopoverRelativeTo:…)` showed this controller in.
+    internal var _presentedPopover: NSPopover? = nil
     private var _presentationAnimator: (any NSViewControllerPresentationAnimator)? = nil
 
     @MainActor public convenience override init() { self.init(nibName: nil, bundle: nil) }
@@ -83,6 +85,9 @@ import CoreText
             if NSApplication.shared.modalWindow === w { NSApplication.shared.stopModal() }
             w.close()
             viewController._presentedWindow = nil
+        } else if let p = viewController._presentedPopover {
+            viewController._presentedPopover = nil
+            p.close()
         } else if let a = viewController._presentationAnimator {
             a.animateDismissal(of: viewController, from: self)
             viewController._presentationAnimator = nil
@@ -155,8 +160,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/present(_:aspopoverrelativeto:of:preferrededge:behavior:)
     @available(macOS 10.10, *)
     @MainActor open func present(_ viewController: NSViewController, asPopoverRelativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge, behavior: NSPopover.Behavior) {
-        // Popovers arrive with NSPopover; until then the content shows in a modal window.
-        _presentInWindow(viewController, title: nil)
+        let popover = NSPopover()
+        popover.contentViewController = viewController
+        popover.behavior = behavior
+        viewController._presenting = self
+        viewController._presentedPopover = popover
+        _presented.append(viewController)
+        popover.show(relativeTo: positioningRect, of: positioningView, preferredEdge: preferredEdge)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsviewcontroller/present(_:aspopoverrelativeto:of:preferrededge:behavior:hasfullsizecontent:)
     @available(macOS 14.0, *)

@@ -20,39 +20,39 @@ import CoreText
 @MainActor open class NSPopoverTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/collapsedrepresentation
     @MainActor open var collapsedRepresentation: NSView {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/collapsedrepresentationimage
     @MainActor open var collapsedRepresentationImage: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/collapsedrepresentationlabel
     @MainActor open var collapsedRepresentationLabel: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // SKIPPED (override type String! differs from superclass String): @MainActor var customizationLabel: String! { get set }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/dismisspopover(_:)
-    @MainActor open func dismissPopover(_ sender: Any?) { unimplemented() }
+    @MainActor open func dismissPopover(_ sender: Any?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/makestandardactivatepopovergesturerecognizer()
-    @MainActor open func makeStandardActivatePopoverGestureRecognizer() -> NSGestureRecognizer { unimplemented() }
+    @MainActor open func makeStandardActivatePopoverGestureRecognizer() -> NSGestureRecognizer { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/popovertouchbar
     @MainActor open var popoverTouchBar: NSTouchBar {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/pressandholdtouchbar
     @MainActor open var pressAndHoldTouchBar: NSTouchBar? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/showpopover(_:)
-    @MainActor open func showPopover(_ sender: Any?) { unimplemented() }
+    @MainActor open func showPopover(_ sender: Any?) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopovertouchbaritem/showsclosebutton
     @MainActor open var showsCloseButton: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

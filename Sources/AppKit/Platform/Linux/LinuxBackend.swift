@@ -42,6 +42,9 @@ final class LinuxBackend: PlatformBackend {
     var lastEventTime: Time = Time(CurrentTime)
     private(set) var x11DragDrop: X11DragDrop!
     var dragDrop: (any PlatformDragDrop)? { x11DragDrop }
+    /// Printing (LinuxPrinting.swift): Cairo PDF and CUPS.
+    let linuxPrinting = LinuxPrintBackend()
+    var printing: (any PlatformPrintBackend)? { linuxPrinting }
     /// StatusNotifierItems over the session bus (LinuxStatusItem.swift); made on first use.
     private var statusNotifier: LinuxStatusNotifierHost?
     private var statusNotifierTried = false
@@ -54,6 +57,17 @@ final class LinuxBackend: PlatformBackend {
     }
     /// AT-SPI2 over D-Bus (LinuxAccessibility.swift, ADR-0013); nil without an accessibility bus.
     private(set) var atspi: AtspiBridge?
+    /// The workspace (LinuxWorkspace.swift, ADR-0022) over the X11 window list; made on first use.
+    private var linuxWorkspace: LinuxWorkspace?
+    private(set) var x11WindowSystem: LinuxX11WindowSystem?
+    var workspace: any PlatformWorkspace {
+        if let w = linuxWorkspace { return w }
+        let ws = LinuxX11WindowSystem(backend: self)
+        x11WindowSystem = ws
+        let w = LinuxWorkspace(windowSystem: ws)
+        linuxWorkspace = w
+        return w
+    }
 
     init() {
         guard let d = XOpenDisplay(nil) else {
@@ -82,11 +96,7 @@ final class LinuxBackend: PlatformBackend {
         text = HostTextBackend()      // CoreText over Pango/HarfBuzz (ADR-0007)
         image = LinuxImageBackend()
         x11DragDrop = X11DragDrop(backend: self)
-        let scale = self.scale, screenHeightPx = self.screenHeightPx
-        atspi = AtspiBridge.connect(rootWindowProperty: { [self] in atspiBusFromRootWindow() }) { r in
-            (Int32((r.minX * scale).rounded()), Int32((screenHeightPx - r.maxY * scale).rounded()),
-             Int32((r.width * scale).rounded()), Int32((r.height * scale).rounded()))
-        }
+        atspi = AtspiBridge.connect(rootWindowProperty: { [self] in atspiBusFromRootWindow() })
     }
 
     /// The accessibility bus address the bus launcher stores on the root window.
@@ -143,6 +153,7 @@ final class LinuxBackend: PlatformBackend {
                        pollfd(fd: PlatformMainQueue.fileDescriptor, events: Int16(POLLIN), revents: 0)]
             if let a = atspi, a.fileDescriptor >= 0 { fds.append(pollfd(fd: a.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
             if let s = statusNotifier, s.fileDescriptor >= 0 { fds.append(pollfd(fd: s.fileDescriptor, events: Int16(POLLIN), revents: 0)) }
+            for fd in linuxWorkspace?.fileDescriptors ?? [] where fd >= 0 { fds.append(pollfd(fd: fd, events: Int16(POLLIN), revents: 0)) }
             var timeout: Int32 = -1
             if let next = frameCallbacks.map(\.deadline).min() {
                 timeout = Int32(max(0, (next - ProcessInfo.processInfo.systemUptime) * 1000))
@@ -163,6 +174,7 @@ final class LinuxBackend: PlatformBackend {
         }
         atspi?.dispatch()
         statusNotifier?.dispatch()
+        linuxWorkspace?.dispatch()
         drainPosted()
         fireDueFrames()
         for w in windows where w.needsPaint { w.paintIfNeeded() }
@@ -198,6 +210,10 @@ final class LinuxBackend: PlatformBackend {
                                                    state: UInt32(g.mods.effective), cancelled: g.flags & XIGestureSwipeEventCancelled != 0)
             default: break
             }
+            return
+        }
+        if xid == root, Int32(event.type) == PropertyNotify {
+            if let ws = x11WindowSystem, ws.concernsWindowList(event.xproperty.atom) { linuxWorkspace?.windowListDidChange() }
             return
         }
         guard let w = window(for: xid) else { return }
@@ -259,6 +275,31 @@ final class LinuxBackend: PlatformBackend {
     }
 
     func beep() { XBell(display, 0) }
+
+    /// XLookupString on the key that types this keysym, with Shift, Lock, Control and Option as
+    /// ISO Level 3 (Mod5, the layout's AltGr level) in the state (ADR-0038).
+    func characters(forKeyCode keyCode: UInt16, modifierFlags flags: NSEvent.ModifierFlags) -> String? {
+        let code = XKeysymToKeycode(display, KeySym(keyCode))
+        guard code != 0 else { return nil }
+        var ev = XKeyEvent()
+        ev.type = KeyPress
+        ev.display = display
+        ev.keycode = UInt32(code)
+        var state: UInt32 = 0
+        if flags.contains(.shift) { state |= UInt32(ShiftMask) }
+        if flags.contains(.capsLock) { state |= UInt32(LockMask) }
+        if flags.contains(.control) { state |= UInt32(ControlMask) }
+        if flags.contains(.option) { state |= UInt32(Mod5Mask) }
+        ev.state = state
+        var buffer = [CChar](repeating: 0, count: 32)
+        var keysym: KeySym = 0
+        let n = XLookupString(&ev, &buffer, 32, &keysym, nil)
+        if n > 0 {
+            return String(String.UnicodeScalarView(buffer[0..<Int(n)].map { UnicodeScalar(UInt8(bitPattern: $0)) }))
+        }
+        if keysym & 0x0100_0000 != 0, let scalar = UnicodeScalar(UInt32(keysym & 0x00FF_FFFF)) { return String(scalar) }
+        return nil
+    }
     var systemAppearanceIsDark: Bool { false }
 
     var mouseLocation: NSPoint {
@@ -326,7 +367,10 @@ final class LinuxBackend: PlatformBackend {
     }
 
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
-        // X11 has no native menu bar; NSApplication still dispatches key equivalents.
+        // X11 has no native menu bar; NSApplication still dispatches key equivalents. The
+        // menu reaches assistive technology as the application's AXMenuBar (ADR-0013).
+        if let app = host as? PlatformAccessibilityApplication, atspi?.application !== app { atspi?.application = app }
+        else { atspi?.menuBarChanged() }
     }
 
     func frameRect(forContentRect contentRect: NSRect, styleMask: NSWindow.StyleMask) -> NSRect { contentRect }

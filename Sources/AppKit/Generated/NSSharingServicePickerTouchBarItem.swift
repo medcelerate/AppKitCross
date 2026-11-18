@@ -20,22 +20,22 @@ import CoreText
 @MainActor open class NSSharingServicePickerTouchBarItem: NSTouchBarItem {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickertouchbaritem/buttonimage
     @MainActor open var buttonImage: NSImage? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickertouchbaritem/buttontitle
     @MainActor open var buttonTitle: String {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickertouchbaritem/delegate
     @MainActor open var delegate: (any NSSharingServicePickerTouchBarItemDelegate)? {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickertouchbaritem/isenabled
     @MainActor open var isEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
 }

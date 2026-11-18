@@ -19,26 +19,26 @@ import CoreText
 @available(macOS 10.12, *)
 @MainActor open class NSTouchBarItem: NSObject, NSCoding {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/init(coder:)
-    @MainActor public required init?(coder: NSCoder) { unimplemented() }
+    @MainActor public required init?(coder: NSCoder) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/init(identifier:)
-    @MainActor public init(identifier: NSTouchBarItem.Identifier) { unimplemented() }
+    @MainActor public init(identifier: NSTouchBarItem.Identifier) { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/customizationlabel
-    @MainActor open var customizationLabel: String { unimplemented() }
+    @MainActor open var customizationLabel: String { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/identifier
-    @MainActor open var identifier: NSTouchBarItem.Identifier { unimplemented() }
+    @MainActor open var identifier: NSTouchBarItem.Identifier { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/isvisible
-    @MainActor open var isVisible: Bool { unimplemented() }
+    @MainActor open var isVisible: Bool { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/view
-    @MainActor open var view: NSView? { unimplemented() }
+    @MainActor open var view: NSView? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/viewcontroller
-    @MainActor open var viewController: NSViewController? { unimplemented() }
+    @MainActor open var viewController: NSViewController? { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstouchbaritem/visibilitypriority
     @MainActor open var visibilityPriority: NSTouchBarItem.Priority {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { appleOnlyUnavailable() }
+        set { appleOnlyUnavailable() }
     }
     // Requirement of NSCoding
-    open func encode(with coder: NSCoder) { unimplemented() }
+    open func encode(with coder: NSCoder) { appleOnlyUnavailable() }
 }
 
 @available(macOS 10.12, *)

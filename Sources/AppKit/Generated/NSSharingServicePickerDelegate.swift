@@ -31,7 +31,7 @@ extension NSSharingServicePickerDelegate {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickerdelegate/sharingservicepicker(_:didchoose:)
     public func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, didChoose service: NSSharingService?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickerdelegate/sharingservicepicker(_:sharingservicesforitems:proposedsharingservices:)
-    public func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, sharingServicesForItems items: [Any], proposedSharingServices proposedServices: [NSSharingService]) -> [NSSharingService] { unimplementedOptionalRequirement() }
+    public func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker, sharingServicesForItems items: [Any], proposedSharingServices proposedServices: [NSSharingService]) -> [NSSharingService] { appleOnlyUnavailable() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssharingservicepickerdelegate/sharingservicepickercollaborationmoderestrictions(_:)
     @available(macOS 15.0, *)
     public func sharingServicePickerCollaborationModeRestrictions(_ sharingServicePicker: NSSharingServicePicker) -> [NSSharingServicePicker.CollaborationModeRestriction]? { return nil }

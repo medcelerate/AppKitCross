@@ -18,9 +18,12 @@ import CoreGraphics
     internal var _segmentedCell: NSSegmentedCell? { _cell as? NSSegmentedCell }
     @MainActor open override class func _makeDefaultCell() -> NSCell? { NSSegmentedCell(textCell: "") }
     @MainActor open override var acceptsFirstResponder: Bool { isEnabled && !refusesFirstResponder }
+    /// A click acts without taking the keyboard focus (the Tab key still reaches it).
+    @MainActor internal override var _takesFirstResponderOnMouseDown: Bool { false }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/init(coder:)
-    public required init?(coder: NSCoder) { unimplemented() }
+    /// Decoding reads no archive keys (the port loads no nibs): the result is what `init(frame: .zero)` makes.
+    public required init?(coder: NSCoder) { super.init(coder: coder) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/init(frame:)
     @MainActor public override init(frame frameRect: NSRect) { super.init(frame: frameRect) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssegmentedcontrol/init(images:trackingmode:target:action:)

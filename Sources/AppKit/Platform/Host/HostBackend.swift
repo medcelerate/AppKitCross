@@ -14,6 +14,19 @@ final class HostBackend: PlatformBackend {
                         visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1055),
                         backingScaleFactor: 2, localizedName: "Host Display", isMain: true)
     ]
+    /// Test hook: the physical top-left pixel of each display (index into `displays`);
+    /// by default the display's point origin times its scale, flipped against the
+    /// primary display's physical height, as Win32Backend derives `NSScreen` frames.
+    var physicalOrigins: [Int: CGPoint] = [:]
+    func physicalOrigin(of index: Int) -> CGPoint {
+        if let o = physicalOrigins[index] { return o }
+        let d = displays[index], primary = displays[0]
+        let primaryHeight = primary.frame.height * primary.backingScaleFactor
+        return CGPoint(x: d.frame.minX * d.backingScaleFactor, y: primaryHeight - d.frame.maxY * d.backingScaleFactor)
+    }
+    /// Test hook: a window-system drag runner standing in for OLE or the Wayland data
+    /// device (nil: the tracker keeps the pointer, the host's normal behaviour).
+    var dragDrop: (any PlatformDragDrop)?
     private var running = false
     private var pending: [@MainActor () -> Void] = []
     var mouseLocation: NSPoint = .zero
@@ -62,9 +75,26 @@ final class HostBackend: PlatformBackend {
     }
 
     func beep() { beepCount += 1 }
+
+    func characters(forKeyCode keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> String? {
+        HostKeyboardLayout.characters(forKeyCode: keyCode, modifierFlags: modifierFlags)
+    }
+
+    /// Test hook: the mask and handler NSEvent's global monitors installed; a test reports
+    /// another application's event with `globalEventHandler?(event)`.
+    var globalEventMask: NSEvent.EventTypeMask = []
+    var globalEventHandler: (@MainActor (NSEvent) -> Void)? = nil
+    func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?) {
+        globalEventMask = handler == nil ? [] : mask
+        globalEventHandler = handler
+    }
     var systemAppearanceIsDark = false
 
     let systemPasteboard: any PlatformPasteboard = HostPasteboard()
+
+    /// Test hook: the style of the standard buttons the package draws (ADR-0022). Windows
+    /// answers `.caption`; the host defaults to the traffic lights of macOS and Linux.
+    var windowButtonStyle: PlatformWindowButtonStyle = .trafficLights
 
     /// The host has no native dialog: the panels draw themselves. Tests may install one
     /// (`HostFileDialog` records the options and answers a canned result).
@@ -74,6 +104,18 @@ final class HostBackend: PlatformBackend {
     /// The in-process status area (StatusItem.swift): tests click its items.
     let hostStatusItems = HostStatusItems()
     var statusItems: (any PlatformStatusItemHost)? { hostStatusItems }
+    /// Printing (Printing.swift): PDF through the platform writer, jobs kept for tests.
+    let hostPrinting = HostPrintBackend()
+    var printing: (any PlatformPrintBackend)? { hostPrinting }
+
+    /// Test hook: what the "native" colour dialog answers; nil cancels.
+    var nextColorDialogResult: (CGFloat, CGFloat, CGFloat)? = nil
+    private(set) var colorDialogRuns = 0
+    var hasNativeColorDialog: Bool { true }
+    func runColorDialog(initial: (CGFloat, CGFloat, CGFloat), parent: PlatformWindow?) -> (CGFloat, CGFloat, CGFloat)? {
+        colorDialogRuns += 1
+        return nextColorDialogResult
+    }
 
     func runModal(for window: PlatformWindow?, until stop: @escaping @MainActor () -> Bool) {
         // Tests end modal sessions from inside the loop via posted blocks.
@@ -135,6 +177,8 @@ final class HostWindow: PlatformWindow {
     var minSize = NSSize(width: 0, height: 0)
     var maxSize = NSSize(width: 100_000, height: 100_000)
     private var dirty: NSRect? = nil
+    /// Whether a paint is pending (tests check that a paint does not invalidate itself).
+    var _needsPaint: Bool { dirty != nil }
     private var _frame: NSRect
     /// Title bar height used by this fake window manager.
     static let titleBarHeight: CGFloat = 28
@@ -154,6 +198,26 @@ final class HostWindow: PlatformWindow {
     private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { accessibilityChanges.append(change) }
     func clearAccessibilityChanges() { accessibilityChanges.removeAll() }
+
+    /// How this fake window system places a window on the physical desktop, modelled on
+    /// Windows' per-monitor DPI: every display covers a physical-pixel rectangle starting
+    /// at `HostBackend.physicalOrigin(of:)` and maps its own points onto it at its own
+    /// scale. The window's client area sits on the display holding the client frame's
+    /// centre; its physical origin is that display's origin plus the offset in points
+    /// times the display's scale. Tests compare the snapshot's frames against this.
+    func accessibilityScreenMapping(clientFrame: NSRect) -> PlatformAccessibilityScreenMapping? {
+        let displays = backend.displays
+        guard !displays.isEmpty else { return nil }
+        let centre = NSPoint(x: clientFrame.midX, y: clientFrame.midY)
+        let i = displays.firstIndex { $0.frame.contains(centre) } ?? 0
+        let d = displays[i]
+        let origin = backend.physicalOrigin(of: i)
+        let scale = Double(backingScaleFactor)
+        return PlatformAccessibilityScreenMapping(clientFrame: clientFrame,
+                                                  clientOriginX: Double(origin.x) + Double(clientFrame.minX - d.frame.minX) * scale,
+                                                  clientOriginY: Double(origin.y) + Double(d.frame.maxY - clientFrame.maxY) * scale,
+                                                  scale: scale)
+    }
 
     /// Test hook: when set, the window hosts layer scenes and composites them itself
     /// (a reference for the DirectComposition implementation).
@@ -184,6 +248,18 @@ final class HostWindow: PlatformWindow {
             _frame = f
             owner?.platformWindowDidChangeFrame(f)
         }
+    }
+    /// What `NSWindow` asked live resizes to keep to (ADR-0036).
+    private(set) var resizeConstraints = PlatformResizeConstraints()
+    func setResizeConstraints(_ constraints: PlatformResizeConstraints) { resizeConstraints = constraints }
+    /// Test hook: the user drags the bottom-right corner (or, `heightEdgeOnly`, the
+    /// bottom edge) until the content would be `size`; the top-left corner stays.
+    func _userResize(toContentSize size: NSSize, heightEdgeOnly: Bool = false) {
+        let content = contentRect(forFrameRect: _frame)
+        let extra = NSSize(width: _frame.width - content.width, height: _frame.height - content.height)
+        let c = resizeConstraints.constrain(contentSize: size, frameExtra: extra, heightEdgeOnly: heightEdgeOnly)
+        let w = c.width + extra.width, h = c.height + extra.height
+        frame = NSRect(x: _frame.minX, y: _frame.maxY - h, width: w, height: h)
     }
 
     /// The window this one is attached to as a sheet (ADR-0019); a sheet has no title bar.
@@ -245,6 +321,9 @@ final class HostWindow: PlatformWindow {
         }
         guard let ctx = surface else { return }
         ctx.saveGState()
+        // A non-opaque window starts each frame at alpha 0 where it repaints, as the Win32
+        // composition swap chain does, so pixels its content leaves alone stay transparent.
+        if chrome.isTransparent { ctx.clear(rect) }
         owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
         ctx.restoreGState()
         if let scene = hostedScene { composite(scene, into: ctx, height: content.height) }

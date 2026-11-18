@@ -1,0 +1,4 @@
+module CSpellCheck {
+    header "cspell.h"
+    export *
+}

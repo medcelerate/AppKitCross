@@ -1,5 +1,5 @@
 // NSApplication (hand-written; seeded from the generated stub, see tools/apigen)
-// Members still marked unimplemented() are stubs awaiting implementation.
+// Members still marked unimplemented() say why (ADR-0038).
 //
 // Every member is either implemented (hand-written types only), stubbed with
 // unimplemented(), or listed as SKIPPED with the reason it cannot compile on Windows yet.
@@ -16,9 +16,11 @@ import CoreText
 #endif
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication
 @MainActor open class NSApplication: NSResponder, PlatformMenuHost, NSUserInterfaceValidations, NSMenuItemValidation, NSAccessibilityElementProtocol, NSAccessibilityProtocol, NSAppearanceCustomization, NSSelectorHandling {
-    /// The application's own menu actions (`terminate:`, `hide:`, the About panel), at the
-    /// end of the responder chain as on macOS.
-    private static let _actions: Set<String> = ["terminate:", "hide:", "unhide:", "unhideAllApplications:", "orderFrontStandardAboutPanel:", "arrangeInFront:"]
+    /// The application's own menu actions (`terminate:`, `hide:`, the About panel) and the
+    /// panel actions the standard toolbar items send with no target (`orderFrontColorPanel:`
+    /// is its own, `orderFrontFontPanel:` goes to the font manager; ADR-0031), at the end of
+    /// the responder chain as on macOS.
+    private static let _actions: Set<String> = ["terminate:", "hide:", "unhide:", "unhideAllApplications:", "orderFrontStandardAboutPanel:", "arrangeInFront:", "orderFrontColorPanel:", "orderFrontFontPanel:"]
     public func respondsToSelectorAction(_ action: Selector) -> Bool { NSApplication._actions.contains(NSStringFromSelector(action)) }
     public func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
         switch NSStringFromSelector(action) {
@@ -28,6 +30,8 @@ import CoreText
         case "unhideAllApplications:": unhideWithoutActivation()
         case "orderFrontStandardAboutPanel:": orderFrontStandardAboutPanel(sender)
         case "arrangeInFront:": arrangeInFront(sender)
+        case "orderFrontColorPanel:": orderFrontColorPanel(sender)
+        case "orderFrontFontPanel:": NSFontManager.shared.orderFrontFontPanel(sender)
         default: return false
         }
         return true
@@ -37,6 +41,9 @@ import CoreText
         super.init()
         _CoreAnimationHost.installIfNeeded()
         if NSApplication._shared == nil { NSApplication._shared = self }
+        #if os(Windows) || os(Linux)
+        UserNotificationsBridge.install()
+        #endif
     }
 
     @MainActor public required init?(coder: NSCoder) { super.init(coder: coder) }
@@ -82,6 +89,7 @@ import CoreText
 
     internal func _unregister(window: NSWindow) {
         _windows.removeAll { $0 === window }
+        _zOrder.removeAll { $0 == ObjectIdentifier(window) }
         if _keyWindow === window { _keyWindow = nil }
         if _mainWindow === window { _mainWindow = nil }
         // The last window closed: hidden windows (ended sheets, ordered-out panels) do not
@@ -124,10 +132,14 @@ import CoreText
         delegate?.applicationWillBecomeActive(post(NSApplication.willBecomeActiveNotification))
         _isActive = true
         delegate?.applicationDidBecomeActive(post(NSApplication.didBecomeActiveNotification))
+        NSWorkspace.shared._currentApplicationDidChange(active: true)
         for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/activatecontexthelpmode(_:)
-    @MainActor open func activateContextHelpMode(_ sender: Any?) { unimplemented() }
+    /// Does nothing: help tags come from NSHelpManager, still a generated stub, so no object
+    /// has context help; macOS leaves the mode at the next click in that case, so entering it
+    /// would show only the question-mark cursor (ADR-0038).
+    @MainActor open func activateContextHelpMode(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/activationpolicy()
     @MainActor open func activationPolicy() -> NSApplication.ActivationPolicy { _activationPolicy }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/addwindowsitem(_:title:filename:)
@@ -141,11 +153,17 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationiconimage
     @MainActor open var applicationIconImage: NSImage! {
         get { _applicationIconImage }
-        set { _applicationIconImage = newValue }
+        set { _applicationIconImage = newValue; _dockTile?.display() }
     }
+    /// The icon image when one was set (the dock tile and `NSRunningApplication.icon`).
+    @MainActor internal var _applicationIconImageIfSet: NSImage? { _applicationIconImage }
+    @MainActor internal var _isFinishedLaunching: Bool { _finishedLaunching }
+    private var _dockTile: NSDockTile? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationshouldsuppresshighdynamicrangecontent
     @available(macOS 26.0, *)
-    @MainActor open var applicationShouldSuppressHighDynamicRangeContent: Bool { unimplemented() }
+    /// False: neither Windows nor the Linux compositors ask applications to hold back HDR
+    /// content (macOS does for a background app on some displays).
+    @MainActor open var applicationShouldSuppressHighDynamicRangeContent: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/arrangeinfront(_:)
     @MainActor open func arrangeInFront(_ sender: Any?) { for w in _windows where w.isVisible { w.orderFront(nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/beginmodalsession(for:)
@@ -156,7 +174,18 @@ import CoreText
         return OpaquePointer(Unmanaged.passUnretained(session).toOpaque())
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/beginsheet(_:modalfor:modaldelegate:didend:contextinfo:)
-    @MainActor open func beginSheet(_ sheet: NSWindow, modalFor docWindow: NSWindow, modalDelegate: Any?, didEnd didEndSelector: Selector?, contextInfo: UnsafeMutableRawPointer!) { unimplemented() }
+    /// The pre-10.9 sheet call, bridged to `NSWindow.beginSheet(_:completionHandler:)` (the
+    /// ADR-0025 sheet seam). `sheetDidEnd:returnCode:contextInfo:` is a three-argument
+    /// message the port cannot send without the Objective-C runtime; as with NSDocument's
+    /// callbacks the delegate receives `didEndSelector` through the target/action registry
+    /// (`NSSelectorHandling` or `setActionHandler(for:)`) with the return code as an NSNumber
+    /// sender, after the sheet has been ordered out.
+    @MainActor open func beginSheet(_ sheet: NSWindow, modalFor docWindow: NSWindow, modalDelegate: Any?, didEnd didEndSelector: Selector?, contextInfo: UnsafeMutableRawPointer!) {
+        docWindow.beginSheet(sheet) { response in
+            guard let delegate = modalDelegate, let selector = didEndSelector else { return }
+            _ = ActionRegistry.perform(selector, on: delegate as AnyObject, with: NSNumber(value: response.rawValue))
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/canceluserattentionrequest(_:)
     @MainActor open func cancelUserAttentionRequest(_ request: Int) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/changewindowsitem(_:title:filename:)
@@ -164,7 +193,8 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/completestaterestoration()
     @MainActor open func completeStateRestoration() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/context
-    @MainActor open var context: NSGraphicsContext? { unimplemented() }
+    /// Nil, as on macOS since 10.12: there is no application-wide graphics context.
+    @MainActor open var context: NSGraphicsContext? { nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/currentevent
     @MainActor open var currentEvent: NSEvent? { _currentEvent }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/currentsystempresentationoptions
@@ -175,6 +205,7 @@ import CoreText
         delegate?.applicationWillResignActive(post(NSApplication.willResignActiveNotification))
         _isActive = false
         delegate?.applicationDidResignActive(post(NSApplication.didResignActiveNotification))
+        NSWorkspace.shared._currentApplicationDidChange(active: false)
         for w in _windows { w._trackingActivityDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/delegate
@@ -183,7 +214,9 @@ import CoreText
         set { _delegate = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/detachdrawingthread(_:totarget:with:)
-    @MainActor public class func detachDrawingThread(_ selector: Selector, toTarget target: Any, with argument: Any?) { unimplemented() }
+    @MainActor public class func detachDrawingThread(_ selector: Selector, toTarget target: Any, with argument: Any?) {
+        unimplemented("NSApplication.detachDrawingThread — sending a selector on another thread needs the Objective-C runtime; the port's target/action registry runs on the main actor")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/didbecomeactivenotification
     static public var didBecomeActiveNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSApplicationDidBecomeActiveNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/didchangeocclusionstatenotification
@@ -207,16 +240,22 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/discardevents(matching:before:)
     @MainActor open func discardEvents(matching mask: NSEvent.EventTypeMask, before lastEvent: NSEvent?) { _eventQueue.removeAll { mask.contains(NSEvent.EventTypeMask(type: $0.type)) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/displaywindowrunloopordering
-    class public var displayWindowRunLoopOrdering: Int { unimplemented() }
+    class public var displayWindowRunLoopOrdering: Int { 600000 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/docktile
-    @MainActor open var dockTile: NSDockTile { unimplemented() }
+    @MainActor open var dockTile: NSDockTile {
+        if let t = _dockTile { return t }
+        let t = NSDockTile(owner: self)
+        _dockTile = t
+        return t
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/effectiveappearance
     @available(macOS 10.14, *)
     @MainActor open var effectiveAppearance: NSAppearance { _appearance ?? NSAppearance(named: Platform.backend.systemAppearanceIsDark ? .darkAqua : .aqua)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enablerelaunchonlogin()
     @MainActor open func enableRelaunchOnLogin() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/enabledremotenotificationtypes
-    @MainActor open var enabledRemoteNotificationTypes: NSApplication.RemoteNotificationType { unimplemented() }
+    /// Empty: registration always fails (there is no Apple Push Notification service off macOS).
+    @MainActor open var enabledRemoteNotificationTypes: NSApplication.RemoteNotificationType { [] }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/endmodalsession(_:)
     @MainActor open func endModalSession(_ session: NSApplication.ModalSession) {
         if !_modalStack.isEmpty { _modalStack.removeLast() }
@@ -268,17 +307,20 @@ import CoreText
         _isHidden = true
         for w in _windows where w.isVisible && w.canHide { w.orderOut(nil) }
         delegate?.applicationDidHide(post(NSApplication.didHideNotification))
+        NSWorkspace.shared._currentApplicationDidChange(hidden: true)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/hideotherapplications(_:)
-    @MainActor open func hideOtherApplications(_ sender: Any?) { unimplemented() }
+    @MainActor open func hideOtherApplications(_ sender: Any?) { NSWorkspace.shared.hideOtherApplications() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/isactive
     @MainActor open var isActive: Bool { _isActive }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/isautomaticcustomizetouchbarmenuitemenabled
     @available(macOS 10.12, *)
+    /// Stored; there is no Touch Bar, so the View menu never gains the item.
     @MainActor open var isAutomaticCustomizeTouchBarMenuItemEnabled: Bool {
-        get { unimplemented() }
-        set { unimplemented() }
+        get { _automaticCustomizeTouchBarMenuItem }
+        set { _automaticCustomizeTouchBarMenuItem = newValue }
     }
+    private var _automaticCustomizeTouchBarMenuItem = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/isfullkeyboardaccessenabled
     @MainActor open var isFullKeyboardAccessEnabled: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/ishidden
@@ -294,11 +336,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/keywindow
     @MainActor open var keyWindow: NSWindow? { _keyWindow }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/launchisdefaultuserinfokey
-    static public var launchIsDefaultUserInfoKey: String { unimplemented() }
+    static public var launchIsDefaultUserInfoKey: String { "NSApplicationLaunchIsDefaultLaunchKey" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/launchusernotificationuserinfokey
-    static public var launchUserNotificationUserInfoKey: String { unimplemented() }
+    static public var launchUserNotificationUserInfoKey: String { "NSApplicationLaunchUserNotificationKey" }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/loadapplication()
-    @MainActor public static func loadApplication() { unimplemented() }
+    @MainActor public static func loadApplication() {
+        unimplemented("NSApplication.loadApplication — loads the Info.plist main nib or storyboard; the port has no nib or storyboard loader (apps build their UI in code)")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/mainmenu
     @MainActor open var mainMenu: NSMenu? {
         get { _mainMenu }
@@ -360,7 +404,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/mainwindow
     @MainActor open var mainWindow: NSWindow? { _mainWindow }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/makewindowsperform(_:inorder:)
-    @MainActor open func makeWindowsPerform(_ selector: Selector, inOrder: Bool) -> NSWindow? { unimplemented() }
+    /// Sends `selector` to each window (front to back when `inOrder`, else in the order the
+    /// windows were created) and returns the first that performed it. Without the runtime a
+    /// selector has no return value, so "performed" (the target/action registry found a
+    /// handler) stands for macOS's YES.
+    @MainActor open func makeWindowsPerform(_ selector: Selector, inOrder: Bool) -> NSWindow? {
+        let list = inOrder ? orderedWindows : _windows
+        return list.first { ActionRegistry.perform(selector, on: $0, with: nil) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/miniaturizeall(_:)
     @MainActor open func miniaturizeAll(_ sender: Any?) { for w in _windows where w.isVisible { w.miniaturize(nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/modalwindow
@@ -376,9 +427,11 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/occlusionstate
     @MainActor open var occlusionState: NSApplication.OcclusionState { .visible }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcharacterpalette(_:)
-    @MainActor open func orderFrontCharacterPalette(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontCharacterPalette(_ sender: Any?) {
+        unimplemented("NSApplication.orderFrontCharacterPalette — Windows opens its emoji panel only from Win+Period and X11/Wayland have no character viewer API")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontcolorpanel(_:)
-    @MainActor open func orderFrontColorPanel(_ sender: Any?) { unimplemented() }
+    @MainActor open func orderFrontColorPanel(_ sender: Any?) { NSColorPanel.shared.orderFront(sender) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(_:)
     @MainActor open func orderFrontStandardAboutPanel(_ sender: Any?) { orderFrontStandardAboutPanel(options: [:]) }
     /// The standard about panel: the application's name and version (from the bundle, or
@@ -396,9 +449,36 @@ import CoreText
         _ = alert.runModal()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/ordereddocuments
-    @MainActor open var orderedDocuments: [NSDocument] { unimplemented() }
+    /// The open documents, front to back by their frontmost visible window; documents with
+    /// no visible window are left out (macOS).
+    @MainActor open var orderedDocuments: [NSDocument] {
+        guard let dc = NSDocumentController._shared else { return [] }
+        var result: [NSDocument] = []
+        for w in orderedWindows {
+            if let d = w.windowController?.document as? NSDocument, dc.documents.contains(where: { $0 === d }), !result.contains(where: { $0 === d }) {
+                result.append(d)
+            }
+        }
+        return result
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderedwindows
-    @MainActor open var orderedWindows: [NSWindow] { _windows.filter { $0.isVisible } }
+    /// Front to back: the order windows were last ordered front (or back) in; windows
+    /// never ordered keep their registration order behind those (ADR-0036).
+    @MainActor open var orderedWindows: [NSWindow] {
+        let visible = _windows.filter { $0.isVisible }
+        let rank = Dictionary(_zOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return visible.enumerated().sorted { a, b in
+            let ra = rank[ObjectIdentifier(a.element)] ?? Int.max, rb = rank[ObjectIdentifier(b.element)] ?? Int.max
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element)
+    }
+    /// Window identities front first, as last ordered.
+    private var _zOrder: [ObjectIdentifier] = []
+    internal func _windowOrdered(_ window: NSWindow, front: Bool) {
+        let id = ObjectIdentifier(window)
+        _zOrder.removeAll { $0 == id }
+        if front { _zOrder.insert(id, at: 0) } else { _zOrder.append(id) }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/postevent(_:atstart:)
     @MainActor open func postEvent(_ event: NSEvent, atStart: Bool) {
         if atStart { _eventQueue.insert(event, at: 0) } else { _eventQueue.append(event) }
@@ -413,26 +493,47 @@ import CoreText
     @MainActor open func preventWindowOrdering() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/registerforremotenotifications()
     @available(macOS 10.14, *)
-    @MainActor open func registerForRemoteNotifications() { unimplemented() }
+    /// Fails at once through the delegate: there is no Apple Push Notification service.
+    @MainActor open func registerForRemoteNotifications() {
+        let error = NSError(domain: NSCocoaErrorDomain, code: 3010, userInfo: [NSLocalizedDescriptionKey: "Remote notifications are not supported on this platform."])
+        delegate?.application(self, didFailToRegisterForRemoteNotificationsWithError: error)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/registerforremotenotifications(matching:)
-    @MainActor open func registerForRemoteNotifications(matching types: NSApplication.RemoteNotificationType) { unimplemented() }
+    @MainActor open func registerForRemoteNotifications(matching types: NSApplication.RemoteNotificationType) { registerForRemoteNotifications() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/registerservicesmenusendtypes(_:returntypes:)
-    @MainActor open func registerServicesMenuSendTypes(_ sendTypes: [NSPasteboard.PasteboardType], returnTypes: [NSPasteboard.PasteboardType]) { unimplemented() }
+    /// Recorded; the Services menu is a macOS system service, so no service ever asks the
+    /// registered requestors (ADR-0038).
+    @MainActor open func registerServicesMenuSendTypes(_ sendTypes: [NSPasteboard.PasteboardType], returnTypes: [NSPasteboard.PasteboardType]) {
+        _servicesSendTypes = sendTypes
+        _servicesReturnTypes = returnTypes
+    }
+    internal private(set) var _servicesSendTypes: [NSPasteboard.PasteboardType] = []
+    internal private(set) var _servicesReturnTypes: [NSPasteboard.PasteboardType] = []
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/registeruserinterfaceitemsearchhandler(_:)
-    @MainActor open func registerUserInterfaceItemSearchHandler(_ handler: any NSUserInterfaceItemSearching) { unimplemented() }
+    /// Kept until unregistered. The port's Help menu has no search field, so handlers are
+    /// not queried (ADR-0038).
+    @MainActor open func registerUserInterfaceItemSearchHandler(_ handler: any NSUserInterfaceItemSearching) {
+        guard !_searchHandlers.contains(where: { $0 === handler }) else { return }
+        _searchHandlers.append(handler)
+    }
+    internal private(set) var _searchHandlers: [any NSUserInterfaceItemSearching] = []
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/removewindowsitem(_:)
     @MainActor open func removeWindowsItem(_ win: NSWindow) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/reply(toapplicationshouldterminate:)
     @MainActor open func reply(toApplicationShouldTerminate shouldTerminate: Bool) { if shouldTerminate { _terminateNow() } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/reply(toopenorprint:)
-    @MainActor open func reply(toOpenOrPrint reply: NSApplication.DelegateReply) { unimplemented() }
+    /// Accepted and ignored: the port does not hold launch-time open/print requests waiting
+    /// for the delegate's reply to `application(_:openFiles:)`.
+    @MainActor open func reply(toOpenOrPrint reply: NSApplication.DelegateReply) { }
     // SKIPPED (Foundation.NSException not in corelibs): @MainActor func reportException(_ exception: NSException)
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/requestuserattention(_:)
     @MainActor open func requestUserAttention(_ requestType: NSApplication.RequestUserAttentionType) -> Int { 0 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/resetcursorrectsrunloopordering
-    class public var resetCursorRectsRunLoopOrdering: Int { unimplemented() }
+    class public var resetCursorRectsRunLoopOrdering: Int { 700000 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/restorewindow(withidentifier:state:completionhandler:)
-    @MainActor open func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder, completionHandler: @escaping (NSWindow?, (any Error)?) -> Void) -> Bool { unimplemented() }
+    @MainActor open func restoreWindow(withIdentifier identifier: NSUserInterfaceItemIdentifier, state: NSCoder, completionHandler: @escaping (NSWindow?, (any Error)?) -> Void) -> Bool {
+        unimplemented("NSApplication.restoreWindow — the port writes no window restoration archives, so there is no restoration class to ask")
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/run()
     @MainActor open func run() {
         if !_finishedLaunching { finishLaunching() }
@@ -456,9 +557,40 @@ import CoreText
         return s.response ?? .continue
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/runpagelayout(_:)
-    @MainActor open func runPageLayout(_ sender: Any?) { unimplemented() }
+    /// Page Setup for the shared print info, as a sheet on the key window when there is one.
+    @MainActor open func runPageLayout(_ sender: Any?) {
+        let layout = NSPageLayout()
+        if let w = keyWindow ?? mainWindow, w.isVisible {
+            layout._beginSheet(with: NSPrintInfo.shared, modalFor: w) { _ in }
+        } else {
+            _ = layout.runModal()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/searchstring(_:inuserinterfaceitemstring:range:found:)
-    @MainActor open func searchString(_ searchString: String, inUserInterfaceItemString stringToSearch: String, range searchRange: NSRange, found foundRange: UnsafeMutablePointer<NSRange>?) -> Bool { unimplemented() }
+    /// macOS's Help-menu match: a word of `stringToSearch` (inside `searchRange`) that starts
+    /// with `searchString`, ignoring case; `foundRange` gets the whole word, or
+    /// {NSNotFound, 0}. A search string that is empty or spans words matches nothing.
+    @MainActor open func searchString(_ searchString: String, inUserInterfaceItemString stringToSearch: String, range searchRange: NSRange, found foundRange: UnsafeMutablePointer<NSRange>?) -> Bool {
+        foundRange?.pointee = NSRange(location: NSNotFound, length: 0)
+        let needle = searchString.lowercased()
+        guard !needle.isEmpty else { return false }
+        let ns = stringToSearch as NSString
+        let end = min(ns.length, searchRange.location + searchRange.length)
+        var i = max(0, searchRange.location)
+        func isWordUnit(_ u: unichar) -> Bool { UnicodeScalar(u).map { CharacterSet.alphanumerics.contains($0) } ?? true }
+        while i < end {
+            guard isWordUnit(ns.character(at: i)) else { i += 1; continue }
+            var j = i
+            while j < end, isWordUnit(ns.character(at: j)) { j += 1 }
+            let word = NSRange(location: i, length: j - i)
+            if ns.substring(with: word).lowercased().hasPrefix(needle) {
+                foundRange?.pointee = word
+                return true
+            }
+            i = j
+        }
+        return false
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/sendaction(_:to:from:)
     @MainActor open func sendAction(_ action: Selector, to target: Any?, from sender: Any?) -> Bool {
         // See TargetAction.swift: explicit targets get the action directly; nil walks the
@@ -480,6 +612,8 @@ import CoreText
     /// reports it while its action runs.
     @MainActor internal func _setCurrentEvent(_ event: NSEvent) { _currentEvent = event }
     @MainActor open func sendEvent(_ event: NSEvent) {
+        // Local event monitors see the event first and may replace or drop it (ADR-0038).
+        guard let event = NSEvent._runLocalMonitors(event) else { return }
         _currentEvent = event
         // The pointer left a window (the backends report it as a move to a far-away point):
         // only that window's tracking areas and hover states care, so it goes straight
@@ -513,6 +647,9 @@ import CoreText
         // An open combo box list takes the mouse over it and its navigation keys; typing
         // still reaches the field.
         if let popUp = _NSComboBoxPopUp.current, popUp.handle(event) { return }
+        // Shown popovers close on clicks outside them per their behaviour (ADR-0025); the
+        // click still reaches what is under it.
+        NSPopover._noteEvent(event)
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.
         if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
@@ -541,7 +678,14 @@ import CoreText
         return app
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/showhelp(_:)
-    @MainActor open func showHelp(_ sender: Any?) { unimplemented() }
+    /// There is no Help Viewer: says so in an alert, as macOS does for an application
+    /// without a help book.
+    @MainActor open func showHelp(_ sender: Any?) {
+        let name = (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? ProcessInfo.processInfo.processName
+        let alert = NSAlert()
+        alert.messageText = "Help isn’t available for \(name)."
+        _ = alert.runModal()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stop(_:)
     @MainActor open func stop(_ sender: Any?) { Platform.backend.stop() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stopmodal()
@@ -549,9 +693,14 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stopmodal(withcode:)
     @MainActor open func stopModal(withCode returnCode: NSApplication.ModalResponse) { _modalStack.last?.response = returnCode }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/target(foraction:)
-    @MainActor open func target(forAction action: Selector) -> Any? { unimplemented() }
+    @MainActor open func target(forAction action: Selector) -> Any? { target(forAction: action, to: nil, from: nil) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/target(foraction:to:from:)
-    @MainActor open func target(forAction action: Selector, to target: Any?, from sender: Any?) -> Any? { unimplemented() }
+    /// An explicit target is returned as is (macOS); nil searches the responder chains of the
+    /// key and main windows, then the application, its delegate and the document controller.
+    @MainActor open func target(forAction action: Selector, to target: Any?, from sender: Any?) -> Any? {
+        if let target { return target }
+        return _target(forAction: action)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/terminate(_:)
     /// After the delegate agrees, the document controller reviews unsaved documents
     /// (each one's Save / Cancel / Don't Save); Cancel keeps the application running.
@@ -572,13 +721,14 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/toggletouchbarcustomizationpalette(_:)
     @available(macOS 10.12, *)
-    @MainActor open func toggleTouchBarCustomizationPalette(_ sender: Any?) { unimplemented() }
+    /// Does nothing: there is no Touch Bar to customise (as on a Mac without one).
+    @MainActor open func toggleTouchBarCustomizationPalette(_ sender: Any?) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/trytoperform(_:with:)
     @MainActor open override func tryToPerform(_ action: Selector, with object: Any?) -> Bool { super.tryToPerform(action, with: object) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhide(_:)
     @MainActor open func unhide(_ sender: Any?) { unhideWithoutActivation(); activate(ignoringOtherApps: true) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhideallapplications(_:)
-    @MainActor open func unhideAllApplications(_ sender: Any?) { unimplemented() }
+    @MainActor open func unhideAllApplications(_ sender: Any?) { NSWorkspace.shared._unhideAllApplications() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unhidewithoutactivation()
     @MainActor open func unhideWithoutActivation() {
         guard _isHidden else { return }
@@ -586,11 +736,13 @@ import CoreText
         _isHidden = false
         for w in _windows { w.orderFront(nil) }
         delegate?.applicationDidUnhide(post(NSApplication.didUnhideNotification))
+        NSWorkspace.shared._currentApplicationDidChange(hidden: false)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unregisterforremotenotifications()
-    @MainActor open func unregisterForRemoteNotifications() { unimplemented() }
+    /// Nothing to undo: registration never succeeds.
+    @MainActor open func unregisterForRemoteNotifications() { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/unregisteruserinterfaceitemsearchhandler(_:)
-    @MainActor open func unregisterUserInterfaceItemSearchHandler(_ handler: any NSUserInterfaceItemSearching) { unimplemented() }
+    @MainActor open func unregisterUserInterfaceItemSearchHandler(_ handler: any NSUserInterfaceItemSearching) { _searchHandlers.removeAll { $0 === handler } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/updatewindows()
     @MainActor open func updateWindows() {
         _ = post(NSApplication.willUpdateNotification)
@@ -600,7 +752,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/updatewindowsitem(_:)
     @MainActor open func updateWindowsItem(_ win: NSWindow) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/updatewindowsrunloopordering
-    class public var updateWindowsRunLoopOrdering: Int { unimplemented() }
+    class public var updateWindowsRunLoopOrdering: Int { 500000 }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/userinterfacelayoutdirection
     @MainActor open var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection { NSApplication._resolvedLayoutDirection }
 
@@ -610,6 +762,16 @@ import CoreText
     nonisolated(unsafe) internal static var _layoutDirectionOverride: NSUserInterfaceLayoutDirection?
     internal static var _resolvedLayoutDirection: NSUserInterfaceLayoutDirection {
         if let o = _layoutDirectionOverride { return o }
+        if let d = _defaultLayoutDirection { return d }
+        let d = _resolveDefaultLayoutDirection()
+        _defaultLayoutDirection = d
+        return d
+    }
+    /// The environment, defaults and locale answer, kept: every leading/trailing anchor
+    /// asks on each layout pass, and reading the environment (a copy of the whole block)
+    /// and the defaults each time was most of a pass on Windows.
+    nonisolated(unsafe) private static var _defaultLayoutDirection: NSUserInterfaceLayoutDirection?
+    private static func _resolveDefaultLayoutDirection() -> NSUserInterfaceLayoutDirection {
         if let env = ProcessInfo.processInfo.environment["APPKITWIN_LAYOUT_DIRECTION"]?.lowercased() {
             if env == "rtl" || env == "righttoleft" { return .rightToLeft }
             if env == "ltr" || env == "lefttoright" { return .leftToRight }
@@ -625,7 +787,10 @@ import CoreText
         return ["ar", "arc", "ckb", "dv", "fa", "he", "iw", "khw", "ks", "ku", "ps", "sd", "ug", "ur", "yi"].contains(code)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/validrequestor(forsendtype:returntype:)
-    @MainActor open override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? { unimplemented() }
+    /// The delegate's answer when it is a responder, else nil (the end of the chain).
+    @MainActor open override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        (delegate as? NSResponder)?.validRequestor(forSendType: sendType, returnType: returnType)
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/willbecomeactivenotification
     static public var willBecomeActiveNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSApplicationWillBecomeActiveNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/willfinishlaunchingnotification
@@ -651,10 +816,12 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/yieldactivation(to:)
     @available(macOS 14.0, *)
-    @MainActor open func yieldActivation(to application: NSRunningApplication) { unimplemented() }
+    @MainActor open func yieldActivation(to application: NSRunningApplication) { _ = application.activate(options: []) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/yieldactivation(toapplicationwithbundleidentifier:)
     @available(macOS 14.0, *)
-    @MainActor open func yieldActivation(toApplicationWithBundleIdentifier bundleIdentifier: String) { unimplemented() }
+    @MainActor open func yieldActivation(toApplicationWithBundleIdentifier bundleIdentifier: String) {
+        if let other = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first { yieldActivation(to: other) }
+    }
     // MARK: Accessibility (ADR-0013)
     //
     // The application is the root of the tree: its children are the windows, its
@@ -672,8 +839,11 @@ import CoreText
     open func isAccessibilityFrontmost() -> Bool { MainActor.assumeIsolated { _isActive } }
     open func setAccessibilityFrontmost(_ accessibilityFrontmost: Bool) { if accessibilityFrontmost { MainActor.assumeIsolated { activate(ignoringOtherApps: true) } } }
     open func accessibilityIdentifier() -> String { Bundle.main.bundleIdentifier ?? "" }
-    /// The visible windows, key window first.
-    open func accessibilityChildren() -> [Any]? { accessibilityWindows() }
+    /// The visible windows, key window first, then the menu bar (the main menu).
+    open func accessibilityChildren() -> [Any]? {
+        let windows = accessibilityWindows() ?? []
+        return MainActor.assumeIsolated { mainMenu.map { windows + [$0] } ?? windows }
+    }
     open func accessibilityVisibleChildren() -> [Any]? { accessibilityWindows() }
     open func accessibilityWindows() -> [Any]? {
         MainActor.assumeIsolated {

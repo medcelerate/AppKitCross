@@ -132,7 +132,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         return (w, host)
     }
 
-    func testWindowShowsItsButtonsInTheBandAndDragsTheRest() {
+    func testWindowShowsItsButtonsInTheBandAndDragsTheRest() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let (w, host) = decoratedWindow(titled)
             defer { w.close() }
@@ -145,8 +146,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(row.frame.minY, 300)
             XCTAssertFalse(row.isHidden)
             // Band points: buttons are content (they take the click), the rest drags the window.
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 314)), .client, "the close button")
-            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 58, y: 314)), .client, "the zoom button")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 18, y: 314)), .closeButton, "the close button")
+            XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 58, y: 314)), .zoomButton, "the zoom button")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 4, y: 314)), .caption, "the gap before the buttons")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 314)), .caption, "the title")
             XCTAssertEqual(w.platformWindowHitTest(NSPoint(x: 200, y: 290)), .client, "content just below the band")
@@ -160,7 +161,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testBandClickCloses_DoubleClickZooms() {
+    func testBandClickCloses_DoubleClickZooms() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             final class Delegate: NSObject, NSWindowDelegate {
                 var zoomAsked = 0
@@ -189,7 +191,8 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
     /// The band is painted into a context in window coordinates: a flat bar of the
     /// appearance's colour, the close button's red at the left, the title in the middle,
     /// and nothing below the band.
-    func testBandDrawsBackgroundButtonsAndTitle() {
+    func testBandDrawsBackgroundButtonsAndTitle() throws {
+        try requireHostBackend()
         MainActor.assumeIsolated {
             let (w, _) = decoratedWindow(titled)
             defer { w.close() }
@@ -225,3 +228,4 @@ final class ClientSideDecorationTests: XCTestCase, @unchecked Sendable {
         }
     }
 }
+

@@ -95,13 +95,96 @@ nothing reached the platform: screen readers saw empty windows.
   id. On Windows the core's change notifications are queued and raised on the next turn
   of the event loop, coalesced, so a snapshot is never pushed while the view hierarchy
   is mid-change or from inside a provider call.
-- Limitations: the `org.a11y.atspi.Cache` interface is not served (clients that insist
-  on it, as some versions of libatspi do for interface lists, fall back to the
-  `GetInterfaces` method, which is served); AT-SPI text granularities (word, line) report
-  the whole text; UIA text ranges carry no formatting attributes; structure changes are
-  reported as "children invalidated" without the added or removed child; menus and menu
-  items are not in the tree yet; `NSAccessibilityElement` (virtual elements for custom
-  views) and custom rotors and actions are still stubs; the native Win32 menu bar is served by the system's own UIA proxy, whose ExpandCollapse
-  does not open our menus (mouse and Alt do); and the Wayland bridge reports
-  extents against the primary output's logical size because Wayland has no global
-  coordinates.
+- Limitations of the first version (several closed by the follow-ups below): the
+  `org.a11y.atspi.Cache` interface is not served (clients that insist on it, as some
+  versions of libatspi do for interface lists, fall back to the `GetInterfaces` method,
+  which is served); AT-SPI text granularities (word, line) report the whole text; UIA
+  text ranges carry no formatting attributes; custom rotors are stubs; the native Win32
+  menu bar is served by the system's own UIA proxy, whose ExpandCollapse did not open our
+  menus on the PC (mouse and Alt do).
+
+## Follow-ups (2026-11-10)
+
+- Menus. `NSMenu` and `NSMenuItem` are virtual elements: the main menu is an AXMenuBar
+  of AXMenuBarItems, any other menu an AXMenu of AXMenuItems; an item reports its title,
+  enabled state, check mark (`PlatformAccessibilityElement.checkedState`), key equivalent
+  as drawn (`keyEquivalent`, "Ctrl+S") and its submenu as its child. Press (and pick)
+  chooses an item of an open menu or opens its submenu, as a click would; on a closed item
+  it performs the action, or opens the submenu as a menu of its own below the key
+  window's content (the menu bar on platforms that draw none). A menu that is open on
+  screen is live: the `_NSMenuWindow` the tracker shows it in is the AXMenu at the root
+  of its window's tree, its drawn rows are the items with frames, the highlighted item is
+  selected and focused (the tracker reports `.focus` on each highlight, so screen readers
+  follow arrow keys), cancel on the menu closes it, and the window reports
+  `.menuOpened`/`.menuClosed` (UIA MenuOpened/MenuClosed, AT-SPI showing/visible).
+  `NSApplication.accessibilityChildren` lists the menu bar after the windows, and
+  `NSApplication` serves it to backends through `PlatformAccessibilityApplication`.
+- The native Win32 menu bar stays the system's. The HMENU lives in the non-client area;
+  UI Automation already exposes it through the HWND's own MenuBar/MenuItem proxy (names,
+  AcceleratorKey from the "\t" text, enabled and checked state, Invoke, ExpandCollapse),
+  which Narrator, Accessibility Insights and every Win32 application use, and which
+  merges with our client-area provider under the window. Mirroring the tree in our
+  provider would put a second menu bar into the tree with no hit-test area of its own
+  (the system owns the pixels) and two answers for the same items. What the proxy cannot
+  do (open a menu whose ExpandCollapse it refuses) is a system-proxy limitation; the menus
+  it opens are native popups, not our menu windows. On AT-SPI nothing draws a menu bar,
+  so the bridge lists the AXMenuBar tree as a child of the application next to the windows
+  (`atspi-probe.py` walks File/Edit/View/Help and View > Show Grid's check mark and key
+  binding); pressing a bar item opens its menu as a live AXMenu window.
+- Pop-up buttons: an `NSPopUpButton` is AXPopUpButton (UIA ComboBox) whose value is the
+  selected title, expandable (`isExpanded`: UIA ExpandCollapse, AT-SPI expandable/expanded,
+  has-popup); expand and press open the menu, collapse closes it; while it is open the
+  pop-up's child is the open AXMenu of AXMenuItems with their on-screen frames, and press
+  or pick on an item chooses it (selects it, sends the action, closes the menu). The
+  pop-up reports `.childAdded`/`.childRemoved` naming the menu.
+- SwiftUI parity: `Slider` labels its `NSSlider` with its label text and moves by its
+  `step` (the slider's `altIncrementValue`, which `NSSlider`'s increment now prefers;
+  values snap to the steps); `Picker` labels its pop-up or segmented control with the
+  picker's label; `ProgressView` (drawn from shapes on main) is an AXProgressIndicator
+  with its value in 0...total. Toggle and TextField already matched AppKit. The tree on
+  macOS had the slider all along: the PC finding was a slider without a name (the
+  Observable example's slider sits next to a separate Text), now named in the example
+  with `.accessibilityLabel`. Stepper and DatePicker arrive with PR 44 over
+  `NSStepper`/`NSDatePicker`, which answer their own roles. `NSButton.performClick` now
+  flips the state after the highlight's display pass: a SwiftUI host re-rendering during
+  that pass put a Toggle's old state back before the action read it (any press from the
+  keyboard or assistive technology on a Toggle next to a Picker was lost).
+- Frames on monitors of different scales: the window root carries `clientFrame` (the
+  platform client area in the tree's screen points) and backends convert through
+  `PlatformAccessibilityScreenMapping`: each frame relative to the client area, times the
+  window's own backing scale, plus the client area's physical origin as the window system
+  reports it (`ClientToScreen` on Win32, `XTranslateCoordinates` on X11). Nothing uses
+  the primary monitor's height or scale, and a core frame lagging a DPI change cancels
+  out. Win32 also invalidates the snapshot on WM_MOVE, WM_SIZE and WM_DPICHANGED: UIA
+  clients keep providers across moves, and the rectangles were served from the old
+  position (the likely cause of the PC's mismatch after moving a window to a monitor of
+  another scale). The window root's rectangle is `GetWindowRect`. On Wayland, which has
+  no global coordinates, extents are window-relative logical pixels (as GTK reports them
+  there). `AccessibilityFollowUpTests` checks the conversion on the host backend with two
+  displays at 100% and 200%.
+- `NSAccessibilityElement` (hand-written now) is a virtual element custom views publish
+  from `accessibilityChildren()`: role, subrole, label, title, value, help, identifier,
+  enabled, selected, focused, min/max, index, custom actions, parent and children, with
+  the frame either set in screen coordinates or given in the parent's space
+  (`accessibilityFrameInParentSpace`, converted through the nearest view above it,
+  nested elements adding their parents' offsets via `NSAccessibility.screenRect(fromView:rect:)`,
+  implemented now with `screenPoint`). Actions from the platform call its
+  `accessibilityPerform...` methods, which subclasses override; values call
+  `setAccessibilityValue`. Virtual elements, menu items and custom actions are found by id
+  through a weak registry, not only by walking the content view.
+- Structure events name the child: adding, removing, hiding or showing a view sends
+  `.childAdded(parent:child:)`/`.childRemoved(parent:child:)` after the `.structure`
+  change, one per element the view contributes (itself, or the elements of an ignored
+  container); UIA raises StructureChangeType_ChildAdded on the child and ChildRemoved on
+  the parent with the child's runtime id, AT-SPI `ChildrenChanged` add/remove with the
+  child and its index.
+- Custom actions (`accessibilityCustomActions`, `NSAccessibilityCustomAction` hand-written
+  with handler or target/selector): each has an id and a name in the snapshot. AT-SPI
+  lists them after the role's actions in the Action interface (named actions are native
+  there). UI Automation has no named-action pattern for providers — LegacyIAccessible has
+  a single default action, already taken by the role's action — so each custom action is
+  a Button child of its element named after the action whose Invoke performs it; the
+  buttons cover their element's rectangle for screen-reader navigation but never answer
+  a hit test (`CUIA_SKIP_HIT_TEST`).
+- Still documented gaps: custom rotors, the AT-SPI Cache interface, AT-SPI text
+  granularities finer than the whole text, formatting attributes on UIA text ranges.

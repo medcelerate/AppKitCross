@@ -66,7 +66,10 @@ final class Win32ImageBackend: PlatformImageBackend {
     }
 
     nonisolated func encode(_ image: CGImage, format: String, quality: Double) -> Data? {
-        let fmt = format.contains("jpeg") || format.contains("jpg") ? "jpeg" : "png"
+        // WIC's PNG and JPEG encoders only (GIF needs a palette, JPEG 2000 has no encoder).
+        let f = format.lowercased()
+        guard f.hasSuffix("png") || f == "public.jpeg" || f.hasSuffix("jpeg") || f.hasSuffix("jpg") else { return nil }
+        let fmt = f.hasSuffix("png") ? "png" : "jpeg"
         var bytes: UnsafeMutablePointer<UInt8>? = nil
         var length: UInt32 = 0
         let ok = image.data.withUnsafeBytes { buf -> Bool in

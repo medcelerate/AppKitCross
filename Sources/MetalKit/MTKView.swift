@@ -126,6 +126,12 @@ public protocol MTKViewDelegate: AnyObject {
         #endif
     }
 
+    #if os(Linux)
+    /// Where the native surface under the view is, in window coordinates (nil without
+    /// one). Not part of Apple's API (tooling and tests).
+    public var _presentationSurfaceFrame: NSRect? { _surface == nil ? nil : _surfaceFrame }
+    #endif
+
     #if os(Windows)
     /// The swap chain sized to the drawable, while the window hosts its layers natively and
     /// the device is Direct3D 12; otherwise nil, any chain dropped, and frames are read back.
@@ -224,6 +230,45 @@ public protocol MTKViewDelegate: AnyObject {
         _swapChain = sc
         _presented = nil
         return sc
+    }
+
+    /// Keeps an existing native surface at the view's frame in the window (a move without
+    /// a resize, an ancestor's layout), dropping it when the view left the content area.
+    private func _repositionSurface() {
+        guard let s = _surface, let w = window else { return }
+        let frame = convert(bounds, to: nil).intersection(w.contentView?.bounds ?? .zero)
+        guard frame.width >= 1, frame.height >= 1 else {
+            _trace("dropping the swap chain: the view is outside the content area")
+            _dropSwapChain()
+            return
+        }
+        guard frame != _surfaceFrame || w.backingScaleFactor != _surfaceScale else { return }
+        _trace("presentation surface moved to \(frame) scale \(w.backingScaleFactor)")
+        s.setFrame(frame)
+        _surfaceFrame = frame
+        _surfaceScale = w.backingScaleFactor
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/viewdidhide()
+    open override func viewDidHide() {
+        super.viewDidHide()
+        // The native surface is above the window's own drawing: it goes with the view.
+        if _swapChain != nil || _surface != nil { _trace("dropping the swap chain: the view was hidden") }
+        _dropSwapChain()
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/viewdidunhide()
+    open override func viewDidUnhide() {
+        super.viewDidUnhide()
+        // The next frame makes a new surface and chain; a view drawn on demand draws now.
+        _swapChainError = nil
+        needsDisplay = true
+    }
+
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setframeorigin(_:)
+    open override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        _repositionSurface()
     }
 
     /// Drops the chain and the native surface: the window shows the view's own drawing again.
@@ -341,7 +386,15 @@ public protocol MTKViewDelegate: AnyObject {
     }
 
     open override func draw(_ dirtyRect: NSRect) {
-        if !_needsPresentImage && delegate != nil && (enableSetNeedsDisplay || isPaused) {
+        #if os(Linux)
+        // A window paint follows every layout change, so the native surface follows the
+        // view here even when no frame is being drawn (`enableSetNeedsDisplay`, paused).
+        _repositionSurface()
+        #endif
+        // Apple's drawing modes: with `enableSetNeedsDisplay` the view draws when marked
+        // for display; otherwise the display link (timed updates) or `draw()` (explicit
+        // drawing, `isPaused` alone) runs frames, and a paint shows the last one.
+        if !_needsPresentImage && delegate != nil && enableSetNeedsDisplay {
             draw()
         }
         _needsPresentImage = false

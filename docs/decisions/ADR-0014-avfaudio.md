@@ -1,6 +1,6 @@
 # ADR-0014: AVFAudio and AVFoundation, a Swift audio engine over WASAPI, PipeWire and ALSA
 
-Date: 2026-11-04. Status: accepted.
+Date: 2026-11-04. Status: accepted; extended by ADR-0028 (time stretching, conversion, source and sink nodes, streaming, CAF, devices, capture).
 
 ## Context
 
