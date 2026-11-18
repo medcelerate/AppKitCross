@@ -1,5 +1,6 @@
 // swift-tools-version:6.0
 import PackageDescription
+import CompilerPluginSupport
 import Foundation
 
 // Windows-only modules. On macOS these are NOT declared: Apple's Foundation re-exports
@@ -300,6 +301,11 @@ appKitTestDependencies += platformTestDependencies
 appKitTestDependencies += avfAudioDependencies
 var audioPlayerDependencies: [Target.Dependency] = ["AppKit"]
 audioPlayerDependencies += avfAudioDependencies
+
+// The compiler plugin behind `#Preview` (ADR-0049): no swift-syntax, just the plugin
+// protocol over stdin/stdout. AppKit (and through it SwiftUI) declares the macros.
+targets.append(.macro(name: "AppKitCrossPreviewMacros", path: "Sources/PreviewMacros", swiftSettings: [.swiftLanguageMode(.v5)]))
+appKitDependencies.append("AppKitCrossPreviewMacros")
 
 targets += [
     // SwiftUI over this AppKit (ADR-0010), on every platform.

@@ -771,6 +771,8 @@ extension NSTextView {
 
     /// Writes the selection as plain text, and as RTF (RTFD with attachments) when rich.
     internal func _writeSelection(to pb: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        // A secure field's text never leaves it (copy, cut, drag and services), as in AppKit.
+        if _layoutManager._secureEcho != nil { return false }
         let sel = selectedRange
         guard sel.length > 0, let st = textStorage else { return false }
         let sub = st.attributedSubstring(from: sel)

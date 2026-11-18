@@ -281,11 +281,11 @@ Work in this order; each step's failures hide the next step's.
      for target/action use `Selector(("name:"))`.
    - Actor isolation (section 2): add `@MainActor` to coordinators and helpers that touch AppKit.
    - Frameworks the port lacks (WebKit, MapKit, StoreKit, Sparkle, ...): see step 6.
-   - SwiftUI API the port lacks: expect several in any app. Known missing (2026-11-18):
-     `#Preview` (wrap previews in `#if !APPKITCROSS`), `SecureField`, `onReceive`,
-     `ForEach.onDelete`, `remove(atOffsets:)`, `lineLimit(_: ClosedRange)`,
-     `TextField(_:text:axis:)`, and `Section { } header: { }` without a footer (reported as
-     the misleading `generic parameter 'Footer' could not be inferred`). Check
+   - SwiftUI API the port lacks: the names earlier validation runs had to shim (`#Preview`,
+     `SecureField`, `onReceive`, `ForEach.onDelete`, `remove(atOffsets:)`, ranged
+     `lineLimit`, `TextField(_:text:axis:)`, header-only `Section`) are all in the port now
+     (ADR-0049); `#Preview` compiles as is and renders nothing. A missing overload can still
+     show up as the misleading `generic parameter 'X' could not be inferred`. Check
      [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) for what real
      apps hit, then shim (step 6) and file a gap (section 7).
    - Corelibs Foundation strictness: `NSLock.lock()` is unavailable in `async` functions
@@ -300,8 +300,8 @@ Work in this order; each step's failures hide the next step's.
    gated with `#if canImport(X)` instead; a missing member of the port's own SwiftUI or
    AppKit cannot be, since the module imports fine.
 
-   [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md) has a ready-made
-   file covering every gap listed in step 4, each with the compiler messages it answers.
+   [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md) has the pattern
+   and lists the shims earlier ports carried that are now ambiguity errors (delete them).
 
    Keep the names Apple's, so deleting the file is the whole migration; when the port adds
    a name, the shim turns into an ambiguity error, which is the cue to delete that part.
@@ -377,9 +377,10 @@ Work in this order; each step's failures hide the next step's.
   (for example Markdown) have no extensions off macOS, so those files will not open.
 - **Printing** (ADR-0022): the port's print panel everywhere (`APPKITWIN_PRINT_PANEL=native`
   for Windows' own); PDF output through the platform's writer; CUPS on Linux.
-- **Secure text**: `NSSecureTextField` (and so any `SecureField` shim built on a text field)
-  draws its text in clear on the port today; only accessibility masks it. Do not ship a
-  password or API-key field without saying so; this is a known gap.
+- **Secure text**: `NSSecureTextField` and `SecureField` draw bullets on every backend, edit
+  in a secure field editor that never copies, cuts or drags the text out, and read as bullets
+  to assistive technology (ADR-0049). The platform's secure-input mode (blocking other
+  processes from reading keystrokes) is not engaged.
 - **Accessibility** (ADR-0013): `NSAccessibility` maps to UI Automation (Narrator,
   Accessibility Insights) and AT-SPI2 (Orca). Standard controls need nothing; custom views
   need the same `setAccessibility...` calls as on macOS.

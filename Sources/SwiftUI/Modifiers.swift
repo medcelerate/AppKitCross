@@ -3,6 +3,7 @@
 // clipping, opacity), and event hooks (tap, hover, appear).
 
 import Foundation
+import Combine
 
 extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/font(_:)
@@ -32,7 +33,32 @@ extension View {
         _EnvironmentView(content: self) { if disabled { $0.isEnabled = false } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/linelimit(_:)-513mb
-    public func lineLimit(_ number: Int?) -> some View { environment(\.lineLimit, number) }
+    public func lineLimit(_ number: Int?) -> some View {
+        _EnvironmentView(content: self) { $0.lineLimit = number; $0._lineLimitExtras = _LineLimitExtras() }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/linelimit(_:)-7ufty
+    ///
+    /// A vertical `TextField` is at least `lowerBound` lines tall and grows to `upperBound`.
+    public func lineLimit(_ limit: ClosedRange<Int>) -> some View {
+        _EnvironmentView(content: self) { $0.lineLimit = limit.upperBound; $0._lineLimitExtras = _LineLimitExtras(minimum: limit.lowerBound) }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/linelimit(_:)-8e5wm
+    public func lineLimit(_ limit: PartialRangeFrom<Int>) -> some View {
+        _EnvironmentView(content: self) { $0.lineLimit = nil; $0._lineLimitExtras = _LineLimitExtras(minimum: limit.lowerBound) }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/linelimit(_:)-6b9u6
+    public func lineLimit(_ limit: PartialRangeThrough<Int>) -> some View {
+        _EnvironmentView(content: self) { $0.lineLimit = limit.upperBound; $0._lineLimitExtras = _LineLimitExtras() }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/linelimit(_:reservesspace:)
+    ///
+    /// With `reservesSpace`, text takes the height of `limit` lines even when it is shorter.
+    public func lineLimit(_ limit: Int, reservesSpace: Bool) -> some View {
+        _EnvironmentView(content: self) {
+            $0.lineLimit = limit
+            $0._lineLimitExtras = reservesSpace ? _LineLimitExtras(minimum: limit, reservesSpace: true) : _LineLimitExtras()
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/multilinetextalignment(_:)
     public func multilineTextAlignment(_ alignment: TextAlignment) -> some View { environment(\.multilineTextAlignment, alignment) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/truncationmode(_:)
@@ -928,5 +954,52 @@ extension View {
     /// to copy (docs/compatibility/swiftui-apps.md, MD Vault, follow-up).
     public func textSelection<S: TextSelectability>(_ selectability: S) -> some View {
         _EnvironmentView(content: self) { $0._allowsTextSelection = S.allowsSelection }
+    }
+}
+
+// MARK: onReceive
+
+extension View {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/onreceive(_:perform:)
+    ///
+    /// Subscribes when the view joins the hierarchy and cancels when it leaves; the action
+    /// runs where the publisher delivers (receive on the main queue for UI work, as on macOS).
+    public func onReceive<P: Publisher>(_ publisher: P, perform action: @escaping (P.Output) -> Void) -> some View where P.Failure == Never {
+        _LayoutModified(content: self) { _OnReceivePrimitive(publisher: publisher, action: action, content: $0) }
+    }
+}
+
+/// The action an `onReceive` subscription calls; updated in place when the view updates.
+final class _ReceiveAction<Output>: @unchecked Sendable {
+    var action: (Output) -> Void
+    init(_ action: @escaping (Output) -> Void) { self.action = action }
+}
+
+@MainActor
+final class _OnReceivePrimitive<P: Publisher>: _Primitive where P.Failure == Never {
+    let publisher: P
+    let receive: _ReceiveAction<P.Output>
+    private var subscription: AnyCancellable?
+    init(publisher: P, action: @escaping (P.Output) -> Void, content: _AnyViewBox) {
+        self.publisher = publisher
+        receive = _ReceiveAction(action)
+        super.init()
+        children = [content]
+    }
+    override var isLayoutTransparent: Bool { true }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        guard subscription == nil else { return }
+        let receive = receive
+        subscription = publisher.sink { receive.action($0) }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _OnReceivePrimitive<P> { receive.action = o.receive.action }
+    }
+    override func detach() {
+        subscription?.cancel()
+        subscription = nil
+        super.detach()
     }
 }

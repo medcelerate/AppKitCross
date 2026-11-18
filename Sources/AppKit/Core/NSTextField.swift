@@ -75,6 +75,7 @@ import CoreText
         editor.isEditable = isEditable
         editor.isSelectable = isEditable || isSelectable
         editor.isFieldEditor = true
+        editor._fieldEditorWraps = _fieldCell?._isMultiline ?? false
         editor.delegate = self
         editor.frame = _editorFrame()
         editor.autoresizingMask = [.width, .height]

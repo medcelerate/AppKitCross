@@ -69,7 +69,7 @@ Cloned into a scratch directory, not vendored.
 
 Port gaps both runs found, for the port's list: the eight SwiftUI names in
 `swiftui-shims.md`, `SecureField`/`NSSecureTextField` masking, and `@discardableResult` on
-`NSPasteboard.clearContents()` and `setString(_:forType:)`.
+`NSPasteboard.clearContents()` and `setString(_:forType:)`. All are closed by ADR-0049.
 
 ## Consequences
 

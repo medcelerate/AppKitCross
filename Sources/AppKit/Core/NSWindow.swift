@@ -460,6 +460,7 @@ import CoreText
     private var _titlebarAppearsTransparent = false
     private var _appearance: NSAppearance? = nil
     private var _fieldEditor: NSTextView? = nil
+    private var _secureFieldEditor: NSTextView? = nil
     /// Backdrop requested by an NSVisualEffectView blending behind the window.
     internal var _backdrop: PlatformWindowChrome.Backdrop = .none { didSet { if _backdrop != oldValue { _updateChrome() } } }
     /// The shape of the views asking for `_backdrop` (`NSWindow._updateBackdrop`).
@@ -1781,7 +1782,7 @@ import CoreText
     @MainActor open func enableSnapshotRestoration() { _snapshotRestorationDisabledCount = max(0, _snapshotRestorationDisabledCount - 1) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endediting(for:)
     @MainActor open func endEditing(for object: Any?) {
-        guard let e = _fieldEditor, e.superview != nil, firstResponder === e else { return }
+        guard let e = firstResponder as? NSTextView, e === _fieldEditor || e === _secureFieldEditor, e.superview != nil else { return }
         _ = makeFirstResponder(nil)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/endsheet(_:)
@@ -1830,6 +1831,24 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/fieldeditor(_:for:)
     @MainActor open func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        // A secure field edits in its own editor, which lays out bullets for the text and
+        // never writes it to a pasteboard (AppKit's secure field editor does the same).
+        if let secure = object as? NSSecureTextField {
+            if _secureFieldEditor == nil, createFlag {
+                let e = NSTextView(usingTextLayoutManager: false)    // the mask lives in NSLayoutManager
+                e.frame = NSRect(x: 0, y: 0, width: 100, height: 20)
+                e.isFieldEditor = true
+                e.isRichText = false
+                e.isAutomaticSpellingCorrectionEnabled = false
+                e.isContinuousSpellCheckingEnabled = false
+                _secureFieldEditor = e
+            }
+            if let e = _secureFieldEditor {
+                let bullets = (secure.cell as? NSSecureTextFieldCell)?.echosBullets ?? true
+                e._layoutManager._secureEcho = bullets ? "\u{2022}" : ""
+            }
+            return _secureFieldEditor
+        }
         if let e = _fieldEditor { return e }
         guard createFlag else { return nil }
         let e = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))

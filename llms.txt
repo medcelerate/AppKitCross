@@ -9,7 +9,7 @@ An agent porting someone else's Mac app should start with AGENTS.md. Contributor
 - [AGENTS.md](AGENTS.md): porting a Mac app with this package: the dependency, builds on macOS/Windows/Linux, headless tests and screenshots, the porting checklist, platform behaviour, reporting gaps, shipping
 - [docs/API-COVERAGE.md](docs/API-COVERAGE.md): every AppKit type with its status (hand-written, generated, Apple-only) and how many members still trap
 - [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md): every gap two real open-source SwiftUI apps hit on the port, with root cause and fix
-- [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md): ready-made stand-ins for SwiftUI API the port does not declare yet, with the compiler messages each answers
+- [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md): how to shim API the port does not declare, and the earlier shims that are now part of the port
 - [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md): third-party SwiftUI packages built against the port, verdict per platform and the API gaps they found
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): repository layout, building and testing each platform, the Linux container, runtime switches (`APPKITWIN_*`), threading
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): module map, the platform seam, the drawing path, how the Objective-C runtime dependence is handled

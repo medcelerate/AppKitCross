@@ -278,6 +278,7 @@ public struct EnvironmentValues {
     private struct DisplayScaleKey: EnvironmentKey { static let defaultValue: CGFloat = 1 }
     private struct LocaleKey: EnvironmentKey { static let defaultValue: Locale = .current }
     private struct LineLimitKey: EnvironmentKey { static let defaultValue: Int? = nil }
+    private struct LineLimitExtrasKey: EnvironmentKey { static let defaultValue = _LineLimitExtras() }
     private struct MultilineTextAlignmentKey: EnvironmentKey { static let defaultValue: TextAlignment = .leading }
     private struct TruncationModeKey: EnvironmentKey { static let defaultValue: Text.TruncationMode = .tail }
     private struct ControlActiveStateKey: EnvironmentKey { static let defaultValue: ControlActiveState = .inactive }
@@ -293,6 +294,8 @@ public struct EnvironmentValues {
     public var displayScale: CGFloat { get { self[DisplayScaleKey.self] } set { self[DisplayScaleKey.self] = newValue } }
     public var locale: Locale { get { self[LocaleKey.self] } set { self[LocaleKey.self] = newValue } }
     public var lineLimit: Int? { get { self[LineLimitKey.self] } set { self[LineLimitKey.self] = newValue } }
+    /// The rest of a ranged `lineLimit` (`lineLimit` itself holds the maximum).
+    var _lineLimitExtras: _LineLimitExtras { get { self[LineLimitExtrasKey.self] } set { self[LineLimitExtrasKey.self] = newValue } }
     public var multilineTextAlignment: TextAlignment { get { self[MultilineTextAlignmentKey.self] } set { self[MultilineTextAlignmentKey.self] = newValue } }
     public var truncationMode: Text.TruncationMode { get { self[TruncationModeKey.self] } set { self[TruncationModeKey.self] = newValue } }
     public var controlActiveState: ControlActiveState { get { self[ControlActiveStateKey.self] } set { self[ControlActiveStateKey.self] = newValue } }
@@ -367,4 +370,11 @@ func _installDynamicProperties(in value: Any, node: _ViewNode, slot: inout Int) 
             if m.displayStyle == .struct, !(child.value is any View) { _installDynamicProperties(in: child.value, node: node, slot: &slot) }
         }
     }
+}
+
+/// A ranged `lineLimit`'s lower bound: the lines a vertical text field always shows, and
+/// (with `reservesSpace`) the lines text reserves.
+struct _LineLimitExtras: Equatable, Sendable {
+    var minimum: Int? = nil
+    var reservesSpace = false
 }
