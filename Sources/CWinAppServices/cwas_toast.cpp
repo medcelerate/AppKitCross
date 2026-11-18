@@ -7,10 +7,17 @@
 // takes the shell some seconds to pick up a new shortcut: toasts shown in that window never
 // surface. So the shim makes the shortcut when it creates the notifier and, while the shell
 // has not yet displayed one of the app's toasts, shows a fresh toast again a few times
-// (see `retryUntilDisplayed`). Activation without a COM activator reaches the app only through the toast
-// object's Activated event, so the shim keeps every shown toast (and its handlers) alive until
-// it is activated, dismissed by the user, or removed: a toast clicked in Action Center while
-// the app runs still reports back; one clicked after the app quit starts nothing.
+// (see `retryUntilDisplayed`).
+//
+// A click on a live banner raises the toast object's Activated event; a click in the
+// notification center does not (checked on the PC: the toast just closed). The shell delivers
+// those to the app's COM activator, the class named by the shortcut's ToastActivatorCLSID, so
+// the shim registers one (HKCU\Software\Classes\CLSID\{clsid}\LocalServer32 and the class
+// object in this process). Both paths go through `deliverActivation`, which reports a toast
+// once, while it is still the one shown under its tag. The activation arguments carry the tag
+// (ToastXML.swift). The shim keeps every shown toast and its handlers alive until it is
+// activated, dismissed by the user, or removed. A click after the app quit starts the app
+// (COM runs LocalServer32 with -Embedding) but is not reported to it.
 //
 // Plain COM over the WinRT ABI headers (no WRL, no C++/WinRT): the three event handlers are
 // small hand-written agile objects.
@@ -36,6 +43,8 @@
 #include <windows.foundation.collections.h>
 #include <windows.data.xml.dom.h>
 #include <windows.ui.notifications.h>
+#include <NotificationActivationCallback.h>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
@@ -100,6 +109,11 @@ static IToastNotifier *g_notifier = nullptr;
 static IToastNotificationHistory *g_history = nullptr;
 static std::wstring g_aumid;
 static uint64_t g_nextSerial = 0;
+/// Set once the shell has reported anything about one of the app's toasts (a click, a close,
+/// a timeout into the notification center): it displays them, so no re-show is needed.
+static std::atomic<bool> g_shellShowedToast(false);
+static CLSID g_activatorClsid = {};
+static DWORD g_activatorCookie = 0;
 /// GetTickCount64 when this process made or repaired the Start-menu shortcut; 0 otherwise.
 static ULONGLONG g_shortcutMadeAt = 0;
 static cwas_toast_activated_fn g_activated = nullptr;
@@ -275,13 +289,95 @@ typedef ITypedEventHandler<ToastNotification *, IInspectable *> ActivatedHandler
 typedef ITypedEventHandler<ToastNotification *, ToastDismissedEventArgs *> DismissedHandler;
 typedef ITypedEventHandler<ToastNotification *, ToastFailedEventArgs *> FailedHandler;
 
+static int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static std::string percentDecoded(const std::string &s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); i++) {
+        int hi, lo;
+        if (s[i] == '%' && i + 2 < s.size() && (hi = hexValue(s[i + 1])) >= 0 && (lo = hexValue(s[i + 2])) >= 0) {
+            out.push_back((char)(hi * 16 + lo));
+            i += 2;
+        } else {
+            out.push_back(s[i]);
+        }
+    }
+    return out;
+}
+
+/// Splits ToastXML's activation arguments, "{tag} {action}" each percent-encoded. False for
+/// arguments in any other form.
+static bool parseArguments(const std::string &arguments, std::string *tag, std::string *action) {
+    size_t space = arguments.find(' ');
+    if (space == std::string::npos) return false;
+    *tag = percentDecoded(arguments.substr(0, space));
+    *action = percentDecoded(arguments.substr(space + 1));
+    return true;
+}
+
+/// The group of the live toast with this tag (the COM activator gets no toast object).
+static bool liveGroupOf(const std::wstring &tag, std::wstring *group) {
+    std::lock_guard<std::mutex> guard(g_lock);
+    for (auto &entry : g_live) {
+        size_t newline = entry.first.find(L'\n');
+        if (newline != std::wstring::npos && entry.first.compare(newline + 1, std::wstring::npos, tag) == 0) {
+            *group = entry.second.group;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Reports a click or button press once. `sender` is the toast object (the Activated event) or
+/// null (the COM activator); `inputs` maps text box ids to the typed text.
+static void deliverActivation(IToastNotification *sender, const std::string &arguments,
+                              const std::map<std::wstring, std::wstring> &inputs, const char *via) {
+    std::string tagUtf8, action;
+    std::wstring group;
+    if (sender) {
+        std::wstring tag = tagOf(sender, &group);
+        std::string encodedTag;
+        if (!parseArguments(arguments, &encodedTag, &action)) action = arguments;
+        tagUtf8 = narrow(tag.c_str(), (UINT32)tag.size());
+    } else if (!parseArguments(arguments, &tagUtf8, &action)) {
+        fprintf(stderr, "UserNotifications: activation with arguments \"%s\" that are not this app's; ignored\n", arguments.c_str());
+        return;
+    }
+    std::wstring tag = widen(tagUtf8.c_str());
+    g_shellShowedToast = true;
+    bool found = false;
+    std::vector<std::wstring> ids;
+    if (sender || liveGroupOf(tag, &group)) ids = forget(sender, tag, group, &found);
+    if (GetEnvironmentVariableA("APPKITWIN_TRACE_TOASTS", nullptr, 0) > 0 || !found) {
+        fprintf(stderr, "UserNotifications: activation of toast %s action %s via %s%s\n", tagUtf8.c_str(), action.c_str(), via,
+                found ? "" : " (not a toast this process shows, or already reported; ignored)");
+    }
+    if (!found) return;
+    std::string packed;
+    for (const std::wstring &id : ids) {
+        auto it = inputs.find(id);
+        if (it == inputs.end()) continue;
+        packed.append(narrow(id.c_str(), (UINT32)id.size()));
+        packed.push_back('\0');
+        packed.append(narrow(it->second.c_str(), (UINT32)it->second.size()));
+        packed.push_back('\0');
+    }
+    packed.push_back('\0');
+    if (g_activated) g_activated(g_context, tagUtf8.c_str(), action.c_str(), ids.empty() ? nullptr : packed.data());
+}
+
 class ActivatedSink : public Handler<ActivatedHandler> {
 public:
     HRESULT STDMETHODCALLTYPE Invoke(IToastNotification *sender, IInspectable *args) override {
         std::wstring group;
         std::wstring tag = tagOf(sender, &group);
         std::string arguments;
-        std::string inputs;
+        std::map<std::wstring, std::wstring> inputs;
         std::vector<std::wstring> ids = inputIdsOf(sender, tag, group);
         IToastActivatedEventArgs *a = nullptr;
         if (args && SUCCEEDED(args->QueryInterface(__uuidof(IToastActivatedEventArgs), reinterpret_cast<void **>(&a)))) {
@@ -305,11 +401,9 @@ public:
                         if (SUCCEEDED(value->QueryInterface(__uuidof(IPropertyValue), reinterpret_cast<void **>(&pv)))) {
                             HSTRING text = nullptr;
                             if (SUCCEEDED(pv->GetString(&text))) {
-                                std::string idUtf8 = narrow(id.c_str(), (UINT32)id.size());
-                                inputs.append(idUtf8);
-                                inputs.push_back('\0');
-                                inputs.append(text ? narrow(text) : std::string());
-                                inputs.push_back('\0');
+                                UINT32 n = 0;
+                                const wchar_t *raw = text ? WindowsGetStringRawBuffer(text, &n) : nullptr;
+                                inputs[id] = raw ? std::wstring(raw, n) : std::wstring();
                                 if (text) WindowsDeleteString(text);
                             }
                             pv->Release();
@@ -322,13 +416,63 @@ public:
             }
             a2->Release();
         }
-        inputs.push_back('\0');
-        forget(sender, tag, group);
-        std::string tagUtf8 = narrow(tag.c_str(), (UINT32)tag.size());
-        if (g_activated) g_activated(g_context, tagUtf8.c_str(), arguments.c_str(), ids.empty() ? nullptr : inputs.data());
+        deliverActivation(sender, arguments, inputs, "the Activated event");
         return S_OK;
     }
 };
+
+/// The COM activator: the shell calls Activate for clicks in the notification center (and for
+/// banner clicks, which the Activated event may also report; deliverActivation reports one).
+class ActivationCallback : public INotificationActivationCallback {
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **object) override {
+        if (!object) return E_POINTER;
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(INotificationActivationCallback)) {
+            *object = static_cast<INotificationActivationCallback *>(this);
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }    // a static object
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE Activate(LPCWSTR appUserModelId, LPCWSTR invokedArgs,
+                                       const NOTIFICATION_USER_INPUT_DATA *data, ULONG count) override {
+        (void)appUserModelId;
+        std::map<std::wstring, std::wstring> inputs;
+        for (ULONG i = 0; data && i < count; i++) {
+            if (data[i].Key) inputs[data[i].Key] = data[i].Value ? data[i].Value : L"";
+        }
+        std::string arguments = invokedArgs ? narrow(invokedArgs, (UINT32)wcslen(invokedArgs)) : std::string();
+        deliverActivation(nullptr, arguments, inputs, "the COM activator");
+        return S_OK;
+    }
+};
+
+class ActivatorFactory : public IClassFactory {
+public:
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **object) override {
+        if (!object) return E_POINTER;
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IClassFactory)) {
+            *object = static_cast<IClassFactory *>(this);
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown *outer, REFIID riid, void **object) override;
+    HRESULT STDMETHODCALLTYPE LockServer(BOOL) override { return S_OK; }
+};
+
+static ActivationCallback g_activationCallback;
+static ActivatorFactory g_activatorFactory;
+
+HRESULT STDMETHODCALLTYPE ActivatorFactory::CreateInstance(IUnknown *outer, REFIID riid, void **object) {
+    if (outer) return CLASS_E_NOAGGREGATION;
+    return g_activationCallback.QueryInterface(riid, object);
+}
 
 class DismissedSink : public Handler<DismissedHandler> {
 public:
@@ -343,6 +487,7 @@ public:
         if (code != 2) forget(sender, tag, group, &live);
         else live = isLive(sender, tag, group);
         if (!live) return S_OK;
+        if (code != 1) g_shellShowedToast = true;
         std::string tagUtf8 = narrow(tag.c_str(), (UINT32)tag.size());
         if (g_dismissed) g_dismissed(g_context, tagUtf8.c_str(), code, 0);
         return S_OK;
@@ -366,19 +511,61 @@ public:
     }
 };
 
-static void registerAumid(const std::wstring &aumid, const std::wstring &name, const std::wstring &icon) {
+static void setString(HKEY key, const wchar_t *name, const std::wstring &value) {
+    RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE *>(value.c_str()), (DWORD)((value.size() + 1) * sizeof(wchar_t)));
+}
+
+static std::wstring clsidString(const CLSID &clsid) {
+    wchar_t buffer[64] = {0};
+    StringFromGUID2(clsid, buffer, ARRAYSIZE(buffer));
+    return buffer;
+}
+
+/// Registers the AppUserModelID (display name, icon, and the activator's CLSID as
+/// CustomActivator) and returns that CLSID: the one already registered for the ID, else a new
+/// one. False when the key cannot be written.
+static bool registerAumid(const std::wstring &aumid, const std::wstring &name, const std::wstring &icon, CLSID *activator) {
     std::wstring path = L"Software\\Classes\\AppUserModelId\\" + aumid;
     HKEY key = nullptr;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
-    RegSetValueExW(key, L"DisplayName", 0, REG_SZ, reinterpret_cast<const BYTE *>(name.c_str()), (DWORD)((name.size() + 1) * sizeof(wchar_t)));
-    if (!icon.empty()) {
-        RegSetValueExW(key, L"IconUri", 0, REG_SZ, reinterpret_cast<const BYTE *>(icon.c_str()), (DWORD)((icon.size() + 1) * sizeof(wchar_t)));
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return false;
+    setString(key, L"DisplayName", name);
+    if (!icon.empty()) setString(key, L"IconUri", icon);
+    wchar_t existing[64] = {0};
+    DWORD bytes = sizeof(existing) - sizeof(wchar_t);
+    DWORD type = 0;
+    bool have = RegQueryValueExW(key, L"CustomActivator", nullptr, &type, reinterpret_cast<BYTE *>(existing), &bytes) == ERROR_SUCCESS
+        && type == REG_SZ && SUCCEEDED(CLSIDFromString(existing, activator));
+    if (!have && SUCCEEDED(CoCreateGuid(activator))) {
+        setString(key, L"CustomActivator", clsidString(*activator));
+        have = true;
     }
     RegCloseKey(key);
+    return have;
+}
+
+/// HKCU\Software\Classes\CLSID\{activator}\LocalServer32 = this executable, so COM can reach
+/// (or start) the app for a click in the notification center.
+static void registerActivatorServer(const CLSID &activator, const std::wstring &name) {
+    wchar_t exe[4 * MAX_PATH] = {0};
+    DWORD length = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
+    if (length == 0 || length >= ARRAYSIZE(exe)) return;
+    std::wstring path = L"Software\\Classes\\CLSID\\" + clsidString(activator);
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        setString(key, nullptr, name + L" notification activator");
+        RegCloseKey(key);
+    }
+    path += L"\\LocalServer32";
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        setString(key, nullptr, L"\"" + std::wstring(exe) + L"\"");
+        RegCloseKey(key);
+    }
 }
 
 /// PKEY_AppUserModel_ID, spelled out so the shim needs no propsys import library.
 static const PROPERTYKEY kAppUserModelID = {{0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5};
+/// PKEY_AppUserModel_ToastActivatorCLSID.
+static const PROPERTYKEY kToastActivatorCLSID = {{0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 26};
 
 static std::wstring fileSafe(const std::wstring &s) {
     std::wstring out;
@@ -386,8 +573,9 @@ static std::wstring fileSafe(const std::wstring &s) {
     return out;
 }
 
-/// Reads the target and AppUserModelID of the shortcut at `path`; false when there is none.
-static bool readShortcut(const std::wstring &path, std::wstring *target, std::wstring *aumid) {
+/// Reads the target, AppUserModelID and toast activator of the shortcut at `path`; false when
+/// there is none.
+static bool readShortcut(const std::wstring &path, std::wstring *target, std::wstring *aumid, CLSID *activator) {
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
     IShellLinkW *link = nullptr;
     if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_IShellLinkW, reinterpret_cast<void **>(&link)))) return false;
@@ -403,6 +591,9 @@ static bool readShortcut(const std::wstring &path, std::wstring *target, std::ws
             PropVariantInit(&value);
             if (SUCCEEDED(store->GetValue(kAppUserModelID, &value)) && value.vt == VT_LPWSTR && value.pwszVal) *aumid = value.pwszVal;
             PropVariantClear(&value);
+            PropVariantInit(&value);
+            if (SUCCEEDED(store->GetValue(kToastActivatorCLSID, &value)) && value.vt == VT_CLSID && value.puuid) *activator = *value.puuid;
+            PropVariantClear(&value);
         }
     }
     release(store);
@@ -414,9 +605,9 @@ static bool readShortcut(const std::wstring &path, std::wstring *target, std::ws
 /// Makes sure a shortcut in the user's Start-menu Programs folder starts this executable with
 /// the toast AppUserModelID. Its name is the display name; a different program's shortcut of
 /// that name is left alone and the ID names ours instead. An existing shortcut to this
-/// executable gets the ID added. Returns S_OK when it was already right, S_FALSE when it was
-/// made or repaired, or a failure.
-static HRESULT ensureStartShortcut(const std::wstring &aumid, const std::wstring &name) {
+/// executable gets the ID and the activator added. Returns S_OK when it was already right,
+/// S_FALSE when it was made or repaired, or a failure.
+static HRESULT ensureStartShortcut(const std::wstring &aumid, const std::wstring &name, const CLSID &activator) {
     PWSTR folder = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_Programs, KF_FLAG_CREATE, nullptr, &folder))) return E_FAIL;
     std::wstring directory = folder;
@@ -427,13 +618,16 @@ static HRESULT ensureStartShortcut(const std::wstring &aumid, const std::wstring
 
     std::wstring path = directory + L"\\" + fileSafe(name.empty() ? aumid : name) + L".lnk";
     std::wstring target, existingId;
-    if (readShortcut(path, &target, &existingId)) {
-        if (existingId == aumid && _wcsicmp(target.c_str(), exe) == 0) return S_OK;
+    CLSID existingActivator = {};
+    auto right = [&] { return existingId == aumid && _wcsicmp(target.c_str(), exe) == 0 && IsEqualGUID(existingActivator, activator); };
+    if (readShortcut(path, &target, &existingId, &existingActivator)) {
+        if (right()) return S_OK;
         if (existingId != aumid && _wcsicmp(target.c_str(), exe) != 0) {
             path = directory + L"\\" + fileSafe(aumid) + L".lnk";
             target.clear();
             existingId.clear();
-            if (readShortcut(path, &target, &existingId) && existingId == aumid && _wcsicmp(target.c_str(), exe) == 0) return S_OK;
+            existingActivator = CLSID{};
+            if (readShortcut(path, &target, &existingId, &existingActivator) && right()) return S_OK;
         }
     }
 
@@ -456,6 +650,14 @@ static HRESULT ensureStartShortcut(const std::wstring &aumid, const std::wstring
         memcpy(value.pwszVal, aumid.c_str(), bytes);
         value.vt = VT_LPWSTR;
         hr = store->SetValue(kAppUserModelID, value);
+        PropVariantClear(&value);
+        if (FAILED(hr)) break;
+        PropVariantInit(&value);
+        value.puuid = static_cast<CLSID *>(CoTaskMemAlloc(sizeof(CLSID)));
+        if (!value.puuid) { hr = E_OUTOFMEMORY; break; }
+        *value.puuid = activator;
+        value.vt = VT_CLSID;
+        hr = store->SetValue(kToastActivatorCLSID, value);
         PropVariantClear(&value);
         if (FAILED(hr) || FAILED(hr = store->Commit())) break;
         if (FAILED(hr = link->QueryInterface(IID_IPersistFile, reinterpret_cast<void **>(&file)))) break;
@@ -487,8 +689,17 @@ static int32_t toastInit(const char *aumid, const char *display_name, const char
     g_activated = activated;
     g_dismissed = dismissed;
     g_context = context;
-    registerAumid(g_aumid, widen(display_name), widen(icon_path));
-    HRESULT shortcut = ensureStartShortcut(g_aumid, widen(display_name));
+    std::wstring name = widen(display_name);
+    bool haveActivator = registerAumid(g_aumid, name, widen(icon_path), &g_activatorClsid);
+    if (haveActivator) {
+        registerActivatorServer(g_activatorClsid, name.empty() ? g_aumid : name);
+        HRESULT registered = CoRegisterClassObject(g_activatorClsid, &g_activatorFactory, CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE, &g_activatorCookie);
+        std::string clsid = narrow(clsidString(g_activatorClsid).c_str(), 38);
+        fprintf(stderr, "UserNotifications: notification activator %s for %s, HRESULT 0x%08lx\n", clsid.c_str(), aumid, (unsigned long)registered);
+    } else {
+        fprintf(stderr, "UserNotifications: no notification activator for %s; clicks in the notification center will not reach the app\n", aumid);
+    }
+    HRESULT shortcut = ensureStartShortcut(g_aumid, name, g_activatorClsid);
     if (shortcut == S_FALSE) {
         g_shortcutMadeAt = GetTickCount64();
         fprintf(stderr, "UserNotifications: made the Start-menu shortcut for %s; Windows shows its toasts once the shell has picked it up\n", aumid);
@@ -659,7 +870,7 @@ static void retryUntilDisplayed(std::string xml, std::string tag, std::string gr
             Sleep(3000);
             bool more = false;
             onToastThread([&] {
-                if (shellKnowsApp() || GetTickCount64() - g_shortcutMadeAt > 30000) return;
+                if (g_shellShowedToast || shellKnowsApp() || GetTickCount64() - g_shortcutMadeAt > 30000) return;
                 {
                     std::lock_guard<std::mutex> guard(g_lock);
                     auto it = g_live.find(liveKey(widen(tag.c_str()), widen(group.c_str())));
@@ -706,7 +917,7 @@ extern "C" int32_t cwas_toast_show(const char *xml, const char *tag, const char 
         uint64_t serial = 0;
         hr = toastShow(xml, tag, group, suppress_popup, input_ids, &serial);
         if (FAILED(hr) || GetEnvironmentVariableA("APPKITWIN_TRACE_TOASTS", nullptr, 0) > 0) traceThread("show toast", tag, caller, hr);
-        if (SUCCEEDED(hr) && g_shortcutMadeAt != 0 && GetTickCount64() - g_shortcutMadeAt < 30000 && !shellKnowsApp()) {
+        if (SUCCEEDED(hr) && g_shortcutMadeAt != 0 && GetTickCount64() - g_shortcutMadeAt < 30000 && !g_shellShowedToast && !shellKnowsApp()) {
             std::string packed;
             for (const char *p = input_ids; p && *p; p += strlen(p) + 1) { packed.append(p); packed.push_back('\0'); }
             retryUntilDisplayed(xml, tag, group, suppress_popup, packed, serial);

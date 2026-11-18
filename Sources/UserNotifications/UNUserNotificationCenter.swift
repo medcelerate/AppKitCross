@@ -107,6 +107,7 @@ open class UNUserNotificationCenter: NSObject, @unchecked Sendable {
             guard let self else { return }
             self.queue.async { self.handle(event) }
         }
+        queue.async { notifier.prepare() }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/usernotifications/unusernotificationcenter/delegate

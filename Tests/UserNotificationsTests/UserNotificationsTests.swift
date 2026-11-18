@@ -418,13 +418,21 @@ final class UserNotificationsTests: XCTestCase {
             PlatformAction(identifier: "done", title: "Done", destructive: false, foreground: true, textInput: nil),
             PlatformAction(identifier: "reply", title: "Reply", destructive: false, foreground: false, textInput: (buttonTitle: "Send", placeholder: "Say <it>")),
         ]))
-        XCTAssertTrue(xml.hasPrefix("<toast launch=\"com.apple.UNNotificationDefaultActionIdentifier\">"))
+        XCTAssertTrue(xml.hasPrefix("<toast launch=\"id com.apple.UNNotificationDefaultActionIdentifier\">"))
         XCTAssertTrue(xml.contains("<text>Tom &amp; Jerry</text><text>&lt;sub&gt;</text><text>say &quot;hi&quot;</text>"))
         XCTAssertTrue(xml.contains("<input id=\"text-1\" type=\"text\" title=\"Reply\" placeHolderContent=\"Say &lt;it&gt;\"/>"))
-        XCTAssertTrue(xml.contains("<action content=\"Done\" arguments=\"done\" activationType=\"foreground\"/>"))
-        XCTAssertTrue(xml.contains("<action content=\"Send\" arguments=\"reply\" activationType=\"foreground\" hint-inputId=\"text-1\"/>"))
+        XCTAssertTrue(xml.contains("<action content=\"Done\" arguments=\"id done\" activationType=\"foreground\"/>"))
+        XCTAssertTrue(xml.contains("<action content=\"Send\" arguments=\"id reply\" activationType=\"foreground\" hint-inputId=\"text-1\"/>"))
         XCTAssertTrue(xml.contains("<audio src=\"ms-winsoundevent:Notification.Default\"/>"))
         XCTAssertTrue(ToastXML.document(for: sample(playsSound: false)).contains("<audio silent=\"true\"/>"))
+    }
+
+    func testToastArgumentsCarryTheTagForTheCOMActivator() {
+        XCTAssertEqual(ToastXML.arguments(tag: "task 1", action: "done"), "task%201 done")
+        XCTAssertEqual(ToastXML.arguments(tag: "a&b", action: "r\u{e9}ply"), "a%26b r%C3%A9ply")
+        let xml = ToastXML.document(for: PlatformNotification(identifier: "two words", title: "t", subtitle: "", body: "", playsSound: true, soundName: nil,
+                                                              imageFiles: [], actions: [], listOnly: false, interruptionLevel: .active, threadIdentifier: ""))
+        XCTAssertTrue(xml.hasPrefix("<toast launch=\"two%20words com.apple.UNNotificationDefaultActionIdentifier\">"))
     }
 
     func testToastXMLKeepsAtMostFiveActionsAndShortTags() {

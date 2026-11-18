@@ -2,21 +2,22 @@
 // macOS tests check it; WindowsToastNotifier hands it to the WinRT shim.
 //
 // Shape (ToastGeneric, Windows 10 and later):
-//   <toast launch="{default action id}">
+//   <toast launch="{tag} {default action id}">
 //     <visual><binding template="ToastGeneric">
 //       <text>title</text><text>subtitle</text><text>body</text><image src="file:///…"/>
 //     </binding></visual>
 //     <actions>
 //       <input id="text-N" type="text" placeHolderContent="…"/>            (text input actions)
-//       <action content="Title" arguments="{action id}" activationType="foreground" [hint-inputId="text-N"]/>
+//       <action content="Title" arguments="{tag} {action id}" activationType="foreground" [hint-inputId="text-N"]/>
 //     </actions>
 //     <audio src="ms-winsoundevent:Notification.Default"/> | <audio silent="true"/>
 //   </toast>
-// A click on the toast reports `launch`, a button its `arguments`, so the activation carries
-// the UNNotificationAction identifier back unchanged. Every action uses foreground activation:
-// an unpackaged app has no COM activator for background activation, and foreground
-// activation of a running app only raises the Activated event (the center decides whether
-// to bring the app forward).
+// A click on the toast reports `launch`, a button its `arguments`: the toast's tag and the
+// UNNotificationAction identifier, each percent-encoded (see `arguments(tag:action:)`). The
+// tag is there because a click in the notification center reaches the app through the COM
+// activator, which gets only the arguments, not the toast. The shim decodes both and reports
+// the action identifier unchanged. Every action uses foreground activation (the center decides
+// whether to bring the app forward).
 
 import Foundation
 
@@ -25,7 +26,8 @@ enum ToastXML {
     static let maximumActions = 5
 
     static func document(for n: PlatformNotification) -> String {
-        var xml = "<toast launch=\"\(escape(UNNotificationDefaultActionIdentifier))\">"
+        let tag = self.tag(for: n.identifier)
+        var xml = "<toast launch=\"\(escape(arguments(tag: tag, action: UNNotificationDefaultActionIdentifier)))\">"
         xml += "<visual><binding template=\"ToastGeneric\">"
         // ToastGeneric shows up to three text lines: the first is the title.
         let lines = [n.title, n.subtitle, n.body].filter { !$0.isEmpty }
@@ -42,7 +44,7 @@ enum ToastXML {
             }
             for (i, action) in actions.enumerated() {
                 let title = action.textInput?.buttonTitle ?? action.title
-                xml += "<action content=\"\(escape(title))\" arguments=\"\(escape(action.identifier))\" activationType=\"foreground\""
+                xml += "<action content=\"\(escape(title))\" arguments=\"\(escape(arguments(tag: tag, action: action.identifier)))\" activationType=\"foreground\""
                 if action.textInput != nil { xml += " hint-inputId=\"text-\(i)\"" }
                 xml += "/>"
             }
@@ -55,6 +57,27 @@ enum ToastXML {
         }
         xml += "</toast>"
         return xml
+    }
+
+    /// The activation arguments: the tag and the action identifier, percent-encoded (everything
+    /// but RFC 3986's unreserved characters) and joined by a space. cwas_toast.cpp decodes them.
+    static func arguments(tag: String, action: String) -> String {
+        percentEncoded(tag) + " " + percentEncoded(action)
+    }
+
+    static func percentEncoded(_ s: String) -> String {
+        var out = ""
+        for byte in s.utf8 {
+            switch byte {
+            case UInt8(ascii: "A")...UInt8(ascii: "Z"), UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "0")...UInt8(ascii: "9"),
+                 UInt8(ascii: "-"), UInt8(ascii: "."), UInt8(ascii: "_"), UInt8(ascii: "~"):
+                out.unicodeScalars.append(Unicode.Scalar(byte))
+            default:
+                let hex = String(byte, radix: 16, uppercase: true)
+                out += "%" + (hex.count == 1 ? "0" + hex : hex)
+            }
+        }
+        return out
     }
 
     /// The input id a text action's text arrives under.

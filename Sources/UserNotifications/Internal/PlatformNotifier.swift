@@ -66,6 +66,10 @@ enum PlatformNotificationEvent: Equatable, Sendable {
 }
 
 protocol PlatformNotifier: AnyObject, Sendable {
+    /// Gets ready to notify, called on the center's queue once the app first asks for the
+    /// center (Windows: registers the app ID, the Start-menu shortcut and the COM activator,
+    /// which the shell needs some seconds to pick up before the first toast).
+    func prepare()
     func authorization() -> PlatformAuthorization
     /// Shows a notification, replacing one shown with the same identifier.
     func post(_ notification: PlatformNotification) throws
@@ -76,6 +80,10 @@ protocol PlatformNotifier: AnyObject, Sendable {
     func setBadgeCount(_ count: Int) -> Bool
     /// Called on any thread with what happened to a shown notification.
     func setEventHandler(_ handler: @escaping @Sendable (PlatformNotificationEvent) -> Void)
+}
+
+extension PlatformNotifier {
+    func prepare() {}
 }
 
 /// What the running app is called on the platform: Windows' AppUserModelID and display name,

@@ -52,6 +52,8 @@ final class WindowsToastNotifier: PlatformNotifier, @unchecked Sendable {
         return result
     }
 
+    func prepare() { _ = start() }
+
     func authorization() -> PlatformAuthorization {
         guard start() >= 0 else { return .unavailable }
         switch cwas_toast_setting() {

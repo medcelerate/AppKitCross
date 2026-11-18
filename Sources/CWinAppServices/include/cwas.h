@@ -15,8 +15,9 @@ extern "C" {
 
 // MARK: Toasts
 
-/// A click on a toast (`arguments` is the toast's launch string) or one of its buttons (the
-/// button's arguments). `user_inputs` lists the toast's text boxes as NUL-separated id/value
+/// A click on a toast or one of its buttons, from a banner or the notification center, reported
+/// once. The toast's launch string and each button's arguments are "{tag} {action}", both
+/// percent-encoded; `arguments` is the decoded action. `user_inputs` lists the toast's text boxes as NUL-separated id/value
 /// pairs ending with an empty string, or is NULL. Called on a thread-pool thread.
 typedef void (*cwas_toast_activated_fn)(void *context, const char *tag, const char *arguments, const char *user_inputs);
 /// A toast left the screen: reason 0 the user closed it, 1 the app removed it, 2 it timed
@@ -26,8 +27,10 @@ typedef void (*cwas_toast_dismissed_fn)(void *context, const char *tag, int reas
 /// Registers the AppUserModelID for toasts (HKCU\Software\Classes\AppUserModelId\<aumid>
 /// with its display name and, when given, an icon file), makes sure a Start-menu shortcut to
 /// this executable carries that ID (Windows displays no toast of an unpackaged app without
-/// one), makes it the process's ID unless the process already has one, and creates the toast
-/// notifier. Returns an HRESULT.
+/// one), registers a COM toast activator for it (HKCU\Software\Classes\CLSID\{clsid} with
+/// LocalServer32, the CLSID kept as the ID's CustomActivator and set on the shortcut; clicks in
+/// the notification center arrive only there), makes it the process's ID unless the process
+/// already has one, and creates the toast notifier. Returns an HRESULT.
 int32_t cwas_toast_init(const char *aumid, const char *display_name, const char *icon_path,
                         cwas_toast_activated_fn activated, cwas_toast_dismissed_fn dismissed, void *context);
 /// The notifier's NotificationSetting: 0 enabled, 1 disabled for the app, 2 disabled for

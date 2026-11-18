@@ -94,23 +94,36 @@ accepted, listed in the history and never displayed, and neither `IconUri` nor a
 `CustomActivator` value changes that. The shell displays them once a Start-menu shortcut carries
 the ID. So the notifier, when it is first created, makes sure
 `<Start menu>\Programs\<display name>.lnk` starts the running executable with
-`System.AppUserModel.ID` set to the ID. It adds the ID to an existing shortcut to the same
+`System.AppUserModel.ID` set to the ID and `System.AppUserModel.ToastActivatorCLSID` set to the
+app's toast activator (below). It adds the ID to an existing shortcut to the same
 executable, and it uses `<ID>.lnk` when another program's shortcut has the display name. The
 shortcut stays, like an installed app's Start-menu entry; an installer that makes its own with
-the ID makes this a no-op. The shell takes some seconds to pick up a new shortcut and drops
-the toasts shown before then. So for 30 seconds after the process made the shortcut, until
-Windows records the app under `Notifications\Settings\<ID>` (which it does with the first
-toast it displays), the shim shows each new toast again every 3 seconds while it is still the
-toast under its tag. Toasts use the `ToastGeneric`
+the ID makes this a no-op. The center creates the notifier, and with it the shortcut, when
+the app first asks for `UNUserNotificationCenter.current()`, which apps do at launch to set the
+delegate, so the shortcut is usually in place well before the first toast. The shell takes
+some seconds to pick up a new shortcut and drops the toasts shown before then. So for 30
+seconds after the process made the shortcut, the shim shows each new toast again every 3
+seconds while it is still the toast under its tag, until the shell reports anything about one
+of the app's toasts (a click, a close, a timeout into the notification center) or records the
+app under `Notifications\Settings\<ID>`. That key alone is not a reliable sign: on the PC
+it appeared in one run and not in another where toasts displayed. Toasts use the `ToastGeneric`
 template: up to three text lines (title, subtitle, body), one inline image attachment, up to
 five buttons, and a text box per text-input action. Each toast gets a tag (the identifier,
 hashed when longer than 64 characters) and one group for the app. Removal uses
-`ToastNotificationHistory`. An unpackaged app has no COM activator, so activation arrives only
-through the toast object's `Activated` event. The shim keeps every shown toast and its handlers
-alive until the toast is activated, dismissed or removed. A toast clicked in Action Center while
-the app runs therefore still reaches the delegate. One clicked after the app quit starts
-nothing. Every action uses foreground activation, because background activation needs the COM
-activator. Sound is the system notification sound or silence, since an unpackaged toast cannot
+`ToastNotificationHistory`.
+
+A click on a live banner raises the toast object's `Activated` event, but a click in the
+notification center does not: on the PC the toast closed and nothing reached the app. The shell
+sends those to the app's COM toast activator, as for any unpackaged app. So the shim registers
+one: a CLSID made once per ID and kept as the ID's `CustomActivator` value,
+`HKCU\Software\Classes\CLSID\{clsid}\LocalServer32` naming the executable, the CLSID on the
+shortcut, and the class object (`INotificationActivationCallback`) registered in the running
+process. The activator gets only the activation arguments, so the toast's `launch` and each
+button's `arguments` carry the tag as well as the action identifier, each percent-encoded. A
+click can arrive both ways; the shim reports it once, and only while the toast is still the one
+shown under its tag. A toast clicked after the app quit starts the app (COM runs it with
+`-Embedding`), but the click is not reported, since the new process has no record of it. Every
+action uses foreground activation. Sound is the system notification sound or silence, since an unpackaged toast cannot
 name its own audio file. Windows has no badge for an unpackaged app; the badge goes to the dock
 tile.
 
@@ -173,7 +186,7 @@ have, so they are not provided.
   error paths over a fake) run on every platform. `FreedesktopNotifierTests` (Linux) owns
   `org.freedesktop.Notifications` on the session bus and plays the server. It skips without a
   session bus or when a real server owns the name; run it under `dbus-run-session`.
-- Follow-ups: activation after the app quit on Windows (a COM activator registered with the
-  AUMID, launching the app with the toast's arguments); persisting pending requests across
+- Follow-ups: reporting a click that launched the app on Windows (the activator already starts
+  it; the center would need the delivered notification back); persisting pending requests across
   launches; `NSUserNotificationCenter` on the same seam; the toast app icon (`IconUri`) from
   the app's icon.
