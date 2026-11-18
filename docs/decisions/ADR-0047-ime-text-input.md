@@ -127,7 +127,12 @@ batches and XIM preedit draws.
   clauses), context activation across focus changes, TSF store edits (including a commit and a
   new composition in one edit, and reconversion), text-input-v3 batches with UTF-8 offsets,
   surrounding text, and the XIM preedit buffer. `X11InputMethodTests` checks the input context
-  and `Xutf8LookupString` under Xvfb. CI has no input method on any platform, so composition
+  and `Xutf8LookupString` under Xvfb. `tools/linux/ime-e2e.sh` runs ibus-libpinyin over XIM
+  into TextEdit in the Linux image: "nihao" composes inline (underlined, candidate window
+  under it), Space commits 你好. There, Escape cleared the engine's buffer without ibus sending
+  the empty preedit draw, so the last preedit stayed marked until the next keystroke replaced
+  it (the engine's behaviour; ibus-x11 does send draw("") and done when a preedit is hidden).
+  CI has no input method on any platform, so composition
   with a real input method is checked by hand (the PR's PC checklist; ibus or fcitx5 on Linux).
 - Not covered: reconversion started from the application, `GetACPFromPoint` (clicks inside the
   composition), TSF text attributes and input scopes, the Windows emoji panel's own checks,
