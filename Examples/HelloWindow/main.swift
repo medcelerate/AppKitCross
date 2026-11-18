@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
             NSApp.terminate(nil)
         }
         // `HelloWindow --metal` opens the Layout Demo on its Metal tab (for scripted runs);
-        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|browser|legacy|bindings|coredepth picks a tab the same way.
+        // APPKITWIN_LAYOUT_TAB=form|split|table|metal|combo|outline|pages|collection|grid|box|controls|date|diffable|panels|popover|browser|legacy|bindings|coredepth|notifications picks a tab the same way.
         if CommandLine.arguments.contains("--metal") {
             showLayoutDemo()
             (layoutWindowController?.window?.contentViewController as? NSTabViewController)?.selectedTabViewItemIndex = 3
@@ -476,7 +476,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
 
     var layoutWindowController: NSWindowController?
     var glassWindow: NSWindow?
-    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "browser", "legacy", "bindings", "coredepth"]
+    static let layoutTabs = ["form", "split", "table", "metal", "combo", "outline", "pages", "collection", "grid", "box", "controls", "date", "diffable", "panels", "popover", "browser", "legacy", "bindings", "coredepth", "notifications"]
 
     /// Milestone 3b: a frameless, translucent window over the system backdrop.
     // MARK: Screenshots for the comparison page
@@ -644,7 +644,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         tabs.addChild(LegacyDemoViewController())
         tabs.addChild(BindingsDemoViewController())
         tabs.addChild(CoreDepthDemoViewController())
-        tabs.view.frame = NSRect(x: 0, y: 0, width: 1000, height: 300)   // wide enough for the nineteen tabs
+        tabs.addChild(NotificationsDemoViewController())
+        tabs.view.frame = NSRect(x: 0, y: 0, width: 1000, height: 300)   // wide enough for the twenty tabs
         let window = NSWindow(contentViewController: tabs)
         window.title = "Layout Demo"
         if layerBacked { window.contentView?.wantsLayer = true }

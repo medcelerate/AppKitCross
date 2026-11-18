@@ -41,6 +41,9 @@ import CoreText
         super.init()
         _CoreAnimationHost.installIfNeeded()
         if NSApplication._shared == nil { NSApplication._shared = self }
+        #if os(Windows) || os(Linux)
+        UserNotificationsBridge.install()
+        #endif
     }
 
     @MainActor public required init?(coder: NSCoder) { super.init(coder: coder) }
