@@ -372,9 +372,10 @@ Work in this order; each step's failures hide the next step's.
   `IFileOpenDialog`/`IFileSaveDialog` on Windows and the xdg-desktop-portal `FileChooser` on
   Linux; with no portal on the session bus the package-drawn panel is used. File types come
   from `UTType`s and the Info.plist's `CFBundleDocumentTypes` (ADR-0017).
-- **Info.plist**: read from `APPKITWIN_INFO_PLIST`, else `Info.plist` beside the executable,
-  else `Bundle.main`. Without it the app is named after its executable, and imported UTIs
-  (for example Markdown) have no extensions off macOS, so those files will not open.
+- **Info.plist**: `APPKITWIN_INFO_PLIST`, else `Info.plist` beside the executable, in
+  `Resources/`, or in the executable target's SwiftPM resource bundle (section 8). Without it
+  the app is named after its executable, and imported UTIs (for example Markdown) have no
+  extensions off macOS, so those files will not open.
 - **Printing** (ADR-0022): the port's print panel everywhere (`APPKITWIN_PRINT_PANEL=native`
   for Windows' own); PDF output through the platform's writer; CUPS on Linux.
 - **Secure text**: `NSSecureTextField` (and so any `SecureField` shim built on a text field)
@@ -403,9 +404,28 @@ Open an issue at <https://github.com/medcelerate/AppKitCross/issues> with the
 
 ## 8. Shipping
 
-<!-- PLACEHOLDER(app-bundle-identity): folder layout beside the executable, Info.plist, .lproj, icon, identity, file associations (ADR-0045). -->
-**App layout, resources and identity**: *pending (the app bundle and identity work).* Today:
-give the app an Info.plist through `APPKITWIN_INFO_PLIST` or beside the executable (section 6).
+<!-- FILLED(app-bundle-identity) from PR 89 / ADR-0045: true once PR 89 is on main. -->
+**App layout, resources and identity** (ADR-0045,
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#app-layout-on-windows-and-linux)): the app folder is
+the executable plus the `.resources` bundles `swift build` writes beside it; no restructuring.
+`Bundle.main` searches `Resources/`, then the executable target's SwiftPM bundle, then the
+folder, so an app that declares its `Info.plist`, `Assets.xcassets` (read uncompiled: image,
+app icon and data sets) and `.lproj` folders as target resources finds them as on macOS.
+- **Strings**: `.strings`, `.stringsdict` (plural rules) and `.xcstrings` are read;
+  `NSLocalizedString`, `String(localized:)`, `LocalizedStringResource` and SwiftUI `Text` keys
+  resolve them. The language comes from `-AppleLanguages`, the Windows UI languages, or
+  `LANGUAGE`/`LC_*`/`LANG` on Linux (`LANG=de_DE.UTF-8 ./MyApp` to test).
+- **Identity**: `CFBundleIdentifier` (else `AppKitCross.<exe>`) is the Wayland app id, the X11
+  `WM_CLASS`, the desktop entry id and the crash-report folder. `CFBundleIconName` or
+  `CFBundleIconFile` (`.png`/`.ico`, not `.icns`) becomes the window icon.
+- **Single instance**: with a `CFBundleIdentifier`, a second launch hands its files and URLs
+  to the running app (the document controller or `application(_:open:)`) and exits. Opt out with the Info.plist key
+  `AppKitCrossAllowsMultipleInstances` or `APPKITWIN_MULTIPLE_INSTANCES=1`.
+- **File associations** (per user, only when asked): run `MyApp --appkitcross-register` /
+  `--appkitcross-unregister` from an installer, or set the Info.plist key
+  `AppKitCrossRegistersFileTypes` to register at launch. `CFBundleDocumentTypes` and
+  `CFBundleURLTypes` say what is registered.
+- `APPKITWIN_CORELIBS_BUNDLE=1` turns off the port's `Bundle` routing if you suspect it.
 
 <!-- FILLED(release-bundle-tool) from PR 87 / ADR-0046: true once PR 87 is on main. -->
 **Release builds and the app folder** (ADR-0046, [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#shipping-an-app)):
