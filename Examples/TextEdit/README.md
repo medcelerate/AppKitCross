@@ -54,3 +54,9 @@ APPKITWIN_TEXTKIT=2 swift run TextEdit                                # document
 
 On Windows the panels are the common item dialogs; on Linux the xdg-desktop-portal
 FileChooser when a portal runs, else the package-drawn panel (ADR-0017).
+
+Input methods (ADR-0047): the document's text view is the PC test surface for Chinese,
+Japanese and Korean input. With an input method on (Microsoft IME on Windows, ibus or fcitx5
+on Linux), the composition shows inline with the clause underlines macOS draws (thick under
+the clause being converted) and the candidate window opens under it. Run with
+`APPKITWIN_TRACE_TEXTINPUT=1` to see each step as a `[textinput]` line on stderr.
