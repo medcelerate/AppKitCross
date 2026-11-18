@@ -14,6 +14,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "pointer-gestures-unstable-v1-client-protocol.h"
+#include "text-input-unstable-v3-client-protocol.h"
 
 /// `wl_registry_bind` for the interfaces this backend uses, looked up by the name the
 /// registry advertises (Swift cannot take the address of the imported `wl_*_interface`

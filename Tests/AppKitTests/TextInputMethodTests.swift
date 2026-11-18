@@ -348,6 +348,9 @@ final class TextInputMethodTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(p.string, "日本")
         p.draw(caret: 3, first: 2, length: 0, text: Array("😀".unicodeScalars), thick: [false])
         XCTAssertEqual(p.caretUTF16, 4)
+        // Feedback alone changes (XIMText without a string): the clause moves.
+        p.restyle(first: 0, thick: [false, true])
+        XCTAssertEqual(p.thick, [false, true, false])
         p.reset()
         XCTAssertEqual(p.string, "")
     }

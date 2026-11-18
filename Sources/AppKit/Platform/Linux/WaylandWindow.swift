@@ -851,6 +851,17 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
     /// at the origin, the band above it, y up), which is what `locationInWindow` carries.
     private func contentPoint(_ p: NSPoint) -> NSPoint { appliedLayout.windowPoint(fromSurface: p) }
     func windowPoint(fromSurface p: NSPoint) -> NSPoint { appliedLayout.windowPoint(fromSurface: p) }
+    /// A window rectangle (bottom-left origin) in surface coordinates (top-left origin).
+    func surfaceRect(fromWindow r: NSRect) -> NSRect {
+        let topLeft = appliedLayout.surfacePoint(fromWindow: NSPoint(x: r.minX, y: r.maxY))
+        return NSRect(x: topLeft.x, y: topLeft.y, width: r.width, height: r.height)
+    }
+
+    // MARK: Input methods (ADR-0047)
+
+    /// The focused text input client, for the text input protocol.
+    var textInputSession: _TextInputSession? { owner?.platformWindowTextInput()?.session }
+    func textInputChanged(_ change: PlatformTextInputChange) { backend.textInput?.changed(in: self, change) }
     private func seconds(_ t: UInt32) -> TimeInterval { TimeInterval(t) / 1000 }
 
     private func mouse(_ type: NSEvent.EventType, position: NSPoint, time: UInt32, button: Int, clickCount: Int = 1) {

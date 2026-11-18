@@ -431,6 +431,11 @@ public struct _XIMPreedit: Equatable {
         caret = min(max(0, newCaret), characters.count)
     }
 
+    /// Only the feedback of the characters from `first` changes (XIMText without a string).
+    public mutating func restyle(first: Int, thick newThick: [Bool]) {
+        for (i, flag) in newThick.enumerated() where first + i >= 0 && first + i < thick.count { thick[first + i] = flag }
+    }
+
     public mutating func reset() { characters = []; thick = []; caret = 0 }
 
     public var string: String { var v = String.UnicodeScalarView(); v.append(contentsOf: characters); return String(v) }
