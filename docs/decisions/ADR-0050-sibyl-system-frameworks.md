@@ -133,8 +133,9 @@ declared as documented no-ops (the port draws no SF Symbol animations).
 
 ## Verification
 
-`SwiftUIObservationTests` (5), `OSLogTests` (12), `CoreMIDITests` (12), `NetworkTests`,
-`SwiftUIContainerGapTests` (12) and `SwiftUISibylGapTests` on the macOS host build and in
+`SwiftUIObservationTests` (5), `OSLogTests` (12), `CoreMIDITests` (15), `NetworkTests` (25),
+`SwiftUIContainerGapTests` (12) and `SwiftUISibylGapTests` (11) on the macOS host build and in
 the Linux container; the Windows PC run is relayed by the orchestrating session. Sibyl
 builds on macOS with Apple's frameworks unchanged (140 tests), on the macOS host build
-against the port with whisper.cpp, and in the Linux container.
+against the port with whisper.cpp (144 tests plus hosting smoke tests of its windows), and in
+the Linux container.
