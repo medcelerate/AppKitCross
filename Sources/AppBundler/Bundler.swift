@@ -455,11 +455,21 @@ public final class Bundler {
         return "\(name)-\(safeVersion)-\(platform.rawValue)-\(architecture).\(ext)"
     }
 
+    /// Windows' own bsdtar (System32), which writes a ZIP for `-a`; a `tar` found first on
+    /// PATH may be Git's GNU tar, which reads `D:\...` as a remote host.
+    static func windowsTar() -> URL? {
+        if let root = ProcessInfo.processInfo.environment["SystemRoot"] ?? ProcessInfo.processInfo.environment["SYSTEMROOT"] {
+            let tar = URL(fileURLWithPath: root).appendingPathComponent("System32").appendingPathComponent("tar.exe")
+            if FileManager.default.isExecutableFile(atPath: tar.path) { return tar }
+        }
+        return nil
+    }
+
     private func makeZip(version: String) throws -> URL {
         let zipURL = options.outputDirectory.appendingPathComponent(Bundler.archiveName(name: options.name, version: version, platform: options.platform, architecture: options.architecture, ext: "zip"))
         if fm.fileExists(atPath: zipURL.path) { try fm.removeItem(at: zipURL) }
         let parent = options.outputDirectory.path
-        if options.platform == .windows, let tar = Bundler.which("tar") {
+        if options.platform == .windows, let tar = Bundler.windowsTar() {
             // bsdtar (Windows 10 and later) writes a deflated ZIP when the name ends in .zip.
             let r = Bundler.runTool(tar.path, ["-a", "-c", "-f", zipURL.path, "-C", parent, options.name])
             if r.status == 0 { return zipURL }

@@ -327,7 +327,9 @@ jobs:
             Write-Host "$app ran for 8 s"
           }
           # The reports directory appears with the first report, not at launch.
-          if (Test-Path localappdata) { Get-ChildItem -Recurse localappdata | Format-Table FullName; Write-Error "a launch without a crash created a reports directory"; exit 1 }
+          # (Windows itself creates localappdata\Microsoft\...; only a Crashes folder counts.)
+          $early = Get-ChildItem -Recurse -Directory -Filter Crashes localappdata -ErrorAction SilentlyContinue
+          if ($early) { $early | Format-Table FullName; Write-Error "a launch without a crash created a reports directory"; exit 1 }
           if (-not (Test-Path ".build\bundle\MDVault\MDVault.pdb")) { Write-Error "no PDB in the MDVault bundle"; exit 1 }
           $env:APPKITWIN_CRASH_TEST = "1"
           $p = Start-Process -FilePath "Examples\Dependent\.build\bundle\Dependent\Dependent.exe" -PassThru
