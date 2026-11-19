@@ -194,6 +194,62 @@ final class BundlerTests: XCTestCase {
         XCTAssertNil(Bundler.appRoot(in: [sources]))
     }
 
+    /// A resource bundle's plist (what Windows SwiftPM has left at a package root) is not the
+    /// app's: it is skipped, and the search goes on.
+    func testResourceBundlePlistIsNotTheAppsInfoPlist() throws {
+        let fm = FileManager.default
+        let stray = temp.appendingPathComponent("stray", isDirectory: true)
+        let real = temp.appendingPathComponent("real", isDirectory: true)
+        try fm.createDirectory(at: stray, withIntermediateDirectories: true)
+        try fm.createDirectory(at: real, withIntermediateDirectories: true)
+        func write(_ plist: [String: Any], to url: URL) throws {
+            try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: url)
+        }
+        try write(["CFBundleIdentifier": "pkg.TextEdit.resources", "CFBundlePackageType": "BNDL"], to: stray.appendingPathComponent("Info.plist"))
+        try write(["CFBundleIdentifier": "com.example.app", "CFBundlePackageType": "APPL"], to: real.appendingPathComponent("Info.plist"))
+        XCTAssertFalse(Bundler.isApplicationInfoPlist(stray.appendingPathComponent("Info.plist")))
+        try write(["CFBundleIdentifier": "pkg.Other.resources"], to: stray.appendingPathComponent("Info.plist"))
+        XCTAssertFalse(Bundler.isApplicationInfoPlist(stray.appendingPathComponent("Info.plist")))
+        XCTAssertTrue(Bundler.isApplicationInfoPlist(real.appendingPathComponent("Info.plist")))
+        XCTAssertNil(Bundler.appRoot(in: [stray]))
+        XCTAssertEqual(Bundler.appRoot(in: [stray, real])?.standardizedFileURL.path, real.standardizedFileURL.path)
+
+        // End to end: a product whose only candidate holds the stray plist gets none, and
+        // with a real one further up, the bundled plist is an application's.
+        let build = temp.appendingPathComponent("build", isDirectory: true)
+        try fm.createDirectory(at: build, withIntermediateDirectories: true)
+        let exe = build.appendingPathComponent("App")
+        try Data("not a binary".utf8).write(to: exe)
+        for (candidates, expectPlist) in [([stray], false), ([stray, real], true)] {
+            let out = temp.appendingPathComponent("out-\(candidates.count)")
+            let options = BundleOptions(executable: exe, name: "App", packageDirectory: temp, appRootCandidates: candidates,
+                                        outputDirectory: out, platform: .macos)
+            _ = try Bundler(options: options, log: { _ in }).run()
+            let bundled = out.appendingPathComponent("App/Info.plist")
+            XCTAssertEqual(fm.fileExists(atPath: bundled.path), expectPlist, "\(candidates)")
+            if expectPlist {
+                let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: bundled), format: nil) as? [String: Any])
+                let type = plist["CFBundlePackageType"] as? String
+                XCTAssertTrue(type == nil || type == "APPL", "\(plist)")
+                XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.example.app")
+            }
+        }
+    }
+
+    /// Windows: the executable's PDB travels with it.
+    func testProgramDatabaseIsCopiedOnWindows() throws {
+        let build = temp.appendingPathComponent("build", isDirectory: true)
+        try FileManager.default.createDirectory(at: build, withIntermediateDirectories: true)
+        let exe = build.appendingPathComponent("App.exe")
+        try Data("MZ".utf8).write(to: exe)
+        try Data("pdb".utf8).write(to: build.appendingPathComponent("App.pdb"))
+        var options = BundleOptions(executable: exe, name: "App", packageDirectory: temp, outputDirectory: temp.appendingPathComponent("out"))
+        options.platform = .windows
+        let report = try? Bundler(options: options).run()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: temp.appendingPathComponent("out/App/App.pdb").path))
+        if let report { XCTAssertTrue(report.copiedFiles.contains("App.pdb"), "\(report.copiedFiles)") }
+    }
+
     /// A bundle of a fake executable: the folder holds it, the app's Info.plist, Resources
     /// and icon, and the product's resource bundle (not another target's); --zip names the
     /// archive from CFBundleShortVersionString. The library walk is skipped (not a real

@@ -86,9 +86,22 @@ the executable:
 - **All**: the SwiftPM resource bundles of the product's targets (`<Pkg>_<Target>.resources`;
   the generated `Bundle.module` accessor looks beside the executable first), and the app's
   `Info.plist`, `Resources/` and `*.ico`/`*.png` from the nearest directory, from the
-  executable target's directory up to the package root, that has an `Info.plist`, a
-  `Resources/Info.plist` or a `Resources/` directory (`--info-plist`, `--resources`,
-  `--icon` override). The on-disk layout of the bundle identity (ADR-0045, a parallel
+  executable target's directory up to (not including) the package root, that has an
+  application `Info.plist`, a `Resources/Info.plist` or a `Resources/` directory
+  (`--info-plist`, `--resources`, `--icon` override). The root is shared by every product,
+  and on Windows swift-build drops resource-bundle files there (below); the first PC run
+  bundled TextEdit's bundle plist into DailyTodo that way. So the root is searched only for
+  a target whose sources live there, and a plist with `CFBundlePackageType` BNDL or an
+  identifier ending in `.resources` is never taken. The walk does go above the target's
+  own directory, since a vendored app keeps its plist beside its sources
+  (`Examples/MDVault/Resources/Info.plist` above `Sources/MDVault`). `/Info.plist` is
+  git-ignored.
+- **PDB (Windows)**: SwiftPM's release configuration writes no PDB, so a crash report could
+  only give module offsets. The plugin adds `-g -debug-info-format=codeview` and
+  `-Xlinker -debug` to a Windows release build (`--no-debug-info` opts out) and copies
+  `<Name>.pdb` beside the executable, where DbgHelp finds it on the user's machine. CI
+  passes the same flags to its release build so the plugin's build reuses it, and checks
+  that the report names `ccrash_crash_now`. The on-disk layout of the bundle identity (ADR-0045, a parallel
   session) decides where these finally go; the copying is one function
   (`Bundler.copyAppFiles`) to change when it lands.
 
@@ -112,7 +125,8 @@ WinSDK) is installed by `NSApplication.init` on Windows and Linux:
   (`MiniDumpWriteDump`: thread info, unloaded modules, indirectly referenced memory) and
   `.txt` (exception code and name, address, module and offset, thread, an access
   violation's operation and address, a `StackWalk64` trace with DbgHelp symbols where the
-  PDB is found) under `%LOCALAPPDATA%\<bundle id>\Crashes`, then passes the exception on (the
+  PDB is found; without one DbgHelp offers the nearest export, "main + 1360341", so a match
+  more than 1 MB from its symbol or past its size is left out) under `%LOCALAPPDATA%\<bundle id>\Crashes`, then passes the exception on (the
   previous filter, then Windows Error Reporting). `abort()` ends the process through
   `__fastfail`, which skips the filter, so a SIGABRT handler writes the same report from a
   captured context. The thread keeps 64 KB of stack in reserve so a stack overflow is
@@ -126,6 +140,8 @@ WinSDK) is installed by `NSApplication.init` on Windows and Linux:
   async-signal-safe (static buffers, hand-formatted numbers, `backtrace` warmed at install)
   and then restores the previous action and re-raises, so the Swift runtime's backtracer
   (`SWIFT_BACKTRACE`) still prints when enabled and the exit status is the signal's.
+- The reports directory is created with the first report (on Linux with `mkdir`, which is
+  async-signal-safe), so a launch that never crashes leaves nothing on disk.
 - The bundle identifier is `Bundle.main.bundleIdentifier`, else the executable's name.
   `APPKITWIN_CRASH_REPORTER=0` turns it off, `APPKITWIN_CRASH_DIR` moves the reports, and
   `APPKITWIN_CRASH_TEST=1|trap|abort` crashes on purpose a second after
@@ -136,6 +152,36 @@ WinSDK) is installed by `NSApplication.init` on Windows and Linux:
   available and nothing reaches an uncaught-exception handler; Swift errors that escape
   end in a runtime trap, which the handler above reports. On the macOS host build Apple's
   Foundation keeps its own behaviour.
+
+### Upstream: swift-build copies resource bundles into the package root on Windows
+
+Seen with Swift 6.4.1 on Windows: whenever a resource bundle is created or changes, the
+build's "Touch `<X>.bundle`" step runs, with the package root as working directory,
+
+```
+cmd.exe /c copy /b <.build>\...\<Pkg>_<Target>.bundle +,,
+```
+
+`copy /b <file> +,,` updates a file's timestamp; given a directory it copies the
+directory's top-level files into the working directory instead. A package root then gains
+the bundle's `Info.plist` (`CFBundlePackageType` BNDL, `CFBundleIdentifier
+<pkg>.<Target>.resources`) and any top-level resource (`Examples/Dependent` got
+`Greeting.txt`). Consumers who find those untracked files in their package root after a
+Windows build are seeing this; they are safe to delete. Filing it is the maintainer's call;
+a draft:
+
+> **Windows: "Touch" of a resource bundle copies its files into the package root**
+>
+> On Windows, building a package with a resource-bearing target (`resources: [.copy(...)]`)
+> leaves the bundle's top-level files (`Info.plist`, copied resources) in the package
+> root. With `-v`, after "Create directory", "Copy Resources" and "Process plist" for
+> `<Pkg>_<Target>.bundle`, the Touch step runs
+> `cmd.exe /c copy /b <path>\<Pkg>_<Target>.bundle +,,` with the package root as the
+> working directory. `copy /b <dir> +,,` does not update a directory's timestamp; it copies
+> the directory's files into the current directory. Reproduce: `swift package init --type
+> executable`, add a resource, `swift build` on Windows, `git status`. Expected: nothing new
+> in the package root. Seen with Swift 6.4.1 (swift-build). A fix would touch the
+> directory another way (e.g. `SetFileTime`, or skip touching directories).
 
 ## Consequences
 

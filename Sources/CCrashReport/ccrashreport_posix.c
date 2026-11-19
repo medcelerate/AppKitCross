@@ -135,8 +135,13 @@ static unsigned long long thread_id(void) {
 
 // MARK: The report
 
+static int make_directories(const char *path);
+
 static int write_report(int sig, siginfo_t *info, const char *reason) {
     if (!g_directory[0]) return 0;
+    // Created here, not at install, so a launch that never crashes leaves nothing behind
+    // (mkdir is async-signal-safe).
+    if (!make_directories(g_directory)) return 0;
     time_t now = time(NULL);
     char path[CCRASH_PATH_MAX];
     buf_t pb = { path, sizeof path };
@@ -241,7 +246,7 @@ static void copy(char *dst, size_t size, const char *src) {
 }
 
 int ccrash_configure(const char *directory, const char *appName, const char *bundleIdentifier) {
-    if (!directory || !make_directories(directory)) return 0;
+    if (!directory || !*directory || strlen(directory) >= sizeof g_directory) return 0;
     copy(g_directory, sizeof g_directory, directory);
     // A trailing slash would double up in the file name.
     size_t len = strlen(g_directory);

@@ -43,6 +43,8 @@ final class CrashReportingTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("appkitcross-crash-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         XCTAssertTrue(PlatformCrashReporting.configure(directory: dir))
+        // Nothing on disk until a report is written.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
         XCTAssertTrue(PlatformCrashReporting.writeReport(reason: "unit test"))
         let report = try XCTUnwrap(PlatformCrashReporting.lastReport)
         XCTAssertTrue(FileManager.default.fileExists(atPath: report.path), report.path)

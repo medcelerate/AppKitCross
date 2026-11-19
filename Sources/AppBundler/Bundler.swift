@@ -2,6 +2,8 @@
 //
 //   <Name>/
 //     <Name>(.exe)              the executable
+//     <Name>.pdb                Windows: its debug symbols, when the build wrote them, so
+//                               crash reports name functions
 //     *.dll | *.so*             every shared library it loads that the target system lacks:
 //                               the Swift runtime, Foundation and ICU, libdispatch, the
 //                               Visual C++ runtime on Windows, Cairo/Pango and friends on Linux
@@ -36,7 +38,7 @@ public struct BundleOptions: Sendable {
     public var name: String
     public var packageDirectory: URL
     /// Directories to look in for Info.plist / Resources / icons, nearest first (the
-    /// executable target's directory and its parents up to the package root).
+    /// executable target's directory and its parents below the package root).
     public var appRootCandidates: [URL]
     /// Target names whose SwiftPM resource bundles belong to the product.
     public var targets: [String]
@@ -119,6 +121,7 @@ public final class Bundler {
         let exeName = options.executable.lastPathComponent
         try copy(options.executable, to: folder.appendingPathComponent(exeName))
         report.copiedFiles.append(exeName)
+        if options.platform == .windows { try copyProgramDatabase() }
 
         switch options.platform {
         case .windows: try collectWindowsLibraries()
@@ -347,13 +350,46 @@ public final class Bundler {
         }
     }
 
+    /// The executable's PDB (`<name>.pdb` beside it, which the linker writes with `-debug`),
+    /// copied so DbgHelp names functions in crash reports on the user's machine.
+    private func copyProgramDatabase() throws {
+        let pdb = options.executable.deletingPathExtension().appendingPathExtension("pdb")
+        if fm.fileExists(atPath: pdb.path) {
+            try copy(pdb, to: folder.appendingPathComponent(pdb.lastPathComponent))
+            report.copiedFiles.append(pdb.lastPathComponent)
+        } else {
+            report.notes.append("no \(pdb.lastPathComponent) beside the executable: crash reports will give module offsets without function names (build with -Xswiftc -g -Xswiftc -debug-info-format=codeview -Xlinker -debug, as the plugin does)")
+        }
+    }
+
+    /// Whether `url` is an application's Info.plist: it parses, and it is not a bundle's
+    /// (`CFBundlePackageType` BNDL, or the `<id>.resources` identifier SwiftPM gives a
+    /// resource bundle's plist).
+    public static func isApplicationInfoPlist(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else { return false }
+        if (plist["CFBundlePackageType"] as? String) == "BNDL" { return false }
+        if let id = plist["CFBundleIdentifier"] as? String, id.hasSuffix(".resources") { return false }
+        return true
+    }
+
+    /// The Info.plist an app root provides: `Info.plist`, else `Resources/Info.plist`, when
+    /// it is an application's.
+    static func infoPlist(in dir: URL) -> URL? {
+        for candidate in [dir.appendingPathComponent("Info.plist"), dir.appendingPathComponent("Resources/Info.plist")]
+        where FileManager.default.fileExists(atPath: candidate.path) && isApplicationInfoPlist(candidate) {
+            return candidate
+        }
+        return nil
+    }
+
     /// The directory that holds the app's Info.plist and Resources: the first candidate with
-    /// an `Info.plist`, a `Resources/Info.plist` or a `Resources` directory.
+    /// an application `Info.plist` (or `Resources/Info.plist`) or a `Resources` directory.
     public static func appRoot(in candidates: [URL]) -> URL? {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         for dir in candidates {
-            if fm.fileExists(atPath: dir.appendingPathComponent("Info.plist").path) { return dir }
+            if infoPlist(in: dir) != nil { return dir }
             if fm.fileExists(atPath: dir.appendingPathComponent("Resources").path, isDirectory: &isDirectory), isDirectory.boolValue { return dir }
         }
         return nil
@@ -362,12 +398,7 @@ public final class Bundler {
     private func copyAppFiles() throws -> [String: Any]? {
         let root = Bundler.appRoot(in: options.appRootCandidates)
         var plistURL = options.infoPlist
-        if plistURL == nil, let root {
-            for candidate in [root.appendingPathComponent("Info.plist"), root.appendingPathComponent("Resources/Info.plist")] where fm.fileExists(atPath: candidate.path) {
-                plistURL = candidate
-                break
-            }
-        }
+        if plistURL == nil, let root { plistURL = Bundler.infoPlist(in: root) }
         var plist: [String: Any]?
         if let plistURL {
             try copy(plistURL, to: folder.appendingPathComponent("Info.plist"))

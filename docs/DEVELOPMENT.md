@@ -182,9 +182,16 @@ unzip it) anywhere and run `MyApp.exe` / `./MyApp`. It contains, side by side:
   each other; the tool says when it is missing);
 - the SwiftPM resource bundles of the product's targets (`MyPkg_MyApp.resources`);
 - `Info.plist`, `Resources/` and `*.ico`/`*.png` from the nearest directory, from the
-  executable target's directory up to the package root, with an `Info.plist`, a
-  `Resources/Info.plist` or a `Resources/` (`--info-plist`, `--resources`, `--icon`
-  override). The bundle identity layout (ADR-0045) defines how the app reads them.
+  executable target's directory up to (not including) the package root, with an
+  application `Info.plist`, a `Resources/Info.plist` or a `Resources/`; a resource bundle's
+  plist (`CFBundlePackageType` BNDL, an identifier ending in `.resources`) is skipped. The
+  package root is searched only for a target whose sources live there; otherwise name the
+  plist with `--info-plist` (`--resources`, `--icon` override the rest). The bundle
+  identity layout (ADR-0045) defines how the app reads them;
+- on Windows, `<Name>.pdb`: a release build through the plugin adds `-g
+  -debug-info-format=codeview` and `-Xlinker -debug` so the linker writes one, and crash
+  reports name functions with it (`--no-debug-info` leaves it out; building yourself, pass
+  `-Xswiftc -g -Xswiftc -debug-info-format=codeview -Xlinker -debug`).
 
 Other options: `--output <dir>`, `--version <v>` (else `CFBundleShortVersionString`, else
 0.0.0), `--appimage` (Linux; needs `appimagetool` on PATH, otherwise skipped with a
@@ -203,13 +210,14 @@ is only a layout check; ship a Mac app with Xcode.
 
 - Windows: `%LOCALAPPDATA%\<bundle id>\Crashes\<app>-<time>-<pid>.dmp` (a minidump; open it
   in Visual Studio or WinDbg with the build's PDB, so keep the PDB of every release) and
-  `.txt` (exception, module and offset, thread, a symbolicated stack where the PDB is
-  beside the executable);
+  `.txt` (exception, module and offset, thread, a stack with function names where the PDB
+  is beside the executable, module offsets only without it);
 - Linux: `~/.local/share/<bundle id>/Crashes/<app>-<time>-<pid>.txt` (`$XDG_DATA_HOME` when
   set): signal, fault address, thread, the backtrace as module+offset (`addr2line -e
   <module> <offset>`, `swift demangle` for the names) and the memory map.
 
-The bundle id is the Info.plist's `CFBundleIdentifier`, else the executable's name. The
+The `Crashes` directory is created with the first report, not at launch. The bundle id is
+the Info.plist's `CFBundleIdentifier`, else the executable's name. The
 process still ends with the crash's own status (and Windows Error Reporting or a core dump
 as usual). `APPKITWIN_CRASH_REPORTER=0` turns the handler off, `APPKITWIN_CRASH_DIR=<dir>`
 moves the reports, `APPKITWIN_CRASH_TEST=1` (or `trap`, `abort`) crashes the app on purpose

@@ -7,7 +7,8 @@
 // -c/--configuration debug|release (default release), --output <dir> (default
 // .build/bundle), --version <v> (default: CFBundleShortVersionString, else 0.0.0),
 // --info-plist <path>, --resources <dir>, --icon <path> (repeatable), --zip, --appimage,
-// --no-build (bundle what the last build produced).
+// --no-build (bundle what the last build produced), --no-debug-info (Windows release: skip
+// the PDB that `-g -debug-info-format=codeview` / `-Xlinker -debug` add for crash reports).
 
 import Foundation
 import PackagePlugin
@@ -42,6 +43,7 @@ struct AppBundlePlugin: CommandPlugin {
         let configuration = (take("-c", "--configuration") ?? "release").lowercased()
         guard configuration == "release" || configuration == "debug" else { throw BundlePluginError("-c must be debug or release") }
         let noBuild = has("--no-build")
+        let noDebugInfo = has("--no-debug-info")
         var forwarded: [String] = []
         if let v = take("--output") { forwarded += ["--output", v] } else {
             forwarded += ["--output", context.package.directoryURL.appendingPathComponent(".build/bundle").path]
@@ -63,29 +65,40 @@ struct AppBundlePlugin: CommandPlugin {
                 targets.append(target.name)
                 for dependency in target.recursiveTargetDependencies { targets.append(dependency.name) }
             }
-            // Info.plist / Resources / icons: the main target's directory and its parents up
-            // to the package root, nearest first.
+            // Info.plist / Resources / icons: the main target's directory and its parents,
+            // nearest first, stopping below the package root. The root is shared by every
+            // product (and Windows SwiftPM has left resource-bundle plists there), so it is
+            // searched only for a target that lives there; `--info-plist` names any other.
             if let main = ((product as? ExecutableProduct)?.mainTarget ?? product.targets.first) as? SwiftSourceModuleTarget {
                 var dir = main.directoryURL.standardizedFileURL
                 let root = context.package.directoryURL.standardizedFileURL
-                while true {
+                if dir.path == root.path { appRoots.append(dir) }
+                while dir.path != root.path && dir.path.hasPrefix(root.path) {
                     appRoots.append(dir)
-                    if dir.path == root.path || !dir.path.hasPrefix(root.path) { break }
                     let parent = dir.deletingLastPathComponent()
                     if parent.path == dir.path { break }
                     dir = parent
                 }
             }
         }
-        if appRoots.isEmpty { appRoots = [context.package.directoryURL] }
 
         let executableURL: URL
         if noBuild {
             executableURL = try findBuiltExecutable(named: productName, configuration: configuration, packageDirectory: context.package.directoryURL)
         } else {
             print("Building \(productName) (\(configuration))…")
-            let result = try packageManager.build(.product(productName),
-                                                  parameters: .init(configuration: configuration == "release" ? .release : .debug, logging: .concise, echoLogs: true))
+            var parameters = PackageManager.BuildParameters(configuration: configuration == "release" ? .release : .debug, logging: .concise, echoLogs: true)
+            #if os(Windows)
+            // A release build writes no PDB by default; crash reports need one to name
+            // functions (the bundler copies it beside the executable). A debug build has one.
+            if configuration == "release" && !noDebugInfo {
+                parameters.otherSwiftcFlags += ["-g", "-debug-info-format=codeview"]
+                parameters.otherLinkerFlags += ["-debug"]
+            }
+            #else
+            _ = noDebugInfo
+            #endif
+            let result = try packageManager.build(.product(productName), parameters: parameters)
             guard result.succeeded else { throw BundlePluginError("the build failed:\n\(result.logText)") }
             guard let artifact = result.builtArtifacts.first(where: { $0.kind == .executable }) else {
                 throw BundlePluginError("the build produced no executable for \(productName)")

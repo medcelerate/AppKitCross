@@ -97,6 +97,8 @@ static void putf(buf_t *b, const char *format, ...) {
     b->p += n; b->left -= (size_t)n;
 }
 
+static int make_directories(const wchar_t *path);
+
 // Walks the stack from `context` (a copy: StackWalk64 changes it).
 static void put_backtrace(buf_t *b, HANDLE process, HANDLE thread, const CONTEXT *original) {
     CONTEXT context = *original;
@@ -136,7 +138,11 @@ static void put_backtrace(buf_t *b, HANDLE process, HANDLE thread, const CONTEXT
         symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
         symbol->MaxNameLen = 511;
         DWORD64 displacement = 0;
-        if (SymFromAddr(process, pc, &displacement, symbol)) {
+        // Without a PDB, DbgHelp falls back to the nearest export ("main + 1360341"): a name
+        // that is wrong, so a match far from its symbol (or past its known size) is left out
+        // and the module offset above is what to symbolicate with.
+        if (SymFromAddr(process, pc, &displacement, symbol) && displacement < 0x100000 &&
+            (symbol->Size == 0 || displacement < symbol->Size)) {
             putf(b, " %s + %llu", symbol->Name, (unsigned long long)displacement);
             IMAGEHLP_LINE64 line;
             memset(&line, 0, sizeof line);
@@ -153,6 +159,8 @@ static void put_backtrace(buf_t *b, HANDLE process, HANDLE thread, const CONTEXT
 // be built from a captured context (SIGABRT, ccrash_write_report).
 static int write_report(EXCEPTION_POINTERS *pointers, const char *reason) {
     if (!g_directory[0]) return 0;
+    // Created here, not at install, so a launch that never crashes leaves nothing behind.
+    if (!make_directories(g_directory)) return 0;
     SYSTEMTIME now;
     GetLocalTime(&now);
     wchar_t wideApp[256];
@@ -274,7 +282,6 @@ int ccrash_configure(const char *directory, const char *appName, const char *bun
     for (wchar_t *c = wide; *c; c++) if (*c == L'/') *c = L'\\';
     size_t len = wcslen(wide);
     while (len > 3 && wide[len - 1] == L'\\') wide[--len] = 0;
-    if (!make_directories(wide)) return 0;
     wcscpy_s(g_directory, CCRASH_PATH_MAX, wide);
     copy(g_app, sizeof g_app, appName && *appName ? appName : "app");
     for (char *c = g_app; *c; c++) if (strchr("\\/:*?\"<>| ", *c)) *c = '_';

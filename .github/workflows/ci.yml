@@ -295,9 +295,11 @@ jobs:
           branch: swift-6.2-release
           tag: 6.2-RELEASE
       # -j 1 everywhere, as in the debug job (docs/ci-windows-runner.md).
+      # The debug-info flags are the ones the bundle plugin adds to a Windows release build
+      # (a PDB for crash reports), so the plugin's builds below reuse this one.
       - name: Build (release)
         shell: bash
-        run: swift build -c release -j 1
+        run: swift build -c release -j 1 -Xswiftc -g -Xswiftc -debug-info-format=codeview -Xlinker -debug
       - name: A dependent package (Examples/Dependent) with a plain swift build
         shell: bash
         working-directory: Examples/Dependent
@@ -316,6 +318,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          $env:LOCALAPPDATA = "$PWD\localappdata"
           foreach ($app in @(".build\bundle\MDVault\MDVault.exe", ".build\bundle\DailyTodo\DailyTodo.exe")) {
             $p = Start-Process -FilePath $app -PassThru
             Start-Sleep -Seconds 8
@@ -323,7 +326,9 @@ jobs:
             Stop-Process -Id $p.Id -Force
             Write-Host "$app ran for 8 s"
           }
-          $env:LOCALAPPDATA = "$PWD\localappdata"
+          # The reports directory appears with the first report, not at launch.
+          if (Test-Path localappdata) { Get-ChildItem -Recurse localappdata | Format-Table FullName; Write-Error "a launch without a crash created a reports directory"; exit 1 }
+          if (-not (Test-Path ".build\bundle\MDVault\MDVault.pdb")) { Write-Error "no PDB in the MDVault bundle"; exit 1 }
           $env:APPKITWIN_CRASH_TEST = "1"
           $p = Start-Process -FilePath "Examples\Dependent\.build\bundle\Dependent\Dependent.exe" -PassThru
           if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id -Force; Write-Error "the crash test did not end"; exit 1 }
@@ -334,6 +339,7 @@ jobs:
           Get-Content $txt.FullName -TotalCount 40
           if (-not $dmp -or $dmp.Length -lt 1000) { Write-Error "no minidump"; exit 1 }
           if (-not (Select-String -Path $txt.FullName -Pattern "EXCEPTION_ACCESS_VIOLATION" -Quiet)) { Write-Error "no exception in the report"; exit 1 }
+          if (-not (Select-String -Path $txt.FullName -Pattern "ccrash_crash_now" -Quiet)) { Write-Error "the backtrace names no function (PDB missing or not found)"; exit 1 }
       # Last, since `swift test` rebuilds everything with testability (ADR-0046 has the
       # Swift 6.2 asserts-toolchain SIL deserializer crash this step found).
       - name: Tests in release on the host backend

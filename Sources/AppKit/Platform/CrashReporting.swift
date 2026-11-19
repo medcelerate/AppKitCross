@@ -52,8 +52,8 @@ public enum PlatformCrashReporting {
         return name.isEmpty ? "app" : name
     }
 
-    /// Installs the handler into `directory` (default: `reportsDirectory`). Returns false
-    /// when the directory cannot be created.
+    /// Installs the handler into `directory` (default: `reportsDirectory`), which is created
+    /// when the first report is written. Returns false for an unusable path.
     @discardableResult
     public static func install(directory: URL? = nil) -> Bool {
         let identifier = applicationIdentifier
@@ -95,7 +95,7 @@ public enum PlatformCrashReporting {
         if env["APPKITWIN_CRASH_REPORTER"] == "0" { return }
         if env["XCTestConfigurationFilePath"] != nil || ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix(".xctest") || $0.contains("PackageTests") }) { return }
         if !install() {
-            FileHandle.standardError.write(Data("AppKitCross: cannot create the crash report directory \(reportsDirectory(bundleIdentifier: applicationIdentifier).path); crash reports are off\n".utf8))
+            FileHandle.standardError.write(Data("AppKitCross: cannot use the crash report directory \(reportsDirectory(bundleIdentifier: applicationIdentifier).path); crash reports are off\n".utf8))
         }
         #endif
     }
