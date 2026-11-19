@@ -11,9 +11,35 @@ import Darwin
 import dnssd
 #endif
 
-// `POSIXErrorCode` comes from the C library overlay (Darwin, Glibc) or Foundation
-// (Windows). `DNSServiceErrorType` and `OSStatus` come from dnssd and MacTypes on Apple
-// platforms; elsewhere they are declared here with Apple's underlying types.
+// `POSIXErrorCode` comes from the C library overlay (Darwin, Glibc). On Windows
+// swift-corelibs-foundation declares one too, but it stops at the file-system errors: none
+// of the socket codes (`ECONNREFUSED`, `ETIMEDOUT`, `EADDRINUSE`, ...) exist, so `NWError`
+// could not carry them. This module therefore declares its own `POSIXErrorCode` there, the
+// full ucrt `errno.h` numbering (what the C runtime's `errno` and `strerror` use), and
+// `NWError.posix` carries it, as Apple's carries Darwin's. A file that imports both
+// Foundation and Network and spells the bare type name sees an ambiguity on Windows;
+// `NWError.posix(let code)` and `code.rawValue` work everywhere. `DNSServiceErrorType` and
+// `OSStatus` come from dnssd and MacTypes on Apple platforms; elsewhere they are declared
+// here with Apple's underlying types.
+#if os(Windows)
+public enum POSIXErrorCode: Int32, Sendable, Hashable {
+    case EPERM = 1, ENOENT = 2, ESRCH = 3, EINTR = 4, EIO = 5, ENXIO = 6, E2BIG = 7, ENOEXEC = 8
+    case EBADF = 9, ECHILD = 10, EAGAIN = 11, ENOMEM = 12, EACCES = 13, EFAULT = 14, EBUSY = 16
+    case EEXIST = 17, EXDEV = 18, ENODEV = 19, ENOTDIR = 20, EISDIR = 21, EINVAL = 22, ENFILE = 23
+    case EMFILE = 24, ENOTTY = 25, EFBIG = 27, ENOSPC = 28, ESPIPE = 29, EROFS = 30, EMLINK = 31
+    case EPIPE = 32, EDOM = 33, ERANGE = 34, EDEADLK = 36, ENAMETOOLONG = 38, ENOLCK = 39
+    case ENOSYS = 40, ENOTEMPTY = 41, EILSEQ = 42, STRUNCATE = 80
+    case EADDRINUSE = 100, EADDRNOTAVAIL = 101, EAFNOSUPPORT = 102, EALREADY = 103, EBADMSG = 104
+    case ECANCELED = 105, ECONNABORTED = 106, ECONNREFUSED = 107, ECONNRESET = 108
+    case EDESTADDRREQ = 109, EHOSTUNREACH = 110, EIDRM = 111, EINPROGRESS = 112, EISCONN = 113
+    case ELOOP = 114, EMSGSIZE = 115, ENETDOWN = 116, ENETRESET = 117, ENETUNREACH = 118
+    case ENOBUFS = 119, ENODATA = 120, ENOLINK = 121, ENOMSG = 122, ENOPROTOOPT = 123, ENOSR = 124
+    case ENOSTR = 125, ENOTCONN = 126, ENOTRECOVERABLE = 127, ENOTSOCK = 128, ENOTSUP = 129
+    case EOPNOTSUPP = 130, EOTHER = 131, EOVERFLOW = 132, EOWNERDEAD = 133, EPROTO = 134
+    case EPROTONOSUPPORT = 135, EPROTOTYPE = 136, ETIME = 137, ETIMEDOUT = 138, ETXTBSY = 139
+    case EWOULDBLOCK = 140
+}
+#endif
 #if !canImport(dnssd)
 public typealias DNSServiceErrorType = Int32
 #endif
