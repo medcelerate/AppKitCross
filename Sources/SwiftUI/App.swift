@@ -60,7 +60,7 @@ public struct WindowGroup<Content: View>: Scene, _PrimitiveScene {
     public var body: Never { fatalError() }
 
     @MainActor public func _makeWindows(app: _AppRunner) {
-        app.openWindow(title: title ?? app.applicationName, content: content(), defaultSize: defaultSize)
+        app._runWindowGroup(id: id, title: title ?? app.applicationName, content: content, defaultSize: defaultSize)
     }
 }
 
@@ -74,7 +74,9 @@ public struct Window<Content: View>: Scene, _PrimitiveScene {
         self.title = title; self.id = id; self.content = content
     }
     public var body: Never { fatalError() }
-    @MainActor public func _makeWindows(app: _AppRunner) { app.openWindow(title: title, content: content(), defaultSize: nil) }
+    /// Opens at launch only as the app's first scene; otherwise `openWindow(id:)` opens it
+    /// (WindowActions.swift).
+    @MainActor public func _makeWindows(app: _AppRunner) { app._runWindowScene(id: id, title: title, content: content) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/settings
@@ -221,6 +223,10 @@ public final class _AppRunner {
     var commands: [any Commands] = []
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
+    /// The `Window` and identified `WindowGroup` scenes `openWindow(id:)` opens, and
+    /// whether a scene window opened at launch yet (WindowActions.swift).
+    var _windowScenes: [String: _WindowScene] = [:]
+    var _launchSceneOpened = false
     /// A DocumentGroup ran: the File menu gets the document commands (New, Open, Open
     /// Recent, Save, Save As, Revert) instead of New Window.
     var _hasDocumentGroups = false
@@ -339,7 +345,7 @@ public final class _AppRunner {
 
     /// A scene window hosting `content`, sized and styled as the scene modifiers say,
     /// tracked by the runner (closing the last one quits off macOS). Not yet shown.
-    private func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
+    func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
                                             hidesTitleBar: Bool, toolbarStyle: NSWindow.ToolbarStyle) -> NSWindow {
         let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar, pendingToolbarStyle = toolbarStyle
         let hosting = NSHostingView(rootView: content)
