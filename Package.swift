@@ -177,6 +177,15 @@ let leafModuleTestDependencies: [Target.Dependency] = []
 let platformTestDependencies: [Target.Dependency] = []
 #endif
 
+// The crash report shim (ADR-0046): a minidump and text report on Windows (DbgHelp), a
+// backtrace report on Linux. Built on macOS too, where only the tests use it.
+#if os(Windows)
+targets += [.target(name: "CCrashReport", path: "Sources/CCrashReport", linkerSettings: [.linkedLibrary("dbghelp"), .linkedLibrary("shell32")])]
+#else
+targets += [.target(name: "CCrashReport", path: "Sources/CCrashReport")]
+#endif
+appKitDependencies += ["CCrashReport"]
+
 // QuartzCore is ours on every platform: the CALayer tree, animations and the software
 // compositor are pure Swift over CGContext, so the macOS test run exercises them too
 // (the module shadows Apple's QuartzCore inside this package only).
@@ -443,6 +452,25 @@ targets += [
 ]
 
 
+// Shipping (ADR-0046): `swift package bundle --product <Name>` lays out a folder that runs
+// without a Swift toolchain. The plugin builds the product and runs AppKitCrossBundle, whose
+// logic (PE imports, ELF DT_NEEDED, the library policy, zip) is AppBundler.
+targets += [
+    .target(name: "AppBundler", path: "Sources/AppBundler", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .executableTarget(name: "AppKitCrossBundle", dependencies: ["AppBundler"], path: "Sources/AppKitCrossBundle", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .plugin(
+        name: "AppBundle",
+        capability: .command(
+            intent: .custom(verb: "bundle", description: "Build an executable product and lay it out as a folder that runs without Swift installed (--zip, --appimage)"),
+            permissions: [.writeToPackageDirectory(reason: "The app folder and archives go to .build/bundle")]
+        ),
+        dependencies: ["AppKitCrossBundle"],
+        path: "Plugins/AppBundle"
+    ),
+    .testTarget(name: "AppBundlerTests", dependencies: ["AppBundler"], path: "Tests/AppBundlerTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+
+
 let package = Package(
     name: "AppKitCross",
     platforms: [.macOS(.v14)],
@@ -452,6 +480,7 @@ let package = Package(
         .library(name: "Metal", targets: ["Metal"]),
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
+        .plugin(name: "AppBundle", targets: ["AppBundle"]),
     ] + combineProducts + leafModuleProducts + avfAudioProducts + systemServiceProducts + systemFrameworkProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17

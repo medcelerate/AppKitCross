@@ -5,6 +5,9 @@
 
 #define SWIFTCALL __attribute__((swiftcall))
 #define SELF __attribute__((swift_context))
+// `Any?` is address-only in the Swift convention: it is returned through a buffer the caller
+// passes (an indirect result), never in registers, so the four-word hooks take that buffer.
+#define INDIRECT __attribute__((swift_indirect_result))
 
 akc_words2 (*akc_dispatch_w2_w2w2w2)(int32_t, void *, akc_words2, akc_words2, akc_words2) = NULL;
 akc_words2 (*akc_dispatch_w2_w2w2)(int32_t, void *, akc_words2, akc_words2) = NULL;
@@ -14,7 +17,7 @@ akc_words2 (*akc_dispatch_w2)(int32_t, void *) = NULL;
 
 #define HOOK_W2_W2W2W2(n, id) static SWIFTCALL akc_words2 n(akc_words2 a, akc_words2 b, akc_words2 c, SELF void *self) { return akc_dispatch_w2_w2w2w2(id, self, a, b, c); }
 #define HOOK_W2_W2W2(n, id) static SWIFTCALL akc_words2 n(akc_words2 a, akc_words2 b, SELF void *self) { return akc_dispatch_w2_w2w2(id, self, a, b); }
-#define HOOK_W4_W2(n, id) static SWIFTCALL akc_words4 n(akc_words2 a, SELF void *self) { return akc_dispatch_w4_w2(id, self, a); }
+#define HOOK_W4_W2(n, id) static SWIFTCALL void n(INDIRECT akc_words4 *out, akc_words2 a, SELF void *self) { *out = akc_dispatch_w4_w2(id, self, a); }
 #define HOOK_W1(n, id) static SWIFTCALL void *n(SELF void *self) { return akc_dispatch_w1(id, self); }
 #define HOOK_W2(n, id) static SWIFTCALL akc_words2 n(SELF void *self) { return akc_dispatch_w2(id, self); }
 
@@ -53,12 +56,12 @@ const void *akc_bundle_hook(int32_t hook) {
 
 typedef SWIFTCALL akc_words2 (*fn_w2_w2w2w2)(akc_words2, akc_words2, akc_words2, SELF void *);
 typedef SWIFTCALL akc_words2 (*fn_w2_w2w2)(akc_words2, akc_words2, SELF void *);
-typedef SWIFTCALL akc_words4 (*fn_w4_w2)(akc_words2, SELF void *);
+typedef SWIFTCALL void (*fn_w4_w2)(INDIRECT akc_words4 *, akc_words2, SELF void *);
 typedef SWIFTCALL void *(*fn_w1)(SELF void *);
 typedef SWIFTCALL akc_words2 (*fn_w2)(SELF void *);
 
 akc_words2 akc_call_w2_w2w2w2(const void *fn, void *self, akc_words2 a, akc_words2 b, akc_words2 c) { return ((fn_w2_w2w2w2)fn)(a, b, c, self); }
 akc_words2 akc_call_w2_w2w2(const void *fn, void *self, akc_words2 a, akc_words2 b) { return ((fn_w2_w2w2)fn)(a, b, self); }
-akc_words4 akc_call_w4_w2(const void *fn, void *self, akc_words2 a) { return ((fn_w4_w2)fn)(a, self); }
+akc_words4 akc_call_w4_w2(const void *fn, void *self, akc_words2 a) { akc_words4 r; ((fn_w4_w2)fn)(&r, a, self); return r; }
 void *akc_call_w1(const void *fn, void *self) { return ((fn_w1)fn)(self); }
 akc_words2 akc_call_w2(const void *fn, void *self) { return ((fn_w2)fn)(self); }

@@ -41,6 +41,8 @@ import CoreText
         // ADR-0045: corelibs' Bundle answers through the app layout before anything reads it.
         _AppBundle.installMainBundle()
         super.init()
+        // The crash handler first (ADR-0046): a crash anywhere after this leaves a report.
+        PlatformCrashReporting.installAtLaunch()
         _CoreAnimationHost.installIfNeeded()
         let isFirst = NSApplication._shared == nil
         if isFirst { NSApplication._shared = self }
@@ -327,6 +329,7 @@ import CoreText
             _ = _openLaunchItems(files: launch.files, urls: launch.urls)
         }
         delegate?.applicationDidFinishLaunching(post(NSApplication.didFinishLaunchingNotification))
+        PlatformCrashReporting.scheduleCrashTestIfRequested()
         _AppInstance.deliverPending()
     }
 
