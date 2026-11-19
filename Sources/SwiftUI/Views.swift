@@ -462,6 +462,15 @@ final class _TextPrimitive: _Primitive {
         refresh()
         var s = view.size(for: proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
         if let w = proposal.width, w.isFinite, w > 0, s.width > w, node.environment.lineLimit == 1 { s.width = w }
+        // lineLimit(_:reservesSpace: true): the height of that many lines, however short the text.
+        let extras = node.environment._lineLimitExtras
+        if extras.reservesSpace, let lines = extras.minimum, lines > 1 {
+            let a = text._attributed(node.environment)
+            let font = (a.length > 0 ? a.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil) ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let line = (font.ascender - font.descender + font.leading).rounded(.up)
+            let spacing = node.environment.lineSpacing
+            s.height = max(s.height, CGFloat(lines) * line + CGFloat(lines - 1) * spacing)
+        }
         lastMeasuredHeight = s.height
         return s
     }
@@ -1037,6 +1046,32 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     let placeholder: String
     let text: Binding<String>
     let onCommit: () -> Void
+    var axis: Axis = .horizontal
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-8rujz
+    ///
+    /// With `.vertical` the text wraps and the field grows with it, between the lines a
+    /// ranged `lineLimit` allows; Option-Return types a newline, Return submits.
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, axis: Axis) where Label == Text {
+        self.init(titleKey, text: text); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:prompt:axis:)-7n1bo
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?, axis: Axis) where Label == Text {
+        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}; self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-1v9ln
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, axis: Axis) where Label == Text {
+        self.init(String(title), text: text); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:prompt:axis:)-6unlv
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, prompt: Text?, axis: Axis) where Label == Text {
+        self.init(String(title), text: text, prompt: prompt); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(text:prompt:axis:label:)
+    public init(text: Binding<String>, prompt: Text? = nil, axis: Axis, @ViewBuilder label: () -> Label) {
+        self.init(text: text, prompt: prompt, label: label); self.axis = axis
+    }
     public init(_ title: String, text: Binding<String>) where Label == Text {
         placeholder = title; self.text = text; onCommit = {}
     }
@@ -1052,17 +1087,75 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
         placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield
+///
+/// An `NSSecureTextField`: bullets for the text, edited in the window's secure field editor
+/// (no copy, cut or drag of the text), and read as bullets by assistive technology.
+public struct SecureField<Label: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let placeholder: String
+    let text: Binding<String>
+    let onCommit: () -> Void
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-6ae2l
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>) where Label == Text {
+        placeholder = titleKey.key; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-3p6b5
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>) where Label == Text {
+        placeholder = String(title); self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-3kgqx
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?) where Label == Text {
+        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-5ve9a
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, prompt: Text?) where Label == Text {
+        placeholder = prompt?._string ?? String(title); self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(text:prompt:label:)
+    public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
+        placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-7xby2
+    @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
+        placeholder = titleKey.key; self.text = text; self.onCommit = onCommit
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-9cs5n
+    @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
+        placeholder = String(title); self.text = text; self.onCommit = onCommit
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
+    }
+}
+
+/// A secure field's primitive: its own type, so a view switching between a `TextField` and
+/// a `SecureField` (a "show password" toggle) gets a new control rather than an update.
+@MainActor
+final class _SecureFieldPrimitive: _TextFieldPrimitive {
+    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void) {
+        super.init(placeholder: placeholder, text: text, onCommit: onCommit, field: NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22)))
+    }
 }
 
 @MainActor
-final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
+class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     var text: Binding<String>
     var onCommit: () -> Void
     var placeholder: String
-    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void) {
-        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder
-        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
+    var axis: Axis
+    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void, axis: Axis = .horizontal,
+         field: NSTextField? = nil) {
+        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder; self.axis = axis
+        let f = field ?? NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
         f.placeholderString = placeholder
         f.stringValue = text.wrappedValue
         super.init(control: f)
@@ -1085,7 +1178,7 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _TextFieldPrimitive else { return }
-        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder
+        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1096,6 +1189,14 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         // until focus leaves.
         if control.stringValue != text.wrappedValue { control._setStringValueUpdatingEditor(text.wrappedValue) }
         if control.placeholderString != placeholder { control.placeholderString = placeholder }
+        // A vertical field wraps and grows with its text (sizeThatFits measures it).
+        let vertical = axis == .vertical
+        if control.usesSingleLineMode == vertical {
+            control.usesSingleLineMode = !vertical
+            control.cell?.wraps = vertical
+            control.cell?.isScrollable = !vertical
+            control.lineBreakMode = vertical ? .byWordWrapping : .byClipping
+        }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
         switch node.environment.textFieldStyle {
@@ -1104,9 +1205,36 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         }
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
-        let h = control.intrinsicContentSize.height
         let w = proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160
-        return CGSize(width: max(w, 20), height: h == NSView.noIntrinsicMetric ? 22 : h)
+        if axis == .vertical { return CGSize(width: max(w, 20), height: verticalHeight(width: max(w, 20), node: node)) }
+        // One line whatever the text holds (a pasted newline does not grow the field).
+        return CGSize(width: max(w, 20), height: lineHeight + chrome)
+    }
+    private var lineHeight: CGFloat {
+        let font = control.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        return (font.ascender - font.descender + font.leading).rounded(.up)
+    }
+    /// The field's height beyond its lines: macOS's bezeled field is 21 pt for one 16 pt line
+    /// of the system font and 37 pt for two.
+    private var chrome: CGFloat { control.isBezeled || control.isBordered ? 5 : 1 }
+    /// A vertical field's height: its wrapped lines (one at least), clamped to the ranged
+    /// `lineLimit`, plus the bezel.
+    private func verticalHeight(width: CGFloat, node: _ViewNode) -> CGFloat {
+        let font = control.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = self.lineHeight
+        let bezeled = control.isBezeled || control.isBordered
+        let textWidth = max(1, width - (bezeled ? 10 : 4))
+        let string = control.stringValue
+        var lines = 1
+        if !string.isEmpty {
+            let used = (string as NSString).boundingRect(with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                                                        options: [.usesLineFragmentOrigin], attributes: [.font: font], context: nil).height
+            lines = max(1, Int((used / lineHeight).rounded()))
+            if string.hasSuffix("\n") { lines += 1 }       // the caret's empty last line
+        }
+        if let minimum = node.environment._lineLimitExtras.minimum { lines = max(lines, minimum) }
+        if let maximum = node.environment.lineLimit { lines = min(lines, max(1, maximum)) }
+        return CGFloat(lines) * lineHeight + chrome
     }
 }
 
@@ -1480,20 +1608,77 @@ public struct ScrollView<Content: View>: View, _PrimitiveView {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section
-public struct Section<Parent: View, Content: View, Footer: View>: View {
+///
+/// Under a `List` the header is a row of its own that cannot be selected, and the content's
+/// rows follow; under a `Form` or a stack the header sits above the content.
+public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRowsProvider {
     let header: Parent
     let content: Content
     let footer: Footer
     public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent, @ViewBuilder footer: () -> Footer) {
         self.header = header(); self.content = content(); self.footer = footer()
     }
-    public var body: some View { Group { header; content; footer } }
+    public var body: some View {
+        Group {
+            if !(header is EmptyView) { _SectionHeader(content: header) }
+            content
+            if !(footer is EmptyView) { _SectionFooter(content: footer) }
+        }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(header:footer:content:)
+    @available(*, deprecated, renamed: "Section(content:header:footer:)")
+    public init(header: Parent, footer: Footer, @ViewBuilder content: () -> Content) {
+        self.header = header; self.content = content(); self.footer = footer
+    }
+}
+extension Section where Footer == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:header:)
+    public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent) {
+        self.init(content: content, header: header, footer: { EmptyView() })
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(header:content:)
+    @available(*, deprecated, renamed: "Section(content:header:)")
+    public init(header: Parent, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { header }, footer: { EmptyView() })
+    }
+}
+extension Section where Parent == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:footer:)
+    public init(@ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
+        self.init(content: content, header: { EmptyView() }, footer: footer)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(footer:content:)
+    @available(*, deprecated, renamed: "Section(content:footer:)")
+    public init(footer: Footer, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { EmptyView() }, footer: { footer })
+    }
 }
 extension Section where Parent == Text, Footer == EmptyView {
-    public init(_ title: String, @ViewBuilder content: () -> Content) { self.init(content: content, header: { Text(title).font(.headline) }, footer: { EmptyView() }) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(_:content:)-90be4
+    public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { Text(titleKey) }, footer: { EmptyView() })
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(_:content:)-1ex2w
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { Text(title) }, footer: { EmptyView() })
+    }
 }
 extension Section where Parent == EmptyView, Footer == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:)
     public init(@ViewBuilder content: () -> Content) { self.init(content: content, header: { EmptyView() }, footer: { EmptyView() }) }
+}
+
+/// A section's header: headline text, and a row that cannot be selected in a list.
+struct _SectionHeader<Content: View>: View, _ListSupplementaryRow {
+    let content: Content
+    var body: some View { content.font(.headline) }
+}
+
+/// A section's footer: secondary caption text under the content.
+struct _SectionFooter<Content: View>: View, _ListSupplementaryRow {
+    let content: Content
+    var body: some View { content.font(.caption).foregroundColor(.secondary) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/form

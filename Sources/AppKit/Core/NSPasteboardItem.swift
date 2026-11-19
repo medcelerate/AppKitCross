@@ -82,16 +82,20 @@ open class NSPasteboardItem: NSObject, NSPasteboardWriting, NSPasteboardReading 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/propertylist(fortype:)
     open func propertyList(forType type: NSPasteboard.PasteboardType) -> Any? { _resolve(type).flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) } }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/setdata(_:fortype:)
+    @discardableResult
     open func setData(_ data: Data, forType type: NSPasteboard.PasteboardType) -> Bool { _entries[type] = data; return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/setdataprovider(_:fortypes:)
+    @discardableResult
     open func setDataProvider(_ dataProvider: any NSPasteboardItemDataProvider, forTypes types: [NSPasteboard.PasteboardType]) -> Bool { for t in types { _providers[t] = dataProvider }; return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/setpropertylist(_:fortype:)
+    @discardableResult
     open func setPropertyList(_ propertyList: Any, forType type: NSPasteboard.PasteboardType) -> Bool {
         guard let d = try? PropertyListSerialization.data(fromPropertyList: propertyList, format: .xml, options: 0) else { return false }
         _entries[type] = d
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/setstring(_:fortype:)
+    @discardableResult
     open func setString(_ string: String, forType type: NSPasteboard.PasteboardType) -> Bool { _entries[type] = Data(string.utf8); return true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboarditem/string(fortype:)
     open func string(forType type: NSPasteboard.PasteboardType) -> String? { _resolve(type).map { String(decoding: $0, as: UTF8.self) } }

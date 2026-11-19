@@ -142,6 +142,8 @@
     "NSSearchField",
     "NSSearchFieldCell",
     "NSSearchToolbarItem",
+    "NSSecureTextField",
+    "NSSecureTextFieldCell",
     "NSSegmentedCell",
     "NSSegmentedControl",
     "NSSlider",

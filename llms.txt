@@ -1,0 +1,25 @@
+# AppKitCross
+
+> AppKitCross implements Apple's AppKit, SwiftUI, Combine, CoreGraphics, CoreText, QuartzCore, Metal, MetalKit, UniformTypeIdentifiers, ImageIO, AVFAudio, UserNotifications and ServiceManagement under Apple's module names and exact signatures, so an unmodified Swift Mac app builds and runs on Windows (Win32, Direct2D, DirectWrite, DirectComposition, Direct3D 12) and Linux (X11 or Wayland, Cairo, Pango, Vulkan). Apps consume it as a SwiftPM dependency (`.product(name: "AppKit", package: "AppKitCross")`, `SwiftUI`, ...); members not yet written trap with "AppKitCross: `name` is not implemented yet", and macOS-only features trap with "exists only on macOS".
+
+An agent porting someone else's Mac app should start with AGENTS.md. Contributors to the port itself follow CLAUDE.md and docs/DEVELOPMENT.md.
+
+## Docs
+
+- [AGENTS.md](AGENTS.md): porting a Mac app with this package: the dependency, builds on macOS/Windows/Linux, headless tests and screenshots, the porting checklist, platform behaviour, reporting gaps, shipping
+- [docs/API-COVERAGE.md](docs/API-COVERAGE.md): every AppKit type with its status (hand-written, generated, Apple-only) and how many members still trap
+- [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md): every gap two real open-source SwiftUI apps hit on the port, with root cause and fix
+- [docs/compatibility/swiftui-shims.md](docs/compatibility/swiftui-shims.md): how to shim API the port does not declare, and the earlier shims that are now part of the port
+- [docs/compatibility/swiftui-libraries.md](docs/compatibility/swiftui-libraries.md): third-party SwiftUI packages built against the port, verdict per platform and the API gaps they found
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): repository layout, building and testing each platform, the Linux container, runtime switches (`APPKITWIN_*`), threading
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): module map, the platform seam, the drawing path, how the Objective-C runtime dependence is handled
+- [docs/ROADMAP.md](docs/ROADMAP.md): milestone status, what is verified on real Windows hardware, what is not there yet
+- [docs/decisions/](docs/decisions/): the architecture decision records (ADR-0001 onward), one per subsystem
+
+## Optional
+
+- [README.md](README.md): overview, screenshots on all three platforms, the examples
+- [Examples/DailyTodo](Examples/DailyTodo): a vendored real SwiftUI app (Daily To Do, MIT) building on all three platforms
+- [Examples/MDVault](Examples/MDVault): a vendored real document-based SwiftUI app (MD Vault, MIT)
+- [tools/library-compat.sh](tools/library-compat.sh): the two-step build for third-party SwiftUI packages that do not depend on AppKitCross
+- [CLAUDE.md](CLAUDE.md): conventions for changing AppKitCross itself
