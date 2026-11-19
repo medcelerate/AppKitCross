@@ -23,9 +23,11 @@ its own API: you never write AppKitCross-specific code to use it.
 | `Combine`, `UniformTypeIdentifiers`, `ImageIO` | the port | Apple's |
 | `AVFAudio`, `AVFoundation` (audio only) | the port | Apple's |
 | `UserNotifications`, `ServiceManagement` | the port (ADR-0043) | Apple's |
+| `OSLog`, `Network`, `CoreMIDI` | the port (ADR-0050) | Apple's |
 
-Not available anywhere: Observation-driven SwiftUI (`@Observable` models do not update views;
-use `ObservableObject`), SwiftData, Core Data, WebKit, MapKit, AVKit, nibs and storyboards
+Observation-driven SwiftUI works (`@Observable` models, `@Environment(Model.self)`,
+`.environment(model)`, `@Bindable`; ADR-0050), as does `ObservableObject`. Not available
+anywhere: SwiftData, Core Data, WebKit, MapKit, AVKit, nibs and storyboards
 (code-built UI only), the Objective-C runtime (`@objc`, `#selector`, `perform(_:)` with
 dynamic dispatch, `import ObjectiveC`), SF Symbols glyphs (`Image(systemName:)` draws nothing).
 
@@ -49,7 +51,7 @@ every call works; grep before you rely on a rarely used member (section 5, step 
 
 Products by platform: `AppKit`, `Cocoa`, `SwiftUI`, `Metal`, `MetalKit` everywhere; `Combine`,
 `UniformTypeIdentifiers`, `ImageIO`, `AVFAudio`, `AVFoundation`, `UserNotifications`,
-`ServiceManagement` **only on Windows and Linux**. SwiftPM refuses a product that does not
+`ServiceManagement`, `OSLog`, `Network`, `CoreMIDI` **only on Windows and Linux**. SwiftPM refuses a product that does not
 exist on the host even under `condition: .when(platforms:)`
 (`product 'Combine' ... not found in package 'AppKitCross'`), so gate those with `#if os` in
 the manifest:
