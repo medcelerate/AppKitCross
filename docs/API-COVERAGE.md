@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 215 |
-| Types generated | 291 |
+| Types handwritten | 217 |
+| Types generated | 289 |
 | Types apple-only | 33 |
 | Types pending | 2 |
 | Types skipped | 0 |
@@ -22,7 +22,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 249 |
+| Members unimplemented-calls | 252 |
 
 ## Stub call sites
 
@@ -32,9 +32,9 @@ not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).
 
 | Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |
 | --- | ---: | ---: |
-| `Sources/AppKit/Generated` | 685 | 341 |
-| `Sources/AppKit/Core` | 80 | 30 |
-| Total | 765 | 371 |
+| `Sources/AppKit/Generated` | 674 | 341 |
+| `Sources/AppKit/Core` | 83 | 30 |
+| Total | 757 | 371 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -202,7 +202,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSCursor | class | handwritten | 76 | 0 | 9 | 2 |  |
 | NSCustomImageRep | class | generated | 5 | 0 | 0 |  |  |
 | NSCustomTouchBarItem | class | apple-only | 1 | 2 | 0 |  | 2 |
-| NSDataAsset | class | generated | 6 | 0 | 1 |  |  |
+| NSDataAsset | class | handwritten | 6 | 0 | 1 | 0 |  |
 | NSDatePicker | class | handwritten | 28 | 0 | 3 | 1 |  |
 | NSDatePickerCell | class | handwritten | 16 | 0 | 0 | 1 |  |
 | NSDatePickerCellDelegate | protocol | generated | 1 | 0 | 0 |  |  |
@@ -313,7 +313,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSMultibyteGlyphPacking | enum | generated | 1 | 0 | 0 |  |  |
 | NSMutableFontCollection | class | handwritten | 8 | 1 | 0 | 0 |  |
 | NSMutableParagraphStyle | class | handwritten | 24 | 1 | 0 | 0 |  |
-| NSNib | class | generated | 4 | 0 | 1 |  |  |
+| NSNib | class | handwritten | 4 | 0 | 1 | 3 |  |
 | NSObjectController | class | handwritten | 21 | 3 | 0 | 2 |  |
 | NSOpenGLContext | class | apple-only | 24 | 6 | 1 |  | 13 |
 | NSOpenGLGlobalOption | enum | generated | 4 | 1 | 0 |  |  |

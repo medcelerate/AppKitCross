@@ -684,7 +684,16 @@ final class LinuxWorkspace: PlatformWorkspace {
     }
 
     func setDefaultApplication(at applicationURL: URL, toOpen target: PlatformOpenTarget) throws {
-        guard let entry = database.entry(at: applicationURL) else { throw PlatformWorkspaceError.noApplication(applicationURL.path) }
+        var found = database.entry(at: applicationURL)
+        // This application itself (its folder or executable, as `Bundle.main.bundleURL` names
+        // it): register its desktop entry first (ADR-0045), then make that the default.
+        if found == nil, Self.isRunningApplication(applicationURL) {
+            let plan = try _AppRegistration._registerCurrent()
+            let home = ProcessInfo.processInfo.environment["XDG_DATA_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+                ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/share")
+            found = database.entry(at: home.appendingPathComponent("applications/" + plan.desktopFileName))
+        }
+        guard let entry = found else { throw PlatformWorkspaceError.noApplication(applicationURL.path) }
         let mime: String
         switch target {
         case .file(let url): mime = database.mimeType(for: url)
@@ -692,6 +701,12 @@ final class LinuxWorkspace: PlatformWorkspace {
         case .scheme(let scheme): mime = "x-scheme-handler/" + scheme.lowercased()
         }
         try database.setDefault(entry.id, forMIMEType: mime)
+    }
+
+    /// Whether a URL names the running application (its bundle folder or executable).
+    static func isRunningApplication(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        return path == _AppBundle.main.layout.bundleURL.standardizedFileURL.path || path == _AppBundle.mainExecutableURL.standardizedFileURL.path
     }
 
     // MARK: Icons

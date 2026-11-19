@@ -29,7 +29,7 @@ state is in [ROADMAP.md](ROADMAP.md).
 | `Examples/HelloWindow` | The sample: AppKit drawing, controls, menus, a glass window, the Layout Demo and the SwiftUI demo. |
 | `Examples/Calculator`, `FramelessWindow`, `Animation`, `Drawing`, `Observable`, `AudioPlayer`, `TextEdit`, `Toolbar`, `Sheets`, `Workspace` | Small, self-contained examples, one executable target each (see [Examples](#examples)). |
 | `Examples/DailyTodo` | A real third-party SwiftUI app (Daily To Do, MIT) vendored unmodified, with shims for the Apple frameworks the port lacks; the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
-| `Examples/MDVault` | A real document-based SwiftUI app (MD Vault, MIT) vendored with one `@MainActor`; its Info.plist under `Resources/` (named by `APPKITWIN_INFO_PLIST`); the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
+| `Examples/MDVault` | A real document-based SwiftUI app (MD Vault, MIT) vendored with one `@MainActor`; its Info.plist and icon under `Resources/`, the target's SwiftPM bundle (ADR-0045); the gaps it found are in [compatibility/swiftui-apps.md](compatibility/swiftui-apps.md). |
 | `Examples/LibraryCompat` | A package of its own: third-party SwiftUI libraries as dependencies, one tab each, with the per-library verdicts and API gaps in [compatibility/swiftui-libraries.md](compatibility/swiftui-libraries.md). Built by `tools/library-compat.sh` (see below). |
 
 ## Conventions
@@ -148,7 +148,7 @@ says what it demonstrates. CI builds every one on macOS, Windows and both Linux 
 
 | Example | Shows | Run |
 | --- | --- | --- |
-| `HelloWindow` | The big tour: drawing, controls, menus, the glass window, the Layout Demo and the SwiftUI demo | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`, `--screenshot <dir>`, `--metal-selftest`) |
+| `HelloWindow` | The big tour: drawing, controls, menus, the glass window, the Layout Demo and the SwiftUI demo; a localized line and an image from its SwiftPM bundle (ADR-0045) | `swift run HelloWindow` (`--swiftui`, `--layout`, `--metal`, `--screenshot <dir>`, `--metal-selftest`, `--bundle-report`, `-AppleLanguages "(de)"`) |
 | `Calculator` | SwiftUI `App` + `WindowGroup`, button grid, `keyboardShortcut` keys, fixed-size window, `CommandMenu` | `swift run Calculator` |
 | `FramelessWindow` | `.fullSizeContentView` window with AppKit's window buttons, rounded non-opaque shape, movable by background, `NSVisualEffectView` backdrop, close/minimize/zoom, a `.borderless` panel | `swift run FramelessWindow` (`--panel`) |
 | `Animation` | `CABasicAnimation`, `CAKeyframeAnimation` along a path, 3D flip with perspective, `CAAnimationGroup`, implicit `CATransaction` animations, play/pause, SwiftUI `withAnimation` | `swift run Animation` (`--paused`) |
@@ -160,12 +160,61 @@ says what it demonstrates. CI builds every one on macOS, Windows and both Linux 
 | `Toolbar` | `NSToolbar` (image items, `NSToolbarItemGroup`, `NSMenuToolbarItem`, `NSSearchToolbarItem`, validation, overflow, the customization sheet, autosave) and an `NSStatusItem` with a menu | `swift run Toolbar` |
 | `Workspace` | `NSWorkspace` (open a URL, reveal in the file manager, icons, recycle, `urlForApplication`), `NSRunningApplication` (frontmost, launch, activate, hide, terminate) and `NSDockTile` (a badge on the taskbar button) | `swift run Workspace` (`--report`) |
 | `DailyTodo` | Daily To Do, a real third-party SwiftUI app vendored unmodified: `NavigationStack` + toolbar, `DatePicker`s, a checkbox `List`, `ContentUnavailableView`, a `.sheet` with a grouped `Form`, `LabeledContent`, `Picker`, `environmentObject`, JSON persistence; `UserNotifications`/`ServiceManagement` shims off macOS; its self-checks as `DailyTodoChecks` | `swift run DailyTodo`, `swift run DailyTodoChecks` |
-| `MDVault` | MD Vault, a real document-based SwiftUI app: `DocumentGroup` + `FileDocument`, an `NSTextView` representable editor, a SwiftUI Markdown viewer, `@FocusedValue` commands, `@AppStorage` | `APPKITWIN_INFO_PLIST=Examples/MDVault/Resources/Info.plist swift run MDVault` |
+| `MDVault` | MD Vault, a real document-based SwiftUI app: `DocumentGroup` + `FileDocument`, an `NSTextView` representable editor, a SwiftUI Markdown viewer, `@FocusedValue` commands, `@AppStorage`; its icon, the `.md` association (`--appkitcross-register`) and the single instance (ADR-0045) | `swift run MDVault` (`file.md`) |
 
 The port has no Observation framework (`@Observable`), so Observable uses `ObservableObject`;
 `UndoManager` and `FileWrapper` are missing from swift-corelibs-foundation and the port supplies
 them in `Sources/AppKit/Support` on Windows and Linux (Drawing predates that and keeps its own
 undo stacks).
+
+## App layout on Windows and Linux
+
+A Mac app's `Bundle.main`, `NSLocalizedString`, `NSImage(named:)`, Info.plist and icon code runs
+unchanged when the app's files sit in this layout ([ADR-0045](decisions/ADR-0045-app-bundle.md)).
+It is what `swift build` already produces, plus an Info.plist; the app-folder layout tool copies
+the same shape:
+
+```
+MyApp/
+  MyApp.exe            (MyApp on Linux)
+  Info.plist           or Resources/Info.plist, or in the executable's SwiftPM bundle
+                       (Resources/Info.plist or MyApp-Info.plist: SwiftPM refuses a resource
+                       named Info.plist at the top)
+  Resources/           optional, what Contents/Resources holds on macOS
+  MyPkg_MyApp.resources/   SwiftPM's bundle of the executable target, e.g. its
+                       `.copy("Resources")` folder: en.lproj/, de.lproj/, Assets.xcassets/,
+                       AppIcon.png, sounds
+  MyPkg_OtherModule.resources/   Bundle.module of the app's other targets
+  runtime DLLs / .so
+```
+
+- `Bundle.main` searches `Resources/`, then the executable target's bundle (its `Resources/`
+  folder first), then the executable's folder. `APPKITWIN_INFO_PLIST` names an Info.plist
+  anywhere, for a bare `swift run`.
+- Strings: `<lang>.lproj/Localizable.strings` and `.stringsdict`, or a String Catalog
+  (`Localizable.xcstrings`, uncompiled) at a resource root. The language comes from the user's
+  UI languages on Windows, from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG` on Linux, or from
+  `-AppleLanguages "(de)"` on the command line to try one: `swift run HelloWindow -AppleLanguages "(de)"`.
+- Asset catalogs are read uncompiled. Copy the `.xcassets` folder as a resource. Image sets,
+  app icon sets, data sets and colour sets are read; dark variants are skipped.
+- The icon is the Info.plist's `CFBundleIconName` (an app icon set) or `CFBundleIconFile`
+  (`AppIcon` finds `AppIcon.png`, then `AppIcon.ico`; `.icns` is not read). It goes on the
+  windows' title bar, the taskbar and Alt-Tab (Windows), and on `_NET_WM_ICON` (X11). On
+  Wayland the compositor takes the icon from the desktop entry named after the identity.
+- The identity is `CFBundleIdentifier`, else `AppKitCross.<exe>`. It is the Wayland app id, the
+  X11 `WM_CLASS`, the desktop entry id and the single-instance key.
+- With a `CFBundleIdentifier`, a second launch hands its arguments to the running instance and
+  exits. Turn that off with `AppKitCrossAllowsMultipleInstances` = YES in the Info.plist or
+  `APPKITWIN_MULTIPLE_INSTANCES=1`.
+- File associations and URL schemes (`CFBundleDocumentTypes`, `CFBundleURLTypes`) are
+  registered per user only when asked. `MyApp --appkitcross-register` writes HKCU
+  `Software\Classes` (ProgIDs, OpenWithProgids, Capabilities for Settings > Default apps), or
+  `~/.local/share/applications/<id>.desktop` with MIME types and the icon.
+  `--appkitcross-unregister` removes them. Info.plist `AppKitCrossRegistersFileTypes` = YES
+  registers at launch when the registration is missing.
+- Documents and URLs on the command line (`MyApp file.md`, `MyApp myscheme://x`) reach
+  `NSDocumentController` or `application(_:openFile(s):)`/`application(_:open:)`. Explorer and
+  the desktop launch apps this way.
 
 ## Threading
 
@@ -194,6 +243,10 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_PANELS_OPEN=color\|font` | With the Layout Demo's Panels tab, opens the Colors or Fonts panel at launch (screenshots `color-panel`, `font-panel`). |
 | `APPKITWIN_COLOR_PANEL=native` | `NSColorPanel.orderFront` runs the system colour dialog (Windows' ChooseColor) instead of the package-drawn panel (ADR-0031); ignored where there is none. |
 | `APPKITWIN_COMPAT_TAB=confetti` | Opens `LibraryCompat` on that library's tab (shimmer, confetti, wrapping, defaults, markdown, introspect, charts, nuke). |
+| `APPKITWIN_INFO_PLIST=path` | The Info.plist to use for a bare executable (`swift run`), ahead of the app folder's (ADR-0045). |
+| `APPKITWIN_MULTIPLE_INSTANCES=1` | No single-instance hand-off: every launch runs its own process (ADR-0045). |
+| `APPKITWIN_CORELIBS_BUNDLE=1` | Leaves swift-corelibs-foundation's `Bundle` alone (no vtable hooks): `Bundle.main` is the executable's folder only and `NSLocalizedString` answers in the development language (ADR-0045). |
+| `-AppleLanguages "(de, en)"` (argument) | The preferred languages for this run, as on macOS (ADR-0045). |
 | `APPKITWIN_HOST_BACKEND=1` | The headless backend the tests use; the suite expects it on Windows and Linux. Unset it before running an example: with it set no native window is created (the package says so on stderr). |
 | `APPKITWIN_PRINT_PANEL=native` | The platform's own print dialog (`PrintDlgEx` on Windows) instead of the package's print panel; Linux has none, so the package's panel shows either way (ADR-0022). |
 | `APPKITWIN_IME_LAYOUT=00000411` | Windows: activates that keyboard layout for the process and opens its IME in native mode on focus (00000411 is Japanese), for testing composition without changing the system's input settings. |

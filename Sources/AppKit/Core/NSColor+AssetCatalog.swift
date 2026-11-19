@@ -38,17 +38,12 @@ enum _NSColorAssetCatalog {
         return ColorSet(light: light, dark: dark === light ? nil : dark)
     }
 
+    /// The colour set's Contents.json from the bundle's catalogs (the main bundle's search
+    /// path of ADR-0045: Resources/, the executable target's SwiftPM bundle, its folder).
     private static func contents(of name: String, in bundle: Bundle) -> Data? {
-        guard let root = bundle.resourceURL else { return nil }
-        let fm = FileManager.default
-        guard let walker = fm.enumerator(at: root, includingPropertiesForKeys: nil) else { return nil }
-        let target = name + ".colorset"
-        for case let url as URL in walker {
-            if url.lastPathComponent == target, url.deletingLastPathComponent().pathComponents.contains(where: { $0.hasSuffix(".xcassets") }) {
-                if let d = fm.contents(atPath: url.appendingPathComponent("Contents.json").path) { return d }
-            }
-        }
-        return nil
+        let roots = _AppBundle.forBundle(bundle).layout.resourceRoots
+        guard let dir = _NSAssetCatalog.assetDirectory(named: name, kind: "colorset", roots: roots) else { return nil }
+        return FileManager.default.contents(atPath: dir.appendingPathComponent("Contents.json").path)
     }
 
     private static func color(from spec: [String: Any]) -> NSColor? {

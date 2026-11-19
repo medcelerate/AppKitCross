@@ -67,8 +67,11 @@ open class NSSound: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
     }
     /// A sound file of the main bundle: `name` with each of the supported extensions.
     private static func _resourceURL(named name: NSSound.Name) -> URL? {
-        for ext in ["wav", "aiff", "aif", "aifc"] {
-            if let url = Bundle.main.url(forResource: name, withExtension: ext) { return url }
+        _AppBundle.installMainBundle()
+        let ns = name as NSString
+        if !ns.pathExtension.isEmpty, let url = _AppBundle.main.url(forResource: ns.deletingPathExtension, withExtension: ns.pathExtension) { return url }
+        for ext in ["wav", "aiff", "aif", "aifc", "caf", "mp3", "m4a", "flac"] {
+            if let url = _AppBundle.main.url(forResource: name, withExtension: ext) { return url }
         }
         return nil
     }

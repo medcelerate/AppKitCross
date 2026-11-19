@@ -1,0 +1,3 @@
+"greeting" = "Hallo";
+"%@ says hi" = "%@ sagt Hallo";
+"escaped" = "Ä";

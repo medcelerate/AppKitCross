@@ -1,0 +1,2 @@
+/* HelloWindow (ADR-0045): a localized greeting from the target's SwiftPM bundle. */
+"Welcome to AppKitCross" = "Welcome to AppKitCross";
