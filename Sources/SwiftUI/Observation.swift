@@ -15,13 +15,25 @@ func _trackingObservation<T>(_ node: _ViewNode, _ body: () -> T) -> T {
     withObservationTracking(body) { [weak node] in
         // `onChange` runs on the mutating thread, before the new value is stored
         // (`willSet`); the update is scheduled, so the body reads the stored value.
-        if Thread.isMainThread {
+        if _isOnMainQueue {
             MainActor.assumeIsolated { node?.setNeedsUpdate() }
         } else {
             DispatchQueue.main.async { node?.setNeedsUpdate() }
         }
     }
 }
+
+/// Whether the caller runs on the main queue. `Thread.isMainThread` alone is false on
+/// corelibs for a thread the main queue was handed to (Swift Testing's main-actor tests),
+/// where an async hop would land after the test's next layout pass.
+var _isOnMainQueue: Bool {
+    Thread.isMainThread || DispatchQueue.getSpecific(key: _mainQueueKey) != nil
+}
+private let _mainQueueKey: DispatchSpecificKey<Bool> = {
+    let key = DispatchSpecificKey<Bool>()
+    DispatchQueue.main.setSpecific(key: key, value: true)
+    return key
+}()
 
 // MARK: Environment
 
