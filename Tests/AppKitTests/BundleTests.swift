@@ -296,6 +296,33 @@ final class BundleTests: XCTestCase {
         XCTAssertEqual(String(localized: "greeting.title", defaultValue: "Hi \(n)", bundle: bundle), "Hi 1")
         XCTAssertEqual(String(localized: LocalizedStringResource("greeting", bundle: .atURL(folder))), "Hallo")
     }
+
+    /// Every hooked member, main bundle (the port's answer) and another bundle (corelibs'
+    /// original through the same trampoline), many times: a trampoline with the wrong return
+    /// convention reads stale or garbage memory and shows up as a crash or a changed answer.
+    func testEveryHookedMemberRoundTripsRepeatedly() throws {
+        _AppBundle.installMainBundle()
+        XCTAssertTrue(_AppBundle.isMainBundleInstalled, _BundleHooks.installFailure ?? "")
+        let other = try XCTUnwrap(Bundle(url: folder))
+        func snapshot(_ b: Bundle) -> [String] {
+            [b.localizedString(forKey: "greeting", value: nil, table: nil),
+             "\(b.preferredLocalizations)", "\(b.localizations.sorted())", "\(String(describing: b.developmentLocalization))",
+             "\(b.infoDictionary?.keys.sorted() ?? [])", "\(String(describing: b.bundleIdentifier))",
+             "\(String(describing: b.object(forInfoDictionaryKey: "CFBundleName") as? String))",
+             "\(String(describing: b.object(forInfoDictionaryKey: "NoSuchKey")))",
+             "\(String(describing: b.resourceURL))", "\(String(describing: b.resourcePath))",
+             "\(String(describing: b.url(forResource: "pic", withExtension: "png")))",
+             "\(String(describing: b.url(forResource: "Localizable", withExtension: "strings", subdirectory: "de.lproj")))",
+             "\(String(describing: b.path(forResource: "pic", ofType: "png")))",
+             "\(String(describing: b.path(forResource: "Localizable", ofType: "strings", inDirectory: "de.lproj")))"]
+        }
+        let first = (snapshot(Bundle.main), snapshot(other))
+        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: "CFBundleName"))
+        for i in 0..<2000 {
+            let now = (snapshot(Bundle.main), snapshot(other))
+            if now.0 != first.0 || now.1 != first.1 { XCTFail("iteration \(i): \(now) != \(first)"); break }
+        }
+    }
     #endif
 
     // MARK: Registration
