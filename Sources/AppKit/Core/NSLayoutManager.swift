@@ -491,7 +491,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         // The cache holds when it covers this text and was resolved under this appearance.
         let cachedLength = cached.last.map { $0.range.location + $0.range.length } ?? 0
         let geometry = _textContainers.map(_ContainerGeometry.init)
-        if _layoutIsDark != isDark || cachedLength != length || _secureEcho != nil || geometry != _unitsGeometry {
+        if _layoutIsDark != isDark || cachedLength != length || _secureEcho != nil || geometry != _unitsGeometry
+            || _cacheInconsistency(cached) != nil {
             cached = []
             _fragments = []; _blockFrames = []; _attachments = [:]
         }
@@ -937,6 +938,38 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
 
     internal var _lineFragments: [_NSLineFragment] { _ensureLayout(); return _fragments }
     internal var _laidOutBlockFrames: [_BlockFrame] { _ensureLayout(); return _blockFrames }
+
+    /// Why `units` cannot be reused over the current line arrays, or nil when they can: the
+    /// units must tile the text from 0 in order, and own exactly the lines and boxes there
+    /// are. A pass that finds the cache broken lays everything out again rather than moving
+    /// lines that are not there (which traps).
+    private func _cacheInconsistency(_ units: [_LayoutUnit]) -> String? {
+        guard !units.isEmpty else { return nil }
+        var at = 0, lines = 0, boxes = 0
+        for (k, u) in units.enumerated() {
+            if u.range.location != at || u.range.length < 0 { return "unit \(k) \(u.range) does not start at \(at)" }
+            if u.fragmentCount < 0 || u.blockFrameCount < 0 { return "unit \(k) has negative counts" }
+            at += u.range.length; lines += u.fragmentCount; boxes += u.blockFrameCount
+        }
+        if lines != _fragments.count { return "units own \(lines) lines, there are \(_fragments.count)" }
+        if boxes != _blockFrames.count { return "units own \(boxes) boxes, there are \(_blockFrames.count)" }
+        return nil
+    }
+
+    /// Tests: whether the laid-out units and lines are consistent with each other and with
+    /// the text (nil), or what is wrong.
+    internal var _layoutInconsistency: String? {
+        _ensureLayout()
+        if let why = _cacheInconsistency(_units) { return why }
+        let length = _textStorage?.length ?? 0
+        var at = 0
+        for (k, f) in _fragments.enumerated() {
+            if f.charRange.location != at { return "line \(k) \(f.charRange) does not start at \(at)" }
+            at = f.charRange.location + f.charRange.length
+        }
+        if at != _laidOutLength || _laidOutLength > length { return "lines end at \(at), laid out \(_laidOutLength) of \(length)" }
+        return nil
+    }
 
     /// Caret x (container coordinates) for a character index, within its fragment.
     internal func _caret(forCharacter index: Int) -> (rect: NSRect, container: Int)? {

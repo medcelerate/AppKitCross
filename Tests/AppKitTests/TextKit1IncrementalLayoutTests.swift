@@ -419,18 +419,28 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
 
     /// One random edit of `ts`: typing, Return, deletions within and across paragraphs,
     /// pastes, paragraph style and font changes.
-    @MainActor private func randomEdit(_ ts: NSTextStorage, _ rng: inout Random) {
+    /// Writes a line to stderr unbuffered, so a run that dies names the step it died in
+    /// (Windows CI exited without a message in the random-edit tests, PR 91).
+    private static func trace(_ line: String) {
+        FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+
+    @MainActor private func randomEdit(_ ts: NSTextStorage, _ rng: inout Random, _ label: String = "") {
         let n = ts.length
         let at = rng.int(n + 1)
         let words = ["a", "word", " ", "\n", "longer words that wrap across the line", "\t", "x\ny", "\r\n"]
+        func replace(_ r: NSRange, _ text: String) {
+            TextKit1IncrementalLayoutTests.trace("random edit \(label): replace \(r) of \(n) with \(text.debugDescription)")
+            ts.replaceCharacters(in: r, with: text)
+        }
         switch rng.int(8) {
-        case 0, 1: ts.replaceCharacters(in: NSRange(location: at, length: 0), with: words[rng.int(words.count)])
-        case 2: ts.replaceCharacters(in: NSRange(location: at, length: 0), with: "\n")
-        case 3: if at > 0 { ts.replaceCharacters(in: NSRange(location: at - 1, length: 1), with: "") }
-        case 4: ts.replaceCharacters(in: NSRange(location: at, length: min(n - at, rng.int(120))), with: "")
+        case 0, 1: replace(NSRange(location: at, length: 0), words[rng.int(words.count)])
+        case 2: replace(NSRange(location: at, length: 0), "\n")
+        case 3: if at > 0 { replace(NSRange(location: at - 1, length: 1), "") }
+        case 4: replace(NSRange(location: at, length: min(n - at, rng.int(120))), "")
         case 5:
             let len = min(n - at, rng.int(60))
-            ts.replaceCharacters(in: NSRange(location: at, length: len), with: "Pasted \(rng.int(1000)) text\nand a second paragraph")
+            replace(NSRange(location: at, length: len), "Pasted \(rng.int(1000)) text\nand a second paragraph")
         case 6:
             guard n > 0 else { return }
             let ps = NSMutableParagraphStyle()
@@ -439,10 +449,12 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             ps.paragraphSpacingBefore = CGFloat(rng.int(2) * 5)
             ps.firstLineHeadIndent = CGFloat(rng.int(3) * 10)
             let r = (ts.string as NSString).paragraphRange(for: NSRange(location: min(at, n - 1), length: 0))
+            TextKit1IncrementalLayoutTests.trace("random edit \(label): paragraph style over \(r) of \(n)")
             ts.addAttribute(.paragraphStyle, value: ps, range: r)
         default:
             guard n > 0 else { return }
             let len = min(n - min(at, n - 1), 1 + rng.int(30))
+            TextKit1IncrementalLayoutTests.trace("random edit \(label): font over \(NSRange(location: min(at, n - 1), length: len)) of \(n)")
             ts.addAttribute(.font, value: NSFont.systemFont(ofSize: CGFloat(10 + rng.int(14))), range: NSRange(location: min(at, n - 1), length: len))
         }
     }
@@ -450,6 +462,8 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
     /// Random edit sequences, laid out after each edit or after a few (and inside editing
     /// transactions), always match a full layout of the same text.
     func testRandomEditsMatchAFullLayout() {
+        TextKit1IncrementalLayoutTests.trace("random edits: begin")
+        defer { TextKit1IncrementalLayoutTests.trace("random edits: end") }
         MainActor.assumeIsolated {
             for seed in [1, 7, 42] as [UInt64] {
                 var rng = Random(state: seed)
@@ -461,8 +475,12 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
                     let batch = 1 + rng.int(3)
                     let transaction = rng.int(4) == 0
                     if transaction { ts.beginEditing() }
-                    for _ in 0..<batch { randomEdit(ts, &rng) }
+                    for e in 0..<batch { randomEdit(ts, &rng, "seed \(seed) step \(step).\(e)\(transaction ? " (transaction)" : "")") }
                     if transaction { ts.endEditing() }
+                    if let why = lm._layoutInconsistency {
+                        XCTFail("seed \(seed) step \(step): inconsistent layout: \(why)")
+                        return
+                    }
                     assertMatchesFullLayout(lm, "seed \(seed) step \(step)")
                 }
                 let work = lm._typesetParagraphCount
@@ -499,9 +517,10 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             let (doc, _) = tableDocument()
             doc.append(NSAttributedString(string: "\n" + longText(30), attributes: [.font: TextKit1IncrementalLayoutTests.font]))
             let (w, edited) = textView(doc)
-            for _ in 0..<40 {
-                randomEdit(edited.textStorage!, &rng)
+            for step in 0..<40 {
+                randomEdit(edited.textStorage!, &rng, "pixels step \(step)")
                 w.display()
+                if let why = edited.layoutManager?._layoutInconsistency { return XCTFail("pixels step \(step): inconsistent layout: \(why)") }
             }
             edited.setSelectedRange(NSRange(location: 0, length: 0))
             let (w2, fresh) = textView(edited.textStorage!.attributedSubstring(from: NSRange(location: 0, length: edited.textStorage!.length)))
@@ -523,6 +542,7 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             // (or drawn by a frame clock) after it ends.
             w.close(); w2.close()
             withExtendedLifetime((w, w2, edited, fresh)) {}
+            TextKit1IncrementalLayoutTests.trace("pixels test: windows closed")
         }
     }
 
