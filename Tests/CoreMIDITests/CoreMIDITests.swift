@@ -76,7 +76,8 @@ private final class SibylStyleSender {
 final class CoreMIDITests: XCTestCase {
     override func setUp() {
         super.setUp()
-        XCTAssertNotNil(_MIDITestHooks.nullBackend, "the macOS test build runs on the null backend")
+        _MIDITestHooks.useNullBackend()
+        XCTAssertNotNil(_MIDITestHooks.nullBackend, "the tests run on the null backend")
         _MIDITestHooks.setAcceptsUMP(false)
         _MIDITestHooks.resetDestinations()
         _MIDITestHooks.clearSent()

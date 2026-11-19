@@ -46,9 +46,19 @@ open class NSWorkspace: NSObject {
 
     /// Runs `body` on the main actor: the platform's services are main-actor bound.
     internal func _onMain<T>(_ body: @MainActor () throws -> T) rethrows -> T {
-        if Thread.isMainThread { return try MainActor.assumeIsolated { try body() } }
+        // Already on the main queue (`Thread.isMainThread` is not enough: corelibs answers
+        // false on a thread the main queue has been handed to, as under Swift Testing, and a
+        // `sync` from there would be the deadlock libdispatch traps on).
+        if Thread.isMainThread || DispatchQueue.getSpecific(key: Self._mainQueueKey) != nil {
+            return try MainActor.assumeIsolated { try body() }
+        }
         return try DispatchQueue.main.sync { try MainActor.assumeIsolated { try body() } }
     }
+    private static let _mainQueueKey: DispatchSpecificKey<Bool> = {
+        let key = DispatchSpecificKey<Bool>()
+        DispatchQueue.main.setSpecific(key: key, value: true)
+        return key
+    }()
     @MainActor internal var _platform: any PlatformWorkspace { Platform.backend.workspace }
 
     @MainActor internal func _startMonitoringIfNeeded() {

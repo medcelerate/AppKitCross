@@ -133,6 +133,11 @@ final class NullMIDIBackend: MIDIPlatformBackend {
 
 /// Internal switches for the tests (null backend only).
 enum _MIDITestHooks {
+    /// Installs the null backend (idempotent), whatever platform the tests run on.
+    static func useNullBackend() {
+        if nullBackend == nil { MIDIServer.shared._replaceBackend(NullMIDIBackend()) }
+    }
+
     /// The active null backend, or nil when a platform backend is in use.
     static var nullBackend: NullMIDIBackend? {
         MIDIServer.shared.withBackend { $0 as? NullMIDIBackend }

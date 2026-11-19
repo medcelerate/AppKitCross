@@ -32,7 +32,7 @@ final class MIDIServer: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private let backend: MIDIPlatformBackend
+    private var backend: MIDIPlatformBackend
     private var nextRef: MIDIObjectRef = 0x0010_0000
     private var clients: [MIDIClientRef: Client] = [:]
     private var ports: [MIDIPortRef: Port] = [:]
@@ -55,6 +55,16 @@ final class MIDIServer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return body(backend)
+    }
+
+    /// Tests only: swaps the backend (the null one) before any client exists, so the suite
+    /// does not depend on `APPKITWIN_MIDI_BACKEND` on a machine with real MIDI devices.
+    func _replaceBackend(_ newBackend: MIDIPlatformBackend) {
+        lock.lock()
+        defer { lock.unlock() }
+        backend = newBackend
+        endpoints.removeAll(); refByUniqueID.removeAll(); online.removeAll(); opened.removeAll()
+        lastScan = nil
     }
 
     private func allocateRef() -> MIDIObjectRef {
