@@ -253,6 +253,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | force a Linux window system |
 | `APPKITWIN_TRACE=1` | every invalidation, SwiftUI node update (`setNeedsUpdate <View>`) and layout pass: repaint loops, a busy idle CPU |
 | `APPKITWIN_TRACE_FRAMES=1` | what each frame costs (solve, layout, draw, tick lateness) |
+| `APPKITWIN_TRACE_TEXTINPUT=1` | every input method step (`[textinput] ...`): composition that does not reach a text view, a candidate window in the wrong place |
 | `APPKITWIN_INFO_PLIST=<path>` | the Info.plist the app reads when the executable has none beside it (document types, `CFBundleName`, UTIs) |
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
@@ -447,7 +448,6 @@ comes from the system). Crash reports go to `%LOCALAPPDATA%\<bundle id>\Crashes`
 `~/.local/share/<bundle id>/Crashes`; `APPKITWIN_CRASH_TEST=1` crashes a second after launch
 to check them.
 
-<!-- FILLED(ime-text-input) from PR 58 / ADR-0047: true once PR 58 is on main. -->
 **Input methods** (ADR-0047): CJK input works in `NSTextView`, `NSTextField` and the SwiftUI
 text fields built on them, through TSF (IMM32 as fallback) on Windows, `text-input-v3` on
 Wayland and XIM (ibus, fcitx5) on X11. A custom text view needs what it needs on macOS:
