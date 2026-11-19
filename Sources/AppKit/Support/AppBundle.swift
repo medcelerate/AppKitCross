@@ -65,13 +65,25 @@ public struct _BundleLayout: Sendable {
         }
         if plist == nil {
             outer: for root in roots {
-                for file in ["Info.plist", "\(name)-Info.plist"] where FileManager.default.fileExists(atPath: root.appendingPathComponent(file).path) {
+                for file in ["Info.plist", "\(name)-Info.plist"] where _BundleLayout.isApplicationInfoPlist(root.appendingPathComponent(file)) {
                     plist = root.appendingPathComponent(file); break outer
                 }
             }
         }
         infoPlistURL = plist
         resourceRoots = roots
+    }
+
+    /// Whether `url` is an application's Info.plist: it exists, parses, and is not a resource
+    /// bundle's. swift-build generates a plist for each SwiftPM bundle (`CFBundlePackageType`
+    /// BNDL, `CFBundleIdentifier` `<pkg>.<Target>.resources`) and, on Windows, puts it in the
+    /// executable target's bundle, which is a root here (ADR-0046); it is never the app's.
+    static func isApplicationInfoPlist(_ url: URL) -> Bool {
+        guard let data = FileManager.default.contents(atPath: url.path),
+              let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any] else { return false }
+        if (plist["CFBundlePackageType"] as? String) == "BNDL" { return false }
+        if let id = plist["CFBundleIdentifier"] as? String, id.hasSuffix(".resources") { return false }
+        return true
     }
 
     /// Any other bundle (a SwiftPM `.resources` folder, a macOS-style `.bundle` or `.app`):
