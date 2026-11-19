@@ -709,6 +709,15 @@ import CoreText
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
     }
 
+    /// An edit reached the layout through the text storage: TextKit 1's layout manager
+    /// invalidated the edited paragraphs (and TextKit 2 its elements), so only the frame and
+    /// the display follow it here; invalidating every line would typeset the whole text again.
+    internal override func _invalidateLayoutAfterEdit() {
+        if _textLayoutManager != nil { _invalidateLayout(); return }
+        _syncContainerSize()
+        needsDisplay = true
+    }
+
     /// The layout manager laid the text out again (an edit, a geometry change).
     internal func _layoutManagerDidChange() { needsDisplay = true }
 
@@ -1393,6 +1402,8 @@ import CoreText
         set {
             _extras.linkTextAttributes = newValue
             _textLayoutManager?._restyleLaidOutFragments()
+            // TextKit 1 resolves link attributes when it typesets a paragraph.
+            if _textLayoutManager == nil { _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil) }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/loosenkerning(_:)
@@ -1492,7 +1503,7 @@ import CoreText
         let m = NSMutableAttributedString(string: attributedString.string, attributes: base)
         attributedString.enumerateAttributes(in: NSRange(location: 0, length: attributedString.length), options: []) { a, sub, _ in m.addAttributes(a, range: sub) }
         textStorage?.replaceCharacters(in: r, with: m)
-        _invalidateLayout()
+        _invalidateLayoutAfterEdit()
         setSelectedRange(NSRange(location: r.location + m.length, length: 0))
         didChangeText()
         return true

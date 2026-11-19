@@ -210,6 +210,39 @@ underline starts at each mark's own line. A wrapping text view in a scroll view 
 its width equal to the clip view's (it watches the clip view's frame), so no path that
 narrows the clip view can leave lines under the scroller.
 
+### TextKit 1 relayout per paragraph (follow-up)
+
+TextKit 1 first kept the line code of its whole-document pass: every edit converted the
+whole text for CoreText and typeset it again. `NSLayoutManager` now lays out in units, as
+AppKit invalidates and re-typesets paragraphs: a unit is one paragraph, or the run of
+paragraphs in one outermost text block or table (a table's columns and rows depend on every
+cell, so the block is the invalidation unit). Each unit is converted and typeset on its own
+(`_NSCoreTextConversion.convert` of the unit's substring, its own `CTTypesetter`, the shared
+`_NSLineTypesetter` for its lines), so its `CTLine`s index from the unit's start; a line
+fragment carries that base (`lineBase`) and maps document indices through it.
+
+The fragments stay one array in text order; each unit knows how many are its own. An edit
+(`processEditing`, `invalidateLayout(forCharacterRange:…)`, a temporary attribute that
+changes layout) turns the units it touches, plus the one ending where it starts (a line
+break typed or deleted there joins or splits it) and a text block next to it (a paragraph
+joining or leaving a table moves where the table's run ends), into one dirty unit, and moves
+the units after it by the length delta. The next pass walks the units: a dirty one is typeset
+again (as many units as the paragraphs now there need, and a new unit that runs over a cached
+one replaces it too), and its lines are spliced into the array; a clean run of units after it
+moves, in place, by the edit's length delta and the height delta. A clean unit's lines cannot
+break differently (its text, attributes and width are unchanged), so where AppKit
+re-typesets until a paragraph's breaks come out unchanged, the pass stops at the first clean
+unit. A unit laid out at the top of the text (no space before its first paragraph) is typeset
+again when it no longer is. In containers of bounded height (pages, columns, line limits) a
+unit's position decides which container its lines land in, so units are kept only up to the
+first one typeset again. A change of appearance, container geometry, typesetter, a secure
+echo or `invalidateGlyphs` with a length change outside an edit still discards everything.
+
+`NSTextView` no longer invalidates the whole layout after each edit: the edit reaches the
+layout manager through the text storage, so the text view only fits its frame and redraws.
+Setting `linkTextAttributes` invalidates the TextKit 1 layout (links resolve when a paragraph
+is typeset). `usedRect(for:)` is cached until the lines change.
+
 ## Consequences
 
 - Both engines share one typesetter, so TextKit 2 fragment frames match TextKit 1 line rects
@@ -221,13 +254,15 @@ narrows the clip view can leave lines under the scroller.
   link runs take the text view's `linkTextAttributes` (or `linkRenderingAttributes` without a
   view) rather than asking the delegate per link; `renderingAttributes(forLink:at:)` answers
   with the delegate's attributes for callers.
-- Known limit, TextKit 1: NSLayoutManager still lays the whole document out again after
-  every edit (one CoreText conversion and typesetter for the whole text, which its tables and
-  text blocks rely on). At 3000 lines that is about 15 ms per keystroke on the Mac and about
-  2 s on the Windows PC (a 3000-line paste: 13.5 s there, against 8.5 s for TextKit 2).
-  TextKit 2 is the incremental engine (under 0.5 s for three keystrokes on the same PC);
-  making TextKit 1 incremental means per-paragraph typesetting in NSLayoutManager and is
-  left for later.
+- TextKit 1 relays out per paragraph (see the follow-up above): a keystroke typesets the
+  edited paragraph (a table, if the edit is in one) and moves the lines after it. In a
+  3000-line document a keystroke's layout pass took about 12 ms on the macOS host (debug
+  build) when every edit typeset the whole text; it now takes about 1.3 ms, of which the
+  typesetting is 0.03 ms and the rest moves the later lines (linear in their number, but
+  plain arithmetic). On the Windows PC the whole-text pass took about 2 s per keystroke.
+  `TextKit1IncrementalLayoutTests` compares the incremental layout with a full one (line rects, block
+  frames, hit testing, pixels) after edits at the start, middle and end, paragraph splits and
+  joins, wrapping changes, table cell edits and random edit sequences.
 - Not done: multiple text containers in TextKit 2 (Apple's TextKit 2 has one per layout
   manager too), vertical layout orientation, `NSTextAttachmentViewProvider` views in fragments
   (attachments draw their image or cell), `layoutQueue` (layout is synchronous; the property
