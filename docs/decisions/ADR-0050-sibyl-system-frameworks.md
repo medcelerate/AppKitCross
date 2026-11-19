@@ -71,11 +71,30 @@ declared.
 enumerated with stable unique IDs (FNV-1a of name and index), `MIDIObjectFindByUniqueID`,
 string and integer properties, `MIDIPacketList` (packets back to back, running status,
 SysEx across packets) and `MIDIEventList` (UMP MIDI 1.0 and 2.0 channel voice, system and
-7-bit SysEx converted to MIDI 1.0 bytes), with Apple's 16 error codes. Backends: WinMM
-through the `CWinMIDI` shim (short messages, SysEx through prepared headers) and the ALSA
-sequencer through `CALSASeq`, which `dlopen`s libasound as `CALSA` does; a null backend on
-macOS and `APPKITWIN_MIDI_BACKEND=null` records what was sent for tests. Setup changes are
-found by rescanning the destination list (every 2 s while a client exists) and delivered as
+7-bit SysEx converted to MIDI 1.0 bytes for the byte backends), with Apple's 16 error codes. Backends, one per
+process, named in one stderr line when the first client is created:
+
+| Backend | Where | Path |
+|---|---|---|
+| Windows MIDI Services (`CWinMIDI2`) | Windows 11 25H2 (build 26200) and later, with the `Windows.Devices.Midi2` API resolvable (in Windows once it ships there; until then `Windows.Devices.Midi2.dll` and `.pri` from the NuGet package next to the executable) and the service in Full mode | UMP: event lists go out as built (MIDI 1.0 and 2.0 alike; the service translates for MIDI 1.0 devices), packet lists converted bytes to UMP in group 0 |
+| WinMM (`CWinMIDI`) | Windows 10, Windows 11 24H2 (its older Windows MIDI Services never gets the API), Legacy API mode, a disabled `midisrv`, or a build without the API headers | MIDI 1.0 bytes: short messages, SysEx through prepared headers |
+| ALSA sequencer (`CALSASeq`, libasound `dlopen`ed as `CALSA` does) | Linux | MIDI 1.0 bytes |
+| null | macOS (the tests), or `APPKITWIN_MIDI_BACKEND=null` | records what was sent |
+
+`CWinMIDI2` asks the three questions of Microsoft's detect-midi-services sample (Windows
+build, does `MidiApi` resolve, `EnsureServiceAvailable()`) through a hand-declared
+`IMidiApiStatics`, so it needs nothing at build time to decide; the session, endpoint
+watcher and sends go through the C++/WinRT projection, which the build machine generates
+with `cppwinrt.exe` from the `Windows.Devices.Midi2` NuGet package's `.winmd` (written
+against 0.99.92-preview.11, the API lock) and puts on the C++ include path. Without those
+headers the shim compiles to the check alone and Windows falls back to WinMM, saying why.
+`APPKITWIN_MIDI_BACKEND=winmm` or `=midi2` forces one; a forced but unavailable Windows MIDI
+Services reports the reason and has no destinations rather than falling back. One endpoint
+is one destination (a multi-port MIDI 1.0 interface is one endpoint with a group per port;
+byte sends use group 0). The earlier App SDK (`Microsoft.Windows.Devices.Midi2` with
+`MidiDesktopAppSdkInitializer`) is superseded and not supported. Setup changes are
+found by rescanning the destination list (every 2 s while a client exists, and at once on a
+Windows MIDI Services endpoint-watcher event) and delivered as
 `.msgSetupChanged`. On corelibs `CFString` is `NSString` (the CoreText alias), so
 `"Sibyl" as CFString` compiles; `noErr` is declared `@_disfavoredOverload` so a file
 importing AVFAudio too is not ambiguous. Inputs, virtual endpoints, devices and entities,

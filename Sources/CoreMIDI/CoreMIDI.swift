@@ -1,6 +1,7 @@
 // CoreMIDI for Windows and Linux (ADR-0050): the MIDI output subset of Apple's C API under
-// its own names and Swift-imported signatures, over WinMM (`CWinMIDI`) on Windows and the
-// ALSA sequencer (`CALSASeq`, libasound dlopen'ed at run time) on Linux.
+// its own names and Swift-imported signatures, over Windows MIDI Services (`CWinMIDI2`,
+// Universal MIDI Packets through `Windows.Devices.Midi2`) or WinMM (`CWinMIDI`) on Windows
+// and the ALSA sequencer (`CALSASeq`, libasound dlopen'ed at run time) on Linux.
 //
 // Coverage: clients (`MIDIClientCreateWithBlock`, `MIDIClientDispose`) with setup-change
 // notifications, output ports (`MIDIOutputPortCreate`, `MIDIPortDispose`), destinations
@@ -9,16 +10,19 @@
 // (`MIDIPacketListInit`/`Add`/`MIDIPacketNext`) and `MIDISend` (running status, SysEx),
 // `MIDIEventList` building (`MIDIEventListInit`/`Add`/`MIDIEventPacketNext`) and
 // `MIDISendEventList` (UMP: MIDI 1.0 channel voice and system messages, 7-bit SysEx, MIDI
-// 2.0 channel voice down-converted to MIDI 1.0 bytes for the platform API).
+// 2.0 channel voice down-converted to MIDI 1.0 bytes for WinMM and ALSA; on Windows MIDI
+// Services the words go through untouched and `MIDISend`'s bytes are converted to UMP).
 //
 // Unique IDs are stable across replugging: a hash of the device name plus its index among
 // same-named devices. The destination list is polled every 2 s while a client exists; a
 // change calls every client's notify block with `.msgSetupChanged` on a CoreMIDI queue.
-// `APPKITWIN_MIDI_BACKEND=null` (and the macOS test build) uses an in-memory backend.
+// `APPKITWIN_MIDI_BACKEND=null` (and the macOS test build) uses an in-memory backend; on
+// Windows `=winmm` and `=midi2` force one of the two platform backends.
 //
 // Limitations: output only (no sources, input ports, virtual endpoints, devices/entities,
 // thru connections, MIDI-CI); timestamps are ignored (everything is sent immediately);
-// only `.msgSetupChanged` is delivered. Windows code is written against the WinMM docs.
+// only `.msgSetupChanged` is delivered. Windows code is written against the WinMM docs and
+// the `Windows.Devices.Midi2` metadata, not yet run on a PC with Windows MIDI Services.
 
 import Foundation
 
@@ -247,11 +251,19 @@ public func MIDISend(_ port: MIDIPortRef, _ dest: MIDIEndpointRef, _ pktlist: Un
         parser.feed(packet)
     }
     parser.finish()
+    if MIDIServer.shared.backendAcceptsUMP {
+        return MIDIServer.shared.sendUMP(_MIDIBytesToUMP(parser.messages), port: port, destination: dest)
+    }
     return MIDIServer.shared.send(parser.messages, port: port, destination: dest)
 }
 
 @discardableResult
 public func MIDISendEventList(_ port: MIDIPortRef, _ dest: MIDIEndpointRef, _ evtlist: UnsafePointer<MIDIEventList>) -> OSStatus {
+    if MIDIServer.shared.backendAcceptsUMP {
+        // The words as the app built them, whatever the list's protocol: the service takes
+        // MIDI 1.0 and 2.0 UMP alike and translates for the device.
+        return MIDIServer.shared.sendUMP(_MIDIEventPackets(evtlist).flatMap { $0 }, port: port, destination: dest)
+    }
     var converter = _UMPConverter()
     for words in _MIDIEventPackets(evtlist) {
         converter.feed(words)

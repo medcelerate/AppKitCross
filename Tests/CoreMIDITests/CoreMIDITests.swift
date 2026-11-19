@@ -77,8 +77,14 @@ final class CoreMIDITests: XCTestCase {
     override func setUp() {
         super.setUp()
         XCTAssertNotNil(_MIDITestHooks.nullBackend, "the macOS test build runs on the null backend")
+        _MIDITestHooks.setAcceptsUMP(false)
         _MIDITestHooks.resetDestinations()
         _MIDITestHooks.clearSent()
+    }
+
+    override func tearDown() {
+        _MIDITestHooks.setAcceptsUMP(false)
+        super.tearDown()
     }
 
     private func firstDestination() -> MIDIEndpointRef {
@@ -265,5 +271,85 @@ final class CoreMIDITests: XCTestCase {
         parser.feed([0x03, 0xF7, 0xC0, 0x01, 0x02, 0xFE])
         parser.finish()
         XCTAssertEqual(parser.messages, [.sysEx([0xF0, 0x01, 0x02, 0x03, 0xF7]), .short([0xC0, 0x01]), .short([0xC0, 0x02]), .short([0xFE])])
+    }
+
+    // MARK: Windows MIDI Services paths (bytes to UMP, UMP passthrough)
+
+    private func ump(_ bytes: [UInt8]) -> [UInt32] {
+        var parser = _MIDIByteStreamParser()
+        parser.feed(bytes)
+        parser.finish()
+        return _MIDIBytesToUMP(parser.messages)
+    }
+
+    func testBytesToUMPChannelVoiceAndSystem() {
+        XCTAssertEqual(ump([0x90, 0x3C, 0x7F]), [0x2090_3C7F])
+        XCTAssertEqual(ump([0xC2, 0x05]), [0x20C2_0500], "program change: two bytes, data 2 zero")
+        XCTAssertEqual(ump([0xD3, 0x40]), [0x20D3_4000])
+        // Running status: the second note on reuses 0x90.
+        XCTAssertEqual(ump([0x90, 0x3C, 0x7F, 0x3E, 0x60]), [0x2090_3C7F, 0x2090_3E60])
+        // A real-time byte inside a message goes out first, as type 0x1.
+        XCTAssertEqual(ump([0xB1, 0x07, 0xF8, 0x64]), [0x10F8_0000, 0x20B1_0764])
+        // System common: song position (2 data bytes), song select (1), tune request (0).
+        XCTAssertEqual(ump([0xF2, 0x10, 0x20, 0xF3, 0x05, 0xF6]), [0x10F2_1020, 0x10F3_0500, 0x10F6_0000])
+        XCTAssertEqual(_MIDIBytesToUMP([.short([0x80, 0x3C, 0x00])], group: 3), [0x2380_3C00])
+    }
+
+    func testBytesToUMPSysExPackets() {
+        // Sibyl's 20-byte MSC SysEx: 18 data bytes become start, continue, end of six each.
+        let sysEx: [UInt8] = [0xF0, 0x7F, 0x01, 0x02, 0x01, 0x01] + Array("1.50".utf8) + [0x00] + Array("12345678".utf8) + [0xF7]
+        XCTAssertEqual(sysEx.count, 20)
+        let words = ump(sysEx)
+        XCTAssertEqual(words.count, 6)
+        XCTAssertEqual(words.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element >> 28 }, [3, 3, 3])
+        XCTAssertEqual(words.enumerated().filter { $0.offset % 2 == 0 }.map { ($0.element >> 20) & 0xF }, [1, 2, 3], "start, continue, end")
+        XCTAssertEqual(words.enumerated().filter { $0.offset % 2 == 0 }.map { ($0.element >> 16) & 0xF }, [6, 6, 6])
+        XCTAssertEqual(words[0], 0x3016_7F01)
+        XCTAssertEqual(words[1], 0x0201_0131)   // 02 01 01 '1'
+        XCTAssertEqual(words[4], 0x3036_3334)   // end, six bytes: '3' '4'
+        XCTAssertEqual(words[5], 0x3536_3738)   // '5' '6' '7' '8'
+
+        // Short ones: complete in one packet; seven bytes as start (6) and end (1).
+        XCTAssertEqual(ump([0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7]), [0x3004_7E7F, 0x0601_0000])
+        XCTAssertEqual(ump([0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7]), [0x3016_0102, 0x0304_0506, 0x3031_0700, 0x0000_0000])
+        XCTAssertEqual(ump([0xF0, 0xF7]), [0x3000_0000, 0x0000_0000])
+
+        // The inverse of the WinMM path's conversion.
+        var back = _UMPConverter()
+        back.feed(words)
+        XCTAssertEqual(back.messages, [.sysEx(sysEx)])
+    }
+
+    func testUMPPassthroughOnUMPBackend() {
+        guard let sender = SibylStyleSender() else { return XCTFail("client") }
+        _MIDITestHooks.setAcceptsUMP(true)
+        let endpoint = MIDIGetDestination(1)
+
+        // MIDI 2.0 event list: the words arrive exactly as built (group 1 kept).
+        var list = MIDIEventList()
+        var packet = MIDIEventListInit(&list, ._2_0)
+        let words: [UInt32] = [0x4193_3C00, 0xFFFF_0000,
+                               0x3016_7E7F, 0x0601_0203,
+                               0x3032_0405, 0x0000_0000,
+                               0x10F8_0000]
+        packet = MIDIEventListAdd(&list, MemoryLayout<MIDIEventList>.size, packet, 0, words.count, words)
+        XCTAssertEqual(MIDISendEventList(sender.outputPort, endpoint, &list), noErr)
+        XCTAssertEqual(_MIDITestHooks.sentUMP, [.init(destinationName: "Null MIDI Out B", words: words)])
+        XCTAssertEqual(_MIDITestHooks.sent, [], "nothing went through the byte path")
+
+        // A MIDI 1.0 event list (Sibyl's sendShort) is not converted either.
+        _MIDITestHooks.clearSent()
+        XCTAssertEqual(sender.sendShort(0x90, 0x3C, 0x7F, to: endpoint), noErr)
+        XCTAssertEqual(_MIDITestHooks.sentUMP.map(\.words), [[0x2090_3C7F]])
+
+        // A byte packet list is converted to UMP.
+        _MIDITestHooks.clearSent()
+        let sysEx: [UInt8] = [0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7]
+        XCTAssertEqual(sender.sendSysEx(sysEx, to: endpoint), noErr)
+        XCTAssertEqual(_MIDITestHooks.sentUMP.map(\.words), [[0x3004_7E7F, 0x0601_0000]])
+
+        // Errors are the same as on the byte path.
+        XCTAssertEqual(MIDISendEventList(0xBAD, endpoint, &list), kMIDIInvalidPort)
+        XCTAssertEqual(MIDISendEventList(sender.outputPort, 0xBAD, &list), kMIDIUnknownEndpoint)
     }
 }

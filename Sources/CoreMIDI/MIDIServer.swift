@@ -42,6 +42,7 @@ final class MIDIServer: @unchecked Sendable {
     private var opened: Set<MIDIEndpointRef> = []
     private var lastScan: DispatchTime?
     private var timer: DispatchSourceTimer?
+    private var announced = false
 
     let notificationQueue = DispatchQueue(label: "AppKitCross.CoreMIDI.notifications")
     private let pollQueue = DispatchQueue(label: "AppKitCross.CoreMIDI.setup-poll", qos: .utility)
@@ -153,6 +154,12 @@ final class MIDIServer: @unchecked Sendable {
         refresh(force: false)   // the first scan establishes the baseline without notifying
         lock.lock()
         defer { lock.unlock() }
+        if !announced {
+            announced = true
+            if let line = backend.startupLine(destinationCount: online.count) {
+                FileHandle.standardError.write(Data("CoreMIDI: \(line)\n".utf8))
+            }
+        }
         let ref = allocateRef()
         clients[ref] = Client(name: name, notify: notify)
         startPollingLocked()
@@ -257,24 +264,50 @@ final class MIDIServer: @unchecked Sendable {
 
     // MARK: Sending
 
+    /// Whether `MIDISend`/`MIDISendEventList` should hand the backend UMP words.
+    var backendAcceptsUMP: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return backend.acceptsUMP
+    }
+
+    /// Checks the port and endpoint and opens the destination on first use. Under the lock.
+    private func openedDestinationLocked(port: MIDIPortRef, ref: MIDIEndpointRef) -> Result<MIDIPlatformDestination, _MIDIStatus> {
+        guard ports[port] != nil else { return .failure(_MIDIStatus(code: kMIDIInvalidPort)) }
+        guard let endpoint = endpoints[ref] else {
+            return .failure(_MIDIStatus(code: clients[ref] != nil || ports[ref] != nil ? kMIDIWrongEndpointType : kMIDIUnknownEndpoint))
+        }
+        guard online.contains(ref) else { return .failure(_MIDIStatus(code: kMIDIUnknownEndpoint)) }
+        if !opened.contains(ref) {
+            let status = backend.open(endpoint.destination)
+            guard status == noErr else { return .failure(_MIDIStatus(code: status)) }
+            opened.insert(ref)
+        }
+        return .success(endpoint.destination)
+    }
+
+    func sendUMP(_ words: [UInt32], port: MIDIPortRef, destination ref: MIDIEndpointRef) -> OSStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        switch openedDestinationLocked(port: port, ref: ref) {
+        case .failure(let status): return status.code
+        case .success(let destination): return words.isEmpty ? noErr : backend.sendUMP(words, to: destination)
+        }
+    }
+
     func send(_ messages: [_MIDIMessage], port: MIDIPortRef, destination ref: MIDIEndpointRef) -> OSStatus {
         lock.lock()
         defer { lock.unlock() }
-        guard ports[port] != nil else { return kMIDIInvalidPort }
-        guard let endpoint = endpoints[ref] else {
-            return clients[ref] != nil || ports[ref] != nil ? kMIDIWrongEndpointType : kMIDIUnknownEndpoint
-        }
-        guard online.contains(ref) else { return kMIDIUnknownEndpoint }
-        if !opened.contains(ref) {
-            let status = backend.open(endpoint.destination)
-            guard status == noErr else { return status }
-            opened.insert(ref)
+        let destination: MIDIPlatformDestination
+        switch openedDestinationLocked(port: port, ref: ref) {
+        case .failure(let status): return status.code
+        case .success(let value): destination = value
         }
         for message in messages {
             let status: OSStatus
             switch message {
-            case .short(let bytes): status = backend.sendShort(bytes, to: endpoint.destination)
-            case .sysEx(let bytes): status = backend.sendLong(bytes, to: endpoint.destination)
+            case .short(let bytes): status = backend.sendShort(bytes, to: destination)
+            case .sysEx(let bytes): status = backend.sendLong(bytes, to: destination)
             }
             if status != noErr { return status }
         }

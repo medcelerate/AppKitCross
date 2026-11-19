@@ -352,3 +352,37 @@ struct _UMPConverter {
         }
     }
 }
+
+/// Converts MIDI 1.0 messages (from `_MIDIByteStreamParser`) to Universal MIDI Packet words
+/// in `group`, the inverse of `_UMPConverter` for the byte path of a UMP platform (Windows
+/// MIDI Services): channel voice as MIDI 1.0 channel voice (type 0x2), system common and
+/// real time as type 0x1, SysEx as 7-bit SysEx (type 0x3) packets of up to six bytes, F0 and
+/// F7 dropped, marked complete (0), start (1), continue (2) and end (3).
+func _MIDIBytesToUMP(_ messages: [_MIDIMessage], group: UInt8 = 0) -> [UInt32] {
+    let groupBits = UInt32(group & 0xF) << 24
+    var words: [UInt32] = []
+    for message in messages {
+        switch message {
+        case .short(let bytes):
+            guard let status = bytes.first, status >= 0x80, status != 0xF0, status != 0xF7 else { continue }
+            let data1 = bytes.count > 1 ? UInt32(bytes[1] & 0x7F) : 0
+            let data2 = bytes.count > 2 ? UInt32(bytes[2] & 0x7F) : 0
+            let type: UInt32 = status < 0xF0 ? 0x2 : 0x1
+            words.append(type << 28 | groupBits | UInt32(status) << 16 | data1 << 8 | data2)
+        case .sysEx(let bytes):
+            var payload = bytes[...]
+            if payload.first == 0xF0 { payload = payload.dropFirst() }
+            if payload.last == 0xF7 { payload = payload.dropLast() }
+            let data = payload.map { $0 & 0x7F }
+            let chunks = data.isEmpty ? [[]] : stride(from: 0, to: data.count, by: 6).map { Array(data[$0..<min($0 + 6, data.count)]) }
+            for (index, chunk) in chunks.enumerated() {
+                let form: UInt32
+                if chunks.count == 1 { form = 0 } else if index == 0 { form = 1 } else if index == chunks.count - 1 { form = 3 } else { form = 2 }
+                let six = chunk + [UInt8](repeating: 0, count: 6 - chunk.count)
+                words.append(0x3 << 28 | groupBits | form << 20 | UInt32(chunk.count) << 16 | UInt32(six[0]) << 8 | UInt32(six[1]))
+                words.append(UInt32(six[2]) << 24 | UInt32(six[3]) << 16 | UInt32(six[4]) << 8 | UInt32(six[5]))
+            }
+        }
+    }
+    return words
+}
