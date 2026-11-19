@@ -40,16 +40,27 @@ public enum PlatformCrashReporting {
     /// The identifier reports are filed under: the Info.plist's `CFBundleIdentifier`, else
     /// the executable's name.
     public static var applicationIdentifier: String {
-        if let id = Bundle.main.bundleIdentifier, !id.isEmpty { return id }
+        if let id = infoValue("CFBundleIdentifier"), !id.isEmpty { return id }
         var name = ProcessInfo.processInfo.processName
         if name.lowercased().hasSuffix(".exe") { name = String(name.dropLast(4)) }
         return name.isEmpty ? "app" : name
     }
 
     static var applicationName: String {
-        var name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? ProcessInfo.processInfo.processName
+        var name = infoValue("CFBundleName") ?? ProcessInfo.processInfo.processName
         if name.lowercased().hasSuffix(".exe") { name = String(name.dropLast(4)) }
         return name.isEmpty ? "app" : name
+    }
+
+    /// An Info.plist string of the app. Off macOS it is read from the port's app layout
+    /// (ADR-0045) directly rather than through `Bundle.main`, so the reporter does not depend
+    /// on the Bundle hooks it may have to report a crash in.
+    private static func infoValue(_ key: String) -> String? {
+        #if os(macOS)
+        return Bundle.main.object(forInfoDictionaryKey: key) as? String
+        #else
+        return _AppBundle.main.infoDictionary[key] as? String
+        #endif
     }
 
     /// Installs the handler into `directory` (default: `reportsDirectory`), which is created
