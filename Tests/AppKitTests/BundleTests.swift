@@ -281,6 +281,14 @@ final class BundleTests: XCTestCase {
         // The main bundle's Info.plist and resources come from the app layout.
         XCTAssertEqual(Bundle.main.infoDictionary?["CFBundleName"] as? String, _AppBundle.main.infoDictionary["CFBundleName"] as? String)
         XCTAssertEqual(Bundle.main.resourceURL, _AppBundle.main.resourceURL)
+        // `Any?` comes back through the caller's buffer (an indirect result): the main bundle's
+        // through the port, another bundle's through corelibs' own method (ADR-0046 found the
+        // four-word hook returning it in registers, which crashed release builds).
+        let name = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        XCTAssertEqual(name, _AppBundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: "NoSuchKey"))
+        // corelibs' own answer for another bundle comes back intact through the same path.
+        XCTAssertEqual(bundle.object(forInfoDictionaryKey: "CFBundleIdentifier") as? String, bundle.infoDictionary?["CFBundleIdentifier"] as? String)
         // Foundation's own API the port adds.
         XCTAssertEqual(String(localized: "greeting", bundle: bundle), "Hallo")
         let n = 1

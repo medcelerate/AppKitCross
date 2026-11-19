@@ -45,6 +45,13 @@ function that forwarded to a third. `-Xfrontend -disable-cmo` did not avoid it; 
 private helper a concrete result type and calling it directly from the deprecated spellings
 did, without changing any public signature.
 
+The first release runs of the bundled apps found a calling-convention bug in the ADR-0045
+`Bundle` hooks: `object(forInfoDictionaryKey:)` returns `Any?`, which is address-only and so
+comes back through a caller-provided buffer, but its C trampoline returned four register
+words. Debug builds happened to read nil; release builds crashed (DailyTodo through
+`UNUserNotificationCenter`, SIGSEGV on Linux, 0xC000001D on Windows). The trampoline now
+takes a `swift_indirect_result` buffer, and BundleTests calls the method on Linux.
+
 ### 3. `swift package bundle`
 
 A command plugin, `AppBundle` (verb `bundle`, a plugin product so dependents get it), builds

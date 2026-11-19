@@ -7,7 +7,7 @@
 // method receives `self` in), so it can stand in for the method; it forwards to a plain C-ABI
 // dispatcher the port sets from Swift, with the hook's index. Values cross as the words the Swift
 // convention passes them in: String, String? and URL? are two words, arrays and dictionaries one,
-// Any? four.
+// Any? four (returned indirectly: it is address-only).
 
 #ifndef CBUNDLEHOOKS_H
 #define CBUNDLEHOOKS_H
