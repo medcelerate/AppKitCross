@@ -180,6 +180,7 @@
     "NSTextField",
     "NSTextFieldCell",
     "NSTextFinder",
+    "NSTextInputContext",
     "NSTextLayoutFragment",
     "NSTextLayoutManager",
     "NSTextLineFragment",

@@ -55,6 +55,30 @@ import CoreText
     /// Input-method composition in progress (drawn underlined).
     internal var _markedRange: NSRange? = nil
     internal var _markedSelection = NSRange(location: 0, length: 0)
+    /// The composition's clauses relative to `_markedRange` (thin, or thick for the clause
+    /// being converted), from the underline styles of the marked string (ADR-0047).
+    internal var _markedClauses: [_TextInputClause] = []
+
+    /// The marked-text underlines inside `range` (absolute UTF-16), as rectangles from
+    /// `rects(range)`: one line per clause, 1 pt thin or 2 pt thick, a 1 pt gap between
+    /// clauses as macOS draws them.
+    internal func _drawMarkedUnderlines(in visible: NSRange? = nil, rects: (NSRange) -> [NSRect]) {
+        guard let m = _markedRange, m.length > 0 else { return }
+        (_textColor ?? .textColor).setFill()
+        let clauses = _markedClauses.isEmpty ? [_TextInputClause(range: NSRange(location: 0, length: m.length), thick: false)] : _markedClauses
+        for (i, clause) in clauses.enumerated() {
+            var r = NSRange(location: m.location + clause.range.location, length: clause.range.length)
+            if let v = visible { r = NSIntersectionRange(r, v) }
+            guard r.length > 0 else { continue }
+            let last = i == clauses.count - 1
+            for rect in rects(r) {
+                let h: CGFloat = clause.thick ? 2 : 1
+                let w = rect.width - (last ? 0 : 1)
+                guard w > 0 else { continue }
+                NSBezierPath.fill(NSRect(x: rect.minX, y: rect.maxY - 1 - h, width: w, height: h))
+            }
+        }
+    }
     internal var _clickCount = 0
     /// Horizontal scroll of the content for single-line field editors.
     internal var _scrollX: CGFloat = 0
@@ -89,6 +113,7 @@ import CoreText
         if notify { _noteDidChange() }
         _scrollSelectionIntoView()
         needsDisplay = true
+        _inputContextStorage?._clientDidChange()
     }
 
     internal func _noteDidChange() {
@@ -353,15 +378,11 @@ import CoreText
             if l.range.length > 0 {
                 _substring(l.range).draw(at: NSPoint(x: x, y: l.y), withAttributes: _attributes)
             }
-            // Marked (composing) text: underline.
-            if let m = _markedRange, m.length > 0 {
-                let a = max(m.location, l.range.location), b = min(m.location + m.length, l.range.location + l.range.length)
-                if b > a {
-                    let x0 = x + _width(NSRange(location: l.range.location, length: a - l.range.location))
-                    let x1 = x + _width(NSRange(location: l.range.location, length: b - l.range.location))
-                    (_textColor ?? .textColor).setFill()
-                    NSBezierPath.fill(NSRect(x: x0, y: l.y + lh - 2, width: x1 - x0, height: 1))
-                }
+            // Marked (composing) text: underlined by clause.
+            _drawMarkedUnderlines(in: l.range) { r in
+                let x0 = x + _width(NSRange(location: l.range.location, length: r.location - l.range.location))
+                let x1 = x + _width(NSRange(location: l.range.location, length: NSMaxRange(r) - l.range.location))
+                return [NSRect(x: x0, y: l.y, width: x1 - x0, height: lh)]
             }
         }
         if focused && _isEditable && sel.length == 0 {
@@ -573,6 +594,7 @@ import CoreText
             _scrollSelectionIntoView()
             _selectionDidChange()
             needsDisplay = true
+            _inputContextStorage?._clientDidChange()
         }
     }
 
@@ -600,6 +622,7 @@ import CoreText
             _scrollX = 0
             _invalidateLayout()
             needsDisplay = true
+            _inputContextStorage?._clientDidChange()
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstext/subscript(_:)

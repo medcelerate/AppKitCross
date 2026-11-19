@@ -109,12 +109,12 @@ final class SwiftUIStateTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(texts(h).contains("focus: none submitted: 0"))
             allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Focus email" }?.performClick(nil)
             h.layoutSubtreeIfNeeded()
-            XCTAssertNotNil(email.currentEditor, "setting the focus state focuses the field")
+            XCTAssertNotNil(email.currentEditor(), "setting the focus state focuses the field")
             XCTAssertTrue(texts(h).contains("focus: email submitted: 0"))
             // Clicking into the other field moves the state along.
             _ = w.makeFirstResponder(name)
             h.layoutSubtreeIfNeeded()
-            XCTAssertNotNil(name.currentEditor)
+            XCTAssertNotNil(name.currentEditor())
             XCTAssertTrue(texts(h).contains("focus: name submitted: 0"), texts(h).joined(separator: "|"))
             // Return in the email field submits.
             _ = w.makeFirstResponder(email)

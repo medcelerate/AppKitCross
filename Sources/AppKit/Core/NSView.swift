@@ -1307,12 +1307,17 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/inliveresize
     @MainActor open var inLiveResize: Bool { _window?.inLiveResize ?? false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/inputcontext
-    /// Nil for a view that is not an `NSTextInputClient`; text input contexts are not
-    /// modelled yet (ADR-0036), so a client view still stops here.
+    /// Nil for a view that is not an `NSTextInputClient`; a client view makes its context on
+    /// first use and keeps it (ADR-0047).
     @MainActor open var inputContext: NSTextInputContext? {
-        guard self is NSTextInputClient else { return nil }
-        unimplemented("NSView.inputContext for NSTextInputClient views — NSTextInputContext is a generated stub")
+        guard let client = self as? NSTextInputClient else { return nil }
+        if let c = _inputContextStorage { return c }
+        let c = NSTextInputContext(client: client)
+        _inputContextStorage = c
+        return c
     }
+    /// The context `inputContext` made, if any (not created by reading this).
+    internal var _inputContextStorage: NSTextInputContext?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/intrinsiccontentsize
     @MainActor open var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/invalidateintrinsiccontentsize()

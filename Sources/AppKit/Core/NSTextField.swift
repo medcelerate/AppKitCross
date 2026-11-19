@@ -51,8 +51,9 @@ import CoreText
 
     // MARK: Field editor
 
+    /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscontrol/currenteditor()
     /// The field editor while this field is being edited.
-    public var currentEditor: NSText? { _editor }
+    @MainActor open override func currentEditor() -> NSText? { _editor }
 
     private func _editorFrame() -> NSRect {
         guard let cell = _fieldCell else { return bounds }
