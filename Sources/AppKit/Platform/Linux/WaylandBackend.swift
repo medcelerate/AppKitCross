@@ -75,6 +75,8 @@ final class WaylandBackend: PlatformBackend {
     private(set) var lastInputSerial: UInt32 = 0
     /// The clipboard and drag and drop over the seat's data device (WaylandDataDevice.swift).
     private(set) var dataDevice: WaylandDataDevice!
+    /// Input methods (zwp_text_input_v3, ADR-0047).
+    private(set) var textInput: WaylandTextInput!
     var dragDrop: (any PlatformDragDrop)? { dataDevice }
     /// Printing (LinuxPrinting.swift): Cairo PDF and CUPS.
     let linuxPrinting = LinuxPrintBackend()
@@ -147,6 +149,7 @@ final class WaylandBackend: PlatformBackend {
         var fds: [Int32] = [-1, -1]
         if pipe(&fds) == 0 { wakePipe = fds }
         dataDevice = WaylandDataDevice(backend: self)
+        textInput = WaylandTextInput(backend: self)
         registry = wl_display_get_registry(d)
         let registryListener = WaylandBackend.listener(wl_registry_listener(
             global: { data, registry, name, interface, version in
@@ -231,6 +234,8 @@ final class WaylandBackend: PlatformBackend {
             decorationManager = OpaquePointer(appkitwin_wl_registry_bind(registry, name, interface, 1))
         case "wl_data_device_manager":
             dataDevice.managerAdded(name: name, version: version)
+        case "zwp_text_input_manager_v3":
+            textInput.managerAdded(name: name, version: version)
         default:
             break
         }
@@ -246,6 +251,7 @@ final class WaylandBackend: PlatformBackend {
 
     private func seatCapabilities(_ caps: UInt32) {
         dataDevice.seatDidChange()
+        textInput.seatDidChange()
         let hasPointer = caps & UInt32(WL_SEAT_CAPABILITY_POINTER.rawValue) != 0
         let hasKeyboard = caps & UInt32(WL_SEAT_CAPABILITY_KEYBOARD.rawValue) != 0
         if hasPointer && pointer == nil {

@@ -166,16 +166,16 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
             let c = makeCombo(in: w)
             c.completes = true
             click(w, NSPoint(x: 60, y: 112))
-            XCTAssertNotNil(c.currentEditor)
+            XCTAssertNotNil(c.currentEditor())
             key(w, "a")
             XCTAssertEqual(c.stringValue, "Apple", "the first item with the typed prefix completes it")
-            XCTAssertEqual(c.currentEditor?.selectedRange, NSRange(location: 1, length: 4), "the completed part is selected")
+            XCTAssertEqual(c.currentEditor()?.selectedRange, NSRange(location: 1, length: 4), "the completed part is selected")
             key(w, "p")
             XCTAssertEqual(c.stringValue, "Apple")
-            XCTAssertEqual(c.currentEditor?.selectedRange, NSRange(location: 2, length: 3))
+            XCTAssertEqual(c.currentEditor()?.selectedRange, NSRange(location: 2, length: 3))
             key(w, "r")
             XCTAssertEqual(c.stringValue, "Apricot")
-            XCTAssertEqual(c.currentEditor?.selectedRange, NSRange(location: 3, length: 4))
+            XCTAssertEqual(c.currentEditor()?.selectedRange, NSRange(location: 3, length: 4))
             key(w, "\u{7F}")       // delete: removes the selected completion, no new completion
             XCTAssertEqual(c.stringValue, "Apr")
             key(w, "x")
@@ -211,7 +211,7 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(c._isPopUpOpen)
             click(w, c.convert(NSPoint(x: button.midX, y: button.midY), to: nil))
             XCTAssertTrue(c._isPopUpOpen)
-            XCTAssertNotNil(c.currentEditor, "clicking the button starts editing too")
+            XCTAssertNotNil(c.currentEditor(), "clicking the button starts editing too")
             XCTAssertEqual(log.events, ["NSComboBoxWillPopUpNotification", "delegate willPopUp"])
             let popUp = _NSComboBoxPopUp.current!
             XCTAssertTrue(popUp.window.isVisible)
@@ -234,7 +234,7 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(popUp.window.isVisible)
             XCTAssertEqual(c.stringValue, "Banana")
             XCTAssertEqual(c.indexOfSelectedItem, 2)
-            XCTAssertEqual(c.currentEditor?.string, "Banana", "the editor shows the chosen item")
+            XCTAssertEqual(c.currentEditor()?.string, "Banana", "the editor shows the chosen item")
             XCTAssertEqual(log.events, ["delegate isChanging 2", "NSComboBoxWillDismissNotification", "delegate willDismiss", "NSComboBoxSelectionDidChangeNotification", "delegate didChange 2"],
                            "the press highlights the row (changing), the release chooses it")
             XCTAssertEqual(actions, 1)
@@ -286,7 +286,7 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
             c.target = target
             c.action = Selector(("chosen:"))
             click(w, NSPoint(x: 60, y: 112))
-            XCTAssertNotNil(c.currentEditor)
+            XCTAssertNotNil(c.currentEditor())
             key(w, "\u{F701}", code: 125)            // down opens the list
             XCTAssertTrue(c._isPopUpOpen)
             XCTAssertEqual(c.indexOfSelectedItem, -1)
@@ -307,7 +307,7 @@ final class ComboBoxTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(c.stringValue, "Apricot")
             XCTAssertEqual(log.events.last, "delegate didChange 1")
             XCTAssertEqual(actions, 1)
-            XCTAssertNotNil(c.currentEditor, "the field keeps editing")
+            XCTAssertNotNil(c.currentEditor(), "the field keeps editing")
             // A click on a row works after a keyboard-opened list too.
             key(w, "\u{F701}", code: 125)
             XCTAssertTrue(c._isPopUpOpen)
