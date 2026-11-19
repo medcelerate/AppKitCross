@@ -39,6 +39,53 @@ final class Win32Window: PlatformWindow {
     private var tracedNonClientHover = false
     /// An input method composition is in progress (WM_IME_STARTCOMPOSITION ... ENDCOMPOSITION).
     private var composing = false
+    /// The Text Services Framework for this window's text input (ADR-0047), made when a text
+    /// input client of the window is first activated. Nil without TSF: IMM32 (WM_IME_*) then.
+    private var textServices: Win32TextServices?
+    private var textServicesUnavailable = ProcessInfo.processInfo.environment["APPKITWIN_TSF"] == "0"
+    /// TSF composes into the focused client: the WM_IME_* messages are not ours.
+    private var tsfOwnsInput: Bool { textServices?.isFocused == true }
+
+    /// The core's text input notifications (NSTextInputContext, ADR-0047).
+    func textInputChanged(_ change: PlatformTextInputChange) {
+        if change == .activated, textServices == nil, !textServicesUnavailable { makeTextServices() }
+        if let textServices {
+            textServices.handle(change)
+            return
+        }
+        // IMM32: the composition is the input method context's.
+        guard let hwnd else { return }
+        switch change {
+        case .deactivated, .discardComposition:
+            if composing, let himc = ImmGetContext(hwnd) {
+                _ = ImmNotifyIME(himc, DWORD(NI_COMPOSITIONSTR), DWORD(change == .discardComposition ? CPS_CANCEL : CPS_COMPLETE), 0)
+                _ = ImmReleaseContext(hwnd, himc)
+            }
+        case .layoutChanged, .selectionChanged, .textChanged, .activated:
+            if let input = owner?.platformWindowTextInput() { positionInputMethodWindows(input) }
+        }
+    }
+
+    /// Makes the window's TSF document. `APPKITWIN_IME_LAYOUT=<klid>` also makes the Microsoft
+    /// IME (Japanese) the process's text service in romaji-to-hiragana mode and
+    /// `APPKITWIN_IME_OPEN=0|1` sets its open state, for scripted checks.
+    private func makeTextServices() {
+        guard let hwnd else { return }
+        textServices = Win32TextServices(
+            hwnd: hwnd,
+            input: { [weak self] in self?.owner?.platformWindowTextInput() },
+            geometry: { [weak self] in (self?.scale ?? 1, self?.contentSize.height ?? 0) })
+        guard let textServices else { textServicesUnavailable = true; return }
+        let env = ProcessInfo.processInfo.environment
+        if env["APPKITWIN_IME_LAYOUT"] != nil {
+            // After the thread manager exists: activating earlier is reset by it.
+            let hr = Win32TextServices.activateMicrosoftIME()
+            // Hiragana: native | full shape | roman (TF_CONVERSIONMODE_*).
+            textServices.setConversion(0x19)
+            _TextInputTrace.log("tsf activate Microsoft IME (Japanese) hr 0x\(String(UInt32(bitPattern: hr), radix: 16)), conversion 0x\(String(textServices.conversion, radix: 16))")
+        }
+        if let open = env["APPKITWIN_IME_OPEN"] { textServices.setIMEOpen(open == "1") }
+    }
     private var dpi: UINT = 96
     /// UI Automation provider root (CUIARoot*, Win32Accessibility.swift), made on demand.
     var uiaRoot: OpaquePointer? = nil
@@ -1412,6 +1459,8 @@ final class Win32Window: PlatformWindow {
         case WM_DESTROY:
             if NSView._traceInvalidation { NSView._trace("win32 WM_DESTROY '\(title)' destroying \(destroying)") }
             accessibilityWindowDestroyed()
+            textServices?.invalidate()
+            textServices = nil
             if let hwnd { backend.win32DragDrop.revoke(hwnd); backend.menuBar.windowDestroyed(hwnd) }
             backend.unregister(self)
             tearDownLayerHosting()
@@ -1426,9 +1475,14 @@ final class Win32Window: PlatformWindow {
             isKey = true
             owner?.platformWindowDidBecomeKey()
             activateTestInputMethodIfRequested()
+            textServices?.focus()
             return nil      // DefWindowProc activates the input method context for the window
+        case WM_INPUTLANGCHANGE:
+            _TextInputTrace.log("input language changed: keyboard layout 0x\(String(UInt(bitPattern: Int(lParam)), radix: 16)), charset \(wParam)")
+            return nil
         case WM_KILLFOCUS:
             isKey = false
+            textServices?.blur()
             owner?.platformWindowDidResignKey()
             return nil      // ... and deactivates it
         case WM_MOUSEACTIVATE:
@@ -1502,6 +1556,13 @@ final class Win32Window: PlatformWindow {
             if let hwnd { _ = KillTimer(hwnd, Win32Window.wheelGestureTimer) }
             endWheelGesture()
             return 0
+        case WM_IME_STARTCOMPOSITION where tsfOwnsInput:
+            // The text services (TSF, ADR-0047) run the composition: the IME messages are consumed.
+            return 0
+        case WM_IME_COMPOSITION where tsfOwnsInput:
+            return 0
+        case WM_IME_ENDCOMPOSITION where tsfOwnsInput:
+            return 0
         case WM_IME_STARTCOMPOSITION:
             // The text view draws the composition (marked text) itself, so the input
             // method's own composition window is suppressed (no DefWindowProc) and its
@@ -1518,7 +1579,8 @@ final class Win32Window: PlatformWindow {
             if flags & DWORD(GCS_RESULTSTR) != 0 {
                 // Committed text (replaces the marked text); a new composition may follow below.
                 let result = compositionString(himc, DWORD(GCS_RESULTSTR))
-                if !result.isEmpty { input.insertText(result) }
+                _TextInputTrace.log("imm result \(_TextInputTrace.quote(result))")
+                if !result.isEmpty { if let session = input.session { session.commit(result) } else { input.insertText(result) } }
                 handled = true
             }
             if flags & DWORD(GCS_COMPSTR) != 0 {
@@ -1527,14 +1589,42 @@ final class Win32Window: PlatformWindow {
                 if flags & DWORD(GCS_CURSORPOS) != 0 {
                     cursor = max(0, min(cursor, Int(ImmGetCompositionStringW(himc, DWORD(GCS_CURSORPOS), nil, 0))))
                 }
-                input.setMarkedText(composition, NSRange(location: cursor, length: 0))
+                // Clause attributes, one byte per unit: the target clause (being converted)
+                // is ATTR_TARGET_CONVERTED or ATTR_TARGET_NOTCONVERTED, drawn thick.
+                var clauses: [_TextInputClause] = []
+                if flags & DWORD(GCS_COMPATTR) != 0 {
+                    let n = Int(ImmGetCompositionStringW(himc, DWORD(GCS_COMPATTR), nil, 0))
+                    if n > 0 {
+                        var attrs = [UInt8](repeating: 0, count: n)
+                        _ = attrs.withUnsafeMutableBytes { ImmGetCompositionStringW(himc, DWORD(GCS_COMPATTR), $0.baseAddress, DWORD(n)) }
+                        var i = 0
+                        while i < attrs.count {
+                            let thick = attrs[i] == UInt8(ATTR_TARGET_CONVERTED) || attrs[i] == UInt8(ATTR_TARGET_NOTCONVERTED)
+                            var j = i
+                            while j < attrs.count, (attrs[j] == UInt8(ATTR_TARGET_CONVERTED) || attrs[j] == UInt8(ATTR_TARGET_NOTCONVERTED)) == thick { j += 1 }
+                            clauses.append(_TextInputClause(range: NSRange(location: i, length: j - i), thick: thick))
+                            i = j
+                        }
+                        if clauses.count == 1, !clauses[0].thick { clauses = [] }
+                    }
+                }
+                _TextInputTrace.log("imm composition \(_TextInputTrace.quote(composition)) cursor \(cursor)")
+                if let session = input.session {
+                    session.setComposition(composition, selection: NSRange(location: cursor, length: 0), clauses: clauses)
+                } else {
+                    input.setMarkedText(composition, NSRange(location: cursor, length: 0))
+                }
                 positionInputMethodWindows(input)
                 handled = true
             }
             return handled ? 0 : nil
         case WM_IME_ENDCOMPOSITION:
             composing = false
-            if let input = owner?.platformWindowTextInput(), input.hasMarkedText() { input.unmarkText() }
+            // Ended without a result (Escape): the marked text goes away, as on macOS.
+            if let input = owner?.platformWindowTextInput(), input.hasMarkedText() {
+                _TextInputTrace.log("imm end composition")
+                if let session = input.session { session.cancelComposition() } else { input.unmarkText() }
+            }
             return 0
         case WM_KEYDOWN, WM_SYSKEYDOWN:
             // Keyboard access to the native menu bar: Alt+letter (the mnemonics), F10, an

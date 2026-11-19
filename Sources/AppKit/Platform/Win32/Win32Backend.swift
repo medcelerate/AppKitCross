@@ -294,6 +294,9 @@ final class Win32Backend: PlatformBackend {
                 PostQuitMessage(Int32(truncatingIfNeeded: msg.wParam))
                 return false
             }
+            // The focused window's input method (TSF) sees its keys before they are
+            // translated; the keys it takes are not the window's (ADR-0047).
+            if Win32TextServices.preTranslate(msg) { continue }
             TranslateMessage(&msg)
             DispatchMessageW(&msg)
             // The end of an input event closes the undo manager's event groups, as AppKit's
