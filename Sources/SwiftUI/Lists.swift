@@ -77,9 +77,12 @@ extension List {
 
 // MARK: Rows
 
-/// A view whose body contributes rows to a List one by one (OutlineGroup), instead of
-/// being one row itself.
+/// A view whose body contributes rows to a List one by one (OutlineGroup, Section), instead
+/// of being one row itself.
 protocol _ListRowsProvider {}
+
+/// A row that is not content (a section's header or footer): never selected, no separator.
+protocol _ListSupplementaryRow {}
 
 /// Rows stacked with padding, separators and a selection highlight.
 struct _ListRows<Content: View>: View, _PrimitiveView {
@@ -98,6 +101,10 @@ struct _ListRows<Content: View>: View, _PrimitiveView {
 final class _ListView: NSView, NSSelectorHandling {
     var rowFrames: [CGRect] = []
     var selectedRows: Set<Int> = []
+    /// Section headers and footers: no separator above or below them.
+    var supplementaryRows: Set<Int> = []
+    /// Delete, Forward Delete and Edit > Delete on the selection (rows with `onDelete`).
+    var onDelete: (() -> Bool)?
     var emphasized = true
     var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     var onArrow: ((Int, Bool) -> Void)?       // delta, extend
@@ -112,7 +119,7 @@ final class _ListView: NSView, NSSelectorHandling {
             NSBezierPath.fill(rowFrames[i])
         }
         NSColor.separatorColor.setFill()
-        for (i, f) in rowFrames.enumerated().dropLast() where !selectedRows.contains(i) || !selectedRows.contains(i + 1) {
+        for (i, f) in rowFrames.enumerated().dropLast() where (!selectedRows.contains(i) || !selectedRows.contains(i + 1)) && !supplementaryRows.contains(i) && !supplementaryRows.contains(i + 1) {
             NSBezierPath.fill(NSRect(x: f.minX, y: f.maxY, width: f.width, height: 1))
         }
     }
@@ -129,6 +136,8 @@ final class _ListView: NSView, NSSelectorHandling {
         switch event.keyCode {
         case 125: onArrow?(1, extend)
         case 126: onArrow?(-1, extend)
+        case 51, 117:
+            if onDelete?() != true { super.keyDown(with: event) }
         default:
             if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "a", let onSelectAll { onSelectAll() }
             else { super.keyDown(with: event) }
@@ -137,8 +146,11 @@ final class _ListView: NSView, NSSelectorHandling {
     override func becomeFirstResponder() -> Bool { needsDisplay = true; return true }
     override func resignFirstResponder() -> Bool { needsDisplay = true; return true }
     /// The Edit menu's Select All (Cmd-A as a key equivalent) reaches the focused list.
-    func respondsToSelectorAction(_ action: Selector) -> Bool { action == Selector(("selectAll:")) && onSelectAll != nil }
+    func respondsToSelectorAction(_ action: Selector) -> Bool {
+        (action == Selector(("selectAll:")) && onSelectAll != nil) || (action == Selector(("delete:")) && onDelete != nil)
+    }
     func performSelectorAction(_ action: Selector, with sender: Any?) -> Bool {
+        if action == Selector(("delete:")), let onDelete { return onDelete() }
         guard action == Selector(("selectAll:")), let onSelectAll else { return false }
         onSelectAll()
         return true
@@ -153,6 +165,9 @@ final class _ListRowsPrimitive: _Primitive {
     let rowPadding: CGFloat
     private var rowValues: [AnyHashable] = []
     private var rowNodes: [_ViewNode] = []
+    /// Per row: the `onDelete` content it came from and its element's offset there.
+    private var rowDeleteTargets: [(actions: _RowActionsPrimitive, offset: Int)?] = []
+    private var supplementary: Set<Int> = []
     private var anchor: Int?
 
     init(content: _AnyViewBox, selection: _ListSelection?, rowInset: CGFloat, rowPadding: CGFloat) {
@@ -171,7 +186,8 @@ final class _ListRowsPrimitive: _Primitive {
         wireView()
     }
     private func wireView() {
-        guard selection != nil else { view.onClick = nil; view.onArrow = nil; view.onSelectAll = nil; return }
+        guard selection != nil else { view.onClick = nil; view.onArrow = nil; view.onSelectAll = nil; view.onDelete = nil; return }
+        view.onDelete = { [weak self] in self?.deleteSelected() ?? false }
         view.onClick = { [weak self] i, flags in self?.click(i, flags) }
         view.onArrow = { [weak self] delta, extend in self?.arrow(delta, extend: extend) }
         view.onSelectAll = { [weak self] in
@@ -183,18 +199,42 @@ final class _ListRowsPrimitive: _Primitive {
     /// The rows: direct items of the content, through groups, ForEach and views that
     /// declare themselves row providers (OutlineGroup), stopping at tagged items so a
     /// row's tag is its selection value.
-    private func collectRows(_ node: _ViewNode, into out: inout [_ViewNode]) {
-        for c in node.children {
-            if c.box.value is _MetadataView { out.append(c); continue }
-            if let p = c.primitive, p.isLayoutTransparent { collectRows(c, into: &out) }
-            else if c.primitive == nil, c.box.value is any _ListRowsProvider { collectRows(c, into: &out) }
-            else { out.append(c) }
+    private struct _Row {
+        let node: _ViewNode
+        let deleteTarget: (actions: _RowActionsPrimitive, offset: Int)?
+    }
+    /// Where rows are being collected: the nearest `onDelete` content and, below its
+    /// `ForEach`, the element's offset.
+    private struct _RowContext {
+        var actions: _RowActionsPrimitive?
+        var offset: Int?
+        var target: (actions: _RowActionsPrimitive, offset: Int)? {
+            guard let actions, let offset else { return nil }
+            return (actions, offset)
         }
     }
-    private func rows(_ node: _ViewNode) -> [_ViewNode] {
-        var out: [_ViewNode] = []
-        collectRows(node, into: &out)
+    private func collectRows(_ node: _ViewNode, context: _RowContext, into out: inout [_Row]) {
+        for (i, c) in node.children.enumerated() {
+            var inner = context
+            if node.primitive is _ForEachPrimitive, context.actions != nil, context.offset == nil { inner.offset = i }
+            if c.box.value is _MetadataView { out.append(_Row(node: c, deleteTarget: inner.target)); continue }
+            if c.box.value is EmptyView { continue }
+            if let p = c.primitive, p.isLayoutTransparent {
+                if let actions = p as? _RowActionsPrimitive { inner.actions = actions; inner.offset = nil }
+                collectRows(c, context: inner, into: &out)
+            }
+            else if c.primitive == nil, c.box.value is any _ListRowsProvider { collectRows(c, context: inner, into: &out) }
+            else { out.append(_Row(node: c, deleteTarget: inner.target)) }
+        }
+    }
+    private func rowEntries(_ node: _ViewNode) -> [_Row] {
+        var out: [_Row] = []
+        collectRows(node, context: _RowContext(), into: &out)
         return out
+    }
+    private func rows(_ node: _ViewNode) -> [_ViewNode] { rowEntries(node).map(\.node) }
+    private func isSupplementary(_ row: _ViewNode) -> Bool {
+        row.box.value is any _ListSupplementaryRow
     }
     private func value(of row: _ViewNode, index: Int) -> AnyHashable {
         _metadata(of: row.box).meta.tag ?? row.box.id ?? AnyHashable(index)
@@ -213,9 +253,14 @@ final class _ListRowsPrimitive: _Primitive {
     override func place(node: _ViewNode, in rect: CGRect) {
         var y = rect.minY
         var frames: [CGRect] = []
-        let nodes = rows(node)
+        let entries = rowEntries(node)
+        let nodes = entries.map(\.node)
         rowNodes = nodes
-        rowValues = nodes.enumerated().map { value(of: $1, index: $0) }
+        rowDeleteTargets = entries.map(\.deleteTarget)
+        supplementary = Set(nodes.indices.filter { isSupplementary(nodes[$0]) })
+        view.supplementaryRows = supplementary
+        // A header or footer's value is the row object itself: no selection ever holds it.
+        rowValues = nodes.enumerated().map { supplementary.contains($0) ? AnyHashable(ObjectIdentifier($1)) : value(of: $1, index: $0) }
         for r in nodes {
             let s = r.sizeThatFits(ProposedViewSize(width: rect.width - 2 * rowInset, height: nil))
             let rowHeight = s.height + 2 * rowPadding
@@ -246,10 +291,27 @@ final class _ListRowsPrimitive: _Primitive {
         for s in v.subviews { setSelected(on, in: s) }
     }
 
+    // MARK: Deleting
+
+    /// Calls each `onDelete` with the offsets of its selected rows; false when none applies.
+    private func deleteSelected() -> Bool {
+        guard let sel = selection else { return false }
+        let selected = sel.get()
+        var batches: [(actions: _RowActionsPrimitive, offsets: IndexSet)] = []
+        for (i, target) in rowDeleteTargets.enumerated() {
+            guard let target, rowValues.indices.contains(i), selected.contains(rowValues[i]), target.actions.onDelete != nil else { continue }
+            if let k = batches.firstIndex(where: { $0.actions === target.actions }) { batches[k].offsets.insert(target.offset) }
+            else { batches.append((target.actions, IndexSet(integer: target.offset))) }
+        }
+        guard !batches.isEmpty else { return false }
+        for b in batches { b.actions.onDelete?(b.offsets) }
+        return true
+    }
+
     // MARK: Selecting
 
     private func click(_ i: Int, _ flags: NSEvent.ModifierFlags) {
-        guard let sel = selection, rowValues.indices.contains(i) else { return }
+        guard let sel = selection, rowValues.indices.contains(i), !supplementary.contains(i) else { return }
         let v = rowValues[i]
         if sel.allowsMultiple, flags.contains(.command) {
             var s = sel.get()
@@ -258,7 +320,7 @@ final class _ListRowsPrimitive: _Primitive {
             anchor = i
         } else if sel.allowsMultiple, flags.contains(.shift), let a = anchor {
             // Shift extends: the rows between the anchor and the click join what is selected.
-            sel.set(sel.get().union(rowValues[min(a, i)...max(a, i)]))
+            sel.set(sel.get().union((min(a, i)...max(a, i)).filter { !supplementary.contains($0) }.map { rowValues[$0] }))
         } else {
             sel.set([v])
             anchor = i
@@ -269,10 +331,15 @@ final class _ListRowsPrimitive: _Primitive {
         let selected = sel.get()
         let current = rowValues.indices.filter { selected.contains(rowValues[$0]) }
         let from = delta > 0 ? (current.max() ?? -1) : (current.min() ?? rowValues.count)
-        let next = min(max(from + delta, 0), rowValues.count - 1)
+        // The next content row that way (headers and footers are stepped over).
+        var candidate = from + delta
+        while rowValues.indices.contains(candidate), supplementary.contains(candidate) { candidate += delta }
+        guard rowValues.indices.contains(candidate) || current.isEmpty == false else { return }
+        let next = rowValues.indices.contains(candidate) ? candidate : from
+        guard rowValues.indices.contains(next), !supplementary.contains(next) else { return }
         if extend, sel.allowsMultiple {
             let a = anchor ?? from
-            sel.set(selected.union(rowValues[min(a, next)...max(a, next)]))
+            sel.set(selected.union((min(a, next)...max(a, next)).filter { !supplementary.contains($0) }.map { rowValues[$0] }))
         } else {
             sel.set([rowValues[next]])
             anchor = next

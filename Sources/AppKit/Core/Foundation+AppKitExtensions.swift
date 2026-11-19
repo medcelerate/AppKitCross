@@ -448,9 +448,11 @@ extension Bundle {
     /// - SeeAlso: https://developer.apple.com/documentation/foundation/bundle/pathforimageresource(_:)
     public func pathForImageResource(_ name: NSImage.Name) -> String? { urlForImageResource(name)?.path }
     /// - SeeAlso: https://developer.apple.com/documentation/foundation/bundle/image(forresource:)
+    /// A file (any image extension, with its `@2x`/`@3x` siblings), else an asset catalog
+    /// image set (ADR-0045).
     public func image(forResource name: NSImage.Name) -> NSImage? {
-        guard let url = urlForImageResource(name) else { return nil }
-        return NSImage(contentsOf: url)
+        _AppBundle.installMainBundle()
+        return NSImage._loadResource(name, in: _AppBundle.forBundle(self))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/foundation/bundle/path(forsoundresource:)
     public func path(forSoundResource name: NSSound.Name) -> String? { _resourceURL(name, extensions: Bundle._soundExtensions)?.path }

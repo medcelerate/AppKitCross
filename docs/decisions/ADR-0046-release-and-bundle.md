@@ -92,7 +92,11 @@ the executable:
   and on Windows swift-build drops resource-bundle files there (below); the first PC run
   bundled TextEdit's bundle plist into DailyTodo that way. So the root is searched only for
   a target whose sources live there, and a plist with `CFBundlePackageType` BNDL or an
-  identifier ending in `.resources` is never taken. The walk does go above the target's
+  identifier ending in `.resources` is never taken, by the bundler or by the port's
+  `Bundle.main` lookup (ADR-0045 searches the executable target's own bundle, where
+  swift-build puts such a plist on Windows). The names are the port's: `Info.plist` or
+  `<exe>-Info.plist`, in `Resources/` first; with none, the version for the archive name
+  comes from a plist in the executable target's bundle. The walk does go above the target's
   own directory, since a vendored app keeps its plist beside its sources
   (`Examples/MDVault/Resources/Info.plist` above `Sources/MDVault`). `/Info.plist` is
   git-ignored.

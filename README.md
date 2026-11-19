@@ -91,7 +91,8 @@ README. All of them build and run with the same source on macOS, Windows and Lin
 | [DailyTodo](Examples/DailyTodo) | A real third-party SwiftUI app vendored unmodified ([Daily To Do](https://github.com/Noreen21/daily-todo), MIT): `NavigationStack` with a toolbar, date and time pickers, a list of checkbox rows, `ContentUnavailableView`, a settings sheet with a grouped `Form`, `LabeledContent`, a time-zone `Picker`, JSON persistence; `UserNotifications` and `ServiceManagement` shimmed off macOS; the gaps it found are in [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) | `swift run DailyTodo`, `swift run DailyTodoChecks` |
 | [MDVault](Examples/MDVault) | A real document-based SwiftUI app vendored unmodified but for one `@MainActor` ([MD Vault](https://github.com/AadeshTaneja/md-vault), MIT): `DocumentGroup` over a `FileDocument`, an `NSTextView` editor with undo, the find bar and a syntax highlighter, a SwiftUI Markdown viewer (`Grid` tables, attributed runs), commands driven by `@FocusedValue`; the gaps it found are in [docs/compatibility/swiftui-apps.md](docs/compatibility/swiftui-apps.md) | `APPKITWIN_INFO_PLIST=Examples/MDVault/Resources/Info.plist swift run MDVault` |
 
-Add the package to your own app and import the modules by their Apple names:
+Add the package to your own app and import the modules by their Apple names (porting an
+existing app, or handing the job to a coding agent: start with [AGENTS.md](AGENTS.md)):
 
 ```swift
 // Package.swift
@@ -154,6 +155,9 @@ crash reports the app writes, and `Examples/Dependent`, the smallest dependent p
 
 ## Learn more
 
+- [AGENTS.md](AGENTS.md): porting an existing Mac app (the dependency, builds and headless
+  tests on each platform, the porting checklist, shipping), written for coding agents and
+  people alike; [llms.txt](llms.txt) indexes the docs for LLM tools.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): repository layout, building and testing on
   each platform, runtime switches, regenerating the generated code.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/decisions](docs/decisions): how

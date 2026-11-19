@@ -1,0 +1,7 @@
+/* Greeting */
+"greeting" = "Hello";
+"%@ says hi" = "%@ says hi";
+// unquoted and short forms
+plain = word;
+"only key";
+"escaped" = "Tab\there \"quoted\" \U00e9";

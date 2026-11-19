@@ -362,6 +362,16 @@ public final class Bundler {
         }
     }
 
+    /// The app's plist inside the executable target's own SwiftPM bundle, as the port finds
+    /// it there (`Resources/` first, then the bundle; ADR-0045).
+    private func ownBundlePlist(executableName name: String) -> URL? {
+        let items = ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).sorted()
+        for item in items where item.hasSuffix("_\(name).resources") || item == "\(name).resources" || item.hasSuffix("_\(name).bundle") {
+            if let url = Bundler.infoPlist(in: folder.appendingPathComponent(item, isDirectory: true), executableName: name) { return url }
+        }
+        return nil
+    }
+
     /// Whether `url` is an application's Info.plist: it parses, and it is not a bundle's
     /// (`CFBundlePackageType` BNDL, or the `<id>.resources` identifier SwiftPM gives a
     /// resource bundle's plist).
@@ -373,32 +383,37 @@ public final class Bundler {
         return true
     }
 
-    /// The Info.plist an app root provides: `Info.plist`, else `Resources/Info.plist`, when
-    /// it is an application's.
-    static func infoPlist(in dir: URL) -> URL? {
-        for candidate in [dir.appendingPathComponent("Info.plist"), dir.appendingPathComponent("Resources/Info.plist")]
-        where FileManager.default.fileExists(atPath: candidate.path) && isApplicationInfoPlist(candidate) {
-            return candidate
+    /// The Info.plist an app root provides, in the names the port reads (ADR-0045):
+    /// `Info.plist` or `<exe>-Info.plist` (SwiftPM refuses a resource named Info.plist), in
+    /// `Resources/` first as the port searches it, when it is an application's.
+    static func infoPlist(in dir: URL, executableName: String? = nil) -> URL? {
+        let names = ["Info.plist"] + (executableName.map { ["\($0)-Info.plist"] } ?? [])
+        for folder in [dir.appendingPathComponent("Resources", isDirectory: true), dir] {
+            for name in names {
+                let candidate = folder.appendingPathComponent(name)
+                if FileManager.default.fileExists(atPath: candidate.path) && isApplicationInfoPlist(candidate) { return candidate }
+            }
         }
         return nil
     }
 
     /// The directory that holds the app's Info.plist and Resources: the first candidate with
     /// an application `Info.plist` (or `Resources/Info.plist`) or a `Resources` directory.
-    public static func appRoot(in candidates: [URL]) -> URL? {
+    public static func appRoot(in candidates: [URL], executableName: String? = nil) -> URL? {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         for dir in candidates {
-            if infoPlist(in: dir) != nil { return dir }
+            if infoPlist(in: dir, executableName: executableName) != nil { return dir }
             if fm.fileExists(atPath: dir.appendingPathComponent("Resources").path, isDirectory: &isDirectory), isDirectory.boolValue { return dir }
         }
         return nil
     }
 
     private func copyAppFiles() throws -> [String: Any]? {
-        let root = Bundler.appRoot(in: options.appRootCandidates)
+        let exeStem = options.executable.deletingPathExtension().lastPathComponent
+        let root = Bundler.appRoot(in: options.appRootCandidates, executableName: exeStem)
         var plistURL = options.infoPlist
-        if plistURL == nil, let root { plistURL = Bundler.infoPlist(in: root) }
+        if plistURL == nil, let root { plistURL = Bundler.infoPlist(in: root, executableName: exeStem) }
         var plist: [String: Any]?
         if let plistURL {
             try copy(plistURL, to: folder.appendingPathComponent("Info.plist"))
@@ -406,6 +421,10 @@ public final class Bundler {
             if let data = try? Data(contentsOf: plistURL) {
                 plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
             }
+        }
+        if plist == nil, let url = ownBundlePlist(executableName: exeStem), let data = try? Data(contentsOf: url) {
+            plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+            report.notes.append("Info.plist read from \(url.path) (the port finds it in the executable's bundle)")
         }
         var resources = options.resources
         if resources == nil, let root {

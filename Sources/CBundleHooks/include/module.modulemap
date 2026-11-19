@@ -1,0 +1,4 @@
+module CBundleHooks {
+    header "CBundleHooks.h"
+    export *
+}

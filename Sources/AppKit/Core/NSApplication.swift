@@ -38,14 +38,23 @@ import CoreText
     }
 
     @MainActor public override init() {
+        // ADR-0045: corelibs' Bundle answers through the app layout before anything reads it.
+        _AppBundle.installMainBundle()
         super.init()
         // The crash handler first (ADR-0046): a crash anywhere after this leaves a report.
         PlatformCrashReporting.installAtLaunch()
         _CoreAnimationHost.installIfNeeded()
-        if NSApplication._shared == nil { NSApplication._shared = self }
+        let isFirst = NSApplication._shared == nil
+        if isFirst { NSApplication._shared = self }
         #if os(Windows) || os(Linux)
         UserNotificationsBridge.install()
         #endif
+        if isFirst {
+            // `--appkitcross-register` exits here; a second launch hands its arguments to the
+            // running instance and exits (ADR-0045).
+            _AppRegistration.handleLaunchSwitches()
+            _AppInstance.claim()
+        }
     }
 
     @MainActor public required init?(coder: NSCoder) { super.init(coder: coder) }
@@ -153,12 +162,25 @@ import CoreText
         set { _appearance = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationiconimage
+    /// The image set here, else the Info.plist's icon (`CFBundleIconName`, `CFBundleIconFile`;
+    /// ADR-0045), else the executable's icon as the shell shows it. Setting nil goes back to
+    /// the default; every change reaches the windows' icons through the dock tile.
     @MainActor open var applicationIconImage: NSImage! {
-        get { _applicationIconImage }
-        set { _applicationIconImage = newValue; _dockTile?.display() }
+        get {
+            if let image = _applicationIconImageIfSet { return image }
+            if _processIcon == nil, let cg = Platform.backend.workspace.icon(for: .process(ProcessInfo.processInfo.processIdentifier), size: 128, scale: 2) {
+                _processIcon = NSImage(cgImage: cg, size: NSSize(width: 128, height: 128))
+            }
+            return _processIcon
+        }
+        set { _applicationIconImage = newValue; dockTile.display() }
     }
-    /// The icon image when one was set (the dock tile and `NSRunningApplication.icon`).
-    @MainActor internal var _applicationIconImageIfSet: NSImage? { _applicationIconImage }
+    private var _processIcon: NSImage? = nil
+    /// What the last standard about panel showed (title, text), for the tests.
+    internal var _lastAboutPanel: (title: String, text: String)? = nil
+    /// The icon image when one was set or the Info.plist declares one (the dock tile, the
+    /// windows' icons and `NSRunningApplication.icon`).
+    @MainActor internal var _applicationIconImageIfSet: NSImage? { _applicationIconImage ?? _AppIcon.bundleIcon() }
     @MainActor internal var _isFinishedLaunching: Bool { _finishedLaunching }
     private var _dockTile: NSDockTile? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/applicationshouldsuppresshighdynamicrangecontent
@@ -284,19 +306,61 @@ import CoreText
     /// or that made a document controller already) opens the files named on the command
     /// line, or an untitled document when `applicationShouldOpenUntitledFile` agrees,
     /// between the will- and did-finish-launching messages, as macOS does.
+    ///
+    /// Any application gets the documents and URLs on the command line (ADR-0045: how
+    /// Explorer and the Linux desktop open files with an app): files through the document
+    /// controller or `application(_:openFiles:)`/`application(_:openFile:)` (then
+    /// `application(_:open:)`), URLs of the schemes the Info.plist declares through
+    /// `application(_:open:)`. The Info.plist's icon goes to the windows first, and what a
+    /// second launch handed over while this one was launching is opened last.
     @MainActor open func finishLaunching() {
         guard !_finishedLaunching else { return }
+        if _AppIcon.bundleIcon() != nil, _applicationIconImage == nil { dockTile.display() }
         delegate?.applicationWillFinishLaunching(post(NSApplication.willFinishLaunchingNotification))
         _finishedLaunching = true
         activate(ignoringOtherApps: true)
+        let launch = _AppInstance.launchItems(Array(CommandLine.arguments.dropFirst()), workingDirectory: FileManager.default.currentDirectoryPath)
         if let dc = NSDocumentController._shared ?? (NSDocumentController._applicationDeclaresDocumentTypes ? NSDocumentController.shared : nil) {
             dc._mainMenuDidChange()
-            if !dc._openCommandLineFiles(), delegate?.applicationShouldOpenUntitledFile(self) ?? true {
+            if !_openLaunchItems(files: launch.files, urls: launch.urls), delegate?.applicationShouldOpenUntitledFile(self) ?? true {
                 if delegate?.applicationOpenUntitledFile(self) != true, dc.defaultType != nil { dc.newDocument(nil) }
             }
+        } else if !launch.files.isEmpty || !launch.urls.isEmpty {
+            _ = _openLaunchItems(files: launch.files, urls: launch.urls)
         }
         delegate?.applicationDidFinishLaunching(post(NSApplication.didFinishLaunchingNotification))
         PlatformCrashReporting.scheduleCrashTestIfRequested()
+        _AppInstance.deliverPending()
+    }
+
+    /// Opens documents and URLs as macOS opens those the Finder or a URL sends: URLs to
+    /// `application(_:open:)`; files to the document controller when there is one, else to
+    /// `application(_:openFiles:)` (several) or `application(_:openFile:)`, then
+    /// `application(_:open:)` with their URLs when `openFile` declined. Whether anything was
+    /// handed on.
+    @MainActor internal func _openLaunchItems(files: [String], urls: [URL]) -> Bool {
+        var opened = false
+        if !urls.isEmpty { delegate?.application(self, open: urls); opened = true }
+        guard !files.isEmpty else { return opened }
+        if let dc = NSDocumentController._shared ?? (NSDocumentController._applicationDeclaresDocumentTypes ? NSDocumentController.shared : nil) {
+            return dc._openFiles(files) || opened
+        }
+        guard let d = delegate else { return opened }
+        if files.count > 1 { d.application(self, openFiles: files); return true }
+        if !d.application(self, openFile: files[0]) { d.application(self, open: files.map { URL(fileURLWithPath: $0) }) }
+        return true
+    }
+
+    /// A launch with nothing to open while the application runs (macOS's reopen event):
+    /// `applicationShouldHandleReopen`, then a minimised window comes back or, in a document
+    /// application with no window, an untitled document opens.
+    @MainActor internal func _reopen() {
+        let visible = _windows.contains { $0.isVisible && !$0.isMiniaturized }
+        guard delegate?.applicationShouldHandleReopen(self, hasVisibleWindows: visible) ?? true, !visible else { return }
+        if let w = _windows.first(where: { $0.isMiniaturized }) { w.deminiaturize(nil); return }
+        if let dc = NSDocumentController._shared, dc.defaultType != nil, delegate?.applicationShouldOpenUntitledFile(self) ?? true {
+            if delegate?.applicationOpenUntitledFile(self) != true { dc.newDocument(nil) }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/helpmenu
     @MainActor open var helpMenu: NSMenu? {
@@ -441,15 +505,31 @@ import CoreText
     /// the options) in an alert.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/orderfrontstandardaboutpanel(options:)
     @MainActor open func orderFrontStandardAboutPanel(options optionsDictionary: [NSApplication.AboutPanelOptionKey : Any] = [:]) {
-        let info = Bundle.main.infoDictionary ?? [:]
-        let name = (optionsDictionary[NSApplication.AboutPanelOptionKey(rawValue: "ApplicationName")] as? String)
-            ?? (info["CFBundleName"] as? String)
-            ?? ((CommandLine.arguments.first ?? "App") as NSString).lastPathComponent
-        let version = (optionsDictionary[NSApplication.AboutPanelOptionKey(rawValue: "ApplicationVersion")] as? String) ?? (info["CFBundleShortVersionString"] as? String) ?? ""
+        let content = NSApplication._aboutPanelContent(options: optionsDictionary, app: _AppBundle.main)
         let alert = NSAlert()
-        alert.messageText = name
-        alert.informativeText = version.isEmpty ? "" : "Version \(version)"
+        alert.messageText = content.title
+        alert.informativeText = content.text
+        if let icon = (optionsDictionary[.applicationIcon] as? NSImage) ?? applicationIconImage { alert.icon = icon }
+        _lastAboutPanel = content
         _ = alert.runModal()
+    }
+    /// The standard about panel's title and text: the name (`CFBundleDisplayName`,
+    /// `CFBundleName`), "Version 1.2 (34)" from `CFBundleShortVersionString` and
+    /// `CFBundleVersion` (the build left out when it equals the version), the credits and
+    /// `NSHumanReadableCopyright`; each from the options first.
+    internal static func _aboutPanelContent(options: [NSApplication.AboutPanelOptionKey: Any], app: _AppBundle) -> (title: String, text: String) {
+        let name = (options[.applicationName] as? String) ?? app.displayName
+        let version = (options[.applicationVersion] as? String) ?? (app.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
+        let build = (options[.version] as? String) ?? (app.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? ""
+        let credits = (options[.credits] as? NSAttributedString)?.string
+        let copyright = (options[NSApplication.AboutPanelOptionKey(rawValue: "Copyright")] as? String)
+            ?? (app.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String)
+        var lines: [String] = []
+        if !version.isEmpty { lines.append(build.isEmpty || build == version ? "Version \(version)" : "Version \(version) (\(build))") }
+        else if !build.isEmpty { lines.append("Version \(build)") }
+        if let credits, !credits.isEmpty { lines.append(credits) }
+        if let copyright, !copyright.isEmpty { lines.append(copyright) }
+        return (name, lines.joined(separator: "\n\n"))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/ordereddocuments
     /// The open documents, front to back by their frontmost visible window; documents with
@@ -684,9 +764,8 @@ import CoreText
     /// There is no Help Viewer: says so in an alert, as macOS does for an application
     /// without a help book.
     @MainActor open func showHelp(_ sender: Any?) {
-        let name = (Bundle.main.infoDictionary?["CFBundleName"] as? String) ?? ProcessInfo.processInfo.processName
         let alert = NSAlert()
-        alert.messageText = "Help isn’t available for \(name)."
+        alert.messageText = "Help isn’t available for \(_AppBundle.main.displayName)."
         _ = alert.runModal()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsapplication/stop(_:)

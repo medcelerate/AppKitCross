@@ -6,10 +6,9 @@
 // Save All actions (ADR-0017).
 //
 // Document types come from `CFBundleDocumentTypes` in the application's Info.plist, as
-// on macOS. Windows and Linux executables have no bundle, so the dictionary is looked
-// up in this order: the file `APPKITWIN_INFO_PLIST` names, `Info.plist` next to the
-// executable, then `Bundle.main.infoDictionary` (which on corelibs Foundation is the
-// same adjacent file). Each entry's `LSItemContentTypes` (UTIs) name the type;
+// on macOS. On Windows and Linux the application folder's Info.plist is found as ADR-0045
+// lays out (`APPKITWIN_INFO_PLIST`, Resources/, the executable target's SwiftPM bundle,
+// next to the executable). Each entry's `LSItemContentTypes` (UTIs) name the type;
 // `CFBundleTypeExtensions`, `CFBundleTypeRole` (Editor, Viewer), `NSDocumentClass`
 // ("Module.Class", resolved through the Swift runtime) and `NSExportableTypes` are
 // honoured; `UTExportedTypeDeclarations`/`UTImportedTypeDeclarations` register their
@@ -84,21 +83,12 @@ import UniformTypeIdentifiers
 
     // MARK: Info.plist
 
-    /// The application's Info.plist dictionary (see the file comment for the lookup).
+    /// The application's Info.plist dictionary (ADR-0045: `APPKITWIN_INFO_PLIST`, then
+    /// Info.plist in Resources/, the executable target's SwiftPM bundle or next to the
+    /// executable), else `Bundle.main`'s.
     internal static func _infoDictionary() -> [String: Any] {
         if let o = _infoDictionaryOverride { return o }
-        let env = ProcessInfo.processInfo.environment
-        var candidates: [URL] = []
-        if let p = env["APPKITWIN_INFO_PLIST"], !p.isEmpty { candidates.append(URL(fileURLWithPath: p)) }
-        if let exe = Bundle.main.executableURL ?? CommandLine.arguments.first.map({ URL(fileURLWithPath: $0) }) {
-            candidates.append(exe.deletingLastPathComponent().appendingPathComponent("Info.plist"))
-        }
-        for url in candidates {
-            if let data = try? Data(contentsOf: url),
-               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-                return plist
-            }
-        }
+        if _AppBundle.main.layout.infoPlistURL != nil { return _AppBundle.main.infoDictionary }
         return Bundle.main.infoDictionary ?? [:]
     }
 
@@ -413,11 +403,11 @@ import UniformTypeIdentifiers
         }
     }
 
-    /// Opens the files named on the command line (`application(_:openFile:)` first, as
-    /// the Finder would) and returns whether any were opened.
-    @MainActor internal func _openCommandLineFiles() -> Bool {
+    /// Opens files a launch names (`application(_:openFile:)` first, as the Finder would)
+    /// and returns whether any were opened (NSApplication picks them from the command line
+    /// or a second launch's hand-off, ADR-0045).
+    @MainActor internal func _openFiles(_ paths: [String]) -> Bool {
         let app = NSApplication.shared
-        let paths = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") && FileManager.default.fileExists(atPath: $0) }
         guard !paths.isEmpty else { return false }
         var opened = false
         if let d = app.delegate, paths.count > 1 {

@@ -94,18 +94,38 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         return _representations.max { area($0) < area($1) }
     }
 
-    /// Loads an image resource by name from the main bundle (any supported extension).
+    /// Loads an image resource by name from the main bundle (ADR-0045): a file with any
+    /// supported extension (its `@2x`/`@3x` siblings as further representations), else an
+    /// image set or app icon set of an asset catalog, else AppKit's own named images.
     private static func _loadNamed(_ name: NSImage.Name) -> NSImage? {
-        let base = name
-        for ext in ["png", "jpg", "jpeg", "bmp", "gif", "tiff"] {
-            if let url = Bundle.main.url(forResource: base, withExtension: ext), let img = NSImage(contentsOf: url) {
-                img._name = name
-                return img
-            }
-        }
+        _AppBundle.installMainBundle()
+        if let image = _loadResource(name, in: _AppBundle.main) { image._name = name; return image }
         // AppKit's own named images (NSImage.addTemplateName...) are drawn (ADR-0036).
         if let system = MainActor.assumeIsolated({ _NSSystemImages.named(name) }) { system._name = name; return system }
         return nil
+    }
+
+    /// An image file or asset of a bundle by name.
+    internal static func _loadResource(_ name: String, in app: _AppBundle) -> NSImage? {
+        let ns = name as NSString
+        var candidates: [(String, String)] = []
+        if !ns.pathExtension.isEmpty { candidates.append((ns.deletingPathExtension, ns.pathExtension)) }
+        for ext in ["png", "pdf", "jpg", "jpeg", "tiff", "tif", "gif", "bmp", "ico", "heic", "svg"] { candidates.append((name, ext)) }
+        for (base, ext) in candidates {
+            guard let url = app.url(forResource: base, withExtension: ext), let image = NSImage(contentsOf: url) else { continue }
+            // name@2x.png, name@3x.png: further representations at their scale.
+            if let first = image.representations.first as? NSBitmapImageRep, image.representations.count == 1 {
+                let pointSize = first.size
+                for scale in [2, 3] {
+                    guard let u = app.url(forResource: "\(base)@\(scale)x", withExtension: ext),
+                          let data = FileManager.default.contents(atPath: u.path), let rep = NSBitmapImageRep(data: data) else { continue }
+                    rep.size = pointSize
+                    image.addRepresentation(rep)
+                }
+            }
+            return image
+        }
+        return _NSAssetCatalog.image(named: ns.pathExtension.isEmpty ? name : ns.deletingPathExtension, roots: app.layout.resourceRoots)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsimage/init(byreferencing:)
     public convenience init(byReferencing url: URL) {

@@ -237,15 +237,11 @@ public final class _AppRunner {
         if NSApplication.shared.mainMenu != nil { installMenuBar() }
     }
 
-    /// The bundle's name: its Info.plist's `CFBundleName`, or for a bare executable the
-    /// one in the Info.plist `APPKITWIN_INFO_PLIST` names (where AppKit's document
-    /// controller reads the document types too).
+    /// The bundle's name: its Info.plist's `CFBundleName` (the app folder's Info.plist,
+    /// ADR-0045, including one `APPKITWIN_INFO_PLIST` names), localized by InfoPlist.strings.
     static var bundleName: String? {
+        if _AppBundle.main.layout.infoPlistURL != nil, let n = _AppBundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, !n.isEmpty { return n }
         if let n = Bundle.main.infoDictionary?["CFBundleName"] as? String, !n.isEmpty { return n }
-        if let path = ProcessInfo.processInfo.environment["APPKITWIN_INFO_PLIST"], !path.isEmpty,
-           let data = FileManager.default.contents(atPath: path),
-           let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-           let n = plist["CFBundleName"] as? String, !n.isEmpty { return n }
         return nil
     }
 

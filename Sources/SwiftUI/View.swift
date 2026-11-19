@@ -143,7 +143,7 @@ public struct ForEach<Data, ID, Content>: View, _PrimitiveView where Data: Rando
         idForElement = { $0[keyPath: id] }
     }
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
-        _GroupPrimitive(children: data.map { _ViewBox(content($0), id: AnyHashable(idForElement($0))) })
+        _ForEachPrimitive(children: data.map { _ViewBox(content($0), id: AnyHashable(idForElement($0))) })
     }
 }
 

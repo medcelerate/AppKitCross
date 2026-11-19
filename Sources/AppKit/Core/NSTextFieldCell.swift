@@ -50,12 +50,16 @@ import CoreText
 
     @MainActor internal var _attributes: [NSAttributedString.Key: Any] { [.font: _effectiveFont, .foregroundColor: _textColor] }
 
+    /// The text drawn and measured for the value (a secure cell's bullets).
+    @MainActor internal var _displayedString: String { stringValue }
+
     @MainActor internal func _measure(maxWidth: CGFloat?) -> NSSize {
-        var s = stringValue.size(withAttributes: _attributes)
+        let shown = _displayedString
+        var s = shown.size(withAttributes: _attributes)
         if _isMultiline, let maxWidth, maxWidth > 0 {
-            s = _NSTextMeasureCache.measure(stringValue, font: _effectiveFont, maxWidth: maxWidth)
+            s = _NSTextMeasureCache.measure(shown, font: _effectiveFont, maxWidth: maxWidth)
         }
-        if stringValue.isEmpty { s.height = _effectiveFont.ascender - _effectiveFont.descender }
+        if shown.isEmpty { s.height = _effectiveFont.ascender - _effectiveFont.descender }
         return s
     }
 
@@ -110,13 +114,14 @@ import CoreText
             }
             return
         }
+        let shown = _displayedString
         if _isMultiline {
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current?.cgContext.clip(to: rect)
-            stringValue.draw(in: rect, withAttributes: _attributes)
+            shown.draw(in: rect, withAttributes: _attributes)
             NSGraphicsContext.restoreGraphicsState()
         } else {
-            _drawText(stringValue, attributes: _attributes, in: rect, alignment: _alignment, flipped: flipped)
+            _drawText(shown, attributes: _attributes, in: rect, alignment: _alignment, flipped: flipped)
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextfieldcell/init(coder:)

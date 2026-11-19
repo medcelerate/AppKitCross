@@ -17,3 +17,5 @@
   real CoreGraphics so signatures stay honest.
 - Swift language mode is 5 with strict concurrency warnings. AppKit types that are
   `@MainActor` in Apple's SDK stay `@MainActor` here.
+
+Consumers of the package (an agent porting someone else's Mac app) read [AGENTS.md](AGENTS.md); this file is for contributors to the port.

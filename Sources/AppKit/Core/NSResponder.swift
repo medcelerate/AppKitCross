@@ -124,7 +124,7 @@ import CoreText
         let plain = event.charactersIgnoringModifiers ?? ""
         var selector: String? = _pcNavigationSelector(plain, flags)
         if selector == nil { switch plain {
-        case "\r", "\u{3}": selector = "insertNewline:"
+        case "\r", "\u{3}": selector = option ? "insertNewlineIgnoringFieldEditor:" : "insertNewline:"
         case "\t": selector = shift ? "insertBacktab:" : "insertTab:"
         case "\u{1B}": selector = option ? "complete:" : "cancelOperation:"
         case "\u{F708}": selector = "complete:"

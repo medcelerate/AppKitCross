@@ -201,6 +201,16 @@ import CoreText
         if _listNewline() { return }
         insertText("\n")
     }
+    /// Option-Return: a newline even in a field editor (a wrapping field's second line).
+    @MainActor open func insertNewlineIgnoringFieldEditor(_ sender: Any?) {
+        guard isEditable else { return }
+        insertText("\n")
+    }
+    /// A line break inside the paragraph (U+2028).
+    @MainActor open func insertLineBreak(_ sender: Any?) {
+        guard isEditable else { return }
+        insertText("\u{2028}")
+    }
     /// Tab at the start of a list item's text nests it; in a table it moves to the next cell.
     @MainActor open func insertTab(_ sender: Any?) {
         if isFieldEditor { _endEditing(movement: .tab); return }
@@ -255,7 +265,8 @@ import CoreText
         "pageUp:": { $0.pageUp($1) }, "pageDown:": { $0.pageDown($1) },
         "deleteBackward:": { $0.deleteBackward($1) }, "deleteForward:": { $0.deleteForward($1) },
         "deleteWordBackward:": { $0.deleteWordBackward($1) }, "deleteWordForward:": { $0.deleteWordForward($1) },
-        "insertNewline:": { $0.insertNewline($1) }, "insertTab:": { $0.insertTab($1) }, "insertBacktab:": { $0.insertBacktab($1) },
+        "insertNewline:": { $0.insertNewline($1) }, "insertNewlineIgnoringFieldEditor:": { $0.insertNewlineIgnoringFieldEditor($1) },
+        "insertLineBreak:": { $0.insertLineBreak($1) }, "insertTab:": { $0.insertTab($1) }, "insertBacktab:": { $0.insertBacktab($1) },
         "cancelOperation:": { $0.cancelOperation($1) }, "selectAll:": { $0.selectAll($1) }, "selectWord:": { $0.selectWord($1) },
         "selectLine:": { $0.selectLine($1) }, "selectParagraph:": { $0.selectParagraph($1) },
         "copy:": { $0.copy($1) }, "cut:": { $0.cut($1) }, "paste:": { $0.paste($1) }, "delete:": { $0.delete($1) },
@@ -629,7 +640,7 @@ import CoreText
     /// Container width follows the view unless the text runs on one line (field editors,
     /// horizontally resizable views).
     private func _syncContainerSize() {
-        let unbounded = isFieldEditor || isHorizontallyResizable
+        let unbounded = (isFieldEditor && !_fieldEditorWraps) || isHorizontallyResizable
         let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
         let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         if _container.size != size { _container.size = size }
@@ -915,7 +926,7 @@ import CoreText
         _ = writeSelection(to: .general, types: writablePasteboardTypes)
     }
     open override func cut(_ sender: Any?) {
-        guard isEditable, selectedRange.length > 0 else { return }
+        guard isEditable, selectedRange.length > 0, _layoutManager._secureEcho == nil else { return }
         copy(sender)
         _withUndoName("Cut") { delete(sender) }
     }
@@ -1205,7 +1216,7 @@ import CoreText
     /// selection's image; false without a selection.
     @MainActor open func dragSelection(with event: NSEvent, offset mouseOffset: NSSize, slideBack: Bool) -> Bool {
         let sel = selectedRange
-        guard sel.length > 0, let st = textStorage else { return false }
+        guard sel.length > 0, let st = textStorage, _layoutManager._secureEcho == nil else { return false }
         var origin = NSPoint.zero
         let image = dragImageForSelection(with: event, origin: &origin)
         let text = st.attributedSubstring(from: sel)
@@ -1963,7 +1974,11 @@ import CoreText
     open override func isAccessibilityElement() -> Bool { _a11y.isElement ?? !isFieldEditor }
     open override func accessibilityRole() -> NSAccessibility.Role? { _a11y.role ?? .textArea }
     open override func isAccessibilityEnabled() -> Bool { _a11y.isEnabled ?? (isEditable || isSelectable) }
-    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : string }
+    open override func accessibilityValue() -> Any? { _a11y.hasValue ? _a11y.value : _accessibilityText }
+    /// The text as assistive technology reads it: a secure field's editor reads bullets.
+    private var _accessibilityText: String {
+        _layoutManager._secureEcho == nil ? string : String(repeating: "\u{2022}", count: string.count)
+    }
     override func _accessibilityValueIsSettable() -> Bool { isEditable }
     override func _accessibilityIsMultiline() -> Bool { !isFieldEditor }
     override func _accessibilitySetValue(_ value: PlatformAccessibilityValue) -> Bool {
@@ -2005,7 +2020,7 @@ import CoreText
     // Requirement of NSAccessibilityNavigableStaticText
     open func accessibilityFrame(for range: NSRange) -> NSRect { accessibilityFrame() }
     // Requirement of NSAccessibilityStaticText
-    open func accessibilityValue() -> String? { string }
+    open func accessibilityValue() -> String? { _accessibilityText }
     // Requirement of NSAccessibilityStaticText
     open func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
         guard let storage = textStorage, range.location != NSNotFound, NSMaxRange(range) <= storage.length else { return nil }
