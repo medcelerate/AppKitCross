@@ -140,7 +140,7 @@ func _foregroundColor(for style: any ShapeStyle, in environment: EnvironmentValu
     case let c as Color: return c
     case let h as HierarchicalShapeStyle: return h._resolvedColor(environment)
     case let a as AnyShapeStyle: return _foregroundColor(for: a.style, in: environment)
-    default: return nil
+    default: return _extraForegroundColor(for: style, in: environment)    // ShapeStyleExtras.swift
     }
 }
 

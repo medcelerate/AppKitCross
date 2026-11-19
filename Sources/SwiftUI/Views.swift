@@ -1047,6 +1047,8 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     let text: Binding<String>
     let onCommit: () -> Void
     var axis: Axis = .horizontal
+    /// Set by the `value:` initialisers (FormattedText.swift): the field edits a formatted value.
+    var _formatting: _TextFieldFormatting? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-8rujz
     ///
     /// With `.vertical` the text wraps and the field grows with it, between the lines a
@@ -1087,7 +1089,10 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
         placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        if let f = _formatting { return _FormattedTextFieldPrimitive(placeholder: placeholder, formatting: f, axis: axis) }
+        return _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis)
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield

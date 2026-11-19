@@ -103,12 +103,22 @@ final class _ListView: NSView, NSSelectorHandling {
     var selectedRows: Set<Int> = []
     /// Section headers and footers: no separator above or below them.
     var supplementaryRows: Set<Int> = []
+    /// Rows whose separator `listRowSeparator(.hidden)` removed: above, and below.
+    var hiddenSeparatorsAbove: Set<Int> = []
+    var hiddenSeparatorsBelow: Set<Int> = []
     /// Delete, Forward Delete and Edit > Delete on the selection (rows with `onDelete`).
     var onDelete: (() -> Bool)?
     var emphasized = true
     var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     var onArrow: ((Int, Bool) -> Void)?       // delta, extend
     var onSelectAll: (() -> Void)?
+    /// Drag reordering (`onMove`): whether a row can be dragged, and the move to a gap.
+    var canReorder: ((Int) -> Bool)?
+    var onReorder: ((Int, Int) -> Void)?
+    private var dragRow: Int?
+    private var dragStart: NSPoint?
+    /// The gap a dragged row would drop into (0...rowFrames.count), drawn as a line.
+    private(set) var dropGap: Int?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { onClick != nil }
@@ -119,17 +129,42 @@ final class _ListView: NSView, NSSelectorHandling {
             NSBezierPath.fill(rowFrames[i])
         }
         NSColor.separatorColor.setFill()
-        for (i, f) in rowFrames.enumerated().dropLast() where (!selectedRows.contains(i) || !selectedRows.contains(i + 1)) && !supplementaryRows.contains(i) && !supplementaryRows.contains(i + 1) {
+        for (i, f) in rowFrames.enumerated().dropLast() where (!selectedRows.contains(i) || !selectedRows.contains(i + 1)) && !supplementaryRows.contains(i) && !supplementaryRows.contains(i + 1) && !hiddenSeparatorsBelow.contains(i) && !hiddenSeparatorsAbove.contains(i + 1) {
             NSBezierPath.fill(NSRect(x: f.minX, y: f.maxY, width: f.width, height: 1))
         }
+        if let g = dropGap, !rowFrames.isEmpty {
+            let y = g < rowFrames.count ? rowFrames[g].minY : rowFrames[rowFrames.count - 1].maxY
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath.fill(NSRect(x: 4, y: y - 1, width: bounds.width - 8, height: 2))
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let r = dragRow, let start = dragStart else { super.mouseDragged(with: event); return }
+        let p = convert(event.locationInWindow, from: nil)
+        guard dropGap != nil || abs(p.y - start.y) > 3 else { return }
+        // The gap whose row midpoint the pointer is above.
+        var gap = rowFrames.count
+        for (i, f) in rowFrames.enumerated() where p.y < f.midY { gap = i; break }
+        if gap != dropGap { dropGap = gap; needsDisplay = true }
+        _ = r
+    }
+    override func mouseUp(with event: NSEvent) {
+        defer { dragRow = nil; dragStart = nil }
+        guard let r = dragRow, let g = dropGap else { super.mouseUp(with: event); return }
+        dropGap = nil
+        needsDisplay = true
+        onReorder?(r, g)
     }
     func row(at point: NSPoint) -> Int? { rowFrames.firstIndex { $0.contains(point) } }
 
     override func mouseDown(with event: NSEvent) {
-        guard let onClick else { super.mouseDown(with: event); return }
+        let p = convert(event.locationInWindow, from: nil)
+        if let i = row(at: p), canReorder?(i) == true { dragRow = i; dragStart = p; dropGap = nil }
+        guard let onClick else { if dragRow == nil { super.mouseDown(with: event) }; return }
         // A click anywhere in a row (also on a row's own views) focuses the list for the keys.
         if let w = window, w.firstResponder !== self { _ = w.makeFirstResponder(self) }
-        if let i = row(at: convert(event.locationInWindow, from: nil)) { onClick(i, event.modifierFlags) }
+        if let i = row(at: p) { onClick(i, event.modifierFlags) }
     }
     override func keyDown(with event: NSEvent) {
         let extend = event.modifierFlags.contains(.shift)
@@ -167,6 +202,8 @@ final class _ListRowsPrimitive: _Primitive {
     private var rowNodes: [_ViewNode] = []
     /// Per row: the `onDelete` content it came from and its element's offset there.
     private var rowDeleteTargets: [(actions: _RowActionsPrimitive, offset: Int)?] = []
+    /// Per row: the `onMove` content it came from and its element's offset there.
+    private var rowMoveTargets: [(actions: _RowMovePrimitive, offset: Int)?] = []
     private var supplementary: Set<Int> = []
     private var anchor: Int?
 
@@ -186,6 +223,8 @@ final class _ListRowsPrimitive: _Primitive {
         wireView()
     }
     private func wireView() {
+        view.canReorder = { [weak self] i in self?.rowMoveTargets.indices.contains(i) == true && self?.rowMoveTargets[i]?.actions.onMove != nil }
+        view.onReorder = { [weak self] row, gap in self?.reorder(row, toGap: gap) }
         guard selection != nil else { view.onClick = nil; view.onArrow = nil; view.onSelectAll = nil; view.onDelete = nil; return }
         view.onDelete = { [weak self] in self?.deleteSelected() ?? false }
         view.onClick = { [weak self] i, flags in self?.click(i, flags) }
@@ -202,29 +241,37 @@ final class _ListRowsPrimitive: _Primitive {
     private struct _Row {
         let node: _ViewNode
         let deleteTarget: (actions: _RowActionsPrimitive, offset: Int)?
+        var moveTarget: (actions: _RowMovePrimitive, offset: Int)? = nil
     }
     /// Where rows are being collected: the nearest `onDelete` content and, below its
     /// `ForEach`, the element's offset.
     private struct _RowContext {
         var actions: _RowActionsPrimitive?
+        /// The nearest `onMove` content (MoveAndDialogs.swift).
+        var move: _RowMovePrimitive?
         var offset: Int?
         var target: (actions: _RowActionsPrimitive, offset: Int)? {
             guard let actions, let offset else { return nil }
             return (actions, offset)
         }
+        var moveTarget: (actions: _RowMovePrimitive, offset: Int)? {
+            guard let move, let offset else { return nil }
+            return (move, offset)
+        }
     }
     private func collectRows(_ node: _ViewNode, context: _RowContext, into out: inout [_Row]) {
         for (i, c) in node.children.enumerated() {
             var inner = context
-            if node.primitive is _ForEachPrimitive, context.actions != nil, context.offset == nil { inner.offset = i }
-            if c.box.value is _MetadataView { out.append(_Row(node: c, deleteTarget: inner.target)); continue }
+            if node.primitive is _ForEachPrimitive, context.actions != nil || context.move != nil, context.offset == nil { inner.offset = i }
+            if c.box.value is _MetadataView { out.append(_Row(node: c, deleteTarget: inner.target, moveTarget: inner.moveTarget)); continue }
             if c.box.value is EmptyView { continue }
             if let p = c.primitive, p.isLayoutTransparent {
                 if let actions = p as? _RowActionsPrimitive { inner.actions = actions; inner.offset = nil }
+                if let move = p as? _RowMovePrimitive { inner.move = move; inner.offset = nil }
                 collectRows(c, context: inner, into: &out)
             }
             else if c.primitive == nil, c.box.value is any _ListRowsProvider { collectRows(c, context: inner, into: &out) }
-            else { out.append(_Row(node: c, deleteTarget: inner.target)) }
+            else { out.append(_Row(node: c, deleteTarget: inner.target, moveTarget: inner.moveTarget)) }
         }
     }
     private func rowEntries(_ node: _ViewNode) -> [_Row] {
@@ -244,6 +291,13 @@ final class _ListRowsPrimitive: _Primitive {
         var height: CGFloat = 0
         var width: CGFloat = 0
         for r in rows(node) {
+            if _ListRowDecorationPrimitive.traits(of: r) != nil {
+                // A decorated row (listRowInsets/Background/Separator) insets itself.
+                let s = r.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+                height += s.height + 1
+                width = max(width, s.width)
+                continue
+            }
             let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - 2 * rowInset) }, height: nil))
             height += s.height + 2 * rowPadding + 1
             width = max(width, s.width + 2 * rowInset)
@@ -257,11 +311,22 @@ final class _ListRowsPrimitive: _Primitive {
         let nodes = entries.map(\.node)
         rowNodes = nodes
         rowDeleteTargets = entries.map(\.deleteTarget)
+        rowMoveTargets = entries.map(\.moveTarget)
         supplementary = Set(nodes.indices.filter { isSupplementary(nodes[$0]) })
         view.supplementaryRows = supplementary
         // A header or footer's value is the row object itself: no selection ever holds it.
         rowValues = nodes.enumerated().map { supplementary.contains($0) ? AnyHashable(ObjectIdentifier($1)) : value(of: $1, index: $0) }
-        for r in nodes {
+        var hiddenAbove: Set<Int> = [], hiddenBelow: Set<Int> = []
+        for (i, r) in nodes.enumerated() {
+            if let traits = _ListRowDecorationPrimitive.traits(of: r) {
+                if traits.separatorHidden.contains(.top) { hiddenAbove.insert(i) }
+                if traits.separatorHidden.contains(.bottom) { hiddenBelow.insert(i) }
+                let s = r.sizeThatFits(ProposedViewSize(width: rect.width, height: nil))
+                r.place(in: CGRect(x: rect.minX, y: y, width: rect.width, height: s.height).integralIfNeeded)
+                frames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: s.height))
+                y += s.height + 1
+                continue
+            }
             let s = r.sizeThatFits(ProposedViewSize(width: rect.width - 2 * rowInset, height: nil))
             let rowHeight = s.height + 2 * rowPadding
             r.place(in: CGRect(x: rect.minX + rowInset, y: y + rowPadding, width: rect.width - 2 * rowInset, height: s.height).integralIfNeeded)
@@ -269,6 +334,8 @@ final class _ListRowsPrimitive: _Primitive {
             y += rowHeight + 1
         }
         view.rowFrames = frames
+        view.hiddenSeparatorsAbove = hiddenAbove
+        view.hiddenSeparatorsBelow = hiddenBelow
         refreshHighlight()
     }
     override func didSyncBackingViews(node: _ViewNode) { refreshHighlight() }
@@ -289,6 +356,22 @@ final class _ListRowsPrimitive: _Primitive {
     private func setSelected(_ on: Bool, in v: NSView) {
         if let t = v as? _TextView { t.isInSelectedRow = on }
         for s in v.subviews { setSelected(on, in: s) }
+    }
+
+    // MARK: Moving
+
+    /// Moves `row` to the gap before row `gap` (`rowCount` for the end) within its own
+    /// `onMove` content, as `onMove(perform:)` offsets count.
+    private func reorder(_ row: Int, toGap gap: Int) {
+        guard rowMoveTargets.indices.contains(row), let target = rowMoveTargets[row], let onMove = target.actions.onMove else { return }
+        var destination = 0
+        for (i, t) in rowMoveTargets.enumerated() where i < gap {
+            if let t, t.actions === target.actions { destination = t.offset + 1 }
+        }
+        // A gap before the first row of the group (or anywhere above it) is offset zero.
+        if let first = rowMoveTargets.firstIndex(where: { $0?.actions === target.actions }), gap <= first { destination = 0 }
+        guard destination != target.offset, destination != target.offset + 1 else { return }
+        onMove(IndexSet(integer: target.offset), destination)
     }
 
     // MARK: Deleting
