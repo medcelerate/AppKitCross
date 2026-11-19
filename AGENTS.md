@@ -253,6 +253,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_LINUX_BACKEND=x11\|wayland` | force a Linux window system |
 | `APPKITWIN_TRACE=1` | every invalidation, SwiftUI node update (`setNeedsUpdate <View>`) and layout pass: repaint loops, a busy idle CPU |
 | `APPKITWIN_TRACE_FRAMES=1` | what each frame costs (solve, layout, draw, tick lateness) |
+| `APPKITWIN_TRACE_TEXTINPUT=1` | every input method step (`[textinput] ...`): composition that does not reach a text view, a candidate window in the wrong place |
 | `APPKITWIN_INFO_PLIST=<path>` | the Info.plist the app reads when the executable has none beside it (document types, `CFBundleName`, UTIs) |
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
@@ -372,8 +373,9 @@ Work in this order; each step's failures hide the next step's.
   `IFileOpenDialog`/`IFileSaveDialog` on Windows and the xdg-desktop-portal `FileChooser` on
   Linux; with no portal on the session bus the package-drawn panel is used. File types come
   from `UTType`s and the Info.plist's `CFBundleDocumentTypes` (ADR-0017).
-- **Info.plist**: `APPKITWIN_INFO_PLIST`, else `Info.plist` beside the executable, in
-  `Resources/`, or in the executable target's SwiftPM resource bundle (section 8). Without it
+- **Info.plist**: `APPKITWIN_INFO_PLIST`, else `Info.plist` (or `<exe>-Info.plist`) in
+  `Resources/`, the executable target's SwiftPM resource bundle, or beside the executable
+  (section 8). Without it
   the app is named after its executable, and imported UTIs (for example Markdown) have no
   extensions off macOS, so those files will not open.
 - **Printing** (ADR-0022): the port's print panel everywhere (`APPKITWIN_PRINT_PANEL=native`
@@ -405,13 +407,13 @@ Open an issue at <https://github.com/medcelerate/AppKitCross/issues> with the
 
 ## 8. Shipping
 
-<!-- FILLED(app-bundle-identity) from PR 89 / ADR-0045: true once PR 89 is on main. -->
 **App layout, resources and identity** (ADR-0045,
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#app-layout-on-windows-and-linux)): the app folder is
 the executable plus the `.resources` bundles `swift build` writes beside it; no restructuring.
 `Bundle.main` searches `Resources/`, then the executable target's SwiftPM bundle, then the
-folder, so an app that declares its `Info.plist`, `Assets.xcassets` (read uncompiled: image,
-app icon and data sets) and `.lproj` folders as target resources finds them as on macOS.
+folder, so an app that declares its `Assets.xcassets` (read uncompiled: image, app icon and
+data sets) and `.lproj` folders as target resources finds them as on macOS. SwiftPM refuses a
+top-level resource named `Info.plist`: ship it as `Resources/Info.plist` or `MyApp-Info.plist`.
 - **Strings**: `.strings`, `.stringsdict` (plural rules) and `.xcstrings` are read;
   `NSLocalizedString`, `String(localized:)`, `LocalizedStringResource` and SwiftUI `Text` keys
   resolve them. The language comes from `-AppleLanguages`, the Windows UI languages, or
@@ -425,10 +427,12 @@ app icon and data sets) and `.lproj` folders as target resources finds them as o
 - **File associations** (per user, only when asked): run `MyApp --appkitcross-register` /
   `--appkitcross-unregister` from an installer, or set the Info.plist key
   `AppKitCrossRegistersFileTypes` to register at launch. `CFBundleDocumentTypes` and
-  `CFBundleURLTypes` say what is registered.
+  `CFBundleURLTypes` say what is registered. On Windows the app is offered under Open with,
+  never made the default; that stays the user's choice.
+- `NSWorkspace` failures (no application, launch failed, `unsupported`) are `LocalizedError`s:
+  show `error.localizedDescription`, which says why.
 - `APPKITWIN_CORELIBS_BUNDLE=1` turns off the port's `Bundle` routing if you suspect it.
 
-<!-- FILLED(release-bundle-tool) from PR 87 / ADR-0046: true once PR 87 is on main. -->
 **Release builds and the app folder** (ADR-0046, [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#shipping-an-app)):
 
 ```bash
@@ -448,7 +452,6 @@ comes from the system). Crash reports go to `%LOCALAPPDATA%\<bundle id>\Crashes`
 `~/.local/share/<bundle id>/Crashes`; `APPKITWIN_CRASH_TEST=1` crashes a second after launch
 to check them.
 
-<!-- FILLED(ime-text-input) from PR 58 / ADR-0047: true once PR 58 is on main. -->
 **Input methods** (ADR-0047): CJK input works in `NSTextView`, `NSTextField` and the SwiftUI
 text fields built on them, through TSF (IMM32 as fallback) on Windows, `text-input-v3` on
 Wayland and XIM (ibus, fcitx5) on X11. A custom text view needs what it needs on macOS:

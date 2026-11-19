@@ -49,9 +49,10 @@ Animation, Metal, the text system and the SwiftUI runtime are in place and verif
 Windows 11 machine and in a Linux container; the macOS build is headless and runs the test
 suite against Apple's own frameworks as the specification.
 
-Not there yet: Metal swap-chain presentation on Linux, IME on Linux. The full milestone table is
-in [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md)
-lists every type with what is implemented.
+Input methods (Chinese, Japanese, Korean) work on Windows (TSF, IMM32) and Linux
+(text-input-v3 on Wayland, XIM on X11). What is not there yet is listed per milestone in
+[docs/ROADMAP.md](docs/ROADMAP.md), and [docs/API-COVERAGE.md](docs/API-COVERAGE.md) lists
+every type with what is implemented.
 
 ## Getting started
 
