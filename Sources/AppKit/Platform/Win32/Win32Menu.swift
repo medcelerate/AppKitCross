@@ -23,13 +23,21 @@ final class Win32MenuBar {
         let key = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(hwnd)))
         var before = RECT()
         GetClientRect(hwnd, &before)
-        if let old = builtBars[key] {
-            SetMenu(hwnd, nil)
-            forget(old)
-            DestroyMenu(old)
-            builtBars[key] = nil
+        // The old bar stays attached until the new one replaces it: detaching it first
+        // (SetMenu(nil)) grew the client area by the bar's height for a moment, and the
+        // WM_SIZE in between presented one frame drawn at the window's top with a black band
+        // at the bottom (a rebuild runs whenever an item's state changes, e.g. Undo enabling
+        // on a key press).
+        let old = builtBars[key]
+        if let old { forget(old) }      // before the new bar registers the same menu ids
+        builtBars[key] = nil
+        guard let spec else {
+            if old != nil { SetMenu(hwnd, nil) }
+            if let old { DestroyMenu(old) }
+            DrawMenuBar(hwnd)
+            restoreClientSize(hwnd, before)
+            return
         }
-        guard let spec else { DrawMenuBar(hwnd); restoreClientSize(hwnd, before); return }
         let bar = CreateMenu()
         for item in spec.items where !item.isHidden {
             append(item, to: bar)
@@ -37,9 +45,12 @@ final class Win32MenuBar {
         if let bar {
             builtBars[key] = bar
             SetMenu(hwnd, bar)
-            DrawMenuBar(hwnd)
-            restoreClientSize(hwnd, before)
+        } else if old != nil {
+            SetMenu(hwnd, nil)
         }
+        if let old { DestroyMenu(old) }
+        DrawMenuBar(hwnd)
+        restoreClientSize(hwnd, before)
     }
 
     /// SetMenu takes the bar out of the client area; grow the frame so the content keeps
