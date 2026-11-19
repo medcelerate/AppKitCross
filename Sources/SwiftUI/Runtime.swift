@@ -242,7 +242,7 @@ public final class _ViewNode {
         if rerun { sizeCache.removeAll(keepingCapacity: true) }
         if box.isPrimitive {
             if rerun || primitive == nil {
-                guard let fresh = box.makePrimitive(node: self) else { return }
+                guard let fresh = _trackingObservation(self, { box.makePrimitive(node: self) }) else { return }
                 if let old = primitive, type(of: old) == type(of: fresh) {
                     old.update(from: fresh)
                 } else {
@@ -258,7 +258,7 @@ public final class _ViewNode {
         } else {
             if rerun {
                 needsUpdate = false
-                if let bodyBox = box.body(node: self) { reconcile([bodyBox], environment: env, force: true) }
+                if let bodyBox = _trackingObservation(self, { box.body(node: self) }) { reconcile([bodyBox], environment: env, force: true) }
             } else {
                 for c in children { c.update(box: nil, environment: env, force: false) }
             }

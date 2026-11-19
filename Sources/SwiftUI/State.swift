@@ -204,9 +204,12 @@ public struct StateObject<ObjectType>: DynamicProperty where ObjectType: Observa
 // MARK: Environment
 
 final class _EnvironmentBox<Value> {
-    let keyPath: KeyPath<EnvironmentValues, Value>
+    /// Reads the value from the installed environment: a key path, or (Observation.swift)
+    /// an `Observable` object stored by type.
+    let read: (EnvironmentValues) -> Value
     var values: EnvironmentValues?
-    init(_ keyPath: KeyPath<EnvironmentValues, Value>) { self.keyPath = keyPath }
+    init(_ keyPath: KeyPath<EnvironmentValues, Value>) { read = { $0[keyPath: keyPath] } }
+    init(read: @escaping (EnvironmentValues) -> Value) { self.read = read }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/environment
@@ -214,7 +217,8 @@ final class _EnvironmentBox<Value> {
 public struct Environment<Value>: DynamicProperty {
     let box: _EnvironmentBox<Value>
     public init(_ keyPath: KeyPath<EnvironmentValues, Value>) { box = _EnvironmentBox(keyPath) }
-    public var wrappedValue: Value { (box.values ?? EnvironmentValues())[keyPath: box.keyPath] }
+    init(box: _EnvironmentBox<Value>) { self.box = box }
+    public var wrappedValue: Value { box.read(box.values ?? EnvironmentValues()) }
     @MainActor public func _install(in node: _ViewNode, slot: Int) { box.values = node.environment }
 }
 
