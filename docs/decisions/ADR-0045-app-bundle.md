@@ -217,14 +217,22 @@ the Info.plist's UTI declarations and UTType's tables), `CFBundleURLTypes` and
 
 On Windows, everything goes under HKCU, so no elevation is needed:
 
-- A ProgID per type, with `shell\open\command` set to `"exe" "%1"`.
-- The type's extensions' `OpenWithProgids`, and the extension's default only when nothing else
-  claims it and the type's rank is Owner or Default. Windows 10 and later leave the default
-  choice to the user.
+- A ProgID per type, with `shell\open\command` set to `"exe" "%1"` and `DefaultIcon` set to
+  `"…\AppIcon.ico",0`. Paths are written with backslashes: Foundation's paths on Windows use
+  forward slashes, which `AssocQueryString` and ShellExecute reject (found on the PC).
+- The type's extensions' `OpenWithProgids`. The app is offered, never made the default: the
+  extension's default and `Content Type` are the user's and the system's, and Windows 10 and
+  later leave the choice to the user anyway.
 - `Applications\<exe>` with `SupportedTypes`.
 - A Capabilities key listed under `RegisteredApplications`, for Settings > Default apps.
 - URL scheme keys, unless another executable owns the scheme.
 - Then `SHCNE_ASSOCCHANGED`.
+
+Unregistering removes the ProgIDs, `Applications\<exe>`, the Capabilities key and its
+`RegisteredApplications` value, the `OpenWithProgids` entries, and the extension keys they leave
+empty. `NSWorkspace.setDefaultApplication(at:toOpen:)` for the running app registers it and
+opens Settings on its Default apps page, then throws `unsupported` with that explanation.
+`PlatformWorkspaceError` is a `LocalizedError`, so an alert shows the sentence.
 
 On Linux:
 

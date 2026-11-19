@@ -135,7 +135,7 @@ public struct PlatformDockTile: Sendable {
     }
 }
 
-public enum PlatformWorkspaceError: Error, CustomStringConvertible {
+public enum PlatformWorkspaceError: Error, CustomStringConvertible, LocalizedError {
     /// Nothing is registered to open the target.
     case noApplication(String)
     /// The process could not be started.
@@ -150,6 +150,15 @@ public enum PlatformWorkspaceError: Error, CustomStringConvertible {
         case .launchFailed(let s): return "could not launch \(s)"
         case .fileOperationFailed(let s): return "file operation failed: \(s)"
         case .unsupported(let s): return "unsupported: \(s)"
+        }
+    }
+    /// What an alert shows (`localizedDescription`), the reason in a sentence.
+    public var errorDescription: String? {
+        switch self {
+        case .noApplication(let s): return "No application is registered to open \(s)."
+        case .launchFailed(let s): return "Could not launch \(s)."
+        case .fileOperationFailed(let s): return "The file operation failed: \(s)."
+        case .unsupported(let s): return s.prefix(1).uppercased() + s.dropFirst() + (s.hasSuffix(".") ? "" : ".")
         }
     }
 }

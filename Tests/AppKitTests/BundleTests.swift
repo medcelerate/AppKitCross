@@ -282,6 +282,10 @@ final class BundleTests: XCTestCase {
 
     // MARK: Registration
 
+    func testWorkspaceErrorsReadAsSentences() {
+        XCTAssertEqual(PlatformWorkspaceError.unsupported("windows lets only the user choose").localizedDescription, "Windows lets only the user choose.")
+    }
+
     func testRegistrationPlanForWindows() throws {
         let plan = _AppRegistration(app: app(), executablePath: #"C:\Program Files\Sample\SampleApp.exe"#)
         XCTAssertEqual(plan.identifier, "com.example.sampleapp")
@@ -294,8 +298,15 @@ final class BundleTests: XCTestCase {
         func value(_ key: String, _ name: String?) -> _AppRegistration.RegistryValue? { values.first { $0.key == key && $0.name == name } }
         XCTAssertEqual(value(#"Software\Classes\com.example.sampleapp.MarkdownDocument\shell\open\command"#, nil)?.value, plan.windowsOpenCommand)
         XCTAssertEqual(value(#"Software\Classes\.md\OpenWithProgids"#, "com.example.sampleapp.MarkdownDocument")?.value, "")
-        XCTAssertEqual(value(#"Software\Classes\.md"#, nil)?.condition, .ifAbsent, "the extension's default only when nothing claims it")
-        XCTAssertNil(value(#"Software\Classes\.smpl"#, nil), "an Alternate type never becomes the default")
+        XCTAssertFalse(values.contains { $0.key == #"Software\Classes\.md"# }, "only offered: never the extension's default or Content Type")
+        XCTAssertEqual(value(#"Software\Classes\com.example.sampleapp.MarkdownDocument\DefaultIcon"#, nil)?.value, #""C:\Program Files\Sample\SampleApp.exe",0"#)
+        // Foundation's paths on Windows use forward slashes; the registry gets backslashes.
+        let slashed = _AppRegistration(app: app(), executablePath: "C:/Program Files/Sample/SampleApp.exe")
+        XCTAssertEqual(slashed.windowsOpenCommand, plan.windowsOpenCommand)
+        XCTAssertEqual(_AppRegistration.windowsPath("/C:/a/b.ico"), #"C:\a\b.ico"#)
+        var withIcon = slashed
+        withIcon.iconPath = "C:/Program Files/Sample/Resources/AppIcon.ico"
+        XCTAssertEqual(withIcon.windowsRegistryValues.first { $0.key.hasSuffix(#"Applications\SampleApp.exe\DefaultIcon"#) }?.value, #""C:\Program Files\Sample\Resources\AppIcon.ico",0"#)
         XCTAssertEqual(value(#"Software\Classes\sample"#, "URL Protocol")?.value, "")
         XCTAssertEqual(value(#"Software\Classes\Applications\SampleApp.exe\SupportedTypes"#, ".smpl")?.value, "")
         XCTAssertEqual(value(#"Software\RegisteredApplications"#, "com.example.sampleapp")?.value, #"Software\AppKitCross\com.example.sampleapp\Capabilities"#)

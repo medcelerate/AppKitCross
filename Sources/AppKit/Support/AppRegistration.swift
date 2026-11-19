@@ -6,10 +6,11 @@
 //
 //   Windows (HKCU\Software\Classes, no administrator rights): a ProgID per document type
 //   (`<identity>.<Type>`: name, DefaultIcon, shell\open\command `"exe" "%1"`), the type's
-//   extensions' OpenWithProgids (and the extension's default when nothing claims it and the
-//   type's rank is Owner or Default), Applications\<exe> with SupportedTypes, a Capabilities
+//   extensions' OpenWithProgids (never the extension's default or its Content Type: those are
+//   the user's and the system's), Applications\<exe> with SupportedTypes, a Capabilities
 //   key listed under RegisteredApplications (what Settings > Default apps offers), and each URL
-//   scheme's key when no other application owns it. Then SHChangeNotify(SHCNE_ASSOCCHANGED).
+//   scheme's key when no other application owns it, every path with backslashes and every
+//   DefaultIcon with its index (`"…\\AppIcon.ico",0`). Then SHChangeNotify(SHCNE_ASSOCCHANGED).
 //   Windows 10 and later leave the default choice to the user (UserChoice): the app becomes a
 //   listed handler, not silently the default.
 //
@@ -137,10 +138,21 @@ public struct _AppRegistration: Equatable, Sendable {
     }
 
     /// `"C:\path\App.exe" "%1"`.
-    public var windowsOpenCommand: String { "\"\(executablePath)\" \"%1\"" }
+    /// A path as the registry and the shell need it: backslashes (Foundation's URL paths on
+    /// Windows use forward slashes, which `AssocQueryString` and ShellExecute reject).
+    static func windowsPath(_ path: String) -> String {
+        var p = path.replacingOccurrences(of: "/", with: "\\")
+        // "/C:/x" (a URL path) → "C:\x"
+        if p.hasPrefix("\\"), p.count > 2, Array(p)[2] == ":" { p.removeFirst() }
+        return p
+    }
+    var windowsExecutablePath: String { _AppRegistration.windowsPath(executablePath) }
+    public var windowsOpenCommand: String { "\"\(windowsExecutablePath)\" \"%1\"" }
     var windowsExecutableName: String { (executablePath.replacingOccurrences(of: "\\", with: "/") as NSString).lastPathComponent }
+    /// A DefaultIcon value: the file and its icon index.
+    static func windowsIconLocation(_ path: String) -> String { "\"\(windowsPath(path))\",0" }
     public var windowsCapabilitiesKey: String { "Software\\AppKitCross\\\(identifier)\\Capabilities" }
-    var windowsIcon: String { iconPath ?? "\"\(executablePath)\",0" }
+    var windowsIcon: String { _AppRegistration.windowsIconLocation(iconPath ?? executablePath) }
 
     /// Every value the registration writes, in order (keys are created as needed).
     public var windowsRegistryValues: [RegistryValue] {
@@ -150,16 +162,12 @@ public struct _AppRegistration: Equatable, Sendable {
             let p = classes + t.progID
             out.append(RegistryValue(key: p, name: nil, value: t.name))
             out.append(RegistryValue(key: p, name: "FriendlyTypeName", value: t.name))
-            out.append(RegistryValue(key: p + "\\DefaultIcon", name: nil, value: t.iconPath ?? windowsIcon))
+            out.append(RegistryValue(key: p + "\\DefaultIcon", name: nil, value: t.iconPath.map(_AppRegistration.windowsIconLocation) ?? windowsIcon))
             out.append(RegistryValue(key: p + "\\shell\\open\\command", name: nil, value: windowsOpenCommand))
+            // Only offered (Open With, Default apps): the extension's default and its Content
+            // Type are the user's and the system's to set.
             for ext in t.extensions {
                 out.append(RegistryValue(key: classes + "." + ext + "\\OpenWithProgids", name: t.progID, value: ""))
-                if t.rank == "Owner" || t.rank == "Default" {
-                    out.append(RegistryValue(key: classes + "." + ext, name: nil, value: t.progID, condition: .ifAbsent))
-                }
-                if let mime = t.mimeTypes.first, !mime.hasPrefix("application/x-" + _AppRegistration.token(identifier)) {
-                    out.append(RegistryValue(key: classes + "." + ext, name: "Content Type", value: mime, condition: .ifAbsent))
-                }
             }
         }
         let app = classes + "Applications\\" + windowsExecutableName

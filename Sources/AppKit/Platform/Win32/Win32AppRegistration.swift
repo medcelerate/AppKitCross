@@ -3,8 +3,9 @@
 // re-reads the associations. A value marked `ifAbsent` is written only when HKEY_CLASSES_ROOT
 // (the user's and the machine's classes merged) has none; a URL scheme another executable owns
 // is left alone. Unregistering removes the keys the registration owns, its OpenWithProgids
-// entries, the extension defaults that still name its ProgIDs, its RegisteredApplications value
-// and the scheme keys whose command is this executable.
+// entries (and the extension keys left empty), extension defaults and Content Types that still
+// name its ProgIDs and MIME types, its RegisteredApplications value and the scheme keys whose
+// command is this executable.
 
 #if os(Windows)
 import Foundation
@@ -53,6 +54,18 @@ private func deleteValue(_ key: String, _ name: String?) {
     }
 }
 
+/// Deletes a key that has no values and no subkeys left.
+private func deleteIfEmpty(_ key: String) {
+    var hkey: HKEY? = nil
+    let opened = key.withCString(encodedAs: UTF16.self) { RegOpenKeyExW(hkcu, $0, 0, REGSAM(0x20019) /* KEY_READ */, &hkey) }
+    guard opened == ERROR_SUCCESS, let hkey else { return }
+    var subkeys: DWORD = 0, values: DWORD = 0
+    let status = RegQueryInfoKeyW(hkey, nil, nil, nil, &subkeys, nil, nil, &values, nil, nil, nil, nil)
+    RegCloseKey(hkey)
+    guard status == ERROR_SUCCESS, subkeys == 0, values == 0 else { return }
+    _ = key.withCString(encodedAs: UTF16.self) { RegDeleteKeyW(hkcu, $0) }
+}
+
 private func notifyShell() {
     SHChangeNotify(LONG(SHCNE_ASSOCCHANGED), UINT(SHCNF_IDLIST), nil, nil)
 }
@@ -85,7 +98,12 @@ func _platformUnregisterApplication(_ plan: _AppRegistration) throws {
         for ext in t.extensions {
             let extKey = classesPrefix + "." + ext
             deleteValue(extKey + "\\OpenWithProgids", t.progID)
+            // Values earlier versions of the registration wrote (the extension's default and
+            // Content Type), removed while they are still what it wrote.
             if readString(hkcu, extKey, nil) == t.progID { deleteValue(extKey, nil) }
+            if let mime = readString(hkcu, extKey, "Content Type"), t.mimeTypes.contains(mime) { deleteValue(extKey, "Content Type") }
+            deleteIfEmpty(extKey + "\\OpenWithProgids")
+            deleteIfEmpty(extKey)
         }
     }
     for key in plan.windowsSchemeKeys where schemeIsOurs(key, plan) && readString(hkcu, key + "\\shell\\open\\command", nil) != nil { deleteTree(key) }
