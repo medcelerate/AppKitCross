@@ -582,8 +582,17 @@ final class Win32Workspace: PlatformWorkspace {
         return nil
     }
 
-    /// Windows 10 and later let only the user change defaults (the Settings app).
+    /// Windows 10 and later let only the user change defaults (the Settings app). For this
+    /// application itself the registration of ADR-0045 is written first, so it is offered
+    /// there, and Settings opens on its page.
     func setDefaultApplication(at applicationURL: URL, toOpen target: PlatformOpenTarget) throws {
+        let path = applicationURL.standardizedFileURL.path
+        if path == _AppBundle.main.layout.bundleURL.standardizedFileURL.path || path == _AppBundle.mainExecutableURL.standardizedFileURL.path {
+            let plan = try _AppRegistration._registerCurrent()
+            let page = "ms-settings:defaultapps?registeredAppUser=" + (plan.identifier.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? plan.identifier)
+            if let url = URL(string: page) { _ = open(url) }
+            throw PlatformWorkspaceError.unsupported("Windows lets only the user choose default applications: \(plan.displayName) is now offered in Settings > Apps > Default apps, which is open")
+        }
         throw PlatformWorkspaceError.unsupported("Windows lets only the user choose default applications (Settings > Apps > Default apps)")
     }
 

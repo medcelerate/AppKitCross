@@ -104,6 +104,7 @@ open class NSPasteboard: NSObject {
     }
     // DUPLICATE: open var accessBehavior: NSPasteboard.AccessBehavior
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/addtypes(_:owner:)
+    @discardableResult
     open func addTypes(_ newTypes: [NSPasteboard.PasteboardType], owner newOwner: Any?) -> Int {
         let item = _firstItem
         for t in newTypes where item._entries[t] == nil { item._entries[t] = Data() }
@@ -119,6 +120,7 @@ open class NSPasteboard: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/changecount
     open var changeCount: Int { _syncFromPlatform(); return _localChangeCount }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/clearcontents()
+    @discardableResult
     open func clearContents() -> Int {
         _items.removeAll()
         _localChangeCount += 1
@@ -128,6 +130,7 @@ open class NSPasteboard: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/data(fortype:)
     open func data(forType dataType: NSPasteboard.PasteboardType) -> Data? { _syncFromPlatform(); for i in _items { if let d = i.data(forType: dataType) { return d } }; return nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/declaretypes(_:owner:)
+    @discardableResult
     open func declareTypes(_ newTypes: [NSPasteboard.PasteboardType], owner newOwner: Any?) -> Int {
         _ = clearContents()
         return addTypes(newTypes, owner: newOwner)
@@ -192,6 +195,7 @@ open class NSPasteboard: NSObject {
     open var pasteboardItems: [NSPasteboardItem]? { _syncFromPlatform(); return _items }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/preparefornewcontents(with:)
     @available(macOS 10.12, *)
+    @discardableResult
     open func prepareForNewContents(with options: NSPasteboard.ContentsOptions = []) -> Int { clearContents() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/propertylist(fortype:)
     open func propertyList(forType dataType: NSPasteboard.PasteboardType) -> Any? { data(forType: dataType).flatMap { try? PropertyListSerialization.propertyList(from: $0, format: nil) } }
@@ -219,6 +223,7 @@ open class NSPasteboard: NSObject {
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/releaseglobally()
     open func releaseGlobally() { NSPasteboard._named[_name] = nil }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/setdata(_:fortype:)
+    @discardableResult
     open func setData(_ data: Data?, forType dataType: NSPasteboard.PasteboardType) -> Bool {
         _firstItem._entries[dataType] = data ?? Data()
         _localChangeCount += 1
@@ -226,11 +231,13 @@ open class NSPasteboard: NSObject {
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/setpropertylist(_:fortype:)
+    @discardableResult
     open func setPropertyList(_ plist: Any, forType dataType: NSPasteboard.PasteboardType) -> Bool {
         guard let d = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) else { return false }
         return setData(d, forType: dataType)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/setstring(_:fortype:)
+    @discardableResult
     open func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool { setData(Data(string.utf8), forType: dataType) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/string(fortype:)
     open func string(forType dataType: NSPasteboard.PasteboardType) -> String? { data(forType: dataType).map { String(decoding: $0, as: UTF8.self) } }
@@ -245,11 +252,13 @@ open class NSPasteboard: NSObject {
     }
     // SKIPPED (Foundation.FileWrapper not in corelibs): func write(_ wrapper: FileWrapper) -> Bool
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/writefilecontents(_:)
+    @discardableResult
     open func writeFileContents(_ filename: String) -> Bool {
         guard let d = try? Data(contentsOf: URL(fileURLWithPath: filename)) else { return false }
         return setData(d, forType: .fileContents)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspasteboard/writeobjects(_:)
+    @discardableResult
     open func writeObjects(_ objects: [any NSPasteboardWriting]) -> Bool {
         MainActor.assumeIsolated {
             for o in objects {

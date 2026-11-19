@@ -114,7 +114,9 @@ final class WaylandWindow: PlatformWindow, AtspiWindow {
         xdg_surface_add_listener(xdgSurface, WaylandWindow.xdgSurfaceListener, opaque)
         toplevel = xdg_surface_get_toplevel(xdgSurface)
         xdg_toplevel_add_listener(toplevel, WaylandWindow.toplevelListener, opaque)
-        xdg_toplevel_set_app_id(toplevel, "AppKitCross")
+        // The desktop entry's id (ADR-0045): the compositor takes the window's icon and name from
+        // `<app_id>.desktop`, which `NSWorkspace._registerApplication` writes.
+        xdg_toplevel_set_app_id(toplevel, _AppBundle.main.platformIdentifier)
         if !_title.isEmpty { xdg_toplevel_set_title(toplevel, _title) }
         if let manager = backend.decorationManager {
             decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(manager, toplevel)

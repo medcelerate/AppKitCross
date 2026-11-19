@@ -196,7 +196,23 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
                                                       appearance: appearance, linkAttributes: linkAttributes, temporary: _temporary,
                                                       container: _textContainers.first, attachmentSizeOverrides: _attachmentSizeOverrides)
         _attachments = converted.attachments
-        return converted.string
+        guard let echo = _secureEcho else { return converted.string }
+        // Run by run, so the attributes stay where they were.
+        let masked = NSMutableAttributedString(attributedString: converted.string)
+        let text = masked.string as NSString
+        var runs: [NSRange] = []
+        masked.enumerateAttributes(in: NSRange(location: 0, length: masked.length), options: []) { _, r, _ in runs.append(r) }
+        for r in runs.reversed() {
+            masked.replaceCharacters(in: r, with: _NSSecureEcho.mask(text.substring(with: r), with: echo))
+        }
+        return masked
+    }
+
+    /// Set on a secure field's editor (NSSecureTextField): the glyphs drawn for the text,
+    /// one per character ("" draws nothing, for `echosBullets == false`). The storage keeps
+    /// the real text; only what is laid out and drawn changes, keeping offsets one to one.
+    internal var _secureEcho: String? {
+        didSet { if _secureEcho != oldValue { _invalidateAll() } }
     }
 
     /// Attachments by character index: the attachment and its laid-out size and baseline offset.

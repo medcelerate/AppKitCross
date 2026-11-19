@@ -1,5 +1,6 @@
 // swift-tools-version:6.0
 import PackageDescription
+import CompilerPluginSupport
 import Foundation
 
 // Windows-only modules. On macOS these are NOT declared: Apple's Foundation re-exports
@@ -189,6 +190,16 @@ targets += [
 ]
 appKitDependencies += ["QuartzCore"]
 
+// ADR-0045: Swift-convention trampolines the port places in swift-corelibs-foundation's
+// Bundle vtable (Bundle cannot be subclassed from another module), so Bundle.main and
+// NSLocalizedString follow the app layout and the user's languages. Windows and Linux only
+// (macOS apps use Apple's Bundle; on the host build XCTest imports AppKit, which must not
+// need a C module its clients cannot see).
+#if os(Windows) || os(Linux)
+targets += [.target(name: "CBundleHooks", path: "Sources/CBundleHooks")]
+appKitDependencies += ["CBundleHooks"]
+#endif
+
 // Metal (ADR-0004): the API as protocols plus the reference device, on every platform;
 // MetalKit's MTKView sits on AppKit. The D3D12 shim is Windows-only.
 #if os(Windows)
@@ -308,6 +319,11 @@ appKitTestDependencies += avfAudioDependencies
 var audioPlayerDependencies: [Target.Dependency] = ["AppKit"]
 audioPlayerDependencies += avfAudioDependencies
 
+// The compiler plugin behind `#Preview` (ADR-0049): no swift-syntax, just the plugin
+// protocol over stdin/stdout. AppKit (and through it SwiftUI) declares the macros.
+targets.append(.macro(name: "AppKitCrossPreviewMacros", path: "Sources/PreviewMacros", swiftSettings: [.swiftLanguageMode(.v5)]))
+appKitDependencies.append("AppKitCrossPreviewMacros")
+
 targets += [
     // SwiftUI over this AppKit (ADR-0010), on every platform.
     .target(name: "SwiftUI", dependencies: swiftUIDependencies, path: "Sources/SwiftUI", swiftSettings: [.swiftLanguageMode(.v5)]),
@@ -327,7 +343,10 @@ targets += [
     .executableTarget(
         name: "HelloWindow",
         dependencies: ["AppKit", "Metal", "MetalKit", "SwiftUI"],
-        path: "Examples/HelloWindow"
+        path: "Examples/HelloWindow",
+        // ADR-0045: a localized greeting (en, de) and an image, found through Bundle.main in
+        // the target's SwiftPM bundle (AppKitCross_HelloWindow.resources/Resources).
+        resources: [.copy("Resources")]
     ),
     // Small, self-contained examples (Examples/<Name>/README.md says what each shows).
     .executableTarget(name: "Calculator", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Calculator", exclude: ["README.md"]),
@@ -351,14 +370,19 @@ targets += [
     .executableTarget(name: "DailyTodo", dependencies: ["AppKit", "SwiftUI", "DailyTodoCore"] + dailyTodoPlatformDependencies, path: "Examples/DailyTodo/Sources/DailyTodo", swiftSettings: [.swiftLanguageMode(.v5)]),
     .executableTarget(name: "DailyTodoChecks", dependencies: ["DailyTodoCore"], path: "Examples/DailyTodo/Sources/DailyTodoChecks", swiftSettings: [.swiftLanguageMode(.v5)]),
     // The second real app, document-based: MD Vault (MIT, Examples/MDVault/README.md), its
-    // `Sources/` vendored unmodified. Upstream builds with plain `swiftc` (Swift 5 mode); its
-    // Info.plist (document types, the Markdown UTI, the app name) stays in
-    // Examples/MDVault/Resources, which `APPKITWIN_INFO_PLIST` can name at launch.
-    .executableTarget(name: "MDVault", dependencies: ["AppKit", "SwiftUI"] + mdVaultDependencies, path: "Examples/MDVault/Sources/MDVault", swiftSettings: [.swiftLanguageMode(.v5)]),
+    // `Sources/` vendored unmodified. Upstream builds with plain `swiftc` (Swift 5 mode). Its
+    // Resources/ folder (upstream's Info.plist with the document types, the Markdown UTI and
+    // the app name, the icon, the sample documents) is the target's SwiftPM bundle, where the
+    // port finds the Info.plist and the icon at launch (ADR-0045).
+    .executableTarget(name: "MDVault", dependencies: ["AppKit", "SwiftUI"] + mdVaultDependencies, path: "Examples/MDVault",
+                      exclude: ["LICENSE", "README.md", "UPSTREAM-README.md"], sources: ["Sources/MDVault"], resources: [.copy("Resources")],
+                      swiftSettings: [.swiftLanguageMode(.v5)]),
     .testTarget(
         name: "AppKitTests",
         dependencies: appKitTestDependencies,
         path: "Tests/AppKitTests",
+        // BundleTests reads the fixture app folder from the source tree (ADR-0045).
+        exclude: ["Fixtures"],
         swiftSettings: avfAudioTestSettings
     ),
 ]

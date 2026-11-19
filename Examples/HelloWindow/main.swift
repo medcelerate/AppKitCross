@@ -309,6 +309,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
         canvas.addSubview(greeting)
         self.greeting = greeting
 
+        // The app bundle (ADR-0045): an image and a localized line from the target's SwiftPM
+        // bundle, through the Apple API a Mac app uses (`-AppleLanguages "(de)"` for German).
+        let globe = NSImageView(frame: NSRect(x: 40, y: prompt.frame.minY - 36, width: 24, height: 24))
+        globe.image = NSImage(named: "Globe")
+        globe.imageScaling = .scaleProportionallyUpOrDown
+        globe.autoresizingMask = [.minYMargin]
+        canvas.addSubview(globe)
+        let welcome = NSTextField(labelWithString: NSLocalizedString("Welcome to AppKitCross", comment: "HelloWindow's localized greeting")
+                                  + " \u{2014} " + String(localized: "\(3) files"))
+        welcome.frame = NSRect(x: globe.frame.maxX + 8, y: globe.frame.minY + 4, width: 420, height: prompt.frame.height)
+        welcome.autoresizingMask = [.minYMargin]
+        canvas.addSubview(welcome)
+
         // A scroll view over a tall document with numbered rows.
         let scroll = NSScrollView(frame: NSRect(x: canvas.bounds.maxX - 180, y: 60, width: 164, height: 200))
         scroll.borderType = .bezelBorder
@@ -658,6 +671,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSe
     func windowDidResize(_ notification: Notification) {
         window.contentView?.needsDisplay = true
     }
+}
+
+// `HelloWindow --bundle-report` prints what the app bundle answers (ADR-0045) and exits:
+// the PC checklist's language, resource and identity checks without a screenshot.
+if CommandLine.arguments.contains("--bundle-report") {
+    let app = MainActor.assumeIsolated { NSApplication.shared }
+    _ = app
+    print("bundle: hooks \(_AppBundle.isMainBundleInstalled ? "installed" : "not installed")")
+    print("bundle: resourceURL \(Bundle.main.resourceURL?.lastPathComponent ?? "nil")")
+    print("bundle: preferredLocalizations \(Bundle.main.preferredLocalizations)")
+    print("bundle: NSLocalizedString \(NSLocalizedString("Welcome to AppKitCross", comment: ""))")
+    print("bundle: String(localized:) \(String(localized: "\(1) files")) / \(String(localized: "\(3) files"))")
+    print("bundle: localizedStringWithFormat \(String.localizedStringWithFormat(NSLocalizedString("%lld files", comment: ""), 3))")
+    print("bundle: url(forResource:) \(Bundle.main.url(forResource: "Globe", withExtension: "png")?.lastPathComponent ?? "nil")")
+    let globe = NSImage(named: "Globe")
+    print("bundle: NSImage(named:) \(globe.map { "\(Int($0.size.width))x\(Int($0.size.height)), \($0.representations.count) reps" } ?? "nil")")
+    print("bundle: name \(_AppBundle.main.displayName), identity \(_AppBundle.main.platformIdentifier)")
+    exit(0)
 }
 
 // `HelloWindow --metal-selftest` checks the Metal device offscreen and exits with the

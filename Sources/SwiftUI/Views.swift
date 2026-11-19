@@ -462,6 +462,15 @@ final class _TextPrimitive: _Primitive {
         refresh()
         var s = view.size(for: proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
         if let w = proposal.width, w.isFinite, w > 0, s.width > w, node.environment.lineLimit == 1 { s.width = w }
+        // lineLimit(_:reservesSpace: true): the height of that many lines, however short the text.
+        let extras = node.environment._lineLimitExtras
+        if extras.reservesSpace, let lines = extras.minimum, lines > 1 {
+            let a = text._attributed(node.environment)
+            let font = (a.length > 0 ? a.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil) ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let line = (font.ascender - font.descender + font.leading).rounded(.up)
+            let spacing = node.environment.lineSpacing
+            s.height = max(s.height, CGFloat(lines) * line + CGFloat(lines - 1) * spacing)
+        }
         lastMeasuredHeight = s.height
         return s
     }
@@ -535,7 +544,7 @@ public struct Text: View, _PrimitiveView, Equatable {
 
     public init(verbatim content: String) { runs = [Run(string: content)] }
     public init<S: StringProtocol>(_ content: S) { runs = [Run(string: String(content))] }
-    public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.key)] }
+    public init(_ key: LocalizedStringKey, tableName: String? = nil, bundle: Bundle? = nil, comment: StaticString? = nil) { runs = [Run(string: key.resolved(tableName: tableName, bundle: bundle))] }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text/init(_:)-1a4oh
     public init(_ attributed: AttributedString) { runs = Text._runs(of: attributed) }
     public init(_ date: Date, style: DateStyle) {
@@ -620,35 +629,46 @@ extension Text {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey
+/// The key is Apple's (`"%lld items"` for `"\(count) items"`); `key` is its text in the main
+/// bundle's `Localizable` table for the user's language, formatted with the interpolated
+/// values, or the text itself when there is no translation (ADR-0045).
 public struct LocalizedStringKey: ExpressibleByStringLiteral, ExpressibleByStringInterpolation, Equatable, Sendable {
-    let key: String
-    public init(_ value: String) { key = value }
-    public init(stringLiteral value: String) { key = value }
-    public init(stringInterpolation: StringInterpolation) { key = stringInterpolation.output }
+    let _raw: _LocalizationKey
+    /// The localized text (main bundle, default table).
+    var key: String { _raw.resolve(table: nil, bundle: nil, locale: nil) }
+    func resolved(tableName: String?, bundle: Bundle?) -> String { _raw.resolve(table: tableName, bundle: bundle, locale: nil) }
+    public init(_ value: String) { _raw = _LocalizationKey(value) }
+    public init(stringLiteral value: String) { _raw = _LocalizationKey(value) }
+    public init(stringInterpolation: StringInterpolation) { _raw = stringInterpolation._key }
 
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/localizedstringkey/stringinterpolation
-    /// The key is built as the formatted string (there is no strings table to look up).
     public struct StringInterpolation: StringInterpolationProtocol, Sendable {
-        var output = ""
-        public init(literalCapacity: Int, interpolationCount: Int) { output.reserveCapacity(literalCapacity) }
-        public mutating func appendLiteral(_ literal: String) { output += literal }
-        public mutating func appendInterpolation(_ string: String) { output += string }
-        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) { output += subject.description }
-        public mutating func appendInterpolation<T>(_ value: T) { output += String(describing: value) }
+        var _key = _LocalizationKey()
+        public init(literalCapacity: Int, interpolationCount: Int) {}
+        public mutating func appendLiteral(_ literal: String) { _key.appendLiteral(literal) }
+        public mutating func appendInterpolation(_ string: String) { _key.append(string, specifier: "%@") }
+        public mutating func appendInterpolation<Subject: CustomStringConvertible>(_ subject: Subject) {
+            if let arg = subject as? CVarArg, !(subject is String) { _key.append(arg, specifier: _LocalizationKey.specifier(for: subject)) }
+            else { _key.append(subject.description, specifier: "%@") }
+        }
+        public mutating func appendInterpolation<T>(_ value: T) {
+            if let arg = value as? CVarArg, !(value is String) { _key.append(arg, specifier: _LocalizationKey.specifier(for: value)) }
+            else { _key.append(String(describing: value), specifier: "%@") }
+        }
         /// `"\(value, specifier: "%.2f")"`: a printf-style format for the value.
-        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { output += String(format: specifier, value._arg) }
+        public mutating func appendInterpolation<T: _FormatSpecifiable>(_ value: T, specifier: String) { _key.append(value._arg, specifier: specifier) }
         public mutating func appendInterpolation<Subject: ReferenceConvertible>(_ subject: Subject, formatter: Formatter? = nil) {
             let any: Any = subject
-            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += String(describing: subject) }
+            _key.append((formatter?.string(for: any)) ?? String(describing: subject), specifier: "%@")
         }
         public mutating func appendInterpolation<Subject: NSObject>(_ subject: Subject, formatter: Formatter? = nil) {
             let any: Any = subject
-            if let formatter, let formatted = formatter.string(for: any) { output += formatted } else { output += subject.description }
+            _key.append((formatter?.string(for: any)) ?? subject.description, specifier: "%@")
         }
-        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { output += format.format(input) }
-        public mutating func appendInterpolation(_ text: Text) { output += text._string }
+        public mutating func appendInterpolation<F: FormatStyle>(_ input: F.FormatInput, format: F) where F.FormatOutput == String { _key.append(format.format(input), specifier: "%@") }
+        public mutating func appendInterpolation(_ text: Text) { _key.append(text._string, specifier: "%@") }
         public mutating func appendInterpolation(_ image: Image) {}
-        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { output += Text(date, style: style)._string }
+        public mutating func appendInterpolation(_ date: Date, style: Text.DateStyle) { _key.append(Text(date, style: style)._string, specifier: "%@") }
     }
 }
 
@@ -1026,6 +1046,32 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     let placeholder: String
     let text: Binding<String>
     let onCommit: () -> Void
+    var axis: Axis = .horizontal
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-8rujz
+    ///
+    /// With `.vertical` the text wraps and the field grows with it, between the lines a
+    /// ranged `lineLimit` allows; Option-Return types a newline, Return submits.
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, axis: Axis) where Label == Text {
+        self.init(titleKey, text: text); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:prompt:axis:)-7n1bo
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?, axis: Axis) where Label == Text {
+        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}; self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-1v9ln
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, axis: Axis) where Label == Text {
+        self.init(String(title), text: text); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:prompt:axis:)-6unlv
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, prompt: Text?, axis: Axis) where Label == Text {
+        self.init(String(title), text: text, prompt: prompt); self.axis = axis
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(text:prompt:axis:label:)
+    public init(text: Binding<String>, prompt: Text? = nil, axis: Axis, @ViewBuilder label: () -> Label) {
+        self.init(text: text, prompt: prompt, label: label); self.axis = axis
+    }
     public init(_ title: String, text: Binding<String>) where Label == Text {
         placeholder = title; self.text = text; onCommit = {}
     }
@@ -1041,17 +1087,75 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
         placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis) }
+}
+
+/// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield
+///
+/// An `NSSecureTextField`: bullets for the text, edited in the window's secure field editor
+/// (no copy, cut or drag of the text), and read as bullets by assistive technology.
+public struct SecureField<Label: View>: View, _PrimitiveView {
+    public typealias Body = Never
+    let placeholder: String
+    let text: Binding<String>
+    let onCommit: () -> Void
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-6ae2l
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>) where Label == Text {
+        placeholder = titleKey.key; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-3p6b5
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>) where Label == Text {
+        placeholder = String(title); self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-3kgqx
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?) where Label == Text {
+        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-5ve9a
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, prompt: Text?) where Label == Text {
+        placeholder = prompt?._string ?? String(title); self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(text:prompt:label:)
+    public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
+        placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-7xby2
+    @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
+    public init(_ titleKey: LocalizedStringKey, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
+        placeholder = titleKey.key; self.text = text; self.onCommit = onCommit
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-9cs5n
+    @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
+        placeholder = String(title); self.text = text; self.onCommit = onCommit
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
+    }
+}
+
+/// A secure field's primitive: its own type, so a view switching between a `TextField` and
+/// a `SecureField` (a "show password" toggle) gets a new control rather than an update.
+@MainActor
+final class _SecureFieldPrimitive: _TextFieldPrimitive {
+    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void) {
+        super.init(placeholder: placeholder, text: text, onCommit: onCommit, field: NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22)))
+    }
 }
 
 @MainActor
-final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
+class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     var text: Binding<String>
     var onCommit: () -> Void
     var placeholder: String
-    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void) {
-        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder
-        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
+    var axis: Axis
+    init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void, axis: Axis = .horizontal,
+         field: NSTextField? = nil) {
+        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder; self.axis = axis
+        let f = field ?? NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
         f.placeholderString = placeholder
         f.stringValue = text.wrappedValue
         super.init(control: f)
@@ -1074,7 +1178,7 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _TextFieldPrimitive else { return }
-        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder
+        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1085,6 +1189,14 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         // until focus leaves.
         if control.stringValue != text.wrappedValue { control._setStringValueUpdatingEditor(text.wrappedValue) }
         if control.placeholderString != placeholder { control.placeholderString = placeholder }
+        // A vertical field wraps and grows with its text (sizeThatFits measures it).
+        let vertical = axis == .vertical
+        if control.usesSingleLineMode == vertical {
+            control.usesSingleLineMode = !vertical
+            control.cell?.wraps = vertical
+            control.cell?.isScrollable = !vertical
+            control.lineBreakMode = vertical ? .byWordWrapping : .byClipping
+        }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
         switch node.environment.textFieldStyle {
@@ -1093,9 +1205,36 @@ final class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         }
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
-        let h = control.intrinsicContentSize.height
         let w = proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160
-        return CGSize(width: max(w, 20), height: h == NSView.noIntrinsicMetric ? 22 : h)
+        if axis == .vertical { return CGSize(width: max(w, 20), height: verticalHeight(width: max(w, 20), node: node)) }
+        // One line whatever the text holds (a pasted newline does not grow the field).
+        return CGSize(width: max(w, 20), height: lineHeight + chrome)
+    }
+    private var lineHeight: CGFloat {
+        let font = control.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        return (font.ascender - font.descender + font.leading).rounded(.up)
+    }
+    /// The field's height beyond its lines: macOS's bezeled field is 21 pt for one 16 pt line
+    /// of the system font and 37 pt for two.
+    private var chrome: CGFloat { control.isBezeled || control.isBordered ? 5 : 1 }
+    /// A vertical field's height: its wrapped lines (one at least), clamped to the ranged
+    /// `lineLimit`, plus the bezel.
+    private func verticalHeight(width: CGFloat, node: _ViewNode) -> CGFloat {
+        let font = control.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let lineHeight = self.lineHeight
+        let bezeled = control.isBezeled || control.isBordered
+        let textWidth = max(1, width - (bezeled ? 10 : 4))
+        let string = control.stringValue
+        var lines = 1
+        if !string.isEmpty {
+            let used = (string as NSString).boundingRect(with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+                                                        options: [.usesLineFragmentOrigin], attributes: [.font: font], context: nil).height
+            lines = max(1, Int((used / lineHeight).rounded()))
+            if string.hasSuffix("\n") { lines += 1 }       // the caret's empty last line
+        }
+        if let minimum = node.environment._lineLimitExtras.minimum { lines = max(lines, minimum) }
+        if let maximum = node.environment.lineLimit { lines = min(lines, max(1, maximum)) }
+        return CGFloat(lines) * lineHeight + chrome
     }
 }
 
@@ -1469,20 +1608,77 @@ public struct ScrollView<Content: View>: View, _PrimitiveView {
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section
-public struct Section<Parent: View, Content: View, Footer: View>: View {
+///
+/// Under a `List` the header is a row of its own that cannot be selected, and the content's
+/// rows follow; under a `Form` or a stack the header sits above the content.
+public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRowsProvider {
     let header: Parent
     let content: Content
     let footer: Footer
     public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent, @ViewBuilder footer: () -> Footer) {
         self.header = header(); self.content = content(); self.footer = footer()
     }
-    public var body: some View { Group { header; content; footer } }
+    public var body: some View {
+        Group {
+            if !(header is EmptyView) { _SectionHeader(content: header) }
+            content
+            if !(footer is EmptyView) { _SectionFooter(content: footer) }
+        }
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(header:footer:content:)
+    @available(*, deprecated, renamed: "Section(content:header:footer:)")
+    public init(header: Parent, footer: Footer, @ViewBuilder content: () -> Content) {
+        self.header = header; self.content = content(); self.footer = footer
+    }
+}
+extension Section where Footer == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:header:)
+    public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent) {
+        self.init(content: content, header: header, footer: { EmptyView() })
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(header:content:)
+    @available(*, deprecated, renamed: "Section(content:header:)")
+    public init(header: Parent, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { header }, footer: { EmptyView() })
+    }
+}
+extension Section where Parent == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:footer:)
+    public init(@ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer) {
+        self.init(content: content, header: { EmptyView() }, footer: footer)
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(footer:content:)
+    @available(*, deprecated, renamed: "Section(content:footer:)")
+    public init(footer: Footer, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { EmptyView() }, footer: { footer })
+    }
 }
 extension Section where Parent == Text, Footer == EmptyView {
-    public init(_ title: String, @ViewBuilder content: () -> Content) { self.init(content: content, header: { Text(title).font(.headline) }, footer: { EmptyView() }) }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(_:content:)-90be4
+    public init(_ titleKey: LocalizedStringKey, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { Text(titleKey) }, footer: { EmptyView() })
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(_:content:)-1ex2w
+    @_disfavoredOverload
+    public init<S: StringProtocol>(_ title: S, @ViewBuilder content: () -> Content) {
+        self.init(content: content, header: { Text(title) }, footer: { EmptyView() })
+    }
 }
 extension Section where Parent == EmptyView, Footer == EmptyView {
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(content:)
     public init(@ViewBuilder content: () -> Content) { self.init(content: content, header: { EmptyView() }, footer: { EmptyView() }) }
+}
+
+/// A section's header: headline text, and a row that cannot be selected in a list.
+struct _SectionHeader<Content: View>: View, _ListSupplementaryRow {
+    let content: Content
+    var body: some View { content.font(.headline) }
+}
+
+/// A section's footer: secondary caption text under the content.
+struct _SectionFooter<Content: View>: View, _ListSupplementaryRow {
+    let content: Content
+    var body: some View { content.font(.caption).foregroundColor(.secondary) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/form

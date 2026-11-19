@@ -135,8 +135,13 @@ import CoreText
     internal var _effectiveFont: NSFont { _font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize) }
     internal var _lineHeight: CGFloat { let f = _effectiveFont; return (f.ascender - f.descender + f.leading).rounded(.up) }
     internal var _contentInset: NSSize { _isFieldEditor ? NSSize(width: 0, height: 0) : NSSize(width: 5, height: 0) }
+    /// Set while a field editor edits a wrapping cell (a multi-line text field): the text
+    /// wraps at the editor's width instead of running on one scrolling line.
+    internal var _fieldEditorWraps = false {
+        didSet { if _fieldEditorWraps != oldValue { _invalidateLayout() } }
+    }
     internal var _wrapWidth: CGFloat? {
-        if _isFieldEditor || _isHorizontallyResizable { return nil }
+        if (_isFieldEditor && !_fieldEditorWraps) || _isHorizontallyResizable { return nil }
         return max(1, bounds.width - 2 * _contentInset.width)
     }
 
