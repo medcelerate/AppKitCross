@@ -131,6 +131,9 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// Drops every cached line: the next layout pass typesets the whole text.
     private func _invalidateAll() {
         _layoutValid = false
+        _invalidations &+= 1
+        // A pass is splicing into these arrays: it drops its work when it ends.
+        if _inPass { return }
         _usedRects = [:]
         _units = []
         _attachments = [:]
@@ -155,6 +158,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
     /// range, or nil when nothing is cached (the next pass lays everything out).
     @discardableResult
     private func _noteEdit(at location: Int, oldLength: Int, delta: Int) -> NSRange? {
+        // During a pass `_units` is being rebuilt: the pass drops its work instead.
+        if _inPass { _invalidateAll(); return nil }
         guard !_units.isEmpty else { return nil }
         let editEnd = location + oldLength
         // The first unit ending at or after the edit, the last starting at or before its end.
@@ -358,6 +363,30 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         }
     }
     private var _units: [_LayoutUnit] = []
+    /// The container geometry `_units` were typeset in. A unit's lines hold only at that
+    /// geometry: a pass that finds the containers changed lays every unit out again, however
+    /// the change arrived (a container's size set while it had no layout manager, or an
+    /// invalidation during a pass, which `_invalidateAll` alone could not undo).
+    private var _unitsGeometry: [_ContainerGeometry] = []
+    /// Bumped by `_invalidateAll`: a pass that sees it move while it runs drops its units.
+    private var _invalidations = 0
+    /// A pass is laying units out (until its lines are complete, before the delegate and
+    /// the text views hear of them).
+    private var _inPass = false
+
+    private struct _ContainerGeometry: Equatable {
+        var size: CGSize
+        var padding: CGFloat
+        var alignmentWidth: CGFloat?
+        var lineBreakMode: NSLineBreakMode
+        var maximumNumberOfLines: Int
+        var exclusions: [CGRect]
+        init(_ c: NSTextContainer) {
+            size = c.size; padding = c.lineFragmentPadding; alignmentWidth = c._alignmentWidth
+            lineBreakMode = c.lineBreakMode; maximumNumberOfLines = c.maximumNumberOfLines
+            exclusions = c.exclusionPaths.map { p in MainActor.assumeIsolated { p.bounds } }
+        }
+    }
     /// Paragraphs typeset by layout passes, and units reused by moving them: tests bound the
     /// work an edit costs with these.
     internal var _typesetParagraphCount = 0
@@ -420,6 +449,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         // A text view fitting its frame to the new layout can change the wrapping width (a
         // scroll view shows its scroller and narrows the clip view), which invalidates the
         // layout again: lay out until it holds, so callers never read an emptied layout.
+        // Asked from inside a pass (a callout it made): the lines so far are what there is.
+        if _inPass { return }
         var passes = 0
         while !_layoutValid, passes < 4 {
             passes += 1
@@ -440,6 +471,8 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         _layoutValid = true
         _usedRects = [:]
         _notShownOverrides = [:]; _drawsOutsideOverrides = []; _intAttributes = [:]; _locationOverrides = [:]
+        _inPass = true
+        defer { _inPass = false }
         var cached = _units
         _units = []
         _extraContainer = nil
@@ -457,11 +490,14 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         let linkAttributes: [NSAttributedString.Key: Any]? = MainActor.assumeIsolated { firstTextView?.linkTextAttributes }
         // The cache holds when it covers this text and was resolved under this appearance.
         let cachedLength = cached.last.map { $0.range.location + $0.range.length } ?? 0
-        if _layoutIsDark != isDark || cachedLength != length || _secureEcho != nil {
+        let geometry = _textContainers.map(_ContainerGeometry.init)
+        if _layoutIsDark != isDark || cachedLength != length || _secureEcho != nil || geometry != _unitsGeometry {
             cached = []
             _fragments = []; _blockFrames = []; _attachments = [:]
         }
         _layoutIsDark = isDark
+        _unitsGeometry = geometry
+        let invalidations = _invalidations
         let first = _textContainers[0]
         // In containers of bounded height (pages, columns, line limits) a unit's position
         // decides which container its lines land in: units are reused only up to the first
@@ -531,6 +567,13 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         splice()
         if fi < _fragments.count { _fragments.removeSubrange(fi...) }
         if bi < _blockFrames.count { _blockFrames.removeSubrange(bi...) }
+        _inPass = false
+        if _invalidations != invalidations {
+            // Invalidated while it ran (something the pass called out to changed the
+            // geometry): what it laid out holds for nothing, and the next pass starts over.
+            _invalidateAll()
+            return
+        }
         if index < length {
             // What did not fit waits, dirty, for more room.
             if _laidOutLength == 0 { _laidOutLength = index }

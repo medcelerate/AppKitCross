@@ -39,8 +39,14 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
         // A copy through the storage's own reader (corelibs' NSAttributedString(attributedString:)
         // does not read an NSTextStorage's backing); the layout manager holds its storage
         // weakly, so keep the copy alive.
-        let (fullStorage, full, _) = textKit1(storage.attributedSubstring(from: NSRange(location: 0, length: storage.length)), width: c0.size.width, height: c0.size.height, containers: lm.textContainers.count)
+        let (fullStorage, full, fullContainers) = textKit1(storage.attributedSubstring(from: NSRange(location: 0, length: storage.length)), width: c0.size.width, height: c0.size.height, containers: lm.textContainers.count)
         defer { withExtendedLifetime(fullStorage) {} }
+        for (c, f) in zip(lm.textContainers, fullContainers) {
+            f.lineFragmentPadding = c.lineFragmentPadding
+            f.lineBreakMode = c.lineBreakMode
+            f.maximumNumberOfLines = c.maximumNumberOfLines
+            f._alignmentWidth = c._alignmentWidth
+        }
         let a = lm._lineFragments, b = full._lineFragments
         let m = message()
         XCTAssertEqual(a.count, b.count, "line count \(m)", file: file, line: line)
@@ -287,6 +293,111 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    // MARK: Geometry changes
+
+    /// A container that gets narrower or wider after a full layout wraps every paragraph at
+    /// its new width (the units' lines hold only at the width they were typeset at), and an
+    /// edit afterwards still matches a full layout.
+    func testContainerWidthChangeRelaysOutEveryParagraph() {
+        MainActor.assumeIsolated {
+            let (ts, lm, c) = textKit1(longText(400), width: 300)
+            let lines = lm._lineFragments.count
+            for width: CGFloat in [180, 420, 300] {
+                c.size = NSSize(width: width, height: c.size.height)
+                assertMatchesFullLayout(lm, "at width \(width)")
+            }
+            XCTAssertEqual(lm._lineFragments.count, lines, "back at the first width, the first layout")
+            c.size = NSSize(width: 200, height: c.size.height)
+            _ = lm._lineFragments
+            let at = (ts.string as NSString).range(of: "Line 200").location
+            ts.replaceCharacters(in: NSRange(location: at, length: 0), with: "typed ")
+            assertMatchesFullLayout(lm, "an edit after the width changed")
+            for padding: CGFloat in [0, 12] {
+                c.lineFragmentPadding = padding
+                assertMatchesFullLayout(lm, "padding \(padding)")
+            }
+        }
+    }
+
+    /// The units remember the geometry they were typeset in: a container resized while it was
+    /// not attached to the layout manager (so no `textContainerChangedGeometry` reached it)
+    /// still lays every paragraph out again.
+    func testGeometryChangedOutsideTheLayoutManagerStillRelaysOut() {
+        MainActor.assumeIsolated {
+            let (ts, lm, c) = textKit1(longText(200), width: 300)
+            _ = lm._lineFragments
+            c.layoutManager = nil
+            c.size = NSSize(width: 160, height: c.size.height)
+            c.layoutManager = lm
+            lm.invalidateLayout(forCharacterRange: NSRange(location: 0, length: 0), actualCharacterRange: nil)
+            assertMatchesFullLayout(lm, "after a detached resize")
+            withExtendedLifetime(ts) {}
+        }
+    }
+
+    /// A text view whose `linkTextAttributes` getter (which a layout pass reads) narrows its
+    /// container: the invalidation inside the pass is not lost, the layout ends at the new width.
+    func testGeometryChangeDuringAPassIsNotLost() {
+        MainActor.assumeIsolated {
+            final class Narrowing: NSTextView {
+                var narrowTo: CGFloat?
+                override var linkTextAttributes: [NSAttributedString.Key: Any]? {
+                    get {
+                        if let w = narrowTo { narrowTo = nil; textContainer?.size = NSSize(width: w, height: CGFloat.greatestFiniteMagnitude) }
+                        return super.linkTextAttributes
+                    }
+                    set { super.linkTextAttributes = newValue }
+                }
+            }
+            let tv = Narrowing(frame: NSRect(x: 0, y: 0, width: 300, height: 400), textContainer: nil)
+            tv.isVerticallyResizable = false
+            tv.textStorage?.setAttributedString(NSAttributedString(string: longText(200), attributes: [.font: TextKit1IncrementalLayoutTests.font]))
+            let lm = tv.layoutManager!
+            _ = lm._lineFragments
+            tv.textContainer?.widthTracksTextView = false
+            tv.narrowTo = 150
+            tv.textStorage?.replaceCharacters(in: NSRange(location: 0, length: 0), with: "x")
+            _ = lm._lineFragments       // the pass that narrows the container
+            XCTAssertEqual(tv.textContainer?.size.width, 150)
+            XCTAssertNil(tv.narrowTo)
+            assertMatchesFullLayout(lm, "after a resize inside a pass")
+        }
+    }
+
+    /// TextEdit's arrangement: a text view in a scroll view, narrowed with its window, wraps
+    /// every paragraph at the new width (PC report on PR 91), and typing afterwards matches.
+    func testTextViewInAScrollViewRewrapsWhenItsWindowNarrows() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 460), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let scroll = NSScrollView(frame: window.contentView!.bounds)
+            scroll.autoresizingMask = [.width, .height]
+            scroll.hasVerticalScroller = true
+            let tv = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+            tv.autoresizingMask = [.width, .height]
+            tv.textStorage?.setAttributedString(NSAttributedString(string: longText(600), attributes: [.font: TextKit1IncrementalLayoutTests.font]))
+            scroll.documentView = tv
+            window.contentView?.addSubview(scroll)
+            window.display()
+            let lm = tv.layoutManager!
+            let wide = lm._lineFragments.count
+            for width in stride(from: 620, through: 300, by: -40) {
+                window.setContentSize(NSSize(width: CGFloat(width), height: 460))
+                window.display()
+            }
+            XCTAssertLessThan(tv.textContainer!.size.width, 300)
+            XCTAssertGreaterThan(lm._lineFragments.count, wide, "narrower lines wrap more")
+            for f in lm._lineFragments { XCTAssertLessThanOrEqual(f.usedRect.maxX, tv.textContainer!.size.width + 0.5); if f.usedRect.maxX > tv.textContainer!.size.width + 0.5 { break } }
+            assertMatchesFullLayout(lm, "after the window narrowed")
+            tv.setSelectedRange(NSRange(location: 500, length: 0))
+            tv.insertText("ok", replacementRange: tv.selectedRange())
+            window.display()
+            assertMatchesFullLayout(lm, "typing after the window narrowed")
+            window.close()
+        }
+    }
+
     // MARK: Random edits
 
     /// A small deterministic generator (SplitMix64).
@@ -352,6 +463,8 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
                 }
                 let work = lm._typesetParagraphCount
                 XCTAssertLessThan(work, 60 * 3 * 12 + 140, "seed \(seed): edits typeset their paragraphs, not the document (\(work))")
+                // The layout manager holds its storage weakly: keep the text system alive to here.
+                withExtendedLifetime((ts, cs)) {}
             }
         }
     }
@@ -363,6 +476,7 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
         try MainActor.assumeIsolated {
             @MainActor func textView(_ text: NSAttributedString) -> (NSWindow, NSTextView) {
                 let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+                w.isReleasedWhenClosed = false
                 let tv = NSTextView(usingTextLayoutManager: false)
                 tv.frame = w.contentView!.bounds
                 tv.isRichText = true
@@ -401,7 +515,10 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             }
             XCTAssertGreaterThan(inked, 500, "text was drawn")
             XCTAssertEqual(differing, 0, "incremental and full layout draw the same pixels")
-            _ = (w, w2)
+            // Closed here, while the test holds them, so no window of this test is torn down
+            // (or drawn by a frame clock) after it ends.
+            w.close(); w2.close()
+            withExtendedLifetime((w, w2, edited, fresh)) {}
         }
     }
 

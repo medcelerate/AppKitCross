@@ -237,6 +237,13 @@ again when it no longer is. In containers of bounded height (pages, columns, lin
 unit's position decides which container its lines land in, so units are kept only up to the
 first one typeset again. A change of appearance, container geometry, typesetter, a secure
 echo or `invalidateGlyphs` with a length change outside an edit still discards everything.
+The units also remember the container geometry they were typeset in (size, padding,
+alignment width, line break mode, line limit, exclusion bounds), and a pass that finds it
+changed lays every unit out again, however the change arrived. An invalidation while a pass
+runs (something the pass called out to resized the container) only marks the layout invalid,
+and the pass drops what it laid out when it ends. Before this, such a pass carried on with its
+cached units after the arrays had been emptied, and either trapped or left the text wrapped at
+the old width (the PC's narrowed TextEdit window).
 
 `NSTextView` no longer invalidates the whole layout after each edit: the edit reaches the
 layout manager through the text storage, so the text view only fits its frame and redraws.
