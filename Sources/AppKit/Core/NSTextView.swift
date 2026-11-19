@@ -499,6 +499,7 @@ import CoreText
         let text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
         let range = replacementRange.location == NSNotFound ? (_markedRange ?? self.selectedRange) : replacementRange
         _replace(range, with: text, notify: false)
+        _markedClauses = text.isEmpty ? [] : _NSMarkedClauses.clauses(of: string, selectedRange: selectedRange)
         if text.isEmpty {
             _markedRange = nil
         } else {
@@ -558,6 +559,7 @@ import CoreText
         super._noteDidChange()
         _extras.finder?.noteClientStringWillChange()
         _spellingAfterEdit()
+        _inputContextStorage?._clientDidChange()
     }
 
     internal override func _selectionDidChange() {
@@ -769,10 +771,7 @@ import CoreText
         let origin = _drawOrigin
         if _textLayoutManager != nil {
             _tk2Draw(dirtyRect)
-            if let m = _markedRange, m.length > 0 {
-                (textColor ?? .textColor).setFill()
-                for r in _tk2Rects(forCharacterRange: m) { NSBezierPath.fill(NSRect(x: r.minX, y: r.maxY - 2, width: r.width, height: 1)) }
-            }
+            _drawMarkedUnderlines { _tk2Rects(forCharacterRange: $0) }
             let sel = selectedRange
             if shouldDrawInsertionPoint && sel.length == 0 {
                 let caret = _caretRect(for: sel.location)
@@ -789,11 +788,12 @@ import CoreText
         _drawFindHighlights(above: false)
         _layoutManager.drawGlyphs(forGlyphRange: all, at: origin)
         _drawFindHighlights(above: true)
-        if let m = _markedRange, m.length > 0 {
-            (textColor ?? .textColor).setFill()
-            _layoutManager.enumerateEnclosingRects(forGlyphRange: m, withinSelectedGlyphRange: m, in: _container) { r, _ in
-                NSBezierPath.fill(NSRect(x: r.minX + origin.x, y: r.maxY + origin.y - 2, width: r.width, height: 1))
+        _drawMarkedUnderlines { range in
+            var rects: [NSRect] = []
+            _layoutManager.enumerateEnclosingRects(forGlyphRange: range, withinSelectedGlyphRange: range, in: _container) { r, _ in
+                rects.append(r.offsetBy(dx: origin.x, dy: origin.y))
             }
+            return rects
         }
         let sel = selectedRange
         if shouldDrawInsertionPoint && sel.length == 0 {
@@ -810,6 +810,8 @@ import CoreText
     }
 
     open override func mouseDown(with event: NSEvent) {
+        // A click ends the composition: the marked text stays as typed (macOS commits it).
+        if hasMarkedText() { inputContext?.discardMarkedText() }
         if event.clickCount == 1, !event.modifierFlags.contains(.shift), let st = textStorage, st.length > 0 {
             let i = _offset(at: convert(event.locationInWindow, from: nil))
             if i < st.length, let link = st.attribute(.link, at: i, effectiveRange: nil) {
@@ -2017,5 +2019,31 @@ import CoreText
     open var contentType: NSTextContentType? {
         get { _extras.contentType }
         set { _extras.contentType = newValue }
+    }
+}
+
+/// The clauses of a marked string as an input method sends it: runs of its underline style
+/// (thick for the clause being converted). Without underline attributes the whole string is
+/// one thin clause and a non-empty selected range inside it is the thick one.
+enum _NSMarkedClauses {
+    static func clauses(of string: Any, selectedRange: NSRange) -> [_TextInputClause] {
+        let attributed = (string as? NSAttributedString) ?? NSAttributedString(string: (string as? String) ?? "")
+        let n = attributed.length
+        guard n > 0 else { return [] }
+        var list: [_TextInputClause] = []
+        var sawUnderline = false
+        attributed.enumerateAttribute(.underlineStyle, in: NSRange(location: 0, length: n), options: []) { value, range, _ in
+            let raw = (value as? Int) ?? (value as? NSNumber)?.intValue ?? 0
+            if raw != 0 { sawUnderline = true }
+            let thick = raw & 0xFF == NSUnderlineStyle.thick.rawValue || raw & 0xFF == NSUnderlineStyle.double.rawValue
+            if let last = list.last, last.thick == thick, attributed.attribute(.markedClauseSegment, at: range.location, effectiveRange: nil) == nil {
+                list[list.count - 1].range.length += range.length
+            } else {
+                list.append(_TextInputClause(range: range, thick: thick))
+            }
+        }
+        if sawUnderline { return list }
+        let attributedFallback = _TextInputSession.markedString(attributed.string, selection: selectedRange, clauses: [])
+        return clauses(of: attributedFallback, selectedRange: selectedRange)
     }
 }

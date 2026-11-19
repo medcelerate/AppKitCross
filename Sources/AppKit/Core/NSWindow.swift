@@ -716,9 +716,20 @@ import CoreText
     @MainActor public var effectiveAppearance: NSAppearance { _appearance ?? NSApplication.shared.effectiveAppearance }
 
     /// Input methods talk to the first responder when it accepts text input.
+    /// The key window's first responder owns the input method (ADR-0047): its context is
+    /// activated, and the previous client of this window loses it.
+    internal func _updateTextInputContext() {
+        guard _isKey else { return }
+        if let view = _firstResponder as? NSView, view is NSTextInputClient, let context = view.inputContext {
+            context.activate()
+        } else if let current = NSTextInputContext.current, (current._liveClient as? NSView)?.window === self {
+            current.deactivate()
+        }
+    }
+
     public func platformWindowTextInput() -> PlatformTextInput? {
         guard let client = _firstResponder as? NSTextInputClient, let view = client as? NSView else { return nil }
-        return PlatformTextInput(
+        var input = PlatformTextInput(
             hasMarkedText: { client.hasMarkedText() },
             setMarkedText: { text, selected in client.setMarkedText(text, selectedRange: selected, replacementRange: NSRange(location: NSNotFound, length: 0)) },
             unmarkText: { client.unmarkText() },
@@ -726,8 +737,11 @@ import CoreText
             markedRect: { [weak view, weak self] in
                 guard let view, let self else { return nil }
                 if let tv = view as? NSTextView { return tv._inputMethodRect }
-                return self.convertFromScreen(client.firstRect(forCharacterRange: client.selectedRange(), actualRange: nil))
+                return _TextInputSession(client: client, window: self).caretRectInWindow
             })
+        // TSF, text-input-v3 and XIM read and edit the client itself (ADR-0047).
+        input.session = _TextInputSession(client: client, window: self)
+        return input
     }
 
     /// The chrome the backend should show for the current properties.
@@ -1350,6 +1364,7 @@ import CoreText
             makeFirstResponder(initial)
         }
         _toolbar?.validateVisibleItems()
+        _updateTextInputContext()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
         _trackingActivityDidChange()
@@ -2020,6 +2035,7 @@ import CoreText
             return false
         }
         if NSView._traceInvalidation { NSView._trace("a11y focus '\(_title)' -> \(String(describing: type(of: target))) element \(accessibilityFocusedElementID.map(String.init) ?? "none")") }
+        _updateTextInputContext()
         _accessibilityNotify(.focus(accessibilityFocusedElementID))
         _trackingActivityDidChange()
         return true
@@ -2317,6 +2333,7 @@ import CoreText
         if let p = _NSComboBoxPopUp.current, p.window !== self { p.dismiss() }
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
+        if let current = NSTextInputContext.current, (current._liveClient as? NSView)?.window === self { current.deactivate() }
         post(NSWindow.didResignKeyNotification)
         _trackingActivityDidChange()
         delegate?.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: self))

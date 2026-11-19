@@ -24,7 +24,7 @@ if command -v dbus-daemon >/dev/null && [ -x /usr/libexec/at-spi-bus-launcher ];
     echo "accessibility bus: ${AT_SPI_BUS_ADDRESS:-none}"
 fi
 echo "== tests on the X11 backend under Xvfb (XDND, CLIPBOARD, the event pump, AT-SPI, Metal presentation)"
-swift test --filter "X11DragDropTests|X11ClipboardTests|MainQueueTests|AtspiTests|MetalVulkanPresentationTests" 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:|MetalVulkanPresentationTests:" | tail -8
+swift test --filter "X11DragDropTests|X11ClipboardTests|X11InputMethodTests|MainQueueTests|AtspiTests|MetalVulkanPresentationTests" 2>&1 | grep -E "Fatal error|error: -\[|Executed .* tests|Test Suite .* (failed|passed)|^error:|MetalVulkanPresentationTests:" | tail -8
 echo "== HelloWindow under Xvfb (X11 backend)"
 APPKITWIN_LINUX_BACKEND=x11 ./.build/debug/HelloWindow &
 APP=$!

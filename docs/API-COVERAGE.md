@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 214 |
-| Types generated | 292 |
+| Types handwritten | 215 |
+| Types generated | 291 |
 | Types apple-only | 33 |
 | Types pending | 2 |
 | Types skipped | 0 |
@@ -22,7 +22,7 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Members nested | 415 |
 | Members constrained-ext-skipped | 1272 |
 | Members unparsed | 0 |
-| Members unimplemented-calls | 245 |
+| Members unimplemented-calls | 249 |
 
 ## Stub call sites
 
@@ -32,9 +32,9 @@ not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).
 
 | Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |
 | --- | ---: | ---: |
-| `Sources/AppKit/Generated` | 705 | 341 |
-| `Sources/AppKit/Core` | 77 | 30 |
-| Total | 782 | 371 |
+| `Sources/AppKit/Generated` | 685 | 341 |
+| `Sources/AppKit/Core` | 80 | 30 |
+| Total | 765 | 371 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -502,7 +502,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSTextFinderClient | protocol | generated | 16 | 0 | 0 |  |  |
 | NSTextInput | protocol | generated | 0 | 0 | 0 |  |  |
 | NSTextInputClient | protocol | generated | 21 | 0 | 0 |  |  |
-| NSTextInputContext | class | generated | 18 | 0 | 0 |  |  |
+| NSTextInputContext | class | handwritten | 18 | 0 | 0 | 5 |  |
 | NSTextInputSourceIdentifier | typealias | generated | 1 | 0 | 0 |  |  |
 | NSTextInputTraitType | enum | generated | 3 | 0 | 0 |  |  |
 | NSTextInputTraits | protocol | generated | 14 | 0 | 0 |  |  |
@@ -573,7 +573,7 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSUserInterfaceValidations | protocol | generated | 1 | 0 | 0 |  |  |
 | NSValidatedUserInterfaceItem | protocol | generated | 2 | 0 | 0 |  |  |
 | NSVerticalDirection | enum | generated | 15 | 0 | 6 |  |  |
-| NSView | class | handwritten | 361 | 3 | 19 | 6 | 2 |
+| NSView | class | handwritten | 361 | 3 | 19 | 5 | 2 |
 | NSViewAnimation | class | handwritten | 8 | 0 | 2 | 1 |  |
 | NSViewContentSelectionInfo | protocol | generated | 1 | 0 | 0 |  |  |
 | NSViewController | class | handwritten | 56 | 1 | 2 | 2 |  |

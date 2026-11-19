@@ -563,7 +563,7 @@ final class SearchFieldTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(f.stringValue, "", "Escape clears")
             XCTAssertEqual(sink.count, 3, "and searches for nothing")
             XCTAssertEqual(delegate.ended, 1)
-            XCTAssertNotNil(f.currentEditor, "still editing")
+            XCTAssertNotNil(f.currentEditor(), "still editing")
             // The delayed search: nothing until the timer, then once.
             f.sendsSearchStringImmediately = false
             key(w, "x")
@@ -700,12 +700,12 @@ final class TokenFieldTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(w.makeFirstResponder(f))
             for c in "ab,cd" { key(w, String(c)) }
             XCTAssertEqual((f.objectValue as? [String]) ?? [], ["ab"], "the comma makes the first token")
-            XCTAssertEqual(f.currentEditor?.string, "cd", "the rest is still being typed")
+            XCTAssertEqual(f.currentEditor()?.string, "cd", "the rest is still being typed")
             XCTAssertEqual(delegate.added.count, 1)
             key(w, "\r")
             XCTAssertEqual((f.objectValue as? [String]) ?? [], ["ab", "cd"], "Return tokenizes the rest")
             XCTAssertEqual(sink.count, 1, "and sends the action")
-            XCTAssertEqual(f.currentEditor?.string, "")
+            XCTAssertEqual(f.currentEditor()?.string, "")
             XCTAssertEqual(f.stringValue, "AB, CD", "display strings come from the delegate")
             // Backspace: first selects the last token, then deletes it.
             key(w, "\u{7F}")
@@ -755,12 +755,12 @@ final class TokenFieldTests: XCTestCase, @unchecked Sendable {
             key(w, "\r")
             XCTAssertEqual((f.objectValue as? [String]) ?? [], ["Mars"], "Return takes the selected completion")
             XCTAssertNil(f._completionPopUp)
-            XCTAssertEqual(f.currentEditor?.string, "")
+            XCTAssertEqual(f.currentEditor()?.string, "")
             key(w, "v")
             XCTAssertEqual(f._completions as? [String], ["Venus"])
             key(w, "\u{1B}")
             XCTAssertNil(f._completionPopUp, "Escape closes the list")
-            XCTAssertEqual(f.currentEditor?.string, "v", "and keeps the text")
+            XCTAssertEqual(f.currentEditor()?.string, "v", "and keeps the text")
             key(w, "z")
             XCTAssertNil(f._completionPopUp, "no matches, no list")
             // A click in the list takes that row.
@@ -800,15 +800,15 @@ final class TokenFieldTests: XCTestCase, @unchecked Sendable {
             // Click a token: it is selected and editing begins.
             click(w, at(f, rects[0].midX, rects[0].midY))
             XCTAssertEqual(cell._selectedToken, 0)
-            XCTAssertNotNil(f.currentEditor)
+            XCTAssertNotNil(f.currentEditor())
             // The chevron hits the menu side.
             XCTAssertEqual(cell._token(at: NSPoint(x: rects[1].maxX - 4, y: rects[1].midY), in: f.bounds)?.onMenu, true)
             XCTAssertEqual(cell._token(at: NSPoint(x: rects[1].minX + 4, y: rects[1].midY), in: f.bounds)?.onMenu, false)
             // Double-click turns the token back into text (its editing string) for editing.
             click(w, at(f, rects[0].midX, rects[0].midY), count: 2)
             XCTAssertEqual((f.objectValue as? [String]) ?? [], [])
-            XCTAssertEqual(f.currentEditor?.string, "ONE, TWO", "the editing string defaults to the display string")
-            XCTAssertEqual(f.currentEditor?.selectedRange, NSRange(location: 0, length: 3))
+            XCTAssertEqual(f.currentEditor()?.string, "ONE, TWO", "the editing string defaults to the display string")
+            XCTAssertEqual(f.currentEditor()?.selectedRange, NSRange(location: 0, length: 3))
             // Ending editing tokenizes the text again.
             _ = w.makeFirstResponder(nil)
             XCTAssertEqual((f.objectValue as? [String]) ?? [], ["ONE", "TWO"])
