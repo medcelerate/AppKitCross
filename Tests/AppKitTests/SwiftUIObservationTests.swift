@@ -6,8 +6,9 @@ import Observation
 @testable import AppKit
 @testable import SwiftUI
 
+// `@unchecked Sendable`: the background-thread test mutates it from a global queue.
 @Observable
-private final class Counter {
+private final class Counter: @unchecked Sendable {
     var count = 0
     var title = "zero"
     var nested = Nested()
