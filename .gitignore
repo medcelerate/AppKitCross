@@ -7,3 +7,6 @@ api-inventory/raw/
 Stubs/Seeds/
 .claude/worktrees/
 .build-linux*/
+# swift-build on Windows copies a resource bundle's top-level files (Info.plist, resources)
+# into the package root when it "touches" the bundle (ADR-0046); never the app's plist.
+/Info.plist

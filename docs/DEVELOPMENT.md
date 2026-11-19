@@ -139,6 +139,91 @@ with the standard buttons, shadow, rounded corners, move and resize through the 
 |---|---|
 | ![HelloWindow under a headless sway](images/hellowindow-linux-wayland.png) | ![HelloWindow with client-side decorations](images/hellowindow-linux-wayland-csd.png) |
 
+## Shipping an app
+
+ADR-0046. Your app is a SwiftPM package that depends on AppKitCross
+(`Examples/Dependent` is the smallest one). It builds with a plain `swift build` on all
+three platforms; on macOS either set `platforms: [.macOS(.v14)]` or, better, depend on the
+port only off macOS so the Mac build uses Apple's frameworks:
+
+```swift
+let port: [Platform] = [.windows, .linux]
+.executableTarget(name: "MyApp", dependencies: [
+    .product(name: "AppKit", package: "AppKitCross", condition: .when(platforms: port)),
+    .product(name: "SwiftUI", package: "AppKitCross", condition: .when(platforms: port)),
+])
+```
+
+On Windows with Swift 6.2, pass `-j 1` to `swift build`, `swift test` and `swift package`
+(the driver bug in docs/ci-windows-runner.md); that is a toolchain workaround no manifest
+can set. Nothing else from `tools/library-compat.sh` applies to a package that declares
+the dependency: module order and the C shims' module maps come with it.
+
+### The app folder
+
+```bash
+swift package --allow-writing-to-package-directory bundle --product MyApp -c release --zip
+#   Windows (Swift 6.2): swift package -j 1 --allow-writing-to-package-directory bundle ...
+```
+
+builds `MyApp` in release (the default; `-c debug` for a debug folder) and writes
+`.build/bundle/MyApp/`, a folder that runs on a machine without Swift, and with `--zip`
+`.build/bundle/MyApp-<version>-<windows|linux>-<x86_64|arm64>.zip`. Copy the folder (or
+unzip it) anywhere and run `MyApp.exe` / `./MyApp`. It contains, side by side:
+
+- the executable;
+- every shared library it loads that the target machine does not have: on Windows the Swift
+  runtime DLLs (`swiftCore`, `swift_Concurrency`, `Foundation`, `FoundationEssentials`,
+  `_FoundationICU`, `dispatch`, `BlocksRuntime`, …) and the Visual C++ runtime
+  (`vcruntime140*.dll`, `msvcp140*.dll`; the Universal CRT ships with Windows 10+); on Linux
+  the Swift runtime `.so` files plus Cairo, Pango, GLib and their dependencies, leaving
+  glibc, libstdc++, X11/xcb, Wayland, xkbcommon, fontconfig/FreeType/HarfBuzz, D-Bus,
+  PipeWire and the GPU stack to the system (install `patchelf` so the copied libraries find
+  each other; the tool says when it is missing);
+- the SwiftPM resource bundles of the product's targets (`MyPkg_MyApp.resources`);
+- `Info.plist`, `Resources/` and `*.ico`/`*.png` from the nearest directory, from the
+  executable target's directory up to (not including) the package root, with an
+  application `Info.plist` or `<exe>-Info.plist` (in `Resources/` or the directory, the
+  names ADR-0045 reads) or a `Resources/`; a resource bundle's
+  plist (`CFBundlePackageType` BNDL, an identifier ending in `.resources`) is skipped. The
+  package root is searched only for a target whose sources live there; otherwise name the
+  plist with `--info-plist` (`--resources`, `--icon` override the rest). The bundle
+  identity layout (ADR-0045) defines how the app reads them;
+- on Windows, `<Name>.pdb`: a release build through the plugin adds `-g
+  -debug-info-format=codeview` and `-Xlinker -debug` so the linker writes one, and crash
+  reports name functions with it (`--no-debug-info` leaves it out; building yourself, pass
+  `-Xswiftc -g -Xswiftc -debug-info-format=codeview -Xlinker -debug`).
+
+Other options: `--output <dir>`, `--version <v>` (else `CFBundleShortVersionString`, else
+0.0.0), `--appimage` (Linux; needs `appimagetool` on PATH, otherwise skipped with a
+message), `--no-build` (bundle what the last build produced). The run prints what it
+bundled, what it left to the system and any library it could not find (exit status 2 and a
+warning: that folder will not start elsewhere). The tool behind the plugin is
+`AppKitCrossBundle`, which can also be run directly on an executable you built yourself.
+
+The Linux folder runs on distributions at least as new as the build machine's (glibc and
+libstdc++ come from the system): build on the oldest one you support. On macOS the folder
+is only a layout check; ship a Mac app with Xcode.
+
+### Crash reports
+
+`NSApplication` installs a crash handler at launch on Windows and Linux. A crash leaves:
+
+- Windows: `%LOCALAPPDATA%\<bundle id>\Crashes\<app>-<time>-<pid>.dmp` (a minidump; open it
+  in Visual Studio or WinDbg with the build's PDB, so keep the PDB of every release) and
+  `.txt` (exception, module and offset, thread, a stack with function names where the PDB
+  is beside the executable, module offsets only without it);
+- Linux: `~/.local/share/<bundle id>/Crashes/<app>-<time>-<pid>.txt` (`$XDG_DATA_HOME` when
+  set): signal, fault address, thread, the backtrace as module+offset (`addr2line -e
+  <module> <offset>`, `swift demangle` for the names) and the memory map.
+
+The `Crashes` directory is created with the first report, not at launch. The bundle id is
+the Info.plist's `CFBundleIdentifier`, else the executable's name. The
+process still ends with the crash's own status (and Windows Error Reporting or a core dump
+as usual). `APPKITWIN_CRASH_REPORTER=0` turns the handler off, `APPKITWIN_CRASH_DIR=<dir>`
+moves the reports, `APPKITWIN_CRASH_TEST=1` (or `trap`, `abort`) crashes the app on purpose
+a second after launch to check the whole path.
+
 ## Examples
 
 Each example under `Examples/` is an executable target in `Package.swift` with a README that
@@ -243,6 +328,9 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_PANELS_OPEN=color\|font` | With the Layout Demo's Panels tab, opens the Colors or Fonts panel at launch (screenshots `color-panel`, `font-panel`). |
 | `APPKITWIN_COLOR_PANEL=native` | `NSColorPanel.orderFront` runs the system colour dialog (Windows' ChooseColor) instead of the package-drawn panel (ADR-0031); ignored where there is none. |
 | `APPKITWIN_COMPAT_TAB=confetti` | Opens `LibraryCompat` on that library's tab (shimmer, confetti, wrapping, defaults, markdown, introspect, charts, nuke). |
+| `APPKITWIN_CRASH_REPORTER=0` | Does not install the crash handler (ADR-0046) at launch. |
+| `APPKITWIN_CRASH_DIR=<dir>` | Writes crash reports there instead of `%LOCALAPPDATA%\<bundle id>\Crashes` / `~/.local/share/<bundle id>/Crashes`. |
+| `APPKITWIN_CRASH_TEST=1\|trap\|abort` | Crashes the app on purpose a second after launch (a null write, a trap as fatalError executes, `abort()`) to check the crash report path. |
 | `APPKITWIN_INFO_PLIST=path` | The Info.plist to use for a bare executable (`swift run`), ahead of the app folder's (ADR-0045). |
 | `APPKITWIN_MULTIPLE_INSTANCES=1` | No single-instance hand-off: every launch runs its own process (ADR-0045). |
 | `APPKITWIN_CORELIBS_BUNDLE=1` | Leaves swift-corelibs-foundation's `Bundle` alone (no vtable hooks): `Bundle.main` is the executable's folder only and `NSLocalizedString` answers in the development language (ADR-0045). |

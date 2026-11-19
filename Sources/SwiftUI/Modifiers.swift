@@ -712,7 +712,9 @@ extension View {
             $0.childBehavior = .ignore
         }
     }
-    private func _accessibility(_ change: (inout _AccessibilityPrimitive.Traits) -> Void) -> some View {
+    // A concrete result, not `some View`: an opaque type forwarding to an opaque type crashed
+    // the Swift 6.2 Windows asserts toolchain's SIL deserializer in -O test builds (ADR-0046).
+    private func _accessibility(_ change: (inout _AccessibilityPrimitive.Traits) -> Void) -> _AccessibilityModified<Self> {
         var t = _AccessibilityPrimitive.Traits()
         change(&t)
         return _AccessibilityModified(content: self, traits: t)
@@ -742,15 +744,15 @@ extension View {
 
     // The SwiftUI 1 spellings, deprecated as Apple's are (SwiftUI-Introspect still uses `.accessibility(hidden:)`).
     @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityLabel(_:)")
-    public func accessibility(label: Text) -> some View { accessibilityLabel(label) }
+    public func accessibility(label: Text) -> some View { _accessibility { $0.label = label._string } }
     @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityValue(_:)")
-    public func accessibility(value: Text) -> some View { accessibilityValue(value) }
+    public func accessibility(value: Text) -> some View { _accessibility { $0.value = value._string } }
     @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityHidden(_:)")
-    public func accessibility(hidden: Bool) -> some View { accessibilityHidden(hidden) }
+    public func accessibility(hidden: Bool) -> some View { _accessibility { $0.hidden = hidden } }
     @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityIdentifier(_:)")
-    public func accessibility(identifier: String) -> some View { accessibilityIdentifier(identifier) }
+    public func accessibility(identifier: String) -> some View { _accessibility { $0.identifier = identifier } }
     @available(macOS, introduced: 10.15, deprecated: 100000.0, renamed: "accessibilityHint(_:)")
-    public func accessibility(hint: Text) -> some View { accessibilityHint(hint) }
+    public func accessibility(hint: Text) -> some View { _accessibility { $0.hint = hint._string } }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/accessibilitychildbehavior

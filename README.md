@@ -143,6 +143,16 @@ app.delegate = delegate
 app.run()
 ```
 
+To hand the app to someone without Swift, lay it out as a folder (or zip) with the Swift
+runtime and resources beside the executable:
+
+```bash
+swift package --allow-writing-to-package-directory bundle --product MyApp -c release --zip
+```
+
+See "Shipping an app" in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for what goes in it, the
+crash reports the app writes, and `Examples/Dependent`, the smallest dependent package.
+
 ## Learn more
 
 - [AGENTS.md](AGENTS.md): porting an existing Mac app (the dependency, builds and headless

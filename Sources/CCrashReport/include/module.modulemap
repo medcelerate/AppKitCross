@@ -1,0 +1,4 @@
+module CCrashReport {
+    header "ccrashreport.h"
+    export *
+}
