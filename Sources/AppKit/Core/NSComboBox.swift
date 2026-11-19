@@ -163,7 +163,7 @@ import CoreText
     @MainActor open override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         guard isEnabled, _buttonRect.contains(p) || !isEditable else { super.mouseDown(with: event); return }
-        if isEditable, currentEditor == nil { _ = window?.makeFirstResponder(self) }
+        if isEditable, currentEditor() == nil { _ = window?.makeFirstResponder(self) }
         _comboCell._togglePopUp(withFrame: _cellFrame, in: self)
     }
 
@@ -188,7 +188,7 @@ import CoreText
     /// so the next key replaces it.
     @MainActor open override func textDidChange(_ notification: Notification) {
         super.textDidChange(notification)
-        guard !_completing, completes, let editor = currentEditor as? NSTextView else { _previousLength = stringValue.count; return }
+        guard !_completing, completes, let editor = currentEditor() as? NSTextView else { _previousLength = stringValue.count; return }
         let typed = editor.string
         let grew = typed.count > _previousLength
         _previousLength = typed.count

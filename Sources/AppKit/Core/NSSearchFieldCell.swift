@@ -162,7 +162,7 @@ import CoreText
         }
     }
 
-    private var _editorHasText: Bool { !((_searchField?.currentEditor as? NSTextView)?.string.isEmpty ?? true) }
+    private var _editorHasText: Bool { !((_searchField?.currentEditor() as? NSTextView)?.string.isEmpty ?? true) }
 
     /// Draws the placeholder centred when nothing is typed and the field is not editing.
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {

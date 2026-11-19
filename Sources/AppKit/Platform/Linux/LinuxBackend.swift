@@ -181,7 +181,17 @@ final class LinuxBackend: PlatformBackend {
         XFlush(display)
     }
 
+    /// The input method of the user's locale (XIM, ADR-0047); `APPKITWIN_XIM=0` turns it off.
+    lazy var xim: OpaquePointer? = {
+        guard ProcessInfo.processInfo.environment["APPKITWIN_XIM"] != "0" else { return nil }
+        let im = appkitwin_xim_open(display)
+        _TextInputTrace.log("xim \(im == nil ? "unavailable" : "opened") (XMODIFIERS=\(ProcessInfo.processInfo.environment["XMODIFIERS"] ?? ""))")
+        return im
+    }()
+
     private func dispatch(_ event: inout XEvent) {
+        // The input method sees every event first; what it filters is its own.
+        if xim != nil, XFilterEvent(&event, 0) != 0 { return }
         let xid = event.xany.window
         if xid == selectionWindow && xid != 0 {
             // Replies and requests for the selections this application owns or asked for.

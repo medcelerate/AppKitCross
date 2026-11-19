@@ -221,10 +221,10 @@ final class _FocusedPrimitive<Value: Hashable>: _Primitive {
             ]
         }
         let wantsFocus = binding.wrappedValue == value
-        let hasFocus = f.currentEditor != nil
+        let hasFocus = f.currentEditor() != nil
         if wantsFocus && !hasFocus, let w = f.window {
             _ = w.makeFirstResponder(f)
-        } else if !wantsFocus && hasFocus, let w = f.window, w.firstResponder === f.currentEditor {
+        } else if !wantsFocus && hasFocus, let w = f.window, w.firstResponder === f.currentEditor() {
             _ = w.makeFirstResponder(nil)
         }
     }

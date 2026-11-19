@@ -25,6 +25,8 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
     private var pressedButtons = 0
     private var lastClickTime: UInt = 0
     private var clickCount = 1
+    /// The window's XIM input context (ADR-0047), nil without an input method.
+    private(set) var inputContext: X11InputContext?
 
     // Painting
     private var backing: OpaquePointer?        // cairo image surface, window size in pixels
@@ -48,8 +50,9 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         let px = pixelRect(contentRect)
         xid = XCreateSimpleWindow(d, backend.root, px.x, px.y, UInt32(max(1, px.w)), UInt32(max(1, px.h)), 0,
                                   XBlackPixel(d, backend.screen), XWhitePixel(d, backend.screen))
-        XSelectInput(d, xid, ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-                     KeyPressMask | KeyReleaseMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask)
+        let eventMask = ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
+                        KeyPressMask | KeyReleaseMask | FocusChangeMask | EnterWindowMask | LeaveWindowMask
+        XSelectInput(d, xid, eventMask)
         var protocols = [backend.wmDeleteWindow]
         XSetWMProtocols(d, xid, &protocols, 1)
         if backend.xiGestureOpcode != nil {
@@ -77,6 +80,13 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         applyDecorationHints()
         backend.register(self)
         applySizeHints()
+        // Input methods (XIM): the input context asks for the events it filters.
+        if let im = backend.xim, let context = X11InputContext(im: im, window: xid,
+                                                                session: { [weak self] in self?.owner?.platformWindowTextInput()?.session },
+                                                                spot: { [weak self] in self?.inputSpot() }) {
+            inputContext = context
+            XSelectInput(d, xid, eventMask | context.filterEvents)
+        }
     }
 
     /// Borderless windows (and sheets) ask the window manager for no decorations (Motif
@@ -351,6 +361,8 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         backend.unregister(self)
         for s in presentationSurfaces { s.close() }
         releaseSurfaces()
+        inputContext?.destroy()
+        inputContext = nil
         XDestroyWindow(backend.display, xid)
         XFlush(backend.display)
         xid = 0
@@ -514,9 +526,35 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         return (text, keysym)
     }
 
+    // MARK: Input methods (ADR-0047)
+
+    func textInputChanged(_ change: PlatformTextInputChange) {
+        inputContext?.changed(change, windowIsKey: isKey)
+    }
+
+    /// The caret's baseline in window pixels, for the candidate window.
+    private func inputSpot() -> (x: Int32, y: Int32)? {
+        guard let r = owner?.platformWindowTextInput()?.session?.caretRectInWindow else { return nil }
+        return (Int32((r.minX * scale).rounded()), Int32(((_frame.height - r.minY) * scale).rounded()))
+    }
+
     private func key(_ type: NSEvent.EventType, _ xkey: XKeyEvent) {
         var ev = xkey
-        let (chars0, keysym) = lookup(&ev)
+        var (chars0, keysym) = lookup(&ev)
+        if type == .keyDown, let context = inputContext, context.focused {
+            // The input context's lookup: text the input method committed (XLookupChars, or
+            // a synthetic key press without a key code) goes to the client as text.
+            var press = xkey
+            let (status, text, sym) = context.lookup(&press)
+            if status == XLookupNone { return }
+            if status == XLookupChars || xkey.keycode == 0 {
+                if !text.isEmpty, context.commit(text) { return }
+                chars0 = text
+            } else if status == XLookupBoth, !text.isEmpty {
+                chars0 = text
+                keysym = sym
+            }
+        }
         if LinuxKeys.special[keysym] == nil && LinuxKeys.modifiers.contains(keysym) {
             let e = NSEvent(type: .flagsChanged, location: .zero, modifierFlags: modifierFlags(xkey.state), timestamp: seconds(xkey.time), windowNumber: windowNumber())
             owner?.platformWindowDispatch(e)
@@ -650,8 +688,10 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         case FocusIn:
             isKey = true
             owner?.platformWindowDidBecomeKey()
+            if owner?.platformWindowTextInput() != nil { inputContext?.setFocus(true) }
         case FocusOut:
             isKey = false
+            inputContext?.setFocus(false)
             owner?.platformWindowDidResignKey()
         case ButtonPress:
             let b = event.xbutton

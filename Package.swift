@@ -47,6 +47,13 @@ targets += [
         path: "Sources/CUIAutomation",
         linkerSettings: [.linkedLibrary("uiautomationcore"), .linkedLibrary("oleaut32"), .linkedLibrary("ole32")]
     ),
+    // extern "C" shim over the Text Services Framework: a text store (ITextStoreACP) per
+    // window for input method composition, clause attributes and the candidate list (ADR-0045).
+    .target(
+        name: "CTextServices",
+        path: "Sources/CTextServices",
+        linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("oleaut32"), .linkedLibrary("uuid")]
+    ),
 ]
 targets += [
     // extern "C" shim over DirectWrite (fonts, shaping, glyph runs) for the CoreText module.
@@ -80,7 +87,7 @@ targets += [
     .target(name: "CWASAPI", path: "Sources/CWASAPI", linkerSettings: [.linkedLibrary("ole32"), .linkedLibrary("avrt"), .linkedLibrary("uuid")]),
 ]
 let audioShimDependencies: [Target.Dependency] = ["CWASAPI"]
-appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers"]
+appKitDependencies += ["CoreGraphics", "CD2D", "CoreText", "CUIAutomation", "ImageIO", "UniformTypeIdentifiers", "CTextServices"]
 // The spell checker seam (ADR-0030): the Windows Spell Checking API over COM.
 targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("ole32")])]
 appKitDependencies += ["CSpellCheck", "Combine"]
