@@ -33,7 +33,7 @@ import CoreText
         set {
             _echosBullets = newValue
             // The field editor follows while it shows this cell's text.
-            if let field = controlView as? NSSecureTextField, let editor = field.currentEditor as? NSTextView {
+            if let field = controlView as? NSSecureTextField, let editor = field.currentEditor() as? NSTextView {
                 editor._layoutManager._secureEcho = newValue ? "\u{2022}" : ""
             }
             _changed()

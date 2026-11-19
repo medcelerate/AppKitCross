@@ -83,7 +83,7 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
 
             // Editing: the secure field editor lays out bullets for the real text.
             XCTAssertTrue(w.makeFirstResponder(field))
-            guard let editor = field.currentEditor as? NSTextView else { return XCTFail("no field editor") }
+            guard let editor = field.currentEditor() as? NSTextView else { return XCTFail("no field editor") }
             XCTAssertNotNil(editor._layoutManager._secureEcho)
             editor.insertText("é🙂x")
             XCTAssertEqual(field.stringValue, "é🙂x")
@@ -105,7 +105,7 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
 
             // A plain field next to it edits in the ordinary, unmasked editor.
             XCTAssertTrue(w.makeFirstResponder(plain))
-            guard let plainEditor = plain.currentEditor as? NSTextView else { return XCTFail("no plain editor") }
+            guard let plainEditor = plain.currentEditor() as? NSTextView else { return XCTFail("no plain editor") }
             XCTAssertFalse(plainEditor === editor)
             XCTAssertNil(plainEditor._layoutManager._secureEcho)
             w.close()
@@ -157,8 +157,8 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(fields.last?.placeholderString, "Prompt")
             XCTAssertEqual(fields.first?.stringValue, "seed")
             XCTAssertTrue(w.makeFirstResponder(fields[0]))
-            (fields[0].currentEditor as? NSTextView)?.selectAll(nil)
-            (fields[0].currentEditor as? NSTextView)?.insertText("s3cret")
+            (fields[0].currentEditor() as? NSTextView)?.selectAll(nil)
+            (fields[0].currentEditor() as? NSTextView)?.insertText("s3cret")
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(texts(h).contains("pw s3cret"), texts(h).joined(separator: "|"))
             XCTAssertEqual(fields[1].stringValue, "s3cret", "the binding reaches the other field")
@@ -360,13 +360,13 @@ final class SwiftUIPortGapsTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(single.frame.height, lineHeight + 5, accuracy: 1, "a horizontal field stays one line")
             // The field editor wraps for a vertical field and Option-Return types a newline.
             XCTAssertTrue(w.makeFirstResponder(vertical))
-            let editor = vertical.currentEditor as? NSTextView
+            let editor = vertical.currentEditor() as? NSTextView
             XCTAssertEqual(editor?._fieldEditorWraps, true)
             editor?.moveToEndOfDocument(nil)
             editor?.insertNewlineIgnoringFieldEditor(nil)
             XCTAssertTrue(vertical.stringValue.hasSuffix("line 9\n"))
             XCTAssertTrue(w.makeFirstResponder(single))
-            XCTAssertEqual((single.currentEditor as? NSTextView)?._fieldEditorWraps, false)
+            XCTAssertEqual((single.currentEditor() as? NSTextView)?._fieldEditorWraps, false)
             w.close()
         }
     }
