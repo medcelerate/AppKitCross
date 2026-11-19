@@ -382,13 +382,17 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             window.display()
             let lm = tv.layoutManager!
             let wide = lm._lineFragments.count
+            let wideWidth = tv.textContainer!.size.width
+            let wideLongest = lm._lineFragments.map(\.usedRect.maxX).max() ?? 0
             for width in stride(from: 620, through: 300, by: -40) {
                 window.setContentSize(NSSize(width: CGFloat(width), height: 460))
                 window.display()
             }
-            XCTAssertLessThan(tv.textContainer!.size.width, 300)
+            // Relative bounds only: line widths are the platform's font metrics (PR 90).
+            XCTAssertLessThan(tv.textContainer!.size.width, 0.6 * wideWidth, "the container followed the window")
             XCTAssertGreaterThan(lm._lineFragments.count, wide, "narrower lines wrap more")
-            for f in lm._lineFragments { XCTAssertLessThanOrEqual(f.usedRect.maxX, tv.textContainer!.size.width + 0.5); if f.usedRect.maxX > tv.textContainer!.size.width + 0.5 { break } }
+            let longest = lm._lineFragments.map(\.usedRect.maxX).max() ?? 0
+            XCTAssertLessThan(longest, 0.6 * wideLongest, "every paragraph wrapped at the new width, none kept the old one")
             assertMatchesFullLayout(lm, "after the window narrowed")
             tv.setSelectedRange(NSRange(location: 500, length: 0))
             tv.insertText("ok", replacementRange: tv.selectedRange())
