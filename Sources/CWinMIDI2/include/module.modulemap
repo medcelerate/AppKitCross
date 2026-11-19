@@ -1,0 +1,4 @@
+module CWinMIDI2 {
+    umbrella header "cwinmidi2.h"
+    export *
+}

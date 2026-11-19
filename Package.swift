@@ -308,8 +308,11 @@ targets += [
 #if os(Windows)
 targets += [
     .target(name: "CWinMIDI", path: "Sources/CWinMIDI", linkerSettings: [.linkedLibrary("winmm")]),
+    // Windows MIDI Services (MIDI 2.0, UMP) through C++/WinRT; compiles to stubs without the
+    // Microsoft.Windows.Devices.Midi2 projection headers, and the WinMM backend is used.
+    .target(name: "CWinMIDI2", path: "Sources/CWinMIDI2", linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32")]),
 ]
-let coreMIDIPlatformDependencies: [Target.Dependency] = ["CWinMIDI"]
+let coreMIDIPlatformDependencies: [Target.Dependency] = ["CWinMIDI", "CWinMIDI2"]
 let networkLinkerSettings: [LinkerSetting] = [.linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi")]
 #elseif os(Linux)
 targets += [
