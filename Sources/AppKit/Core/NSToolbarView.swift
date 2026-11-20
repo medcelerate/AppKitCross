@@ -233,7 +233,13 @@ final class _NSToolbarItemButton: NSButton {
             let scale = size.width > 0 && size.height > 0 ? min(iconSize / size.width, iconSize / size.height, 1) : 1
             let w = size.width * scale, h = size.height * scale
             let dest = NSRect(x: (r.width - w) / 2, y: (r.height - h) / 2, width: w, height: h)
-            image.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            // A template (a symbol) takes the toolbar's icon grey, as macOS 11's toolbar
+            // buttons draw their symbols, not the black of the template's own pixels.
+            if image.isTemplate, let tinted = image._tintedForTemplate(_NSToolbarItemButton._iconColor, size: dest.size) {
+                tinted.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            } else {
+                image.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            }
             if let m = item as? NSMenuToolbarItem, m.showsIndicator { _drawIndicator(alpha: alpha) }
         } else {
             let text = item.title.isEmpty ? item.label : item.title
@@ -252,6 +258,10 @@ final class _NSToolbarItemButton: NSButton {
         NSColor.labelColor.withAlphaComponent(alpha).setStroke()
         p.stroke()
     }
+
+    /// The colour of a toolbar symbol: the label colour at reduced emphasis (a mid grey on
+    /// the light title bar, measured at about 108/255 on macOS 14 and 15).
+    static var _iconColor: NSColor { NSColor.labelColor.withAlphaComponent(0.55) }
 
     /// The width the button wants: the fixed size, or the title's width for titled items.
     func preferredWidth(_ standard: CGFloat) -> CGFloat {
@@ -455,14 +465,33 @@ final class _NSToolbarView: NSView {
         }
         // Navigational items lead; in a unified band the window's title follows them, as
         // on macOS 11 (buttons, sidebar toggle, title and subtitle, then the items).
-        let navigational = entries.filter { $0.item.isNavigational }
+        // With a sidebar tracking separator (a split view's sidebar under the band), the
+        // items up to it sit over the sidebar (the sidebar toggle) and the title leads the
+        // rest, after the sidebar column, as macOS 11 lays out a sidebar window.
         var title: [Entry] = []
         if let w = _titleWidth() { title = [Entry(item: titleSlot, width: w, flexible: false, isSeparator: false, kind: .title)] }
-        entries = navigational + title + entries.filter { !$0.item.isNavigational }
+        if let split = entries.firstIndex(where: { _isSidebarTrackingSeparator($0.item) }) {
+            let overSidebar = Array(entries[...split])
+            let rest = entries[(split + 1)...]
+            entries = overSidebar + rest.filter { $0.item.isNavigational } + title + rest.filter { !$0.item.isNavigational }
+        } else {
+            let navigational = entries.filter { $0.item.isNavigational }
+            entries = navigational + title + entries.filter { !$0.item.isNavigational }
+        }
         // Overflow: drop the lowest-priority items (rightmost first among equals) until
         // the fixed widths fit, keeping room for the chevron.
         let available = bounds.width - m.leadingInset - m.trailingInset
-        func needed(_ es: [Entry]) -> CGFloat { es.reduce(0) { $0 + $1.width } + CGFloat(max(0, es.count - 1)) * m.itemGap }
+        // A tracking separator jumps the row to its divider: that jump is room the items
+        // cannot use.
+        func jump(_ es: [Entry]) -> CGFloat {
+            var x = m.leadingInset, total: CGFloat = 0
+            for e in es {
+                if let t = e.item as? NSTrackingSeparatorToolbarItem, let tx = t._trackedX, tx > x { total += tx - x; x = tx }
+                x += (e.flexible ? 0 : e.width) + m.itemGap
+            }
+            return total
+        }
+        func needed(_ es: [Entry]) -> CGFloat { es.reduce(0) { $0 + $1.width } + CGFloat(max(0, es.count - 1)) * m.itemGap + jump(es) }
         var overflow: [NSToolbarItem] = []
         var shown = entries
         if needed(shown) > available {
@@ -545,6 +574,19 @@ final class _NSToolbarView: NSView {
         }
         overflowButton.isHidden = overflowItems.isEmpty
         overflowButton.frame = NSRect(x: bounds.width - m.trailingInset - _NSToolbarOverflowButton.width, y: rowTop, width: _NSToolbarOverflowButton.width, height: m.buttonSize.height)
+    }
+
+    /// The separator that tracks a sidebar's divider: the standard identifier, or a tracking
+    /// separator on the first divider of a split view whose first pane starts at the
+    /// window's leading edge (a sidebar, not an inspector further in).
+    private func _isSidebarTrackingSeparator(_ item: NSToolbarItem) -> Bool {
+        if item.itemIdentifier == .sidebarTrackingSeparator { return true }
+        // `_trackedX` is nil without a split view in a window (reading `splitView` then
+        // would trap); such a separator stays a plain one until the split view is shown.
+        guard let t = item as? NSTrackingSeparatorToolbarItem, t.dividerIndex == 0, t._trackedX != nil else { return false }
+        let sv = t.splitView
+        guard let first = (sv.arrangedSubviews.isEmpty ? sv.subviews : sv.arrangedSubviews).first else { return false }
+        return sv.convert(NSPoint(x: first.frame.minX, y: first.frame.midY), to: nil).x <= 1
     }
 
     // MARK: Title

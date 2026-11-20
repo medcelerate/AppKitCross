@@ -50,7 +50,7 @@ struct _Searchable<Content: View>: View {
         case .automatic, .toolbar, .toolbarPrincipal:
             content.toolbar {
                 ToolbarItem(placement: placement.kind == .toolbarPrincipal ? .principal : .automatic) {
-                    _SearchField(text: text, prompt: prompt)
+                    _SearchField(text: text, prompt: prompt, inToolbar: true)
                 }
             }
         }
@@ -62,18 +62,30 @@ struct _SearchField: View, _PrimitiveView {
     typealias Body = Never
     let text: Binding<String>
     let prompt: String
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _SearchFieldPrimitive(placeholder: prompt, text: text) }
+    var inToolbar = false
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _SearchFieldPrimitive(placeholder: prompt, text: text, inToolbar: inToolbar) }
 }
 
 @MainActor
 final class _SearchFieldPrimitive: _TextFieldPrimitive {
-    init(placeholder: String, text: Binding<String>) {
-        super.init(placeholder: placeholder, text: text, onCommit: {}, field: NSSearchField(frame: NSRect(x: 0, y: 0, width: 200, height: 22)))
+    /// The field stands in the window's toolbar (`.searchable` placed there).
+    let inToolbar: Bool
+    /// macOS 14/15's toolbar search field, measured on a 1100-point Sibyl window: 325 by
+    /// 28 points (a rounded rectangle; the cell draws it so inside a toolbar band).
+    static let toolbarSize = CGSize(width: 325, height: 28)
+    init(placeholder: String, text: Binding<String>, inToolbar: Bool = false) {
+        self.inToolbar = inToolbar
+        let field = NSSearchField(frame: NSRect(x: 0, y: 0, width: inToolbar ? _SearchFieldPrimitive.toolbarSize.width : 200, height: 22))
+        // The placeholder leads after the magnifier in a toolbar, as on macOS 11 and later.
+        if inToolbar { field.centersPlaceholder = false }
+        super.init(placeholder: placeholder, text: text, onCommit: {}, field: field)
     }
-    /// A toolbar's search field is 200 points wide unless offered a width.
+    /// A toolbar's search field is 325 by 28 points (200 wide elsewhere) unless offered a
+    /// width.
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let s = super.sizeThatFits(proposal, node: node)
-        guard proposal.width == nil || proposal.width?.isFinite == false else { return s }
-        return CGSize(width: 200, height: s.height)
+        let height = inToolbar ? max(s.height, _SearchFieldPrimitive.toolbarSize.height) : s.height
+        guard proposal.width == nil || proposal.width?.isFinite == false else { return CGSize(width: s.width, height: height) }
+        return CGSize(width: inToolbar ? _SearchFieldPrimitive.toolbarSize.width : 200, height: height)
     }
 }

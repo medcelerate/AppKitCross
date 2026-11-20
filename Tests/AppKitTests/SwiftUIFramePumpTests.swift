@@ -81,4 +81,49 @@ final class SwiftUIFramePumpTests: XCTestCase, @unchecked Sendable {
             window.close()
         }
     }
+
+    /// A meter tick repaints the meter's area and nothing else. The layout a change
+    /// requests dirtied one pixel at the window's origin before; Win32 unioned it with the
+    /// meter at the top into the whole window, every frame (Sibyl at 2 KHz: 2.7 Mpt² a frame).
+    func testMeterTickPaintsOnlyTheMeterArea() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Screen: View {
+                let model: _PumpModel
+                var body: some View {
+                    VStack {
+                        HStack { Text(model.text); Capsule().frame(width: model.level * 200, height: 6) }
+                        Spacer()
+                        Text("Combined Log")
+                    }
+                }
+            }
+            let model = _PumpModel()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            let hosting = NSHostingView(rootView: Screen(model: model))
+            window.contentView = hosting
+            window.makeKeyAndOrderFront(nil)
+            _ = runFrames(window, limit: 6)
+            guard let host = window._platformWindow as? HostWindow else { return XCTFail("not the host backend") }
+            XCTAssertFalse(host._needsPaint, "idle: no frame pending")
+            let whole = NSRect(origin: .zero, size: window.contentView!.bounds.size)
+
+            for level in [0.6, 0.3, 0.9] {
+                model.level = level
+                var frames = 0, rects: [NSRect] = []
+                while host._needsPaint, frames < 4 {
+                    host.displayIfNeeded(); frames += 1
+                    if let r = host.lastPaintRect { rects.append(r) }
+                }
+                XCTAssertGreaterThan(frames, 0, "the tick requested a frame")
+                XCTAssertFalse(rects.isEmpty)
+                for r in rects {
+                    XCTAssertLessThan(r.width * r.height, whole.width * whole.height / 4, "a meter tick repaints a small area, not \(r) of \(whole)")
+                    XCTAssertFalse(r.contains(NSPoint(x: 0.5, y: 0.5)), "the origin pixel (the former layout tickle) stays clean: \(r)")
+                    XCTAssertGreaterThan(r.minY, whole.height / 2, "the paint stays in the meter's half of the window: \(r)")
+                }
+            }
+            window.close()
+        }
+    }
 }

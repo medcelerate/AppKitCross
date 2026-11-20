@@ -883,7 +883,16 @@ import CoreText
 
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
-        let r = view._dirtyRectInWindow(rect)
+        var r = view._dirtyRectInWindow(rect)
+        // What a scroll view's clip hides is not drawn: a row appended below the visible
+        // rows marks nothing on screen. An empty area marks nothing either (a view added
+        // with a zero frame grew the platform's dirty rectangle to its origin).
+        var ancestor = view.superview
+        while let v = ancestor, !r.isNull, !r.isEmpty {
+            if v is NSClipView { r = r.intersection(v._dirtyRectInWindow(v.bounds)) }
+            ancestor = v.superview
+        }
+        guard !r.isNull, !r.isEmpty, r.width.isFinite, r.height.isFinite else { return }
         _GlassRegistry.noteInvalidation(in: self, from: view, rect: r)
         _noteDirty(r)
         _platform?.setNeedsDisplay(r)
@@ -932,13 +941,20 @@ import CoreText
         return parts.isEmpty ? [dirtyRect] : parts
     }
 
-    /// A view needs layout: a frame is requested with the smallest dirty area, so the
-    /// paint runs layout (`platformWindowDraw`), and the views layout moves or updates
-    /// invalidate themselves for the frame after. Nothing is repainted wholesale.
+    /// A view needs layout: the platform runs `platformWindowLayout` before its next paint,
+    /// and the views layout moves or updates invalidate themselves. No pixel is dirtied for
+    /// the request itself: the previous one-pixel tickle at the origin, unioned by Win32 with
+    /// a meter at the top of the window, made every frame a whole-window paint.
     internal func _viewNeedsLayout() {
-        let r = NSRect(x: 0, y: 0, width: 1, height: 1)
-        _noteDirty(r)
-        _platform?.setNeedsDisplay(r)
+        _platform?.requestLayout()
+    }
+
+    /// The layout pass a `requestLayout` asked for, before the platform paints: the same
+    /// views the paint lays out, so what moved marks itself before the paint area is fixed.
+    public func platformWindowLayout() {
+        _contentView?.layoutSubtreeIfNeeded()
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
     }
 
     /// Feeds the event to the gesture recognizers of the target view and its ancestors
@@ -1086,6 +1102,12 @@ import CoreText
             if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a._displayHierarchy(in: context, dirtyRect: rect) }
             if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
                 buttons._displayHierarchy(in: context, dirtyRect: rect)
+            }
+            if _dimsForSheet {
+                // macOS dims the window behind a sheet; a dark window a little more.
+                let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                context.setFillColor(CGColor(gray: 0, alpha: dark ? 0.3 : 0.15))
+                context.fill(rect)
             }
             context.restoreGState()
         }
@@ -1259,6 +1281,13 @@ import CoreText
     /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
     /// linger hidden in the application's window list. Not part of Apple's API.
     public var _closesAfterSheetEnds = false
+    /// The sheet sits centred on its parent (clamped under the title band and toolbar)
+    /// rather than hanging from the top of the content: alert sheets, as on macOS 26. Not
+    /// part of Apple's API: NSAlert sets it on its panel.
+    public var _sheetCentresInParent = false
+    /// While a sheet is up the parent's content is drawn dimmed, as macOS dims a window
+    /// behind its sheet.
+    internal var _dimsForSheet: Bool { attachedSheet != nil }
 
     /// A window with an attached sheet does not take input; the sheet does.
     private var _isBlockedBySheet: Bool { attachedSheet != nil }
@@ -1288,6 +1317,7 @@ import CoreText
     private func _presentSheet(_ sheet: NSWindow) {
         post(NSWindow.willBeginSheetNotification)
         sheet._sheetIsPresented = true
+        _setNeedsDisplayWhole()                 // the content dims behind the sheet
         sheet._sheetSlide?.finish()
         sheet._reopenIfNeeded()
         sheet._attachAsSheet(to: self)
@@ -1331,7 +1361,12 @@ import CoreText
         // reported a frame, until nothing but the toolbar was left).
         let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
-        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
+        var top = layout.maxY
+        if sheet._sheetCentresInParent {
+            // Centred on the whole window, never over the title band or the toolbar.
+            top = min(layout.maxY, max(size.height, ((frame.height + size.height) / 2).rounded()))
+        }
+        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: top, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
         let origin = convertPoint(toScreen: rect.origin)
         let width = rect.width > 0 ? rect.width : size.width
@@ -1908,6 +1943,7 @@ import CoreText
         } else if sheetWindow._closesAfterSheetEnds {
             sheetWindow.close()                         // ended while still queued
         }
+        _setNeedsDisplayWhole()                 // the content is no longer dimmed
         completion?(returnCode)
         post(NSWindow.didEndSheetNotification)
         // The next queued sheet comes up; otherwise the parent takes the keyboard back.

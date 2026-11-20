@@ -130,14 +130,30 @@ import CoreText
     @MainActor open func drawArrow(_ whichArrow: NSScroller.Arrow, highlight flag: Bool) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/drawknob()
     @MainActor open func drawKnob() {
-        let knob = rect(for: .knob)
+        var knob = rect(for: .knob)
         guard !knob.isEmpty else { return }
+        if _scrollerStyle == .overlay {
+            // An overlay knob: a thin rounded bar along the trailing (or bottom) edge, in a
+            // translucent label colour so it reads on light and dark content alike.
+            let thickness: CGFloat = 7
+            if _isHorizontal {
+                knob = NSRect(x: knob.minX, y: isFlipped ? knob.maxY - thickness : knob.minY, width: knob.width, height: min(thickness, knob.height))
+            } else {
+                knob = NSRect(x: knob.maxX - thickness, y: knob.minY, width: min(thickness, knob.width), height: knob.height)
+            }
+            let r = min(knob.width, knob.height) / 2
+            NSColor.labelColor.withAlphaComponent(_isHighlighted ? 0.6 : 0.45).setFill()
+            NSBezierPath(roundedRect: knob, xRadius: r, yRadius: r).fill()
+            return
+        }
         let radius = min(knob.width, knob.height) / 2
         (_isHighlighted ? NSColor.selectedKnobColor : NSColor.knobColor).withAlphaComponent(0.85).setFill()
         NSBezierPath(roundedRect: knob.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius).fill()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/drawknobslot(in:highlight:)
     @MainActor open func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+        // An overlay scroller floats over the content with no track of its own.
+        if _scrollerStyle == .overlay { return }
         NSColor.scrollBarColor.withAlphaComponent(0.12).setFill()
         NSBezierPath.fill(bounds)
     }
@@ -199,7 +215,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/scrollerstyle
     @MainActor open var scrollerStyle: NSScroller.Style {
         get { _scrollerStyle }
-        set { _scrollerStyle = newValue; needsDisplay = true }
+        set { guard newValue != _scrollerStyle else { return }; _scrollerStyle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/scrollerwidth(for:scrollerstyle:)
     @MainActor public class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat {

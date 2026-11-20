@@ -138,10 +138,15 @@ final class SwiftUIMeterCascadeTests: XCTestCase, @unchecked Sendable {
                     drawn[k, default: 0] += 1
                 }
             }
-            defer { NSView._invalidationObserver = nil; NSView._drawObserver = nil }
+            // Placements and measurements a tick runs, by primitive (the memo and the pass's
+            // skipping of unchanged subtrees answer the rest).
+            var placed: [String: Int] = [:], measured: [String: Int] = [:]
+            _ViewNode._placeObserver = { n in MainActor.assumeIsolated { placed[n.primitive.map { "\(type(of: $0))" } ?? "body", default: 0] += 1 } }
+            _ViewNode._measureObserver = { n, _ in MainActor.assumeIsolated { measured[n.primitive.map { "\(type(of: $0))" } ?? "body", default: 0] += 1 } }
+            defer { NSView._invalidationObserver = nil; NSView._drawObserver = nil; _ViewNode._placeObserver = nil; _ViewNode._measureObserver = nil }
 
             let ticks = Int(ProcessInfo.processInfo.environment["CASCADE_TICKS"] ?? "") ?? 50
-            var total: TimeInterval = 0, worst: TimeInterval = 0, frames = 0, service: TimeInterval = 0
+            var total: TimeInterval = 0, worst: TimeInterval = 0, frames = 0, service: TimeInterval = 0, layoutTime: TimeInterval = 0
             var dirtyArea: CGFloat = 0, worstDirty = NSRect.null, paintArea: CGFloat = 0
             var allMarksByType: [ObjectIdentifier: Int] = [:], allDrawnByType: [ObjectIdentifier: Int] = [:]
             for t in 1...ticks {
@@ -154,6 +159,11 @@ final class SwiftUIMeterCascadeTests: XCTestCase, @unchecked Sendable {
                 // What the timer's block costs on the main queue: the mutations and the
                 // observation callbacks they run (marks and one frame request).
                 service += Date().timeIntervalSince(t0)
+                // The layout pass the frame starts with, timed on its own (the platform runs
+                // it from the pump; the frame's own pass then finds nothing to do).
+                let tl = Date()
+                window.platformWindowLayout()
+                layoutTime += Date().timeIntervalSince(tl)
                 frames += runFrames(host)
                 let dt = Date().timeIntervalSince(t0)
                 total += dt; worst = max(worst, dt)
@@ -173,8 +183,10 @@ final class SwiftUIMeterCascadeTests: XCTestCase, @unchecked Sendable {
             func perTick(_ d: [String: Int]) -> String {
                 d.sorted { $0.value > $1.value }.map { String(format: "%@ %.1f", $0.key, Double($0.value) / Double(ticks)) }.joined(separator: ", ")
             }
-            print(String(format: "SwiftUIMeterCascadeTests: model mutations %.3f ms per tick", service / Double(ticks) * 1000))
+            print(String(format: "SwiftUIMeterCascadeTests: model mutations %.3f ms per tick, layout %.3f ms per tick, paint %.3f ms per tick", service / Double(ticks) * 1000, layoutTime / Double(ticks) * 1000, (total - service - layoutTime) / Double(ticks) * 1000))
             print("SwiftUIMeterCascadeTests: marks per tick: \(perTick(allMarks))")
+            print("SwiftUIMeterCascadeTests: placements per tick: \(perTick(placed)) (\(placed.values.reduce(0, +) / ticks) in all)")
+            print("SwiftUIMeterCascadeTests: measurements per tick: \(perTick(measured)) (\(measured.values.reduce(0, +) / ticks) in all)")
             print("SwiftUIMeterCascadeTests: draws per tick: \(perTick(allDrawn))")
             print(String(format: "SwiftUIMeterCascadeTests: %.3f ms per tick (worst %.3f ms), %.1f frames per tick, painted area %.0f pt² per tick, bounding box of the marks %.0f pt² (worst %@ of %@)",
                          total / Double(ticks) * 1000, worst * 1000, Double(frames) / Double(ticks), paintArea / CGFloat(ticks), dirtyArea / CGFloat(ticks), "\(worstDirty)", "\(hosting.bounds.size)"))
@@ -183,10 +195,16 @@ final class SwiftUIMeterCascadeTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThanOrEqual(shapes.count, 9, "three meters of three capsules each")
             XCTAssertEqual(allMarks["_TextView", default: 0], 0, "a meter tick marks no text")
             XCTAssertEqual(allMarks["_SwiftUISplitView", default: 0], 0, "a meter tick marks no split view")
+            // The containers around the capsules draw nothing: a tick marks the shapes (and
+            // their layers' hosts), never a container (a Windows run: 2,542 marks in 30 s).
+            XCTAssertEqual(allMarks["_ContainerView", default: 0], 0, "a meter tick marks no container")
+            // The layout a tick runs is the three meter rows': the GeometryReader keeps its
+            // ancestors' measurements, and the transcript list and the inspector are skipped.
+            XCTAssertLessThanOrEqual(measured.values.reduce(0, +), 40 * ticks, "measurements per tick: \(perTick(measured))")
+            XCTAssertLessThanOrEqual(placed.values.reduce(0, +), 80 * ticks, "placements per tick: \(perTick(placed))")
             XCTAssertEqual(allDrawn["_TextView", default: 0], 0, "a meter tick draws no text")
-            // The containers marked are the peak capsules' offset wrappers, each its own 2x4
-            // bounds (the decoration marks itself on update and after layout); no ancestor is
-            // marked with more than a meter's area.
+            // No ancestor is marked with more than a meter's area (the superview repaints what
+            // a capsule uncovered as it shrank; the host the peak capsule's moved layer).
             print("SwiftUIMeterCascadeTests: largest mark per type (pt²): \(biggest.sorted { $0.value > $1.value }.map { "\($0.key) \(Int($0.value))" }.joined(separator: ", "))")
             for (type, area) in biggest where type != "_ShapeDrawingView" {
                 XCTAssertLessThanOrEqual(area, 200 * 6, "\(type) is marked with no more than a meter's area")

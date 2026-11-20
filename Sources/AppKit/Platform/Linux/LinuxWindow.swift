@@ -33,7 +33,7 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
     private var backingCairo: OpaquePointer?   // cairo_t on the backing surface
     private var xsurface: OpaquePointer?       // cairo xlib surface
     private var dirty: NSRect? = nil           // content points
-    var needsPaint: Bool { dirty != nil && isVisible }
+    var needsPaint: Bool { (dirty != nil || needsLayoutPass) && isVisible }
 
     var scale: CGFloat { backend.scale }
     var backingScaleFactor: CGFloat { scale }
@@ -388,7 +388,12 @@ final class LinuxWindow: PlatformWindow, AtspiWindow {
         if let r = rect { dirty = (dirty ?? NSRect.null).union(r).intersection(bounds) } else { dirty = bounds }
     }
 
-    func displayIfNeeded() { if dirty != nil { paintIfNeeded() } }
+    func displayIfNeeded() {
+        if needsLayoutPass { needsLayoutPass = false; owner?.platformWindowLayout() }
+        if dirty != nil { paintIfNeeded() }
+    }
+    private var needsLayoutPass = false
+    func requestLayout() { needsLayoutPass = true }
 
     func display() {
         dirty = NSRect(origin: .zero, size: _frame.size)

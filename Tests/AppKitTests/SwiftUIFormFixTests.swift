@@ -228,7 +228,7 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             }
             // Grouped rows put a fixed control at the trailing edge.
             XCTAssertGreaterThan(frameIn(h, popup).maxX, 300)
-            XCTAssertNotNil(allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Enabled" }, "a toggle's title is on its checkbox")
+            XCTAssertNotNil(allViews(h).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == "Enabled" }, "a grouped form's toggle is a switch with its title beside it")
             w.close()
         }
     }
@@ -363,6 +363,7 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
                                                           ("Add to this show", "Footer four"), ("Start Free Trial", "Footer five")]
             for (row, footer) in pairs {
                 let rowView: NSView? = textView(doc, row) ?? allViews(doc).compactMap { $0 as? NSButton }.first { $0.title == row }
+                    ?? allViews(doc).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == row }
                 guard let rowView, let f = frame(footer), let c = card(containing: docFrame(doc, rowView), in: doc) else { XCTFail("\(row)/\(footer) missing"); continue }
                 XCTAssertGreaterThanOrEqual(f.minY, c.maxY - 0.5, "\(footer) \(f) is below the card \(c) of \(row)")
                 XCTAssertFalse(cards(doc).contains { $0.insetBy(dx: 1, dy: 1).intersects(f) }, "\(footer) is inside no card")
@@ -574,6 +575,43 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(button.frame.width, 0)
             XCTAssertGreaterThan(button.frame.height, 0)
             w.close()
+        }
+    }
+}
+
+/// A grouped form in a wide window keeps its cards to a centred column, as macOS caps the
+/// inset-grouped form at about 606 pt (Sibyl's Settings panes spanned the full width).
+@MainActor private func _colViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(_colViews) }
+
+final class SwiftUIGroupedFormColumnTests: XCTestCase, @unchecked Sendable {
+    @MainActor private func red(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) -> CGFloat {
+        let c = rep.colorAt(x: x, y: y) ?? .black
+        return (c.usingColorSpace(.deviceRGB) ?? c).redComponent
+    }
+    func testGroupedFormContentIsCappedAndCentred() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let form = Form { Section("One") { Text("Row"); Text("Row 2"); Text("Row 3") } }.formStyle(.grouped)
+            for width in [500.0, 900.0, 1200.0] {
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+                let hosting = NSHostingView(rootView: form)
+                window.contentView = hosting
+                hosting.layoutSubtreeIfNeeded()
+                guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { XCTFail("no bitmap"); continue }
+                hosting.cacheDisplay(in: hosting.bounds, to: rep)
+                let scale = CGFloat(rep.pixelsWide) / hosting.bounds.width
+                // The last row's empty trailing half: a white run (the card) between grey page margins.
+                guard let text = _colViews(hosting).compactMap({ $0 as? _TextView }).last else { XCTFail("no row"); continue }
+                let row = hosting.convert(text.bounds, from: text)
+                let y = Int(row.midY * scale)
+                var first = -1, last = -1
+                for x in 0..<rep.pixelsWide where red(rep, x, y) > 0.98 { if first < 0 { first = x }; last = x }
+                let cardWidth = CGFloat(last - first + 1) / scale, mid = CGFloat(first + last) / 2 / scale
+                let expectedWidth = min(width - 32, 606)
+                XCTAssertEqual(cardWidth, expectedWidth, accuracy: 3, "card width at \(width)")
+                XCTAssertEqual(mid, width / 2, accuracy: 3, "card centred at \(width)")
+                window.close()
+            }
         }
     }
 }

@@ -71,7 +71,9 @@ import CoreText
             let size = max(0, sizes[i])
             let f = _isVertical ? NSRect(x: offset, y: 0, width: size, height: bounds.height) : NSRect(x: 0, y: offset, width: bounds.width, height: size)
             if v.frame != f { v.frame = f }
-            v.isHidden = _collapsed.contains(ObjectIdentifier(v)) && size == 0 ? true : v.isHidden && _collapsed.contains(ObjectIdentifier(v))
+            // A collapsed subview hides once it has no size; one the app hid itself stays
+            // hidden (AppKit treats a hidden subview as collapsed), the rest are left alone.
+            if _collapsed.contains(ObjectIdentifier(v)), size == 0 { v.isHidden = true }
             offset += size
             if i < views.count - 1 { _positions.append(offset); offset += dividerThickness }
         }
@@ -242,7 +244,7 @@ import CoreText
         needsLayout = true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitview/issubviewcollapsed(_:)
-    @MainActor open func isSubviewCollapsed(_ subview: NSView) -> Bool { _collapsed.contains(ObjectIdentifier(subview)) }
+    @MainActor open func isSubviewCollapsed(_ subview: NSView) -> Bool { _collapsed.contains(ObjectIdentifier(subview)) || (subview.isHidden && subview.superview === self) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssplitview/isvertical
     @MainActor open var isVertical: Bool {
         get { _isVertical }

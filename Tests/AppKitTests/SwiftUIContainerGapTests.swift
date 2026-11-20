@@ -186,8 +186,9 @@ final class SwiftUIContainerGapTests: XCTestCase, @unchecked Sendable {
             h.layoutSubtreeIfNeeded()
             XCTAssertEqual(split.arrangedSubviews.count, 2, "shown: a trailing column")
             XCTAssertTrue(split.arrangedSubviews[0] === contentPane, "the content keeps its pane")
-            XCTAssertEqual(split.arrangedSubviews[1].frame.width, 330, "at the inspector's ideal width")
-            XCTAssertEqual(contentPane.frame.width, 800 - 330 - split.dividerThickness)
+            // macOS 15 opens it at the modifier's minimum (589 + 1 + 210 in an 800-point window).
+            XCTAssertEqual(split.arrangedSubviews[1].frame.width, 210, "at the inspector's minimum width")
+            XCTAssertEqual(contentPane.frame.width, 800 - 210 - split.dividerThickness)
             XCTAssertEqual(texts(split.arrangedSubviews[1]), ["Inspector"])
 
             model.shown = false
@@ -415,6 +416,44 @@ final class SwiftUIContainerGapTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(tips.contains("A tooltip"), "help(Text) is the tooltip")
             XCTAssertTrue(tips.contains("Localized tooltip"))
             XCTAssertNotEqual(VariableColorSymbolEffect.variableColor.iterative, .variableColor)
+        }
+    }
+}
+
+/// A window scene whose content proposes an infinite height (a sidebar List did) must still
+/// get a finite window: Sibyl's main window on Windows snapped to the maximum track height
+/// after the first programmatic resize.
+final class SwiftUIWindowGeometryFiniteTests: XCTestCase, @unchecked Sendable {
+    private struct Boundless: Layout {
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize { CGSize(width: 250, height: CGFloat.infinity) }
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {}
+    }
+    func testInfiniteContentProposalsNeverReachTheWindow() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let runner = _AppRunner(name: "Boundless")
+            runner.run(scene: SceneBuilder.buildBlock(
+                Window("Main", id: "main") { Boundless { Text("x") } }.defaultSize(width: 1260, height: 780)
+            ))
+            defer { for w in runner.windows { w.close() } }
+            guard let w = runner.windows.first else { return XCTFail("no window") }
+            let content = w.contentView!.frame.size
+            XCTAssertTrue(content.width.isFinite && content.height.isFinite, "\(content)")
+            XCTAssertEqual(content.width, 1260)
+            XCTAssertLessThanOrEqual(content.height, 780)
+            XCTAssertTrue(w.minSize.width.isFinite && w.minSize.height.isFinite, "\(w.minSize)")
+            // A later programmatic resize is honoured as asked.
+            w.setContentSize(NSSize(width: 1100, height: 700))
+            XCTAssertEqual(w.contentView!.frame.size, NSSize(width: 1100, height: 700))
+
+            // The same content with no default size and `.contentSize` resizability.
+            let runner2 = _AppRunner(name: "Boundless2")
+            runner2.run(scene: SceneBuilder.buildBlock(
+                Window("Main", id: "main") { Boundless { Text("x") } }.windowResizability(.contentSize)
+            ))
+            defer { for w in runner2.windows { w.close() } }
+            guard let w2 = runner2.windows.first else { return XCTFail("no window") }
+            XCTAssertTrue(w2.frame.height.isFinite && w2.minSize.height.isFinite, "\(w2.frame) min \(w2.minSize)")
         }
     }
 }
