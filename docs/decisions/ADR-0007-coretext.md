@@ -57,3 +57,31 @@ points with the line origin on the baseline; string indices are UTF-16 as on App
 - Not covered yet: vertical text, font features and variations beyond weight/slant,
   emoji colour glyphs on Linux (Pango draws them where the font has them), glyph
   rendering modes (subpixel positioning follows the engine's default).
+
+## Amendment (2026-11-20): per-run font fallback on Windows
+
+The Windows engine shapes with `IDWriteTextLayout` and a collecting renderer (not the
+`IDWriteTextAnalyzer` path the decision above names), and until now it left font fallback
+implicit in the layout. A Sibyl label on the PC showed U+25B8 (Segoe UI has no glyph for
+it) as a dot. `cdw_shape` now does the fallback itself, before it draws:
+
+- `IDWriteFactory2::GetSystemFontFallback` provides the system fallback, which is also set
+  on the layout (`IDWriteTextLayout2::SetFontFallback`), so no custom or empty fallback can
+  apply.
+- `IDWriteFontFallback::MapCharacters` splits the text from the primary family (base
+  weight and style). Each stretch it maps to another family is pinned to that family on the
+  layout (`SetFontCollection` + `SetFontFamilyName`, and `SetFontSize` when it returns a
+  scale). A second pass checks the primary face's cmap: an inked character still on the
+  primary face whose glyph index is 0 is mapped again from the fallback chain alone (no base
+  family). Controls, spaces, joiners, variation selectors and format characters are not
+  counted as misses.
+- The renderer returns one run per resolved face, each with its own `CDWFont`. The
+  typesetter measures with those runs' advances and `CTRun` draws those glyphs with that
+  face (`DrawGlyphRun`), so the width a line reports (and `sizeThatFits`) is the width it
+  draws. Characters the primary font has keep the primary face as before.
+- CJK and emoji (surrogate pairs such as U+1F600) go through the same path. Emoji draw in
+  monochrome: `ID2D1RenderTarget::DrawGlyphRun` has no colour glyph layers.
+
+`CoreTextFallbackTests` is the contract: a real glyph and a non-zero advance for U+25B8,
+U+1F600 and CJK, and a line width equal to the sum of its runs' advances. It runs against
+Apple's CoreText on macOS and against the port's engines on Windows and Linux.

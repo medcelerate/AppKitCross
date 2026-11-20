@@ -37,12 +37,12 @@ import CoreText
             if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) == true {
                 _hostsLayersNatively = true
                 _layerSceneDirty = false
-                _platform?.setNeedsDisplay(nil)      // the backing store must stop showing the software composite
+                _setNeedsDisplayWhole()      // the backing store must stop showing the software composite
             }
         } else if !wantsHosting && _hostsLayersNatively {
             _hostsLayersNatively = false
             _ = _platform?.hostLayerScene(nil)
-            _platform?.setNeedsDisplay(nil)
+            _setNeedsDisplayWhole()
         }
     }
 
@@ -363,7 +363,7 @@ import CoreText
         _contentView?.needsLayout = true     // contentLayoutRect changed with the band
         _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
     }
 
     /// A unified toolbar shows the title and subtitle in its row: they changed.
@@ -439,7 +439,7 @@ import CoreText
         _layerSceneFrame += 1
         if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) != true {
             _hostsLayersNatively = false            // the platform gave hosting up: back to software
-            _platform?.setNeedsDisplay(nil)
+            _setNeedsDisplayWhole()
         }
     }
     private var _contentView: NSView?
@@ -700,7 +700,7 @@ import CoreText
         view.frame = NSRect(origin: .zero, size: cr.size)
         if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(self)
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
         _ensureWindowButtons()
         _updateLayerHosting()
     }
@@ -721,13 +721,13 @@ import CoreText
         if _lastFrame.width > 0 { _platform?.frame = _lastFrame }
         NSApplication.shared._register(window: self)
         _contentView?.needsDisplay = true
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/appearance
     @MainActor public var appearance: NSAppearance? {
         get { _appearance }
-        set { _appearance = newValue; _contentView?._effectiveAppearanceDidChange(); _platform?.setNeedsDisplay(nil) }
+        set { _appearance = newValue; _contentView?._effectiveAppearanceDidChange(); _setNeedsDisplayWhole() }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/effectiveappearance
@@ -883,15 +883,60 @@ import CoreText
 
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
-        let r = view.convert(rect, to: nil)
+        let r = view._dirtyRectInWindow(rect)
+        _noteDirty(r)
         _platform?.setNeedsDisplay(r)
+    }
+
+    /// The areas views asked to repaint since the last paint (window coordinates, whole
+    /// points), nil when the whole window must be. A platform keeps one dirty rectangle
+    /// (the Host window, Win32's `rcPaint`), so three meters in three list rows would
+    /// repaint the rows' text between them; the paint draws these areas one by one instead.
+    private var _pendingDirtyRects: [NSRect]? = []
+    private static let _maxPendingDirtyRects = 12
+
+    /// The window repaints as a whole (a new appearance, background, scale or layer host).
+    internal func _setNeedsDisplayWhole() {
+        _pendingDirtyRects = nil
+        _platform?.setNeedsDisplay(nil)
+    }
+
+    private func _noteDirty(_ rect: NSRect) {
+        guard var rects = _pendingDirtyRects else { return }
+        guard !rect.isNull, !rect.isEmpty, rect.width.isFinite, rect.height.isFinite else { return }
+        var r = rect.integral
+        // Overlapping areas become one, so no pixel is drawn twice in a paint.
+        var i = 0
+        while i < rects.count {
+            if rects[i].intersects(r) || rects[i].contains(r) || r.contains(rects[i]) {
+                r = r.union(rects[i]); rects.remove(at: i); i = 0
+            } else { i += 1 }
+        }
+        rects.append(r)
+        if rects.count > NSWindow._maxPendingDirtyRects { rects = [rects.reduce(NSRect.null) { $0.union($1) }] }
+        _pendingDirtyRects = rects
+    }
+
+    /// The areas this paint draws within the platform's `dirtyRect`: the views' own when
+    /// they account for all of it, else the whole dirty rectangle (an expose, a resize,
+    /// a repaint the platform asked for itself).
+    private func _takePaintRects(_ dirtyRect: NSRect) -> [NSRect] {
+        let pending = _pendingDirtyRects
+        _pendingDirtyRects = []
+        guard _isOpaque, let rects = pending, rects.count > 1 else { return [dirtyRect] }
+        let box = rects.reduce(NSRect.null) { $0.union($1) }
+        guard box.insetBy(dx: -2, dy: -2).contains(dirtyRect) else { return [dirtyRect] }
+        let parts = rects.map { $0.intersection(dirtyRect) }.filter { !$0.isNull && !$0.isEmpty }
+        return parts.isEmpty ? [dirtyRect] : parts
     }
 
     /// A view needs layout: a frame is requested with the smallest dirty area, so the
     /// paint runs layout (`platformWindowDraw`), and the views layout moves or updates
     /// invalidate themselves for the frame after. Nothing is repainted wholesale.
     internal func _viewNeedsLayout() {
-        _platform?.setNeedsDisplay(NSRect(x: 0, y: 0, width: 1, height: 1))
+        let r = NSRect(x: 0, y: 0, width: 1, height: 1)
+        _noteDirty(r)
+        _platform?.setNeedsDisplay(r)
     }
 
     /// Feeds the event to the gesture recognizers of the target view and its ancestors
@@ -1007,11 +1052,13 @@ import CoreText
         if let cv = _contentView { visit(cv) }
         _setLayerSceneNeedsCommit()
         // The backing store is a new pixel size: everything is drawn again at the new scale.
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
     }
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
+        // Taken before layout: what this paint's layout moves marks the next frame.
+        let paintRects = _takePaintRects(dirtyRect)
         _commitLayerSceneIfNeeded()
         // Geometry settled for this frame: areas under a pointer that did not move still enter or exit.
         if _trackingAreasDirty { _contentView?.layoutSubtreeIfNeeded(); _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
@@ -1020,27 +1067,29 @@ import CoreText
         // views do, so a dark-themed system gets a dark window behind its light text.
         let previousAppearance = NSAppearance.current
         NSAppearance.current = effectiveAppearance
-        if _isOpaque {
-            context.setFillColor(_backgroundColor.cgColor)
-            context.fill(dirtyRect)
-        }
         let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?.layoutSubtreeIfNeeded()
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
-        _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        for rect in paintRects {
+            context.saveGState()
+            if paintRects.count > 1 { context.clip(to: rect) }
+            if _isOpaque {
+                context.setFillColor(_backgroundColor.cgColor)
+                context.fill(rect)
+            }
+            _contentView?._displayHierarchy(in: context, dirtyRect: rect)
+            if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t._displayHierarchy(in: context, dirtyRect: rect) }
+            if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a._displayHierarchy(in: context, dirtyRect: rect) }
+            if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
+                buttons._displayHierarchy(in: context, dirtyRect: rect)
+            }
+            context.restoreGState()
+        }
         if NSView._traceFrames {
-            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height))
-        }
-        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
-            t.layoutSubtreeIfNeeded()
-            t._displayHierarchy(in: context, dirtyRect: dirtyRect)
-        }
-        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden {
-            a.layoutSubtreeIfNeeded()
-            a._displayHierarchy(in: context, dirtyRect: dirtyRect)
-        }
-        if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
-            buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
+            let area = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
+            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f, %d rects, %.0f pt²", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area))
         }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
@@ -1340,7 +1389,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backgroundcolor
     @MainActor open var backgroundColor: NSColor! {
         get { _backgroundColor }
-        set { _backgroundColor = newValue ?? .windowBackgroundColor; _platform?.setNeedsDisplay(nil) }
+        set { _backgroundColor = newValue ?? .windowBackgroundColor; _setNeedsDisplayWhole() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backingalignedrect(_:options:)
     /// Aligns the rect's edges to backing pixels (in window coordinates), each edge
@@ -1987,7 +2036,7 @@ import CoreText
             _platform?.setDocumentEdited(newValue)
             _ensureWindowButtons()
             _windowButtons?.close.isDocumentEdited = newValue
-            if _hasClientSideTitleBar { _platform?.setNeedsDisplay(nil) }
+            if _hasClientSideTitleBar { _setNeedsDisplayWhole() }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isexcludedfromwindowsmenu
@@ -2032,7 +2081,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isopaque
     @MainActor open var isOpaque: Bool {
         get { _isOpaque }
-        set { _isOpaque = newValue; _updateChrome(); _platform?.setNeedsDisplay(nil) }
+        set { _isOpaque = newValue; _updateChrome(); _setNeedsDisplayWhole() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isreleasedwhenclosed
     @MainActor open var isReleasedWhenClosed: Bool {
@@ -2899,7 +2948,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/viewsneeddisplay
     @MainActor open var viewsNeedDisplay: Bool {
         get { _contentView?.needsDisplay ?? false }
-        set { if newValue { _platform?.setNeedsDisplay(nil) } }
+        set { if newValue { _setNeedsDisplayWhole() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/visualizeconstraints(_:)
     /// Out of scope (ADR-0036): the constraint debugging overlay is a macOS developer tool.

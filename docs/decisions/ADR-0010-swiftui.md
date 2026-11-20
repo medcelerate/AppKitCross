@@ -81,6 +81,20 @@ Shape:
   `NSScrollView.tile()` and `reflectScrolledClipView(_:)` set scroller values, frames and
   visibility only when they differ. `SwiftUIUpdateCostTests` counts it: a meter tick marks
   no text (was 40) and measures no row; an appended row marks only itself (was 41 texts).
+- Layer damage (2026-11-20, the Sibyl capture window on Windows marked `_ContainerView` and
+  `_SwiftUISplitView` on every 50 Hz meter tick): the hosting view is layer-backed, and any
+  sublayer property change (a capsule's `bounds` through the view's frame) told the root's
+  host to repaint everything, so every tick repainted the whole window and drew every text.
+  A backing-layer change the view makes to follow its own frame, alpha or hidden state no
+  longer reaches the host (`CALayer._hostMarksChange`: the view marks old and new frames in
+  its superview); a change made to a layer directly (an `offset` effect's transform) repaints
+  what the layer's subtree covered before and after (`layerNeedsDisplay(_:inRootBounds:)`),
+  and dirty rects under a transformed layer go through the layer tree. The software
+  compositor skips a layer's own drawing when the dirty area misses its bounds, the window
+  paints each pending dirty area on its own rather than their bounding box (three meters in
+  three rows no longer repaint the row labels between them), `_SplitPrimitive` re-arranges
+  its split view only when its size or panes changed, and `alphaValue` ignores a value it
+  already has. `SwiftUIMeterCascadeTests` measures the scene.
 - `App` runs `NSApplication`: `WindowGroup` makes an `NSWindow` whose content is an
   `NSHostingView` of the scene's content, sized to the content's ideal size.
 

@@ -263,6 +263,8 @@ import CoreText
     /// Mirrors frame/bounds into the backing layer without animating.
     private func _syncLayerGeometry() {
         guard let l = _layer, !_layerIsHosted else { return }
+        let marks = _beginViewMarkedLayerChange()
+        defer { NSView._viewMarksLayerChange = marks }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         l.bounds = bounds
@@ -271,6 +273,37 @@ import CoreText
         let turn = CGAffineTransform(rotationAngle: _frameRotation * .pi / 180)
         if _frameRotation != 0 || l.affineTransform() != .identity { l.setAffineTransform(_frameRotation == 0 ? .identity : turn) }
         CATransaction.commit()
+    }
+
+    /// While true, a backing-layer change comes from the view itself (its frame, alpha or
+    /// hidden state), which marks what it covers in its superview already: the layer tree
+    /// does not repaint its root host as well (software compositing; a native host still
+    /// recommits). Only for an untransformed layer, whose frame is what it covers.
+    internal static var _viewMarksLayerChange: Bool {
+        get { CALayer._hostMarksChange }
+        set { CALayer._hostMarksChange = newValue }
+    }
+    /// Starts such a change; returns the previous state to restore.
+    private func _beginViewMarkedLayerChange() -> Bool {
+        let previous = NSView._viewMarksLayerChange
+        if _frameRotation == 0, _layer?.transform.isIdentity ?? false { NSView._viewMarksLayerChange = true }
+        return previous
+    }
+
+    /// A rect in this view's bounds as the window shows it. A layer `transform` set
+    /// directly (SwiftUI's offset, scale and rotation effects) moves what an ancestor
+    /// draws without moving its frame: under one, the rect goes through the layer tree.
+    internal func _dirtyRectInWindow(_ rect: NSRect) -> NSRect {
+        var v: NSView? = self
+        var transformed = false
+        while let cur = v, let l = cur._layer, !cur._layerIsHosted {
+            if cur._frameRotation == 0, !l.transform.isIdentity { transformed = true }
+            if cur._isLayerRoot { break }
+            v = cur._superview
+        }
+        guard transformed, let root = v, let l = _layer, root._isLayerRoot,
+              let inRoot = l._rectInRootBounds(rect) else { return convert(rect, to: nil) }
+        return root.convert(inRoot, to: nil)
     }
 
     /// Puts the backing layer into the superview's layer (or makes it a root this view hosts).
@@ -502,6 +535,7 @@ import CoreText
         _dirtyRect = localDirty
         let previousDrawing = NSView._drawingView
         NSView._drawingView = self
+        NSView._drawObserver?(self)
         draw(localDirty)
         NSView._drawingView = previousDrawing
         _dirtyRect = nil
@@ -555,6 +589,9 @@ import CoreText
     nonisolated(unsafe) public static var _invalidationCount = 0
     /// Sees every invalidation (tests count them per view type and collect the dirty area).
     nonisolated(unsafe) public static var _invalidationObserver: ((NSView, NSRect) -> Void)?
+    /// Sees every `draw(_:)` the display runs, directly or through the backing layer (tests
+    /// count which views a frame re-renders).
+    nonisolated(unsafe) public static var _drawObserver: ((NSView) -> Void)?
     private func _invalidate(_ rect: NSRect) {
         NSView._invalidationCount &+= 1
         NSView._invalidationObserver?(self, rect)
@@ -790,11 +827,14 @@ import CoreText
         set {
             let animate = _takeAnimator()
             let old = _alphaValue
+            guard newValue != old || animate else { return }
             _alphaValue = newValue
             if let l = _layer, !_layerIsHosted {
+                let marks = _beginViewMarkedLayerChange()
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.opacity = Float(newValue)
                 CATransaction.commit()
+                NSView._viewMarksLayerChange = marks
                 if animate { _animateLayer("opacity", from: CGFloat(old), to: newValue) }
             }
             setNeedsDisplay(bounds)
@@ -1348,9 +1388,11 @@ import CoreText
             _superview?._subviewDidChangeHidden(self)
             _window?._trackingAreasDidChange()
             if let l = _layer, !_layerIsHosted {
+                let marks = _beginViewMarkedLayerChange()
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.isHidden = newValue
                 CATransaction.commit()
+                NSView._viewMarksLayerChange = marks
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
@@ -2471,6 +2513,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }
         _dirtyRect = b
+        NSView._drawObserver?(self)
         if wantsUpdateLayer { updateLayer() } else { draw(b) }
         _dirtyRect = nil
         NSAppearance.current = previousAppearance
@@ -2503,11 +2546,24 @@ extension NSView: CALayerDelegate, CALayerHost {
             w._setLayerSceneNeedsCommit()
             return
         }
+        if NSView._viewMarksLayerChange { return }
         if let r = rect, let sup = _superview {
             sup.setNeedsDisplay(r.intersection(_frame))
         } else {
             setNeedsDisplay(bounds)
         }
+    }
+
+    /// A layer inside this view's tree changed what it covers: only that area repaints
+    /// (before, any sublayer's geometry change repainted the whole root host in software).
+    public func layerNeedsDisplay(_ root: CALayer, inRootBounds rect: CGRect) {
+        guard root === _layer else { return }
+        if let w = _window, w._hostsLayersNatively {
+            w._setLayerSceneNeedsCommit()
+            return
+        }
+        if NSView._viewMarksLayerChange { return }
+        setNeedsDisplay(rect)
     }
 }
 

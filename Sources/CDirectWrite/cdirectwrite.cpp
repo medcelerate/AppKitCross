@@ -1,6 +1,8 @@
 // DirectWrite shim for the CoreText module (see cdirectwrite.h). Fonts are IDWriteFontFace
 // objects at a size; shaping goes through IDWriteTextLayout with a collecting renderer so
-// DirectWrite handles scripts, bidi and font fallback.
+// DirectWrite handles scripts and bidi. Font fallback is explicit and per run: the system
+// IDWriteFontFallback splits the text by MapCharacters, ranges the primary face lacks are
+// pinned to the fallback family, and each resolved face comes back as its own run.
 
 #include "cdirectwrite.h"
 
@@ -463,16 +465,193 @@ struct CollectingRenderer final : IDWriteTextRenderer {
 };
 }
 
+} // extern "C"
+
+namespace {
+
+// MARK: Per-run font fallback
+//
+// The layout's own fallback is not left implicit: the text is first split into runs with
+// the system IDWriteFontFallback (MapCharacters), each run whose characters the primary
+// face lacks is pinned to the family DirectWrite picks for it (SetFontFamilyName and
+// SetFontCollection on that range), and the layout is told to use the system fallback for
+// anything left (IDWriteTextLayout2::SetFontFallback). The renderer then hands back one glyph
+// run per resolved face, and those runs (glyphs, advances, offsets) are what the CoreText
+// layer both measures and draws, so widths and ink always come from the same face.
+
+IDWriteFontFallback *systemFallback() {
+    static IDWriteFontFallback *fb = nullptr;
+    static bool tried = false;
+    if (!tried && factory()) {
+        tried = true;
+        ComPtr<IDWriteFactory2> f2;
+        if (SUCCEEDED(factory()->QueryInterface(__uuidof(IDWriteFactory2), reinterpret_cast<void **>(f2.put()))) && f2)
+            f2->GetSystemFontFallback(&fb);
+    }
+    return fb;
+}
+
+// The text MapCharacters reads: one left-to-right paragraph in one locale.
+struct FallbackSource final : IDWriteTextAnalysisSource {
+    LONG refs = 1;
+    const WCHAR *text; UINT32 length; std::wstring locale;
+    FallbackSource(const WCHAR *t, UINT32 n, std::wstring l) : text(t), length(n), locale(std::move(l)) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **o) noexcept override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDWriteTextAnalysisSource)) { *o = this; AddRef(); return S_OK; }
+        *o = nullptr; return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override { return InterlockedIncrement(&refs); }
+    ULONG STDMETHODCALLTYPE Release() noexcept override { ULONG r = InterlockedDecrement(&refs); if (!r) delete this; return r; }
+    HRESULT STDMETHODCALLTYPE GetTextAtPosition(UINT32 pos, WCHAR const **s, UINT32 *n) noexcept override {
+        if (pos >= length) { *s = nullptr; *n = 0; } else { *s = text + pos; *n = length - pos; }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetTextBeforePosition(UINT32 pos, WCHAR const **s, UINT32 *n) noexcept override {
+        if (pos == 0 || pos > length) { *s = nullptr; *n = 0; } else { *s = text; *n = pos; }
+        return S_OK;
+    }
+    DWRITE_READING_DIRECTION STDMETHODCALLTYPE GetParagraphReadingDirection() noexcept override { return DWRITE_READING_DIRECTION_LEFT_TO_RIGHT; }
+    HRESULT STDMETHODCALLTYPE GetLocaleName(UINT32 pos, UINT32 *n, WCHAR const **name) noexcept override {
+        *n = pos < length ? length - pos : 0; *name = locale.c_str(); return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetNumberSubstitution(UINT32 pos, UINT32 *n, IDWriteNumberSubstitution **sub) noexcept override {
+        *n = pos < length ? length - pos : 0; *sub = nullptr; return S_OK;
+    }
+};
+
+// A text range pinned to a fallback family.
+struct FallbackRun {
+    UINT32 start, length;
+    std::wstring family;
+    ComPtr<IDWriteFontCollection> collection;
+    float scale;
+};
+
+// Characters that are not expected to have ink of their own (controls, spaces, joiners,
+// variation selectors, bidi and other format characters): their glyph 0 is not a miss.
+bool isInkless(UINT32 c) {
+    if (c < 0x21 || (c >= 0x7F && c <= 0xA0)) return true;
+    if (c == 0xAD || c == 0x034F || c == 0x061C || c == 0x115F || c == 0x1160 || c == 0x180E || c == 0x3000 || c == 0x3164 || c == 0xFEFF) return true;
+    if ((c >= 0x2000 && c <= 0x200F) || (c >= 0x2028 && c <= 0x202F) || (c >= 0x205F && c <= 0x206F)) return true;
+    if ((c >= 0xFE00 && c <= 0xFE0F) || (c >= 0xFFF0 && c <= 0xFFFC) || (c >= 0xE0000 && c <= 0xE0FFF)) return true;
+    return false;
+}
+
+UINT32 codePointAt(const WCHAR *t, UINT32 n, UINT32 i, UINT32 *width) {
+    UINT32 u = static_cast<uint16_t>(t[i]);
+    *width = 1;
+    if (u >= 0xD800 && u <= 0xDBFF && i + 1 < n) {
+        UINT32 v = static_cast<uint16_t>(t[i + 1]);
+        if (v >= 0xDC00 && v <= 0xDFFF) { *width = 2; return 0x10000 + ((u - 0xD800) << 10) + (v - 0xDC00); }
+    }
+    return u;
+}
+
+bool familyIs(IDWriteFont *font, const std::wstring &family, std::wstring *name, ComPtr<IDWriteFontCollection> *collection) {
+    ComPtr<IDWriteFontFamily> fam;
+    if (FAILED(font->GetFontFamily(fam.put())) || !fam) return true;     // unknown: leave the range to the layout
+    ComPtr<IDWriteLocalizedStrings> names;
+    if (SUCCEEDED(fam->GetFamilyNames(names.put()))) *name = localizedString(names.p);
+    fam->GetFontCollection(collection->put());
+    return name->empty() || lower(*name) == lower(family);
+}
+
+// Maps `start..<start+length` with the system fallback and appends a run for every stretch
+// it resolves to a family other than `primary`. `base` is the family MapCharacters tries first
+// (nullptr: the fallback chain only, for characters the primary face is known to lack).
+void mapRange(IDWriteFontFallback *fb, FallbackSource *src, UINT32 start, UINT32 length, const WCHAR *base,
+              const std::wstring &primary, const CDWFont *font, std::vector<FallbackRun> &out) {
+    UINT32 pos = start, end = start + length;
+    while (pos < end) {
+        UINT32 mapped = 0;
+        ComPtr<IDWriteFont> mappedFont;
+        FLOAT scale = 1;
+        if (FAILED(fb->MapCharacters(src, pos, end - pos, systemCollection(), base, font->weight, font->fontStyle,
+                                     DWRITE_FONT_STRETCH_NORMAL, &mapped, mappedFont.put(), &scale)) || mapped == 0) break;
+        if (mappedFont) {
+            std::wstring name;
+            ComPtr<IDWriteFontCollection> coll;
+            if (!familyIs(mappedFont.p, primary, &name, &coll)) out.push_back(FallbackRun{pos, mapped, name, coll, scale > 0 ? scale : 1});
+        }
+        pos += mapped;
+    }
+}
+
+// The fallback runs for `text`: MapCharacters from the primary family, then, for inked
+// characters the primary face itself has no glyph for (index 0) and that the first pass left
+// on the primary family, MapCharacters again from the fallback chain alone.
+std::vector<FallbackRun> fallbackRuns(const WCHAR *text, UINT32 count, CDWFont *font, const std::wstring &locale) {
+    std::vector<FallbackRun> runs;
+    IDWriteFontFallback *fb = systemFallback();
+    if (!fb || !systemCollection()) return runs;
+    FallbackSource *src = new FallbackSource(text, count, locale);
+    mapRange(fb, src, 0, count, font->family.c_str(), font->family, font, runs);
+    // Characters still on the primary face: check its cmap.
+    std::vector<bool> covered(count, false);
+    for (const FallbackRun &r : runs) for (UINT32 i = r.start; i < r.start + r.length && i < count; i++) covered[i] = true;
+    std::vector<FallbackRun> extra;
+    UINT32 i = 0;
+    while (i < count) {
+        UINT32 w = 1;
+        UINT32 c = codePointAt(text, count, i, &w);
+        bool missing = false;
+        if (!covered[i] && !isInkless(c)) {
+            UINT16 g = 0;
+            missing = SUCCEEDED(font->face->GetGlyphIndices(&c, 1, &g)) && g == 0;
+        }
+        if (!missing) { i += w; continue; }
+        // A stretch of missing characters, with the joiners and selectors between them
+        // (an emoji ZWJ sequence stays one stretch); trailing inkless ones stay primary.
+        UINT32 s = i, last = i;
+        while (i < count) {
+            UINT32 cw = 1;
+            UINT32 cc = codePointAt(text, count, i, &cw);
+            if (covered[i]) break;
+            UINT16 g = 0;
+            bool inkless = isInkless(cc);
+            bool miss = inkless || (SUCCEEDED(font->face->GetGlyphIndices(&cc, 1, &g)) && g == 0);
+            if (!miss) break;
+            i += cw;
+            if (!inkless || cc == 0x200D || (cc >= 0xFE00 && cc <= 0xFE0F) || (cc >= 0xE0000 && cc <= 0xE0FFF)) last = i;
+        }
+        mapRange(fb, src, s, last - s, nullptr, font->family, font, extra);
+        i = last;
+    }
+    src->Release();
+    runs.insert(runs.end(), extra.begin(), extra.end());
+    std::sort(runs.begin(), runs.end(), [](const FallbackRun &a, const FallbackRun &b) { return a.start < b.start; });
+    return runs;
+}
+
+} // namespace
+
+extern "C" {
+
 CDWShaped *cdw_shape(const uint16_t *text, uint32_t count, CDWFont *font, const char *localeUTF8) {
     if (!font || !count || !factory()) return nullptr;
     std::wstring locale = localeUTF8 ? widen(localeUTF8) : L"en-us";
+    if (locale.empty()) locale = L"en-us";
     DWRITE_FONT_WEIGHT w = font->weight;
     DWRITE_FONT_STYLE st = font->fontStyle;
+    const WCHAR *wtext = reinterpret_cast<const WCHAR *>(text);
     ComPtr<IDWriteTextFormat> format;
     if (FAILED(factory()->CreateTextFormat(font->family.c_str(), nullptr, w, st, DWRITE_FONT_STRETCH_NORMAL, font->size, locale.c_str(), format.put()))) return nullptr;
     format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(factory()->CreateTextLayout(reinterpret_cast<const WCHAR *>(text), count, format.p, 1e7f, 1e7f, layout.put()))) return nullptr;
+    if (FAILED(factory()->CreateTextLayout(wtext, count, format.p, 1e7f, 1e7f, layout.put()))) return nullptr;
+    // Per-run fallback (see fallbackRuns): pin each run the primary face cannot show to the
+    // family the system fallback picks, and keep the system fallback for whatever remains.
+    if (IDWriteFontFallback *fb = systemFallback()) {
+        ComPtr<IDWriteTextLayout2> layout2;
+        if (SUCCEEDED(layout->QueryInterface(__uuidof(IDWriteTextLayout2), reinterpret_cast<void **>(layout2.put()))) && layout2)
+            layout2->SetFontFallback(fb);
+    }
+    for (const FallbackRun &r : fallbackRuns(wtext, count, font, locale)) {
+        DWRITE_TEXT_RANGE range{r.start, r.length};
+        if (r.collection) layout->SetFontCollection(r.collection.p, range);
+        layout->SetFontFamilyName(r.family.c_str(), range);
+        if (r.scale != 1) layout->SetFontSize(font->size * r.scale, range);
+    }
     CDWShaped *shaped = new CDWShaped();
     CollectingRenderer *renderer = new CollectingRenderer(shaped, font);
     HRESULT hr = layout->Draw(nullptr, renderer, 0, 0);

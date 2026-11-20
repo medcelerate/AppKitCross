@@ -267,16 +267,25 @@ final class _SplitPrimitive: _Primitive {
 
     /// The panes in tree order (a pane shown again, say a sidebar, is added last by the
     /// backing-view sync), then the split view recomputes its dividers from their frames.
+    /// The split's size and pane frames after its last arrangement: a pass that changes
+    /// neither leaves the split alone (arranging marks the whole split for display, and a
+    /// 50 Hz meter in a pane re-ran this on every tick).
+    private var arranged: (size: CGSize, panes: [ObjectIdentifier], frames: [CGRect], hidden: [Bool])?
+
     override func didSyncBackingViews(node: _ViewNode) {
         let want = node.children.compactMap(\.backingView)
         let have = split.subviews.filter { v in want.contains { $0 === v } }
-        if have.map(ObjectIdentifier.init) != want.map(ObjectIdentifier.init) {
+        let reordered = have.map(ObjectIdentifier.init) != want.map(ObjectIdentifier.init)
+        if reordered {
             for v in want { v.removeFromSuperview() }
             for v in want { split.addSubview(v) }
         }
+        if !reordered, let a = arranged, a.size == split.bounds.size,
+           a.panes == want.map(ObjectIdentifier.init), a.frames == want.map(\.frame), a.hidden == want.map(\.isHidden) { return }
         split.needsLayout = true
         split.layoutSubtreeIfNeeded()
-        split.needsDisplay = true
+        if reordered || arranged == nil { split.needsDisplay = true }
+        arranged = (split.bounds.size, want.map(ObjectIdentifier.init), want.map(\.frame), want.map(\.isHidden))
     }
 
     // MARK: Divider drags

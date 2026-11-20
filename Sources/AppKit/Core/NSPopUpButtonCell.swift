@@ -267,6 +267,37 @@ import CoreText
         drawBezel(withFrame: cellFrame, in: controlView)
         drawInterior(withFrame: cellFrame, in: controlView)
     }
+    /// The bezel's hairline border: a light grey that resolves per appearance. (The push
+    /// button's `separatorColor.withAlphaComponent(0.6)` replaces separator's 0.1 alpha, so
+    /// on a pop-up it read as near-black side lines that stopped short of the corner arcs.)
+    internal static let _bezelBorderColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.15)
+            : NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.2)
+    }
+    internal static let _bezelCornerRadius: CGFloat = 5
+    /// One rounded rect: filled to the bounds, then stroked once with a one-device-pixel hairline
+    /// inset by half its width, so the stroke lies inside the bounds and the arcs join the
+    /// straight runs. The same border in the normal, pressed and disabled states.
+    @MainActor open override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
+        guard _isBordered, !isTransparent else { return }
+        let line = 1 / max(1, controlView.window?.backingScaleFactor ?? 1)
+        let r = frame.insetBy(dx: line / 2, dy: line / 2)
+        let radius = min(NSPopUpButtonCell._bezelCornerRadius, r.height / 2, r.width / 2)
+        let path = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+        // The fill reaches the bounds (the stroke's outer edge, concentric arcs) so the
+        // translucent border sits on the fill, not half on whatever is behind the button.
+        let fillPath = NSBezierPath(roundedRect: frame, xRadius: radius + line / 2, yRadius: radius + line / 2)
+        let fill: NSColor
+        if !_isEnabled { fill = NSColor.controlColor.withAlphaComponent(0.6) }
+        else if _isHighlighted { fill = NSColor.controlAccentColor }
+        else { fill = NSColor.controlColor }
+        fill.setFill()
+        fillPath.fill()
+        NSPopUpButtonCell._bezelBorderColor.setStroke()
+        path.lineWidth = line
+        path.stroke()
+    }
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         var attrs = _textAttributes
         if _isHighlighted && _isBordered { attrs[.foregroundColor] = NSColor.white }

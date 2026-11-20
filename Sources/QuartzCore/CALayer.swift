@@ -46,6 +46,9 @@ extension CALayoutManager {
 public protocol CALayerHost: AnyObject {
     /// `rect` is in the root layer's superlayer space (the host's coordinate space), or nil for everything.
     func layerNeedsDisplay(_ root: CALayer, in rect: CGRect?)
+    /// A layer below the root changed and what it covered before and after is known:
+    /// `rect` is in the root layer's own bounds space (the host view's bounds).
+    func layerNeedsDisplay(_ root: CALayer, inRootBounds rect: CGRect)
     /// Whether the tree is on screen. Animations in a tree whose host is off screen (a
     /// closed or hidden window) stop driving frames until `CARuntime.resumeAnimations(of:)`.
     func layerHostIsOnScreen(_ root: CALayer) -> Bool
@@ -54,6 +57,7 @@ public protocol CALayerHost: AnyObject {
 }
 
 extension CALayerHost {
+    public func layerNeedsDisplay(_ root: CALayer, inRootBounds rect: CGRect) { layerNeedsDisplay(root, in: nil) }
     public func layerHostIsOnScreen(_ root: CALayer) -> Bool { true }
     public var _layerHostDescription: String { "\(type(of: self))" }
 }
@@ -300,7 +304,7 @@ open class CALayer: NSObject, CAMediaTiming {
         guard !isPresentationCopy else { return }
         if !CALayer.compositingOnlyKeys.contains(key) { _rasterVersion += 1 }
         if CALayer.borderKeys.contains(key) { _borderVersion += 1 }
-        _setNeedsRedraw()
+        _setNeedsRedraw(damage: CALayer._hostMarksChange ? nil : _damage(forChangeOf: key, old: old))
         guard hasPresentation, !CATransaction.disableActions() else { return }
         if let old { pendingOldValues[key] = old }
         defer { pendingOldValues[key] = nil }
@@ -309,12 +313,66 @@ open class CALayer: NSObject, CAMediaTiming {
         }
     }
 
-    /// Marks the hosting tree dirty.
-    func _setNeedsRedraw() {
+    /// Set by a host (AppKit's view) while it changes a backing layer to follow its own
+    /// state and marks what that covers itself: the change computes no damage, and the
+    /// root's host is told without a rect (a native host recommits).
+    nonisolated(unsafe) public static var _hostMarksChange = false
+
+    /// Marks the hosting tree dirty: the root's host repaints `damage` (in the root's
+    /// bounds space) when it is known, else everything.
+    func _setNeedsRedraw(damage: CGRect? = nil) {
         guard !isPresentationCopy else { return }
         var l: CALayer? = self
-        while let layer = l { layer._treeVersion += 1; l = layer.superlayer }
-        _invalidateHost(nil)
+        var root = self
+        while let layer = l { layer._treeVersion += 1; root = layer; l = layer.superlayer }
+        if let d = damage, root !== self, let host = root.host {
+            if !d.isNull, !d.isEmpty { host.layerNeedsDisplay(root, inRootBounds: d) }
+        } else {
+            _invalidateHost(nil)
+        }
+    }
+
+    /// What a layer below the root covers on screen, in the root's bounds space: its
+    /// subtree and shadow. Nil when that cannot be bounded by a rect (a projective or
+    /// running-animation chain, a shadow or filter above that spreads the change).
+    func _rootExtent() -> CGRect? {
+        guard superlayer != nil else { return nil }
+        var l: CALayer = self
+        while let s = l.superlayer {
+            guard l.animations.isEmpty, l._transform.isAffine, s._sublayerTransform.isIdentity else { return nil }
+            if s.superlayer != nil, s._shadowOpacity > 0, s._shadowColor != nil, s._shadowPath == nil { return nil }
+            if s.filters?.isEmpty == false || s.backgroundFilters?.isEmpty == false || s._mask != nil && !s._maskIsSimpleClip { return nil }
+            l = s
+        }
+        guard filters?.isEmpty != false, backgroundFilters?.isEmpty != false else { return nil }
+        return _rectInRootBounds(_flattenedExtent(presentation: self))
+    }
+
+    /// The area a property change repaints, in the root's bounds space (see `_rootExtent`):
+    /// for a placement change, what the layer covered before and after.
+    func _damage(forChangeOf key: String, old: Any?) -> CGRect? {
+        guard superlayer != nil, let now = _rootExtent() else { return nil }
+        let before: CGRect?
+        switch key {
+        case "position":
+            guard let o = old as? CGPoint else { return nil }
+            let n = _position; _position = o; before = _rootExtent(); _position = n
+        case "bounds":
+            guard let o = old as? CGRect else { return nil }
+            let n = _bounds; _bounds = o; before = _rootExtent(); _bounds = n
+        case "anchorPoint":
+            guard let o = old as? CGPoint else { return nil }
+            let n = _anchorPoint; _anchorPoint = o; before = _rootExtent(); _anchorPoint = n
+        case "transform":
+            guard let o = old as? CATransform3D else { return nil }
+            let n = _transform; _transform = o; before = _rootExtent(); _transform = n
+        case "sublayerTransform", "contents", "shadowPath":
+            return nil
+        default:
+            before = now
+        }
+        guard let before else { return nil }
+        return before.union(now)
     }
 
     /// Finds the root and tells its host to redraw. `rect` is in this layer's superlayer space.
@@ -401,6 +459,7 @@ open class CALayer: NSObject, CAMediaTiming {
             let animate = !wasDisabled && hasPresentation
             CATransaction.setDisableActions(true)
             let oldBounds = _bounds, oldPosition = _position
+            let before = animate || CALayer._hostMarksChange ? nil : _rootExtent()
             _bounds.size = newValue.size
             _position = CGPoint(x: newValue.minX + _anchorPoint.x * newValue.width, y: newValue.minY + _anchorPoint.y * newValue.height)
             if oldBounds.size != _bounds.size {
@@ -414,7 +473,7 @@ open class CALayer: NSObject, CAMediaTiming {
                 _changed("bounds", old: oldBounds)
                 _changed("position", old: oldPosition)
             } else {
-                _setNeedsRedraw()
+                _setNeedsRedraw(damage: before.flatMap { b in _rootExtent().map { b.union($0) } })
             }
         }
     }
@@ -675,9 +734,39 @@ open class CALayer: NSObject, CAMediaTiming {
     /// `convert` and `hitTest` agree with what the compositor draws.
     private func _planeToSuperlayer(flipped parentFlipped: Bool) -> _CAHomography {
         let s = superlayer
+        if s?._sublayerTransform.isIdentity ?? true, _transform.isAffine {
+            return _CAHomography(_affineToSuperlayer(flipped: parentFlipped))
+        }
         return _CAHomography(CALayer._planeTransform(self, parentFlipped: parentFlipped,
                                                      parentSublayerTransform: s?._sublayerTransform ?? CATransform3DIdentity,
                                                      parentBounds: s?._bounds ?? .zero, parentAnchor: s?._anchorPoint ?? .zero))
+    }
+
+    /// The plane as an affine map, for an affine `transform` under an identity
+    /// `sublayerTransform`: the same product `_compose` uses without the 4x4 arithmetic.
+    private func _affineToSuperlayer(flipped parentFlipped: Bool) -> CGAffineTransform {
+        let ax = _bounds.minX + _anchorPoint.x * _bounds.width
+        let ay = _bounds.minY + _anchorPoint.y * _bounds.height
+        var t = _isGeometryFlipped != parentFlipped
+            ? CGAffineTransform(scaleX: 1, y: -1).concatenating(CGAffineTransform(translationX: 0, y: _bounds.minY + _bounds.maxY))
+            : CGAffineTransform.identity
+        t = t.concatenating(CGAffineTransform(translationX: -ax, y: -ay))
+        if !_transform.isIdentity { t = t.concatenating(_transform.affineTransform) }
+        return t.concatenating(CGAffineTransform(translationX: _position.x, y: _position.y))
+    }
+
+    /// A rect in this layer's bounds space as the root's bounds space bounds it, in one
+    /// walk up the tree; nil when the chain is not affine. Damage areas and AppKit's dirty
+    /// rects use it, so it stays cheap.
+    public func _rectInRootBounds(_ r: CGRect) -> CGRect? {
+        var m = CGAffineTransform.identity
+        var l = self
+        while let s = l.superlayer {
+            guard s._sublayerTransform.isIdentity, l._transform.isAffine else { return nil }
+            m = m.concatenating(l._affineToSuperlayer(flipped: l._parentFlipped))
+            l = s
+        }
+        return r.applying(m)
     }
 
     /// Own bounds space -> superlayer space.
@@ -1139,7 +1228,7 @@ open class CALayer: NSObject, CAMediaTiming {
 
     /// Whether the mask can be a clip path (a shape, or a plain rounded rectangle) rather
     /// than an alpha image.
-    private var _maskIsSimpleClip: Bool {
+    var _maskIsSimpleClip: Bool {
         guard let m = _mask else { return true }
         if let shape = m as? CAShapeLayer { return shape.path != nil && shape._sublayers.isEmpty && m._mask == nil }
         return type(of: m) == CALayer.self && m._contents == nil && m.delegate == nil && m._sublayers.isEmpty && m._mask == nil
@@ -1206,7 +1295,13 @@ open class CALayer: NSObject, CAMediaTiming {
 
     /// Own content, sublayers (through the sublayer transform) and the border.
     private func _composeContent(into ctx: CGContext, presentation p: CALayer, alpha a: CGFloat, time: CFTimeInterval, dirty: CGRect?) {
-        _drawOwnContent(into: ctx, presentation: p)
+        // Own content stays inside the bounds: a layer the dirty area misses keeps its
+        // pixels and its delegate is not asked to draw (its sublayers may still reach in).
+        if let dirty, !p._bounds.intersects(dirty) {
+            if _needsDisplay { display() }
+        } else {
+            _drawOwnContent(into: ctx, presentation: p)
+        }
         let subs = p._sublayers.isEmpty ? _sublayers : p._sublayers
         if !subs.isEmpty {
             // The sublayerTransform reaches each sublayer's placement in 3D (a perspective

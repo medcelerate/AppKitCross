@@ -253,6 +253,16 @@ The later runs found the costs that only a real workload shows:
 - **Windows MIDI Services without C++/WinRT**: `tools/midi2abi` and the raw ABI header,
   since the PC cannot run `cppwinrt`; the PC confirmed "Windows MIDI Services backend (1
   endpoint)" through the app-local DLL.
+- **Repaint only what changed, and still paint.** Dropping the whole-host
+  `setNeedsDisplay` from `scheduleUpdate` cut the per-tick cost (a meter tick marks no
+  text view) but left model changes unpainted on Windows: `needsLayout` alone requested
+  no frame. `NSView.needsLayout` now asks the window for a frame with a 1-px dirty area;
+  the paint runs layout and what changes marks itself for the next frame
+  (`SwiftUIFramePumpTests` drives frames with no explicit layout call). The host tests had
+  hidden this by calling `layoutSubtreeIfNeeded` themselves.
+- **Not the port's**: the empty `%LOCALAPPDATA%\<CFBundleName>` a bundled app creates at
+  launch is corelibs Foundation's preferences store, made on the first `UserDefaults`
+  read; a bare executable with no Info.plist files its preferences elsewhere.
 
 ## Consequences
 
