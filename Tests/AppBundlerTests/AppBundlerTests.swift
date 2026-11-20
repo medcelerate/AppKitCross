@@ -284,9 +284,11 @@ final class BundlerTests: XCTestCase {
         (folder, report) = try bundle("out-resources")
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: folder.appendingPathComponent("Info.plist")), format: nil) as? [String: Any])
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "tech.clockworks.Sibyl")
-        for item in ["Resources/Info.plist", "Resources/Sibyl.icns", "Resources/ClockworksMark.png", "ClockworksMark.png"] {
+        for item in ["Resources/Info.plist", "Resources/Sibyl.icns", "Resources/ClockworksMark.png"] {
             XCTAssertTrue(fm.fileExists(atPath: folder.appendingPathComponent(item).path), item)
         }
+        // A logo beside the plist is a resource, not the app icon: it stays out of the top level.
+        XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("ClockworksMark.png").path))
         XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("RootBadge.png").path))
         XCTAssertEqual(report.archive?.lastPathComponent, "Sibyl-1.4.2-macos-arm64.zip")
 

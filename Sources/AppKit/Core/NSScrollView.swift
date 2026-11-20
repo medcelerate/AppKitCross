@@ -149,7 +149,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/backgroundcolor
     @MainActor open var backgroundColor: NSColor {
         get { _backgroundColor }
-        set { _backgroundColor = newValue; needsDisplay = true }
+        set { _backgroundColor = newValue; _contentView.backgroundColor = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/bordertype
     @MainActor open var borderType: NSBorderType {
@@ -201,9 +201,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/documentvisiblerect
     @MainActor open var documentVisibleRect: NSRect { _contentView.documentVisibleRect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/drawsbackground
+    /// The clip view follows, as AppKit's does: a scroll view that draws no background is
+    /// transparent all the way down to its document (a SwiftUI ScrollView over a page
+    /// colour; the clip view's own white hid every grouped Form card).
     @MainActor open var drawsBackground: Bool {
         get { _drawsBackground }
-        set { _drawsBackground = newValue; needsDisplay = true }
+        set { _drawsBackground = newValue; _contentView.drawsBackground = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/findbarposition
     @MainActor open var findBarPosition: NSScrollView.FindBarPosition {

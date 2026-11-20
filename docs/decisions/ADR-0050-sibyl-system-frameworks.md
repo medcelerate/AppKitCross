@@ -236,6 +236,24 @@ The PC run of Sibyl (relayed by the orchestrating session) exercised paths no te
 - **Windows MIDI Services**: see the matrix above; the PC had the superseded preview App
   SDK, not the in-box API, so the check now reports every route it tried.
 
+The later runs found the costs that only a real workload shows:
+
+- **Scene-level tracking** had taken in a window's content closure, so a field bound to
+  the model re-ran every scene, re-rendered both windows and rebuilt the Win32 menu bar
+  per keystroke; only the scene body is tracked now (App.swift).
+- **Measurements** were memoised for one pass and cleared globally every pass, so a 50 Hz
+  meter re-measured every transcript row with DirectWrite; they now survive across passes
+  for subtrees whose inputs did not change (ADR-0010, "Measurement memo").
+- **The clip view** painted its own white whatever `NSScrollView.drawsBackground` said,
+  which hid every grouped-form card on a white page; it follows the scroll view now, and
+  `SwiftUIGroupedFormPixelTests` reads the pixels.
+- **The Win32 loop** waits at most 250 ms between services and, under
+  `APPKITWIN_TRACE=1`, traces the main queue's latency, so the next run can tell a
+  starved queue from slow main-thread work.
+- **Windows MIDI Services without C++/WinRT**: `tools/midi2abi` and the raw ABI header,
+  since the PC cannot run `cppwinrt`; the PC confirmed "Windows MIDI Services backend (1
+  endpoint)" through the app-local DLL.
+
 ## Consequences
 
 - An `@Observable` app ports without model changes; the cost is one tracking scope per

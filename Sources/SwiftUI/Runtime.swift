@@ -169,6 +169,7 @@ public final class _ViewNode {
     public func setNeedsUpdate() {
         if NSView._traceInvalidation { NSView._trace("setNeedsUpdate \(viewType)") }
         needsUpdate = true
+        clearMeasurementUpChain()
         root?.noteTransaction(Transaction._current)
         root?.scheduleUpdate()
         if root == nil { onNeedsUpdate?() }
@@ -242,7 +243,11 @@ public final class _ViewNode {
         let envChanged = !_sameEnvironment(environment, env)
         environment = env
         let rerun = force || needsUpdate || envChanged || newBox != nil
-        if rerun { sizeCache.removeAll(keepingCapacity: true) }
+        // A re-run node measures afresh, and so do its ancestors (their sizes depend on it).
+        // A forced node's parent re-ran in this same walk and already cleared the chain.
+        if rerun {
+            if force { clearOwnMeasurements() } else { clearMeasurementUpChain() }
+        }
         if box.isPrimitive {
             if rerun || primitive == nil {
                 guard let fresh = _trackingObservation(self, { box.makePrimitive(node: self) }) else { return }
@@ -295,7 +300,11 @@ public final class _ViewNode {
                 root?.noteInserted(node)
             }
             node.parent = self
-            node.update(box: b, environment: env, force: force || match == nil)
+            // An unforced pass hands a kept child the box it already has (the primitive was
+            // not re-made): the child re-runs only if it is stale itself, so its measurements
+            // stay valid.
+            let unchanged = !force && match != nil && (b as AnyObject) === (node.box as AnyObject)
+            node.update(box: unchanged ? nil : b, environment: env, force: force || match == nil)
             next.append(node)
         }
         for o in old where o !== _placeholder {
@@ -336,9 +345,15 @@ public final class _ViewNode {
         return children.flatMap(\.layoutLeaves)
     }
 
-    /// Measurements are memoised per proposal for one layout pass (the root's generation):
-    /// stacks probe each item's flexibility with extra proposals, and nested stacks would
-    /// otherwise measure the leaves exponentially often (SwiftUICharts' hierarchy).
+    /// Measurements are memoised per proposal, and the memo survives layout passes: stacks
+    /// probe each item's flexibility with extra proposals (nested stacks would otherwise
+    /// measure the leaves exponentially often, SwiftUICharts' hierarchy), and a pass after
+    /// one leaf changed re-measures only that leaf's ancestors. The memo is dropped when the
+    /// node re-runs or is marked stale (with its ancestors' memos), when its backing view
+    /// changed size on its own (`invalidateMeasurement()`), and for the whole tree when the
+    /// root's generation moves (new content, a new root environment). Primitives that read
+    /// state of their backing view that changes without a re-run (`_MeasuresBackingViewState`)
+    /// are measured afresh in every pass, with their ancestors.
     private var sizeCache: [_SizeKey: CGSize] = [:]
     private var sizeCacheGeneration = -1
     private struct _SizeKey: Hashable { let width: CGFloat?; let height: CGFloat? }
@@ -349,8 +364,33 @@ public final class _ViewNode {
         let key = _SizeKey(width: proposal.width, height: proposal.height)
         if generation >= 0, let cached = sizeCache[key] { return cached }
         let size = computeSizeThatFits(proposal)
-        if generation >= 0 { sizeCache[key] = size }
+        if generation >= 0 {
+            sizeCache[key] = size
+            if let v = primitive as? _MeasuresBackingViewState, v.measuresBackingViewState { root?.noteVolatileMeasurement(self) }
+        }
         return size
+    }
+
+    private func clearOwnMeasurements() {
+        if !sizeCache.isEmpty { sizeCache.removeAll(keepingCapacity: true) }
+    }
+
+    /// Drops this node's measurements and every ancestor's (a parent's size depends on its
+    /// children's). Body nodes and structural groups are rarely measured themselves (stacks
+    /// measure through them), so the walk does not stop at an empty memo.
+    func clearMeasurementUpChain() {
+        var n: _ViewNode? = self
+        while let node = n {
+            node.clearOwnMeasurements()
+            n = node.parent
+        }
+    }
+
+    /// The backing view changed size on its own (a divider drag, rows that grew): this node
+    /// and its ancestors measure again and the host lays out at the next display cycle.
+    public func invalidateMeasurement() {
+        clearMeasurementUpChain()
+        root?.scheduleUpdate()
     }
 
     private func computeSizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
@@ -449,6 +489,19 @@ extension CGRect {
 }
 
 // MARK: Primitives
+
+/// A primitive whose measurement reads state of its backing view that can change without
+/// the node re-running (a representable's own view, a table's measured rows, a vertical
+/// field's typed text): its memo, and its ancestors', last one layout pass.
+@MainActor
+protocol _MeasuresBackingViewState: AnyObject {
+    var measuresBackingViewState: Bool { get }
+}
+extension _RepresentablePrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
+extension _ControllerRepresentablePrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
+extension _NSTablePrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
+extension _TextFieldPrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { axis == .vertical } }
+extension _DatePickerPrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
 
 /// Marker for AppKit views the runtime created (so it can reorder them safely).
 @MainActor
@@ -622,6 +675,7 @@ public final class _ViewRoot: NSHostingRoot {
     func setContent<V: View>(_ content: V) {
         contentBox = _ViewBox(content)
         contentChanged = true
+        measureGeneration &+= 1
     }
 
     public func attach(to host: any NSHostingRootHost) {
@@ -641,6 +695,7 @@ public final class _ViewRoot: NSHostingRoot {
 
     public func contentDidChange() {
         contentChanged = true
+        measureGeneration &+= 1
         scheduleUpdate()
     }
 
@@ -655,6 +710,7 @@ public final class _ViewRoot: NSHostingRoot {
         case .inactive: rootEnvironment.controlActiveState = .inactive
         }
         rootNode?.needsUpdate = true
+        measureGeneration &+= 1
         scheduleUpdate()
     }
 
@@ -697,15 +753,41 @@ public final class _ViewRoot: NSHostingRoot {
     private var dirty = false
     /// Set once a preference primitive attaches; the tree is then walked after layout.
     var usesPreferences = false
-    /// Bumped whenever the tree may have changed; nodes drop their measurement memo.
+    /// Bumped for root-level changes (new content, a new root environment, an explicit
+    /// `invalidateAllMeasurements()`); every node then drops its measurement memo. Changes
+    /// below the root clear only the changed node's chain of ancestors (`_ViewNode`).
     var measureGeneration = 0
+
+    /// Drops every node's measurements (a change the tree cannot attribute to a node).
+    public func invalidateAllMeasurements() {
+        measureGeneration &+= 1
+        scheduleUpdate()
+    }
+
+    /// Nodes whose primitive measures backing-view state that changes without a re-run.
+    private var volatileMeasurements: [ObjectIdentifier: _WeakNode] = [:]
+    private struct _WeakNode { weak var node: _ViewNode? }
+
+    func noteVolatileMeasurement(_ node: _ViewNode) {
+        volatileMeasurements[ObjectIdentifier(node)] = _WeakNode(node: node)
+    }
+
+    /// At the start of a pass: such nodes and their ancestors measure again (their unchanged
+    /// siblings answer from their memos).
+    private func invalidateVolatileMeasurements() {
+        guard !volatileMeasurements.isEmpty else { return }
+        for (key, entry) in volatileMeasurements {
+            guard let n = entry.node, n.isAttached, n.root === self else { volatileMeasurements[key] = nil; continue }
+            n.clearMeasurementUpChain()
+        }
+    }
 
     func scheduleUpdate() {
         dirty = true
         guard !updateScheduled, let host else { return }
         updateScheduled = true
         host.setNeedsLayout()
-        host.invalidateIntrinsicContentSize()
+        host.rootDidScheduleUpdate()
         host.setNeedsDisplay(in: nil)
     }
 
@@ -713,7 +795,6 @@ public final class _ViewRoot: NSHostingRoot {
     public func updateIfNeeded() {
         updateScheduled = false
         dirty = false
-        measureGeneration &+= 1
         guard let node = rootNode else { return }
         node.update(box: contentChanged ? contentBox : nil, environment: rootEnvironment, force: contentChanged)
         contentChanged = false
@@ -727,7 +808,7 @@ public final class _ViewRoot: NSHostingRoot {
     public func sizeThatFits(_ proposal: NSHostingSizeProposal) -> NSSize {
         _ViewRoot._sizeThatFitsCount &+= 1
         updateIfNeeded()
-        measureGeneration &+= 1
+        invalidateVolatileMeasurements()
         guard let node = rootNode else { return .zero }
         let s = node.sizeThatFits(ProposedViewSize(width: proposal.width, height: proposal.height))
         if NSView._traceInvalidation { NSView._trace("swiftui root sizeThatFits \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil") -> \(s)") }
@@ -737,7 +818,7 @@ public final class _ViewRoot: NSHostingRoot {
     public func layout(in bounds: NSRect) {
         _ViewRoot._layoutPassCount &+= 1
         updateIfNeeded()
-        measureGeneration &+= 1
+        invalidateVolatileMeasurements()
         guard let node = rootNode, let host else { return }
         node.place(in: bounds)
         deliverPreferences()
@@ -748,7 +829,7 @@ public final class _ViewRoot: NSHostingRoot {
         while dirty && passes < 4 {
             passes += 1
             updateIfNeeded()
-            measureGeneration &+= 1
+            invalidateVolatileMeasurements()
             node.place(in: bounds)
             deliverPreferences()
         }

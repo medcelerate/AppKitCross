@@ -51,6 +51,21 @@ Shape:
   the host for layout; the next AppKit layout pass re-evaluates dirty bodies top-down,
   reconciles, lays out and resizes backing views. Updates coalesce in AppKit's display
   cycle, so tests drive them with `layoutSubtreeIfNeeded()` or a window display.
+- Measurement memo (2026-11-19, after a Windows run of Sibyl spent about 1.2 s per event-loop
+  iteration re-measuring every transcript row whenever a 50 Hz meter changed): each node
+  memoises `sizeThatFits` per proposal across passes. The memo of a node and of all its
+  ancestors is dropped when the node re-runs or `setNeedsUpdate()` marks it, and through
+  `_ViewNode.invalidateMeasurement()` when a backing view changed size on its own (a split
+  divider drag). The whole tree drops it when `_ViewRoot.measureGeneration` moves (new
+  content, a new root environment, `invalidateAllMeasurements()`); layout passes no longer
+  move it. An unforced pass hands kept children of a primitive their own box, so they no
+  longer re-run on every pass. Primitives whose size reads backing-view state that changes
+  without a re-run (`_MeasuresBackingViewState`: representables, the AppKit table, vertical
+  text fields, date pickers) are re-measured, with their ancestors, at the start of each pass.
+  Animations interpolate presentation frames only, so they need no re-measurement. A
+  scheduled update invalidates the hosting view's intrinsic size only when its
+  `sizingOptions` include `.intrinsicContentSize` and it is not its window's content view
+  (`NSHostingRootHost.rootDidScheduleUpdate()`).
 - `App` runs `NSApplication`: `WindowGroup` makes an `NSWindow` whose content is an
   `NSHostingView` of the scene's content, sized to the content's ideal size.
 

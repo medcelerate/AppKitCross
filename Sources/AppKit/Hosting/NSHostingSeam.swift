@@ -54,9 +54,16 @@ public protocol NSHostingRootHost: AnyObject {
     func setNeedsLayout()
     func setNeedsDisplay(in rect: NSRect?)
     func invalidateIntrinsicContentSize()
+    /// The root scheduled an update. The default invalidates the intrinsic size; a host
+    /// whose intrinsic size nobody reads may skip that.
+    func rootDidScheduleUpdate()
     func makeDisplayLink(_ callback: @escaping (CADisplayLink) -> Void) -> CADisplayLink
     /// Asks the host to adopt a size (windows sized to content, `preferredContentSize`).
     func rootDidChangeIdealSize(_ size: NSSize)
+}
+
+extension NSHostingRootHost {
+    public func rootDidScheduleUpdate() { invalidateIntrinsicContentSize() }
 }
 
 /// A hosted content tree, driven by its host.
@@ -269,6 +276,13 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
     public var hostLayer: CALayer { layer! }
     public var environment: NSHostingEnvironment { _environment }
     public func setNeedsLayout() { needsLayout = true }
+    /// Every state change schedules an update; the intrinsic size is invalidated only when
+    /// something reads it: a hosting view without `.intrinsicContentSize` reports none, and
+    /// a window's content view is sized by the window (its superview would only relayout).
+    public func rootDidScheduleUpdate() {
+        guard _sizingOptions.contains(.intrinsicContentSize), window?.contentView !== self else { return }
+        invalidateIntrinsicContentSize()
+    }
     public func setNeedsDisplay(in rect: NSRect?) { if let r = rect { setNeedsDisplay(r) } else { needsDisplay = true } }
     public func makeDisplayLink(_ callback: @escaping (CADisplayLink) -> Void) -> CADisplayLink {
         _CoreAnimationHost.installIfNeeded()

@@ -318,11 +318,14 @@ public final class _AppRunner {
         settingsContent = nil
         _windowGroupOrdinal = 0
         _appNode.needsUpdate = false
-        _ = _trackingObservation(_appNode) { () -> Bool in
-            run(scene: body())
-            installMenuBar()
-            return true
-        }
+        // Only the scene body itself is tracked (the App's @State, and the model reads in
+        // `.commands`, whose titles are built here). A window's content closure runs
+        // outside the scope: what it reads belongs to the window's own view tree, which
+        // re-renders by itself. Tracking it re-ran every scene, re-rendered every window
+        // and rebuilt the menu bar on each keystroke into a field bound to the model.
+        let scene = _trackingObservation(_appNode) { body() }
+        run(scene: scene)
+        installMenuBar()
     }
 
     private func _scheduleSceneUpdate() {
@@ -382,6 +385,7 @@ public final class _AppRunner {
         let window = _SettingsWindow(contentRect: NSRect(origin: .zero, size: geometry.size), styleMask: geometry.style, backing: .buffered, defer: false)
         window.title = "\(applicationName) Settings"
         window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
         window.minSize = geometry.contentMin
         if let max = geometry.contentMax { window.maxSize = max }
         hosting.frame = NSRect(origin: .zero, size: geometry.size)

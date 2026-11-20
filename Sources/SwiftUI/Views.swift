@@ -1729,14 +1729,24 @@ public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRow
     @Environment(\._formContext) private var formContext
     public var body: some View {
         if formContext == .grouped {
-            // A grouped form's section is its own card: the header above it, the footer
-            // centred under it in the secondary colour, as macOS's inset-grouped form.
+            // A grouped form's section is its own card: the header above it, the rows
+            // separated by hairlines inside it, the footer centred under it in the
+            // secondary colour, as macOS's inset-grouped form (the Settings screenshots).
+            let rows = _formSectionRows(_ViewBox(content))
             VStack(alignment: .leading, spacing: 8) {
                 if !(header is EmptyView) { header.font(.headline).padding(.leading, 4) }
-                VStack(alignment: .leading, spacing: 10) { content }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows.indices, id: \.self) { i in
+                        if i > 0 { Divider().padding(.leading, 12) }
+                        _Page(box: rows[i])
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
                 if !(footer is EmptyView) {
                     footer.font(.caption).foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -1797,6 +1807,25 @@ extension Section where Parent == EmptyView, Footer == EmptyView {
     public init(@ViewBuilder content: () -> Content) { self.init(content: content, header: { EmptyView() }, footer: { EmptyView() }) }
 }
 
+/// The rows of a grouped section: the content split along its structural views only
+/// (tuples, groups, conditionals, optionals, ForEach), never into a control's own parts
+/// (a Picker's items are not rows).
+protocol _FormStructuralView {}
+extension TupleView: _FormStructuralView {}
+extension Group: _FormStructuralView {}
+extension _ConditionalContent: _FormStructuralView {}
+extension Optional: _FormStructuralView where Wrapped: View {}
+extension ForEach: _FormStructuralView {}
+extension EmptyView: _FormStructuralView {}
+
+@MainActor
+func _formSectionRows(_ box: _AnyViewBox) -> [_AnyViewBox] {
+    guard box.value is any _FormStructuralView else { return [box] }
+    if box.value is EmptyView { return [] }
+    guard box.isPrimitive, let p = box.makePrimitive(node: _ViewNode.placeholder), p.isLayoutTransparent else { return [box] }
+    return p.children.flatMap { _formSectionRows($0) }
+}
+
 /// Set by a `Section` inside a grouped `Form`, so the form draws no card of its own.
 struct _GroupedFormSectionsPreference: PreferenceKey {
     static var defaultValue: Bool { false }
@@ -1849,9 +1878,13 @@ public struct Form<Content: View>: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(14)
                         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
                         .padding()
                 }
             }
+            // The page behind the cards is the window background (light grey), painted
+            // here because a Windows window's own backing is white, which hid the cards.
+            .background(Color(nsColor: .windowBackgroundColor))
             .environment(\._formContext, .grouped)
             .onPreferenceChange(_GroupedFormSectionsPreference.self) { sections in
                 if hasSections != sections { hasSections = sections }

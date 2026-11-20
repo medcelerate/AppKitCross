@@ -303,7 +303,7 @@ final class _SplitPrimitive: _Primitive {
             guard let v = pane.backingView else { continue }
             sizes[pane.box.id ?? AnyHashable(0)] = sideBySide ? v.frame.width : v.frame.height
         }
-        node.root?.scheduleUpdate()
+        node.invalidateMeasurement()
     }
 
     /// The current pane sizes (tests).

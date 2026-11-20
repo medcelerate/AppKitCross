@@ -468,7 +468,17 @@ public final class Bundler {
         if icons.isEmpty, let root {
             let iconDir = atPackageRoot ? (Bundler.packageRootInfoPlist(in: root, executableName: exeStem)?.deletingLastPathComponent() ?? root) : root
             let items = (try? fm.contentsOfDirectory(atPath: iconDir.path)) ?? []
-            icons = items.sorted().filter { $0.lowercased().hasSuffix(".ico") || $0.lowercased().hasSuffix(".png") }.map { iconDir.appendingPathComponent($0) }
+            // Every .ico, and only the .png that is the app's icon (named after the
+            // executable, or AppIcon/icon): other images beside the plist are resources,
+            // not icons (a logo and an icon preview landed at the top level).
+            let stem = exeStem.lowercased()
+            icons = items.sorted().filter { name in
+                let lower = name.lowercased()
+                if lower.hasSuffix(".ico") { return true }
+                guard lower.hasSuffix(".png") else { return false }
+                let base = String(lower.dropLast(4))
+                return base == stem || base == "appicon" || base == "icon"
+            }.map { iconDir.appendingPathComponent($0) }
         }
         for icon in icons {
             try copy(icon, to: folder.appendingPathComponent(icon.lastPathComponent))
