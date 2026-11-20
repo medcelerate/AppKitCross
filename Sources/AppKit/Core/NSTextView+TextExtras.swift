@@ -20,7 +20,7 @@ extension NSTextView {
         _finder?.noteClientStringWillChange()
         textStorage?.replaceCharacters(in: r, with: text)
         _markedRange = nil
-        _invalidateLayout()
+        _invalidateLayoutAfterEdit()
         if selectAfter { setSelectedRange(NSRange(location: r.location + text.length, length: 0)) }
         didChangeText()
         needsDisplay = true
@@ -33,7 +33,7 @@ extension NSTextView {
         let r = _clamped(range)
         let attrs = r.length > 0 ? (textStorage?.attributes(at: r.location, effectiveRange: nil) ?? typingAttributes) : typingAttributes
         textStorage?.replaceCharacters(in: r, with: NSAttributedString(string: string, attributes: attrs))
-        _invalidateLayout()
+        _invalidateLayoutAfterEdit()
         needsDisplay = true
     }
 

@@ -643,6 +643,7 @@ import CoreText
         let unbounded = (isFieldEditor && !_fieldEditorWraps) || isHorizontallyResizable
         let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
         let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        if NSView._traceInvalidation, _container.size.width != width { NSView._trace("text view syncContainerSize bounds \(bounds.width) container \(_container.size.width) -> \(width)") }
         if _container.size != size { _container.size = size }
         // An unbounded container still flushes right-aligned and centred text against the
         // visible width; against the unbounded width the line would sit beyond any drawing.
@@ -707,6 +708,15 @@ import CoreText
             return
         }
         _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil)
+    }
+
+    /// An edit reached the layout through the text storage: TextKit 1's layout manager
+    /// invalidated the edited paragraphs (and TextKit 2 its elements), so only the frame and
+    /// the display follow it here; invalidating every line would typeset the whole text again.
+    internal override func _invalidateLayoutAfterEdit() {
+        if _textLayoutManager != nil { _invalidateLayout(); return }
+        _syncContainerSize()
+        needsDisplay = true
     }
 
     /// The layout manager laid the text out again (an edit, a geometry change).
@@ -794,6 +804,11 @@ import CoreText
         // made typing slow).
         let dirty = dirtyRect.offsetBy(dx: -origin.x, dy: -origin.y)
         let all = _layoutManager.glyphRange(forBoundingRect: dirty, in: _container)
+        if NSView._traceInvalidation {
+            let lines = _layoutManager._lineFragments.filter { NSIntersectionRange($0.charRange, all).length > 0 }
+            let widest = lines.map(\.usedRect.maxX).max() ?? 0
+            NSView._trace("text view draw dirty \(dirtyRect) bounds \(bounds.size) visible \(visibleRect) clip \(superview.map { "\($0.bounds)" } ?? "none") lines \(lines.count) widest used maxX \(widest)")
+        }
         _layoutManager.drawBackground(forGlyphRange: all, at: origin)
         _drawTextHighlights()
         _drawFindHighlights(above: false)
@@ -975,6 +990,7 @@ import CoreText
     }
 
     open override func setFrameSize(_ newSize: NSSize) {
+        if NSView._traceInvalidation { NSView._trace("text view setFrameSize \(frame.size) -> \(newSize) engine \(_textLayoutManager == nil ? "TextKit 1" : "TextKit 2") widthTracks \(_container.widthTracksTextView)") }
         _resizingFrame = true
         defer { _resizingFrame = false }
         super.setFrameSize(newSize)
@@ -1393,6 +1409,8 @@ import CoreText
         set {
             _extras.linkTextAttributes = newValue
             _textLayoutManager?._restyleLaidOutFragments()
+            // TextKit 1 resolves link attributes when it typesets a paragraph.
+            if _textLayoutManager == nil { _layoutManager.invalidateLayout(forCharacterRange: NSRange(location: 0, length: _storage.length), actualCharacterRange: nil) }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextview/loosenkerning(_:)
@@ -1492,7 +1510,7 @@ import CoreText
         let m = NSMutableAttributedString(string: attributedString.string, attributes: base)
         attributedString.enumerateAttributes(in: NSRange(location: 0, length: attributedString.length), options: []) { a, sub, _ in m.addAttributes(a, range: sub) }
         textStorage?.replaceCharacters(in: r, with: m)
-        _invalidateLayout()
+        _invalidateLayoutAfterEdit()
         setSelectedRange(NSRange(location: r.location + m.length, length: 0))
         didChangeText()
         return true

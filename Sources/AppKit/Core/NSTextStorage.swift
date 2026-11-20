@@ -12,9 +12,10 @@ import CoreGraphics
 #if !canImport(ObjectiveC)
 /// swift-corelibs-foundation's CFAttributedString compares the attribute dictionaries
 /// of adjacent runs to coalesce them, and its CF equality traps on two distinct instances
-/// of a Swift class (NSFont, NSColor, NSParagraphStyle are not CF types). A Hashable
-/// struct is boxed as a `__SwiftValue`, which CF does compare, so the storage keeps such
-/// objects in this box and unwraps them for every reader.
+/// of a Swift class whose first stored word does not give it a CF type (see
+/// Support/CFBridgeLayout.swift). AppKit's attribute classes (and CGColor) carry a fixed
+/// CF info word and are stored as they are; any other NSObject value is kept in this box
+/// (a `__SwiftValue` to CF) and unwrapped for every reader.
 internal struct _NSTextStorageBox: Hashable {
     let object: AnyObject
     static func == (a: _NSTextStorageBox, b: _NSTextStorageBox) -> Bool {
@@ -27,6 +28,9 @@ internal struct _NSTextStorageBox: Hashable {
     static func needsBox(_ value: Any) -> Bool {
         switch value {
         case is NSString, is NSNumber, is NSData, is NSArray, is NSDictionary, is NSDate, is NSURL, is NSValue: return false
+        // Their first word is a fixed CF info word: CF compares them through Swift, and a
+        // box would put a heap address where CF reads the type (an intermittent halt).
+        case is _CFBridgedLayout, is CGColor: return false
         case let o as AnyObject where type(of: o) is NSObject.Type: return true
         default: return false
         }

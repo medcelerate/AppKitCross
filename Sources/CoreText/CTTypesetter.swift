@@ -213,7 +213,12 @@ public final class CTTypesetter: NSObject {
         var i = start
         while i < count {
             let nl = newlineLength(at: i)
-            if nl > 0 { return i + nl - start }          // a hard break ends the line and belongs to it
+            if nl > 0 {
+                // A hard break ends the line and belongs to it, when the text before it fits;
+                // otherwise the last word overflows and the line breaks before it.
+                if measuredWidth(start, i, offset: pen0, trimTrailingWhitespace: true) <= limit { return i + nl - start }
+                break
+            }
             if i > start, isClusterStart[i], clusters || canBreakBefore[i] {
                 if measuredWidth(start, i, offset: pen0, trimTrailingWhitespace: true) <= limit { lastBreak = i } else { break }
             }

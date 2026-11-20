@@ -21,6 +21,9 @@ open class NSTypesetter: NSObject {
     private weak var _container: NSTextContainer?
     private var _style: NSParagraphStyle?
     private var _units: [UInt16] = []
+    /// The document index of `_units[0]`: the layout manager typesets a paragraph (or a
+    /// text block's paragraphs) at a time, so `_units` is that slice of the text.
+    private var _unitsBase = 0
     private var _lineStart = 0
     private var _inLayout = false
     private var _explicitParagraph: (range: NSRange, separator: NSRange)?
@@ -34,14 +37,16 @@ open class NSTypesetter: NSObject {
 
     // MARK: Layout state, set by NSLayoutManager while it lays out
 
-    /// The layout manager starts a line at `index` of `units` (its CoreText string).
-    internal func _begin(layoutManager: NSLayoutManager, container: NSTextContainer, style: NSParagraphStyle?, paragraphStart: Bool, at index: Int, units: [UInt16]) {
+    /// The layout manager starts a line at document index `index`; `units` is the text it is
+    /// typesetting (its CoreText string), starting at document index `base`.
+    internal func _begin(layoutManager: NSLayoutManager, container: NSTextContainer, style: NSParagraphStyle?, paragraphStart: Bool, at index: Int, units: [UInt16], base: Int = 0) {
         let wasInLayout = _inLayout
         _layoutManager = layoutManager
         _attributedString = layoutManager.textStorage
         _container = container
         _style = style
         _units = units
+        _unitsBase = base
         _lineStart = index
         _inLayout = true
         _explicitParagraph = nil
@@ -77,7 +82,7 @@ open class NSTypesetter: NSObject {
     private var _paragraph: (range: NSRange, separator: NSRange) {
         if let p = _explicitParagraph { return p }
         guard _inLayout, !_units.isEmpty else { return (NSRange(location: NSNotFound, length: 0), NSRange(location: NSNotFound, length: 0)) }
-        var start = min(_lineStart, _units.count)
+        var start = min(max(0, _lineStart - _unitsBase), _units.count)
         while start > 0 {
             let before = start - 1
             if _NSLineTypesetter.newlineLength(at: before, in: _units) > 0 || (before > 0 && _units[before - 1] == 0x0D && _units[before] == 0x0A) { break }
@@ -89,7 +94,7 @@ open class NSTypesetter: NSObject {
             if end - start >= 2, _units[end - 2] == 0x0D, _units[end - 1] == 0x0A { separator = 2 }
             else if _NSLineTypesetter.newlineLength(at: end - 1, in: _units) > 0 { separator = 1 }
         }
-        return (NSRange(location: start, length: end - start), NSRange(location: end - separator, length: separator))
+        return (NSRange(location: _unitsBase + start, length: end - start), NSRange(location: _unitsBase + end - separator, length: separator))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstypesetter/paragraphcharacterrange
     open var paragraphCharacterRange: NSRange { _paragraph.range }

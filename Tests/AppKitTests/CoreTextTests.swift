@@ -109,6 +109,21 @@ final class CoreTextTests: XCTestCase, @unchecked Sendable {
         XCTAssertGreaterThan(CTLineGetTypographicBounds(kerned, nil, nil, nil), CTLineGetTypographicBounds(CTLineCreateWithAttributedString(attributed("Hello", font: f)), nil, nil, nil) + 15)
     }
 
+    /// The last word before a newline is the one that does not fit: the line breaks before
+    /// it, not at the newline (Windows TextEdit kept "...the lazy dog.\r\n" on one line, PR 91).
+    func testTypesetterBreaksBeforeALastWordThatOverflowsAtANewline() {
+        let f = systemFont(14)
+        for newline in ["\n", "\r\n"] {
+            let ts = CTTypesetterCreateWithAttributedString(attributed("one two three four" + newline + "five", font: f))
+            let head = CTLineGetTypographicBounds(CTTypesetterCreateLine(ts, CFRangeMake(0, 13)), nil, nil, nil)   // "one two three"
+            let full = CTLineGetTypographicBounds(CTTypesetterCreateLine(ts, CFRangeMake(0, 18)), nil, nil, nil)   // "... four"
+            let width = (head + full) / 2
+            XCTAssertEqual(CTTypesetterSuggestLineBreak(ts, 0, width), 14, "\(newline.debugDescription): \"four\" moves to the next line")
+            XCTAssertEqual(CTTypesetterSuggestLineBreak(ts, 14, width), 4 + newline.utf16.count, "\(newline.debugDescription): then the newline ends \"four\"'s line")
+            XCTAssertEqual(CTTypesetterSuggestLineBreak(ts, 0, full + 1), 18 + newline.utf16.count, "\(newline.debugDescription): a line that fits keeps its newline")
+        }
+    }
+
     func testTypesetterBreaksAtWordsAndNewlines() {
         let f = systemFont(14)
         let text = attributed("one two three four\nfive six", font: f)
