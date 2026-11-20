@@ -50,6 +50,29 @@ final class CFBridgeLayoutTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// NSTextStorage stores the classes with the fixed word as they are: a `__SwiftValue`
+    /// box around one has a heap address as its first word (PR 91's intermittent halt
+    /// copying a text storage on Windows).
+    func testTextStorageDoesNotBoxClassesWithTheFixedWord() {
+        MainActor.assumeIsolated {
+            let values: [AnyObject] = [NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1), NSFont.systemFont(ofSize: 12), NSMutableParagraphStyle(),
+                                       NSTextAttachment(), NSTextTab(textAlignment: .left, location: 0), NSTextList(markerFormat: .disc, options: 0),
+                                       NSTextBlock(), NSTextTableBlock(table: NSTextTable(), startingRow: 0, rowSpan: 1, startingColumn: 0, columnSpan: 1),
+                                       CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)]
+            for v in values { XCTAssertFalse(_NSTextStorageBox.needsBox(v), "\(type(of: v)) is stored unboxed") }
+            // Distinct but equal fonts and styles in adjacent runs, copied the way the tests
+            // and apps copy a storage.
+            let ts = NSTextStorage()
+            for i in 0..<200 {
+                let ps = NSMutableParagraphStyle(); ps.paragraphSpacing = CGFloat(i % 3)
+                ts.append(NSAttributedString(string: "run \(i)\n", attributes: [.font: NSFont.systemFont(ofSize: CGFloat(12 + i % 2)), .paragraphStyle: ps]))
+            }
+            let copy = NSTextStorage(attributedString: ts.attributedSubstring(from: NSRange(location: 0, length: ts.length)))
+            XCTAssertEqual(copy.string, ts.string)
+            XCTAssertTrue(copy.attribute(.font, at: 0, effectiveRange: nil) is NSFont)
+        }
+    }
+
     /// Distinct values side by side, as the layout manager's CoreText string holds them.
     func testDistinctCoreTextValuesInAdjacentRuns() {
         let pairs: [(String, Any, Any)] = [

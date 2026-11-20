@@ -51,7 +51,11 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/size
     open var size: CGSize {
         get { _size }
-        set { guard newValue != _size else { return }; _size = newValue; _geometryChanged() }
+        set {
+            guard newValue != _size else { return }
+            if NSView._traceInvalidation { _textTrace("text container size \(_size) -> \(newValue) layoutManager \(_layoutManager == nil ? "none" : "set") textLayoutManager \(_textLayoutManager == nil ? "none" : "set")") }
+            _size = newValue; _geometryChanged()
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstextcontainer/containersize
     open var containerSize: NSSize {
@@ -124,3 +128,6 @@ open class NSTextContainer: NSObject, NSSecureCoding, NSCoding, NSTextLayoutOrie
     // Requirement of NSTextLayoutOrientationProvider
     open var layoutOrientation: NSLayoutManager.TextLayoutOrientation { .horizontal }
 }
+
+/// `APPKITWIN_TRACE` lines from the text system's non-view classes (unbuffered).
+internal func _textTrace(_ message: String) { fputs("[trace] \(message)\n", stderr) }

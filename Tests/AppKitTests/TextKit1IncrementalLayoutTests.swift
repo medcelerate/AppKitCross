@@ -376,16 +376,28 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
             scroll.hasVerticalScroller = true
             let tv = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
             tv.autoresizingMask = [.width, .height]
-            tv.textStorage?.setAttributedString(NSAttributedString(string: longText(600), attributes: [.font: TextKit1IncrementalLayoutTests.font]))
+            // TextEdit's editor settings (Examples/TextEdit TextDocument.configure).
+            tv.isRichText = false
+            tv.usesFindBar = true
+            tv.isIncrementalSearchingEnabled = true
+            tv.isContinuousSpellCheckingEnabled = true
+            tv.allowsUndo = true
+            tv.font = NSFont.userFont(ofSize: 13)
+            tv.textStorage?.setAttributedString(NSAttributedString(string: longText(600), attributes: [.font: NSFont.userFont(ofSize: 13)!]))
             scroll.documentView = tv
             window.contentView?.addSubview(scroll)
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(tv)
             window.display()
             let lm = tv.layoutManager!
             let wide = lm._lineFragments.count
             let wideWidth = tv.textContainer!.size.width
             let wideLongest = lm._lineFragments.map(\.usedRect.maxX).max() ?? 0
+            // The window's frame changes as the platform reports a drag of its edge.
             for width in stride(from: 620, through: 300, by: -40) {
-                window.setContentSize(NSSize(width: CGFloat(width), height: 460))
+                var f = window.frame
+                f.size.width = CGFloat(width)
+                window.setFrame(f, display: true)
                 window.display()
             }
             // Relative bounds only: line widths are the platform's font metrics (PR 90).

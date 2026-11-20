@@ -643,6 +643,7 @@ import CoreText
         let unbounded = (isFieldEditor && !_fieldEditorWraps) || isHorizontallyResizable
         let width = unbounded ? CGFloat.greatestFiniteMagnitude : max(1, bounds.width - 2 * _textContainerInset.width)
         let size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        if NSView._traceInvalidation, _container.size.width != width { NSView._trace("text view syncContainerSize bounds \(bounds.width) container \(_container.size.width) -> \(width)") }
         if _container.size != size { _container.size = size }
         // An unbounded container still flushes right-aligned and centred text against the
         // visible width; against the unbounded width the line would sit beyond any drawing.
@@ -984,6 +985,7 @@ import CoreText
     }
 
     open override func setFrameSize(_ newSize: NSSize) {
+        if NSView._traceInvalidation { NSView._trace("text view setFrameSize \(frame.size) -> \(newSize) engine \(_textLayoutManager == nil ? "TextKit 1" : "TextKit 2") widthTracks \(_container.widthTracksTextView)") }
         _resizingFrame = true
         defer { _resizingFrame = false }
         super.setFrameSize(newSize)
