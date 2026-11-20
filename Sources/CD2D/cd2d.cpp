@@ -526,6 +526,32 @@ bool cd2d_target_canvas_is_fresh(CD2DTarget *target) {
     return target && target->swapChain && target->canvasFresh;
 }
 
+bool cd2d_target_copy_rect(CD2DTarget *target, int32_t srcX, int32_t srcY, int32_t w, int32_t h, int32_t dstX, int32_t dstY) {
+    if (!target || !target->swapChain || !target->canvas || !target->dc || target->lost || target->canvasFresh) return false;
+    if (w <= 0 || h <= 0 || srcX < 0 || srcY < 0 || dstX < 0 || dstY < 0) return false;
+    D2D1_SIZE_U size = target->canvas->GetPixelSize();
+    if ((UINT32)srcX + (UINT32)w > size.width || (UINT32)srcY + (UINT32)h > size.height) return false;
+    if ((UINT32)dstX + (UINT32)w > size.width || (UINT32)dstY + (UINT32)h > size.height) return false;
+    // A bitmap cannot copy onto itself where the rects overlap: go through a temporary
+    // of the canvas's format.
+    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_NONE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, target->alphaMode), target->dpi, target->dpi);
+    ID2D1Bitmap1 *temp = nullptr;
+    HRESULT hr = target->dc->CreateBitmap(D2D1::SizeU((UINT32)w, (UINT32)h), nullptr, 0, &props, &temp);
+    if (FAILED(hr) || !temp) { safeRelease(temp); return false; }
+    D2D1_POINT_2U origin = D2D1::Point2U(0, 0);
+    D2D1_RECT_U src = D2D1::RectU((UINT32)srcX, (UINT32)srcY, (UINT32)(srcX + w), (UINT32)(srcY + h));
+    hr = temp->CopyFromBitmap(&origin, target->canvas, &src);
+    if (SUCCEEDED(hr)) {
+        D2D1_POINT_2U dest = D2D1::Point2U((UINT32)dstX, (UINT32)dstY);
+        D2D1_RECT_U all = D2D1::RectU(0, 0, (UINT32)w, (UINT32)h);
+        hr = target->canvas->CopyFromBitmap(&dest, temp, &all);
+    }
+    safeRelease(temp);
+    if (isDeviceLost(hr)) target->lost = true;
+    return SUCCEEDED(hr);
+}
+
 void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_t right, int32_t bottom) {
     if (!target || !target->swapChain) return;
     target->dirty = D2D1::RectU((UINT32)(left < 0 ? 0 : left), (UINT32)(top < 0 ? 0 : top), (UINT32)(right < 0 ? 0 : right), (UINT32)(bottom < 0 ? 0 : bottom));

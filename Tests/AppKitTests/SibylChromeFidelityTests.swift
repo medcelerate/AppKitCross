@@ -273,7 +273,10 @@ final class SibylChromeFidelityTests: XCTestCase, @unchecked Sendable {
             var inkXs: [CGFloat] = []
             for x in stride(from: frame.minX + 24, to: frame.maxX - 8, by: 0.5) where px(x, frame.midY).redComponent < outside - 0.15 { inkXs.append(x) }
             guard let first = inkXs.first, let last = inkXs.last else { return XCTFail("no placeholder drawn") }
-            XCTAssertLessThan(first - frame.minX, 34, "the placeholder starts after the magnifier (\(first - frame.minX))")
+            // Relative to the measured text rect: the first glyph's side bearing differs per font
+            // (half a point more under Cairo than CoreText), while a centred placeholder would start
+            // tens of points further in.
+            XCTAssertLessThan(first, text.minX + 12, "the placeholder starts where the text rect starts, after the magnifier (\(first) vs \(text.minX))")
             XCTAssertLessThan(last, frame.midX, "and ends before the middle (\(last) vs \(frame.midX))")
         }
     }

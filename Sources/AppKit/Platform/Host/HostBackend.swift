@@ -341,6 +341,40 @@ final class HostWindow: PlatformWindow {
 
     func captureContent() -> CGImage? { lastImage }
 
+    /// Copies within the retained surface: the source rect's pixels, cut from a snapshot,
+    /// drawn unscaled at the destination. The surface is presented whole (`lastImage`), so
+    /// nothing else needs marking. Not while a hosted scene is composited into the surface
+    /// (its layers would move with the content).
+    func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool {
+        #if canImport(CoreGraphics)
+        guard let ctx = surface, hostedScene == nil, !rect.isEmpty, rect.minX.isFinite, rect.minY.isFinite else { return false }
+        let content = contentRect(forFrameRect: _frame)
+        let scale = backingScaleFactor
+        let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))
+        guard ctx.width == w, ctx.height == h else { return false }
+        func whole(_ v: CGFloat) -> Bool { abs(v * scale - (v * scale).rounded()) < 0.001 }
+        guard whole(delta.width), whole(delta.height), whole(rect.minX), whole(rect.minY), whole(rect.width), whole(rect.height) else { return false }
+        let src = rect.intersection(rect.offsetBy(dx: -delta.width, dy: -delta.height))
+            .intersection(NSRect(origin: .zero, size: content.size))
+        guard !src.isNull, !src.isEmpty else { return true }      // everything is uncovered: nothing to keep
+        // The whole snapshot drawn offset by the delta under a clip to the destination (the
+        // port's CGImage on Linux has no cropping; the clip does the same job).
+        guard let snapshot = ctx.makeImage() else { return false }
+        ctx.saveGState()
+        ctx.clip(to: src.offsetBy(dx: delta.width, dy: delta.height))
+        ctx.setBlendMode(.copy)
+        ctx.interpolationQuality = .none
+        ctx.draw(snapshot, in: CGRect(origin: CGPoint(x: delta.width, y: delta.height), size: content.size))
+        ctx.restoreGState()
+        scrollCopyCount += 1
+        return true
+        #else
+        return false
+        #endif
+    }
+    /// Scrolls the backing store moved instead of repainting (tests).
+    private(set) var scrollCopyCount = 0
+
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
         guard layerHostingEnabled else { return false }
         hostedScene = scene

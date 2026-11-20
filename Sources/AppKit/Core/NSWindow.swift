@@ -909,36 +909,169 @@ import CoreText
     internal func _setNeedsDisplayWhole() {
         _pendingDirtyRects = nil
         _GlassRegistry.noteInvalidation(in: self, from: nil, rect: nil)
+        _scrolledAreas = []
         _platform?.setNeedsDisplay(nil)
     }
 
     private func _noteDirty(_ rect: NSRect) {
         guard var rects = _pendingDirtyRects else { return }
         guard !rect.isNull, !rect.isEmpty, rect.width.isFinite, rect.height.isFinite else { return }
-        var r = rect.integral
-        // Overlapping areas become one, so no pixel is drawn twice in a paint.
-        var i = 0
-        while i < rects.count {
-            if rects[i].intersects(r) || rects[i].contains(r) || r.contains(rects[i]) {
-                r = r.union(rects[i]); rects.remove(at: i); i = 0
-            } else { i += 1 }
+        // Overlapping areas become one, so no pixel is drawn twice in a paint; unless their
+        // union is mostly neither (a row band across a list and the scroller down its side:
+        // the whole list). Then the new area loses what is already pending and the rest is
+        // kept in pieces.
+        var queue = [rect.integral]
+        while let r0 = queue.popLast() {
+            var r = r0
+            var i = 0
+            var split = false
+            while i < rects.count {
+                let e = rects[i]
+                if e.contains(r) { split = true; break }
+                // A positive-area overlap, not `intersects`: corelibs Foundation answers true for
+                // rects that only touch, whose difference is the rect itself, over and over.
+                let inter = r.intersection(e)
+                let overlaps = !inter.isNull && inter.width > 0 && inter.height > 0
+                if overlaps || r.contains(e) {
+                    let u = r.union(e)
+                    let covered = r.width * r.height + e.width * e.height - (overlaps ? inter.width * inter.height : 0)
+                    if r.contains(e) || u.width * u.height <= covered * 1.25 {
+                        r = u; rects.remove(at: i); i = 0; continue
+                    }
+                    let pieces = NSView._difference(r, e)
+                    guard pieces.count != 1 || pieces[0] != r else { i += 1; continue }
+                    queue.append(contentsOf: pieces)
+                    split = true
+                    break
+                }
+                i += 1
+            }
+            if !split { rects.append(r) }
         }
-        rects.append(r)
         if rects.count > NSWindow._maxPendingDirtyRects { rects = [rects.reduce(NSRect.null) { $0.union($1) }] }
         _pendingDirtyRects = rects
     }
 
     /// The areas this paint draws within the platform's `dirtyRect`: the views' own when
     /// they account for all of it, else the whole dirty rectangle (an expose, a resize,
-    /// a repaint the platform asked for itself).
+    /// a repaint the platform asked for itself). A clip view's area the backing store
+    /// scrolled by copy is accounted for: the platform may present it (Win32 marks it
+    /// dirty so the moved pixels reach the screen) without the window drawing it.
     private func _takePaintRects(_ dirtyRect: NSRect) -> [NSRect] {
         let pending = _pendingDirtyRects
+        let scrolled = _scrolledAreas
         _pendingDirtyRects = []
-        guard _isOpaque, let rects = pending, rects.count > 1 else { return [dirtyRect] }
-        let box = rects.reduce(NSRect.null) { $0.union($1) }
+        _scrolledAreas = []
+        guard _isOpaque, let rects = pending, rects.count > 1 || !scrolled.isEmpty else { return [dirtyRect] }
+        let box = (rects + scrolled).reduce(NSRect.null) { $0.union($1) }
         guard box.insetBy(dx: -2, dy: -2).contains(dirtyRect) else { return [dirtyRect] }
         let parts = rects.map { $0.intersection(dirtyRect) }.filter { !$0.isNull && !$0.isEmpty }
+        if parts.isEmpty, !scrolled.isEmpty { return [] }
         return parts.isEmpty ? [dirtyRect] : parts
+    }
+
+    // MARK: Scrolling by copy
+
+    /// Clip-view areas (window coordinates) whose pixels the backing store moved since the
+    /// last paint: they need no drawing.
+    private var _scrolledAreas: [NSRect] = []
+    /// A paint is drawing: the backing store is in use and the paint rects are taken.
+    private var _painting = false
+
+    /// What of `clip` the window shows (window coordinates, snapped inward to whole
+    /// pixels), when its pixels can be moved by copy: an untransformed clip view in an
+    /// opaque window that composites its views itself. Nil otherwise.
+    internal func _scrollCopyArea(of clip: NSClipView) -> NSRect? {
+        guard _isOpaque, !_hostsLayersNatively, !_painting, _pendingDirtyRects != nil, let cv = _contentView, clip.isDescendant(of: cv) else { return nil }
+        var v: NSView? = clip
+        while let cur = v {
+            if cur.frameRotation != 0 || cur.boundsRotation != 0 || cur.isHidden { return nil }
+            v = cur.superview
+        }
+        var r = clip.convert(clip.bounds, to: nil)
+        guard clip._dirtyRectInWindow(clip.bounds) == r else { return nil }      // a layer transform above
+        var ancestor = clip.superview
+        while let a = ancestor, !r.isNull {
+            if a is NSClipView || a.clipsToBounds || a === cv { r = r.intersection(a.convert(a.bounds, to: nil)) }
+            ancestor = a.superview
+        }
+        let scale = max(1, backingScaleFactor)
+        guard !r.isNull, r.minX.isFinite, r.minY.isFinite, r.width.isFinite, r.height.isFinite else { return nil }
+        let x0 = (r.minX * scale).rounded(.up) / scale, y0 = (r.minY * scale).rounded(.up) / scale
+        let x1 = (r.maxX * scale).rounded(.down) / scale, y1 = (r.maxY * scale).rounded(.down) / scale
+        guard x1 > x0, y1 > y0 else { return nil }
+        return NSRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// Moves the pixels of `visible` (from `_scrollCopyArea`, taken before the scroll) by
+    /// `delta` in the backing store and marks what the copy cannot supply: the uncovered
+    /// band, the views drawn over the clip view (their pixels moved with the content), the
+    /// slivers between the clip view's edge and the pixel grid, and the pending dirty areas
+    /// inside the clip, moved with their content. False when the copy is not possible; the
+    /// clip view then repaints what it shows.
+    internal func _scrollBacking(of clip: NSClipView, visible: NSRect, by delta: NSSize) -> Bool {
+        guard let platform = _platform, _pendingDirtyRects != nil, !_painting else { return false }
+        guard delta.width.isFinite, delta.height.isFinite, delta != .zero,
+              abs(delta.width) < visible.width, abs(delta.height) < visible.height else { return false }
+        let scale = max(1, backingScaleFactor)
+        func whole(_ v: CGFloat) -> Bool { abs(v * scale - (v * scale).rounded()) < 0.001 }
+        guard whole(delta.width), whole(delta.height) else { return false }
+        // Views over the clip view repaint where they were and where their pixels went. A
+        // view under a transparent clip view would move with the content: no copy.
+        var overlays: [(NSView, NSRect)] = []
+        var child: NSView = clip
+        while let sup = child.superview {
+            let subs = sup.subviews
+            if let i = subs.firstIndex(where: { $0 === child }) {
+                for (j, s) in subs.enumerated() where j != i && !s.isHidden {
+                    let r = s.convert(s.bounds, to: nil)
+                    guard r.intersects(visible) else { continue }
+                    if j < i {
+                        // One colour over the whole area looks the same moved.
+                        if !clip.isOpaque, !(s._drawsUniformFill && s.subviews.isEmpty && r.contains(visible)) { return false }
+                    } else {
+                        overlays.append((s, r.intersection(visible)))
+                        let moved = r.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)
+                        if !moved.isNull, !moved.isEmpty { overlays.append((s, moved)) }
+                    }
+                }
+            }
+            if sup === _contentView { break }
+            child = sup
+        }
+        // The window's own chrome drawn over the content.
+        if _showsWindowButtons, let cv = _contentView,
+           NSRect(x: 0, y: cv.bounds.height - NSWindow._titleBarBandHeight, width: cv.bounds.width, height: NSWindow._titleBarBandHeight).intersects(visible) { return false }
+        var chrome: [NSRect] = []
+        for t in [_toolbarView as NSView?, _accessoryHost as NSView?] {
+            guard let t, !t.isHidden else { continue }
+            let r = t.convert(t.bounds, to: nil)
+            if r.intersects(visible) { chrome.append(r.intersection(visible)); chrome.append(r.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)) }
+        }
+        guard platform.scrollBacking(visible, by: delta) else { return false }
+        if NSView._traceInvalidation { NSView._trace("scroll by copy \(type(of: clip)) \(visible) by \(delta)") }
+        // What was waiting to repaint inside the clip moved with its content.
+        let pending = _pendingDirtyRects ?? []
+        _pendingDirtyRects = []
+        for r in pending {
+            for outside in NSView._difference(r, visible) { _noteDirty(outside) }
+            let inside = r.intersection(visible)
+            guard !inside.isNull, !inside.isEmpty else { continue }
+            let moved = inside.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)
+            if !moved.isNull, !moved.isEmpty { _noteDirty(moved); platform.setNeedsDisplay(moved) }
+        }
+        _scrolledAreas.append(visible)
+        // The band the scroll uncovered, and the clip view's edges off the pixel grid.
+        let shown = clip.convert(clip.bounds, to: nil)
+        var exposed = NSView._difference(visible, visible.offsetBy(dx: delta.width, dy: delta.height))
+        exposed += NSView._difference(shown, visible)
+        for e in exposed where !e.isEmpty { clip.setNeedsDisplay(clip.convert(e, from: nil)) }
+        for (s, r) in overlays { s.setNeedsDisplay(s.convert(r, from: nil)) }
+        for r in chrome where !r.isNull && !r.isEmpty { _noteDirty(r); platform.setNeedsDisplay(r) }
+        // The content beneath any glass over the area (or mirrored from it) moved with the
+        // copy: those samples go stale and their surfaces redraw (ADR-0052).
+        _GlassRegistry.noteInvalidation(in: self, from: nil, rect: visible)
+        return true
     }
 
     /// A view needs layout: the platform runs `platformWindowLayout` before its next paint,
@@ -1073,10 +1206,16 @@ import CoreText
         _setNeedsDisplayWhole()
     }
 
+    /// The area (points) the last paint drew, its rects one by one (tests).
+    internal private(set) var _lastPaintArea: CGFloat = 0
+
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
         // Taken before layout: what this paint's layout moves marks the next frame.
         let paintRects = _takePaintRects(dirtyRect)
+        _painting = true
+        defer { _painting = false }
+        _lastPaintArea = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
         _commitLayerSceneIfNeeded()
         // Geometry settled for this frame: areas under a pointer that did not move still enter or exit.
         if _trackingAreasDirty { _contentView?.layoutSubtreeIfNeeded(); _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
@@ -1092,7 +1231,7 @@ import CoreText
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
         for rect in paintRects {
             context.saveGState()
-            if paintRects.count > 1 { context.clip(to: rect) }
+            if paintRects.count > 1 || rect != dirtyRect { context.clip(to: rect) }
             if _isOpaque {
                 context.setFillColor(_backgroundColor.cgColor)
                 context.fill(rect)

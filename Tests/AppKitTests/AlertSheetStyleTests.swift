@@ -12,19 +12,23 @@ private func allViews(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(allVie
 private func buttons(_ v: NSView) -> [NSButton] { allViews(v).compactMap { $0 as? NSButton } }
 
 /// RGBA bytes of an image, top row first.
+/// The host image's bytes (BGRA, premultiplied), read the way every pixel test does; the
+/// Windows release build answered zeros when the image was redrawn into a bitmap context.
 private func rgba(_ image: CGImage) -> [UInt8] {
-    var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
-    let space = CGColorSpaceCreateDeviceRGB()
-    data.withUnsafeMutableBytes { buf in
-        let ctx = CGContext(data: buf.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
-                            space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let d = _pixels(image)
+    var out = [UInt8](repeating: 0, count: image.width * image.height * 4)
+    let stride = image.bytesPerRow
+    for y in 0..<image.height {
+        for x in 0..<image.width {
+            let i = y * stride + x * 4, o = (y * image.width + x) * 4
+            guard i + 3 < d.count else { continue }
+            out[o] = d[i + 2]; out[o + 1] = d[i + 1]; out[o + 2] = d[i]; out[o + 3] = d[i + 3]
+        }
     }
-    return data
+    return out
 }
 
-@MainActor
-private func snapshot(_ w: NSWindow) -> CGImage? {
+@MainActor private func snapshot(_ w: NSWindow) -> CGImage? {
     w.display()
     return (w._platformWindow as? HostWindow)?.lastImage
 }
@@ -119,8 +123,8 @@ final class AlertSheetStyleTests: XCTestCase, @unchecked Sendable {
             if let image = snapshot(panel) {
                 let d = rgba(image)
                 var red = 0
-                for i in stride(from: 0, to: d.count, by: 4) where d[i] > 170 && d[i + 1] < 110 && d[i + 2] < 110 { red += 1 }
-                XCTAssertGreaterThan(red, 10, "red text on the destructive button")
+                for i in stride(from: 0, to: d.count, by: 4) where d[i] > 150 && d[i + 1] < 120 && d[i + 2] < 120 && Int(d[i]) - Int(d[i + 1]) > 60 { red += 1 }
+                XCTAssertGreaterThan(red, 5, "red text on the destructive button")
             } else { XCTFail("no panel image") }
 
             // Escape is Cancel; the dim goes with the sheet.

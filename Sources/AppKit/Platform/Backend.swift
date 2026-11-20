@@ -167,6 +167,15 @@ public protocol PlatformWindow: AnyObject {
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
     func setNeedsDisplay(_ rect: NSRect?)
+    /// Scrolling by copy (`NSClipView.copiesOnScroll`): moves the pixels already painted in
+    /// `rect` (content coordinates, bottom-left, points) by `delta` within the backing store,
+    /// at once, between paints. The pixels that land outside `rect` are dropped; the band
+    /// the move uncovers is left as it was, for the caller to repaint. The next frame shows
+    /// the moved pixels without the window drawing them again: a backend that presents only
+    /// what it repaints marks the destination for presentation itself. Returns false when
+    /// the backend cannot (the default, a fresh or lost backing store, a delta that is not
+    /// whole pixels): the caller then repaints all of `rect`.
+    func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool
     /// Asks for a layout pass (`PlatformWindowOwner.platformWindowLayout`) before the next
     /// paint, without dirtying any pixel: what layout moves or updates invalidates itself.
     /// The default dirties one pixel, which on a backend that unions dirty rects can grow
@@ -304,6 +313,7 @@ extension PlatformWindow {
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
+    public func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool { false }
     public func attachSheet(to parent: PlatformWindow?) { }
     public var supportsTransparency: Bool { true }
     public func setResizeConstraints(_ constraints: PlatformResizeConstraints) { }
