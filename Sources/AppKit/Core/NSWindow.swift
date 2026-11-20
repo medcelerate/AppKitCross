@@ -1238,6 +1238,25 @@ import CoreText
     private weak var _sheetParent: NSWindow?
     /// Presented (attached, ordered in) rather than waiting in the parent's queue.
     private var _sheetIsPresented = false
+    /// A sheet centred over its parent's content (macOS alerts under ADR-0051) instead of
+    /// hanging from the title bar.
+    internal var _sheetCentersOverParent = false
+    /// A sheet whose parent's content dims while it is up (macOS alerts under ADR-0051).
+    internal var _sheetDimsParent = false
+    /// The view dimming this window's content for a sheet.
+    private var _sheetDimView: _NSSheetDimView? = nil
+    private func _dimForSheet(_ on: Bool) {
+        if on {
+            guard _sheetDimView == nil, let root = _contentView else { return }
+            let dim = _NSSheetDimView(frame: root.bounds)
+            dim.autoresizingMask = [.width, .height]
+            root.addSubview(dim, positioned: .above, relativeTo: nil)
+            _sheetDimView = dim
+        } else if let dim = _sheetDimView {
+            dim.removeFromSuperview()
+            _sheetDimView = nil
+        }
+    }
     /// The slide in or out running on this sheet.
     /// While a sheet slides it shows no shadow: on Win32 a borderless window's shadow is a
     /// WS_THICKFRAME frame (ADR-0016), and Windows never sizes such a window below its
@@ -1286,6 +1305,7 @@ import CoreText
     private func _presentSheet(_ sheet: NSWindow) {
         post(NSWindow.willBeginSheetNotification)
         sheet._sheetIsPresented = true
+        if sheet._sheetDimsParent { _dimForSheet(true) }
         sheet._sheetSlide?.finish()
         sheet._reopenIfNeeded()
         sheet._attachAsSheet(to: self)
@@ -1329,6 +1349,11 @@ import CoreText
         // reported a frame, until nothing but the toolbar was left).
         let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
+        if sheet._sheetCentersOverParent {
+            let local = NSPoint(x: ((layout.width - size.width) / 2).rounded(), y: (layout.minY + (layout.height - size.height) / 2).rounded())
+            let origin = convertPoint(toScreen: local)
+            return NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height)
+        }
         var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
         let origin = convertPoint(toScreen: rect.origin)
@@ -1439,6 +1464,7 @@ import CoreText
         }
         _toolbar?.validateVisibleItems()
         _updateTextInputContext()
+        _redisplayControlsForKeyChange()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
         _trackingActivityDidChange()
@@ -1884,6 +1910,7 @@ import CoreText
         let completion = _sheetCompletions.removeValue(forKey: ObjectIdentifier(sheetWindow))
         if sheetWindow._sheetIsPresented {
             sheetWindow._sheetIsPresented = false
+            if sheetWindow._sheetDimsParent { _dimForSheet(false) }
             sheetWindow._sheetSlide?.finish()
             if sheetWindow._isKey { sheetWindow.resignKey() }
             if sheetWindow._sheetAnimates, sheetWindow.isVisible {
@@ -2426,9 +2453,17 @@ import CoreText
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
         if let current = NSTextInputContext.current, (current._liveClient as? NSView)?.window === self { current.deactivate() }
+        _redisplayControlsForKeyChange()
         post(NSWindow.didResignKeyNotification)
         _trackingActivityDidChange()
         delegate?.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: self))
+    }
+    /// Under the macOS control look (ADR-0051) the accent colours grey out with the window,
+    /// so every view repaints when the window gains or loses the keyboard.
+    private func _redisplayControlsForKeyChange() {
+        guard _NSControlStyle.macControls, let root = _contentView else { return }
+        func mark(_ v: NSView) { v.needsDisplay = true; for s in v.subviews { mark(s) } }
+        mark(root)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignmain()
     @MainActor open func resignMain() {
@@ -3283,4 +3318,15 @@ extension NSWindow: PlatformAccessibilityProvider {
 /// A flag an animation's timer sets for the nested loop waiting on it.
 @MainActor internal final class _NSAnimationDone {
     var value = false
+}
+
+/// The translucent black over a window's content while a macOS-style alert sheet is up
+/// (ADR-0051). It takes no events: the sheet blocks the window anyway.
+@MainActor final class _NSSheetDimView: NSView {
+    override var isOpaque: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(white: 0, alpha: effectiveAppearance.isDark ? 0.3 : 0.15).setFill()
+        NSBezierPath.fill(dirtyRect)
+    }
 }

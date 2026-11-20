@@ -57,7 +57,8 @@ import CoreText
     }
 
     @MainActor open override func draw(_ dirtyRect: NSRect) {
-        drawKnobSlot(in: rect(for: .knobSlot), highlight: _isHighlighted)
+        // An overlay scroller (ADR-0051) is its knob alone over the content: no slot.
+        if _scrollerStyle != .overlay { drawKnobSlot(in: rect(for: .knobSlot), highlight: _isHighlighted) }
         if _knobProportion < 1 { drawKnob() }
     }
 
@@ -132,6 +133,15 @@ import CoreText
     @MainActor open func drawKnob() {
         let knob = rect(for: .knob)
         guard !knob.isEmpty else { return }
+        if _scrollerStyle == .overlay {
+            // A translucent pill, 7 points wide, at the trailing edge of its strip.
+            let k = _isHorizontal ? NSRect(x: knob.minX, y: knob.maxY - 9, width: knob.width, height: 7)
+                                  : NSRect(x: knob.maxX - 9, y: knob.minY, width: 7, height: knob.height)
+            let dark = effectiveAppearance.isDark
+            NSColor(white: dark ? 1 : 0, alpha: _isHighlighted ? 0.6 : 0.4).setFill()
+            NSBezierPath(roundedRect: k, xRadius: 3.5, yRadius: 3.5).fill()
+            return
+        }
         let radius = min(knob.width, knob.height) / 2
         (_isHighlighted ? NSColor.selectedKnobColor : NSColor.knobColor).withAlphaComponent(0.85).setFill()
         NSBezierPath(roundedRect: knob.insetBy(dx: 1, dy: 1), xRadius: radius, yRadius: radius).fill()
@@ -171,7 +181,9 @@ import CoreText
         set { _knobStyle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/preferredscrollerstyle
-    @MainActor class public var preferredScrollerStyle: NSScroller.Style { NSScroller.Style(rawValue: 1)! }
+    /// Legacy by default (the port's Windows-flavoured look); overlay under the macOS
+    /// control look (`APPKITWIN_MAC_CONTROLS=1`, ADR-0051).
+    @MainActor class public var preferredScrollerStyle: NSScroller.Style { _NSControlStyle.macControls ? .overlay : .legacy }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/preferredscrollerstyledidchangenotification
     static public var preferredScrollerStyleDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSPreferredScrollerStyleDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/rect(for:)

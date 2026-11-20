@@ -311,8 +311,21 @@ import CoreText
         let chevronColor: NSColor
         if _pullsDown {
             chevronColor = _isHighlighted && _isBordered ? .white : (_isEnabled ? .labelColor : .disabledControlTextColor)
+        } else if !_isBordered {
+            // A borderless pop-up (a SwiftUI picker in a grouped form row, ADR-0051): the title
+            // as plain text, and the chevrons in a small plain bezel, as macOS's forms show it.
+            let small = NSRect(x: box.midX - 8, y: box.midY - 8, width: 16, height: 16)
+            let bezel = NSBezierPath(roundedRect: small.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+            (_isEnabled ? NSColor.controlColor : NSColor.controlColor.withAlphaComponent(0.6)).setFill()
+            bezel.fill()
+            NSPopUpButtonCell._bezelBorderColor.setStroke()
+            bezel.lineWidth = 1
+            bezel.stroke()
+            chevronColor = _isEnabled ? .labelColor : .disabledControlTextColor
         } else {
-            (_isEnabled ? NSColor.controlAccentColor : NSColor.controlAccentColor.withAlphaComponent(0.4)).setFill()
+            // The accent end-cap; grey in an inactive window under the macOS control look.
+            let accent = _NSControlStyle.isActive(controlView) ? NSColor.controlAccentColor : _NSControlStyle.inactiveAccent
+            (_isEnabled ? accent : accent.withAlphaComponent(0.4)).setFill()
             NSBezierPath(roundedRect: box, xRadius: 4, yRadius: 4).fill()
             chevronColor = .white
         }
@@ -331,8 +344,9 @@ import CoreText
         if _pullsDown {
             chevron(centerY: box.midY, up: false)
         } else {
-            chevron(centerY: box.midY + (flipped ? -3.5 : 3.5), up: true)
-            chevron(centerY: box.midY + (flipped ? 3.5 : -3.5), up: false)
+            let gap: CGFloat = _isBordered ? 3.5 : 2.5
+            chevron(centerY: box.midY + (flipped ? -gap : gap), up: true)
+            chevron(centerY: box.midY + (flipped ? gap : -gap), up: false)
         }
     }
 }

@@ -1060,6 +1060,9 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     var _formatting: _TextFieldFormatting? = nil
     /// The field inside its own form row: the label is beside it, so only a prompt is the placeholder.
     var _inFormRow = false
+    /// The row is a grouped form's: the value is plain, trailing-aligned text at rest and
+    /// takes its bezel while editing, as macOS's Settings forms show it (ADR-0051).
+    var _groupedRow = false
     var placeholder: String { _inFormRow ? (prompt ?? "") : (prompt ?? title) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-8rujz
     ///
@@ -1105,11 +1108,11 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         // In a form the title is a label leading the field's row (unless labels are hidden).
         if !_inFormRow, node.environment._formContext != nil, !node.environment._labelsHidden, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true
+            var inner = self; inner._inFormRow = true; inner._groupedRow = node.environment._formContext == .grouped
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner)))])
         }
         if let f = _formatting { return _FormattedTextFieldPrimitive(placeholder: placeholder, formatting: f, axis: axis) }
-        return _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis)
+        return _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis, groupedRow: _groupedRow)
     }
 }
 
@@ -1186,9 +1189,11 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     var onCommit: () -> Void
     var placeholder: String
     var axis: Axis
+    /// A grouped form row's field: plain at rest, bezeled while editing.
+    var groupedRow: Bool
     init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void, axis: Axis = .horizontal,
-         field: NSTextField? = nil) {
-        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder; self.axis = axis
+         field: NSTextField? = nil, groupedRow: Bool = false) {
+        self.text = text; self.onCommit = onCommit; self.placeholder = placeholder; self.axis = axis; self.groupedRow = groupedRow
         let f = field ?? NSTextField(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
         f.placeholderString = placeholder
         f.stringValue = text.wrappedValue
@@ -1212,7 +1217,7 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _TextFieldPrimitive else { return }
-        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis
+        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis; groupedRow = o.groupedRow
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1233,9 +1238,15 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
+        let cell = control.cell as? NSTextFieldCell
         switch node.environment.textFieldStyle {
-        case .plain: control.isBezeled = false; control.drawsBackground = false
-        default: control.isBezeled = true; control.drawsBackground = true
+        case .plain: control.isBezeled = false; control.drawsBackground = false; cell?._bezelsWhileEditing = false
+        case .automatic where groupedRow:
+            // A grouped form's value: plain, trailing-aligned text until it is edited.
+            control.isBezeled = false; control.drawsBackground = false
+            cell?._bezelsWhileEditing = true
+            if control.alignment != .right { control.alignment = .right }
+        default: control.isBezeled = true; control.drawsBackground = true; cell?._bezelsWhileEditing = false
         }
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
@@ -1250,7 +1261,7 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     }
     /// The field's height beyond its lines: macOS's bezeled field is 21 pt for one 16 pt line
     /// of the system font and 37 pt for two.
-    private var chrome: CGFloat { control.isBezeled || control.isBordered ? 5 : 1 }
+    private var chrome: CGFloat { control.isBezeled || control.isBordered || (control.cell as? NSTextFieldCell)?._bezelsWhileEditing == true ? 5 : 1 }
     /// A vertical field's height: its wrapped lines (one at least), clamped to the ranged
     /// `lineLimit`, plus the bezel.
     private func verticalHeight(width: CGFloat, node: _ViewNode) -> CGFloat {
@@ -1290,7 +1301,9 @@ public struct Toggle<Label: View>: View, _PrimitiveView {
         let label = (label as? Text)?._string ?? ""
         // `labelsHidden()`: the control alone, still named for assistive technology.
         let title = env._labelsHidden ? "" : label
-        if env.toggleStyle == .switch {
+        // The automatic style is a switch in a grouped form (macOS 13+: Settings forms and
+        // inspectors), a checkbox elsewhere.
+        if env.toggleStyle == .switch || (env.toggleStyle == .automatic && env._formContext == .grouped) {
             let p = _SwitchTogglePrimitive(title: title, isOn: isOn)
             if title.isEmpty, !label.isEmpty { p.control.toggle.setAccessibilityLabel(label) }
             return p
@@ -1455,6 +1468,7 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         s.doubleValue = value.wrappedValue
         // The step is what an increment from assistive technology (and the arrow keys) moves.
         if let step, step > 0 { s.altIncrementValue = step }
+        _SliderPrimitive.applyTicks(to: s, step: step)
         if let label, !label.isEmpty { s.setAccessibilityLabel(label) }
         super.init(control: s)
         s.target = s
@@ -1475,8 +1489,12 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         super.update(from: other)
         guard let o = other as? _SliderPrimitive else { return }
         value = o.value
+        let rangeChanged = control.minValue != o.control.minValue || control.maxValue != o.control.maxValue
         control.minValue = o.control.minValue; control.maxValue = o.control.maxValue
-        if o.step != step { step = o.step; control.altIncrementValue = (step ?? 0) > 0 ? step! : -1 }
+        if o.step != step || rangeChanged {
+            step = o.step; control.altIncrementValue = (step ?? 0) > 0 ? step! : -1
+            _SliderPrimitive.applyTicks(to: control, step: step)
+        }
         if o.label != label {
             // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
             // above re-applies its own after the update.
@@ -1492,6 +1510,18 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         CGSize(width: max(20, proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160), height: 20)
+    }
+    /// A stepped slider shows a tick mark per step and snaps to them, as macOS draws it
+    /// (Sibyl's cooldown and text size sliders); past 256 steps the ticks are left out.
+    static func applyTicks(to s: NSSlider, step: Double?) {
+        var ticks = 0
+        if let step, step > 0 {
+            let span = s.maxValue - s.minValue
+            let count = (span / step).rounded()
+            if count >= 1, count <= 255, abs(count * step - span) < step * 0.001 { ticks = Int(count) + 1 }
+        }
+        if s.numberOfTickMarks != ticks { s.numberOfTickMarks = ticks }
+        if s.allowsTickMarkValuesOnly != (ticks > 0) { s.allowsTickMarkValuesOnly = ticks > 0 }
     }
 }
 

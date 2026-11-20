@@ -44,8 +44,13 @@ import CoreText
     }
 
     /// Builds the panel: message (bold), informative text, accessory view, buttons right-aligned.
+    /// Under the macOS control look (ADR-0051) the panel is macOS's narrow alert instead:
+    /// the application icon, the message and the informative text centred, the buttons
+    /// stacked at full width (the first on top, a destructive one in red), centred over
+    /// the parent window, which dims while the sheet is up.
     @MainActor private func _buildWindow() -> NSPanel {
         if let w = _window { return w }
+        if _NSControlStyle.macControls { return _buildMacWindow() }
         let width: CGFloat = 420
         let margin: CGFloat = 20
         let textWidth = width - 2 * margin
@@ -85,10 +90,83 @@ import CoreText
             b.tag = i
             b.target = self
             b.action = NSAlert.buttonAction
-            if i == 0 { b.keyEquivalent = "\r" }
-            if i == 1 && _buttons.count > 1 { b.keyEquivalent = "\u{1B}" }
+            // The first button answers Return unless it is destructive (a destructive
+            // action is never the default, as in SwiftUI's alerts on macOS).
+            if i == 0, b.keyEquivalent.isEmpty, !b.hasDestructiveAction { b.keyEquivalent = "\r" }
+            if i == 1 && _buttons.count > 1, b.keyEquivalent.isEmpty { b.keyEquivalent = "\u{1B}" }
             content.addSubview(b)
             x -= 12
+        }
+        setActionHandler(for: NSAlert.buttonAction) { [weak self] sender in
+            guard let self, let b = sender as? NSButton else { return }
+            self._finish(with: self._responseForButton(b.tag))
+        }
+        panel.center()
+        _window = panel
+        return panel
+    }
+
+    /// The icon the alert shows: `icon` when set, else the application's.
+    @MainActor private var _shownIcon: NSImage? { _icon ?? NSApplication.shared.applicationIconImage }
+
+    @MainActor private func _buildMacWindow() -> NSPanel {
+        let width: CGFloat = 260
+        let margin: CGFloat = 16
+        let textWidth = width - 2 * margin
+        let iconSize: CGFloat = 64
+        let message = NSTextField(wrappingLabelWithString: _messageText)
+        message.font = NSFont.boldSystemFont(ofSize: 13)
+        message.alignment = .center
+        message.preferredMaxLayoutWidth = textWidth
+        let info = NSTextField(wrappingLabelWithString: _informativeText)
+        info.font = NSFont.systemFont(ofSize: 11)
+        info.alignment = .center
+        info.preferredMaxLayoutWidth = textWidth
+        let msgSize = message.intrinsicContentSize, infoSize = _informativeText.isEmpty ? NSSize.zero : info.intrinsicContentSize
+        let accessoryHeight = _accessoryView?.frame.height ?? 0
+        if _buttons.isEmpty { _ = addButton(withTitle: "OK") }
+        let buttonHeight: CGFloat = 26, buttonGap: CGFloat = 8
+        let icon = _shownIcon
+        let iconHeight: CGFloat = icon == nil ? 0 : iconSize + 12
+        let height = margin + iconHeight + msgSize.height + 8 + infoSize.height + (accessoryHeight > 0 ? accessoryHeight + 12 : 0)
+            + 16 + CGFloat(_buttons.count) * buttonHeight + CGFloat(_buttons.count - 1) * buttonGap + margin
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+        panel.title = ""
+        panel._sheetCentersOverParent = true
+        panel._sheetDimsParent = true
+        let content = panel.contentView!
+        var y = height - margin
+        if let icon {
+            let view = NSImageView(frame: NSRect(x: (width - iconSize) / 2, y: y - iconSize, width: iconSize, height: iconSize))
+            view.image = icon
+            view.imageScaling = .scaleProportionallyUpOrDown
+            content.addSubview(view)
+            y -= iconHeight
+        }
+        y -= msgSize.height
+        message.frame = NSRect(x: margin, y: y, width: textWidth, height: msgSize.height)
+        content.addSubview(message)
+        if !_informativeText.isEmpty {
+            y -= 8 + infoSize.height
+            info.frame = NSRect(x: margin, y: y, width: textWidth, height: infoSize.height)
+            content.addSubview(info)
+        }
+        if let accessory = _accessoryView {
+            y -= 12 + accessoryHeight
+            accessory.frame.origin = NSPoint(x: margin, y: y)
+            content.addSubview(accessory)
+        }
+        y -= 16
+        for (i, b) in _buttons.enumerated() {
+            y -= buttonHeight
+            b.frame = NSRect(x: margin, y: y, width: textWidth, height: buttonHeight)
+            b.tag = i
+            b.target = self
+            b.action = NSAlert.buttonAction
+            if i == 0, b.keyEquivalent.isEmpty, !b.hasDestructiveAction { b.keyEquivalent = "\r" }
+            if i == 1 && _buttons.count > 1, b.keyEquivalent.isEmpty { b.keyEquivalent = "\u{1B}" }
+            content.addSubview(b)
+            y -= buttonGap
         }
         setActionHandler(for: NSAlert.buttonAction) { [weak self] sender in
             guard let self, let b = sender as? NSButton else { return }

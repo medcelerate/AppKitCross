@@ -30,7 +30,28 @@ import CoreText
     private var _horizontalLineScroll: CGFloat = 10
     private var _verticalPageScroll: CGFloat = 10
     private var _horizontalPageScroll: CGFloat = 10
-    private var _scrollerStyle: NSScroller.Style = .legacy
+    /// Legacy (a bar beside the content) by default; overlay under the macOS control look
+    /// (ADR-0051), where the scrollers float over the content and show while it scrolls.
+    private var _scrollerStyle: NSScroller.Style = NSScroller.preferredScrollerStyle
+    /// Overlay scrollers: shown by a scroll for a second, then hidden.
+    private var _overlayShown = false
+    private var _overlayTimer: _NSFrameTimer? = nil
+    private var _lastReflectedOrigin: NSPoint? = nil
+    private static let overlayHideDelay: TimeInterval = 1.0
+
+    /// Shows the overlay scrollers the content needs and arms the timer that hides them.
+    @MainActor private func _showOverlayScrollers() {
+        guard _scrollerStyle == .overlay else { return }
+        _overlayShown = true
+        _overlayTimer?.invalidate()
+        _overlayTimer = _NSFrameTimer(delay: NSScrollView.overlayHideDelay) { [weak self] in
+            guard let self else { return }
+            self._overlayShown = false
+            self._overlayTimer = nil
+            self.tile()
+        }
+        tile()
+    }
     private var _scrollerKnobStyle: NSScroller.KnobStyle = .default
     private var _contentInsets = NSEdgeInsets()
     private var _scrollerInsets = NSEdgeInsets()
@@ -347,7 +368,11 @@ import CoreText
             let value = range > 0 ? Double(min(max((b.minX - doc.minX) / range, 0), 1)) : 0
             if h.doubleValue != value { h.doubleValue = value }
         }
-        if _autohidesScrollers && !_tiling {
+        if _scrollerStyle == .overlay, !_tiling {
+            // A scroll shows the overlay scrollers for a moment.
+            if let last = _lastReflectedOrigin, last != b.origin { _showOverlayScrollers() }
+            _lastReflectedOrigin = b.origin
+        } else if _autohidesScrollers && !_tiling {
             let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
             let needV = _hasVerticalScroller && doc.height > bounds.height - 2 * _borderInset
             let needH = _hasHorizontalScroller && doc.width > bounds.width - 2 * _borderInset - (needV ? w : 0)
@@ -476,14 +501,21 @@ import CoreText
         let doc = _contentView.documentRect
         let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
         var showV = _hasVerticalScroller, showH = _hasHorizontalScroller
-        if _autohidesScrollers {
+        let overlay = _scrollerStyle == .overlay
+        if overlay {
+            // Overlay scrollers take no room from the content and show only while it
+            // scrolls (and only the ones the document needs).
+            showV = _overlayShown && _hasVerticalScroller && doc.height > content.height
+            showH = _overlayShown && _hasHorizontalScroller && doc.width > content.width
+        } else if _autohidesScrollers {
             // Two passes: showing one scroller can make the other necessary.
             showV = _hasVerticalScroller && doc.height > content.height
             showH = _hasHorizontalScroller && doc.width > content.width - (showV ? w : 0)
             showV = _hasVerticalScroller && doc.height > content.height - (showH ? w : 0)
         }
-        if showV { content.size.width = max(0, content.size.width - w) }
-        if showH {
+        let clipContent = content
+        if showV, !overlay { content.size.width = max(0, content.size.width - w) }
+        if showH, !overlay {
             content.size.height = max(0, content.size.height - w)
             if !isFlipped { content.origin.y += w }
         }
@@ -491,12 +523,14 @@ import CoreText
         // move), so a tile that changes nothing repaints nothing.
         if let v = _verticalScroller {
             if v.isHidden != !showV { v.isHidden = !showV }
-            let f = NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
+            let f = overlay ? NSRect(x: clipContent.maxX - w, y: clipContent.minY, width: w, height: clipContent.height - (showH ? w : 0))
+                            : NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
             if v.frame != f { v.frame = f }
         }
         if let h = _horizontalScroller {
             if h.isHidden != !showH { h.isHidden = !showH }
-            let f = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
+            let f = overlay ? NSRect(x: clipContent.minX, y: isFlipped ? clipContent.maxY - w : clipContent.minY, width: clipContent.width - (showV ? w : 0), height: w)
+                            : NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
             if h.frame != f { h.frame = f }
         }
         if _contentView.frame != content {

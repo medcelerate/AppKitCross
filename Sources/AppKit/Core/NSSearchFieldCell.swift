@@ -164,10 +164,14 @@ import CoreText
 
     private var _editorHasText: Bool { !((_searchField?.currentEditor() as? NSTextView)?.string.isEmpty ?? true) }
 
-    /// Draws the placeholder centred when nothing is typed and the field is not editing.
+    /// Draws the placeholder when nothing is typed and the field is not editing. Since
+    /// macOS 11 the placeholder sits at the leading edge after the search button whatever
+    /// `centersPlaceholder` says (the property is kept, and `false` still means leading);
+    /// the centred placeholder of earlier releases is drawn only under
+    /// `APPKITWIN_SEARCH_PLACEHOLDER=center`.
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         if _hidesText { return }
-        if stringValue.isEmpty, _centersPlaceholder, let p = placeholderString, !p.isEmpty {
+        if stringValue.isEmpty, _centersPlaceholder, NSSearchFieldCell._centersPlaceholderWhenAsked, let p = placeholderString, !p.isEmpty {
             var attrs = _attributes
             attrs[.foregroundColor] = NSColor.placeholderTextColor
             _drawText(p, attributes: attrs, in: _centeredTextRect(forBounds: cellFrame), alignment: .center, flipped: controlView.isFlipped)
@@ -175,6 +179,8 @@ import CoreText
         }
         super.drawInterior(withFrame: cellFrame, in: controlView)
     }
+
+    nonisolated(unsafe) private static let _centersPlaceholderWhenAsked = ProcessInfo.processInfo.environment["APPKITWIN_SEARCH_PLACEHOLDER"] == "center"
 
     private var _glyphColor: NSColor { _isEnabled ? .secondaryLabelColor : .disabledControlTextColor }
 

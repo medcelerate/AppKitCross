@@ -9,8 +9,11 @@ struct _PopUp: View, _PrimitiveView {
     typealias Body = Never
     let titles: [String]
     let selected: Int
+    /// False for a grouped form row's pop-up: the title as plain text, the chevrons in a
+    /// small bezel (ADR-0051).
+    var bordered = true
     let onSelect: (Int) -> Void
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _PopUpPrimitive(titles: titles, selected: selected, onSelect: onSelect) }
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _PopUpPrimitive(titles: titles, selected: selected, bordered: bordered, onSelect: onSelect) }
 }
 
 @MainActor
@@ -22,11 +25,12 @@ final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
     /// `update(from:)` has copied its values into the attached one, so the items are
     /// added only when the primitive attaches: a 400-item picker (every time zone) built
     /// into a throwaway button on each pass cost hundreds of invalidations a second.
-    init(titles: [String], selected: Int, onSelect: @escaping (Int) -> Void) {
+    init(titles: [String], selected: Int, bordered: Bool = true, onSelect: @escaping (Int) -> Void) {
         self.titles = titles
         self.selected = selected
         self.onSelect = onSelect
         let b = NSPopUpButton(frame: .zero, pullsDown: false)
+        b.isBordered = bordered
         super.init(control: b)
         b.target = b
         b.action = Selector(("swiftUIPopUpAction:"))
@@ -50,6 +54,7 @@ final class _PopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         guard let o = other as? _PopUpPrimitive else { return }
         onSelect = o.onSelect
         var changed = false
+        if control.isBordered != o.control.isBordered { control.isBordered = o.control.isBordered; changed = true }
         if o.titles != titles {
             titles = o.titles
             control.removeAllItems()

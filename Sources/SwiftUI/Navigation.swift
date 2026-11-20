@@ -447,6 +447,9 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
     }
     /// The picker inside its own form row: the row shows the label.
     var _inFormRow = false
+    /// The row is a grouped form's: the pop-up is borderless, its chevrons in a small
+    /// bezel, as macOS's Settings forms and inspectors show it (ADR-0051).
+    var _groupedRow = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         let env = node.environment
         let hidden = _inFormRow || env._labelsHidden
@@ -454,11 +457,11 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
         // radio groups and inline lists put it beside their first item (columns) or above
         // their options (grouped).
         if !hidden, env._formContext != nil, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true
+            var inner = self; inner._inFormRow = true; inner._groupedRow = env._formContext == .grouped
             let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
         }
-        return _PickerPrimitive(label: (label as? Text)?._string ?? "", showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content))
+        return _PickerPrimitive(label: (label as? Text)?._string ?? "", showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content), groupedRow: _groupedRow)
     }
 }
 
@@ -505,15 +508,17 @@ final class _PickerPrimitive: _Primitive {
     var showsLabel: Bool
     var selection: AnyBinding
     var contentBox: _AnyViewBox
-    init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox) {
-        self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content
+    /// A grouped form row's pop-up is borderless.
+    var groupedRow: Bool
+    init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox, groupedRow: Bool = false) {
+        self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content; self.groupedRow = groupedRow
         super.init()
     }
     override var isLayoutTransparent: Bool { true }
     override func attach(to node: _ViewNode) { super.attach(to: node); rebuild() }
     override func update(from other: _Primitive) {
         guard let o = other as? _PickerPrimitive else { return }
-        label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox
+        label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox; groupedRow = o.groupedRow
         rebuild()
     }
     private func rebuild() {
@@ -543,7 +548,7 @@ final class _PickerPrimitive: _Primitive {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
                 if !shownLabel.isEmpty { Text(shownLabel) }
-                _PopUp(titles: titles, selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
+                _PopUp(titles: titles, selected: index, bordered: !groupedRow) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
@@ -1064,6 +1069,8 @@ final class _AlertPrimitive: _Primitive {
         for b in alert.buttons {
             let button = ns.addButton(withTitle: b.title)
             if b.role == .cancel { button.keyEquivalent = "\u{1B}" }
+            // A destructive button: red title, never the default (macOS alerts).
+            if b.role == .destructive { button.hasDestructiveAction = true }
         }
         let buttons = alert.buttons
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in

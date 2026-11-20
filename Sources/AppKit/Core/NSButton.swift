@@ -193,12 +193,12 @@ import CoreText
     @MainActor open func getPeriodicDelay(_ delay: UnsafeMutablePointer<Float>, interval: UnsafeMutablePointer<Float>) { _buttonCell?.getPeriodicDelay(delay, interval: interval) }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/hasdestructiveaction
     @available(macOS 11.0, *)
-    /// Stored; no platform styles destructive buttons differently.
+    /// The title is drawn in the system red, and the bezel stays plain even for the
+    /// default button (macOS 11 alerts, a SwiftUI `Button` with the destructive role).
     @MainActor open var hasDestructiveAction: Bool {
-        get { _hasDestructiveAction }
-        set { _hasDestructiveAction = newValue }
+        get { _buttonCell?._hasDestructiveAction ?? false }
+        set { _buttonCell?._hasDestructiveAction = newValue; needsDisplay = true }
     }
-    private var _hasDestructiveAction = false
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/highlight(_:)
     @MainActor open func highlight(_ flag: Bool) { _cell?.isHighlighted = flag; needsDisplay = true }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbutton/image

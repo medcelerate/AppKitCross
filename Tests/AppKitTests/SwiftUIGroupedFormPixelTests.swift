@@ -40,9 +40,12 @@ final class SwiftUIGroupedFormPixelTests: XCTestCase, @unchecked Sendable {
             // not white; the card's interior, past the header, is the control background.
             let page = pixel(rep, Int(6 * scale), Int(6 * scale))
             // The card's interior: the first toggle's row, at its trailing padding (empty).
-            guard let toggle = _pixelTestViews(hosting).first(where: { $0 is NSButton }) else { return XCTFail("no toggle") }
+            // A grouped form's toggle is a switch row (ADR-0051).
+            guard let toggle = _pixelTestViews(hosting).first(where: { $0 is _SwiftUISwitchRow }) else { return XCTFail("no toggle") }
             let row = hosting.convert(toggle.bounds, from: toggle)
-            let cardX = hosting.bounds.width - 30, cardY = row.midY
+            // (The row is a switch row across the card: its middle is empty, between the
+            // label and the switch at the trailing edge.)
+            let cardX = row.midX, cardY = row.midY
             let card = pixel(rep, Int(cardX * scale), Int(cardY * scale))
             XCTAssertLessThan(page.r, 0.98, "the page is not white: \(page)")
             XCTAssertGreaterThan(page.r, 0.8, "the page is a light grey: \(page)")

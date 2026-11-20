@@ -228,7 +228,9 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             }
             // Grouped rows put a fixed control at the trailing edge.
             XCTAssertGreaterThan(frameIn(h, popup).maxX, 300)
-            XCTAssertNotNil(allViews(h).compactMap { $0 as? NSButton }.first { $0.title == "Enabled" }, "a toggle's title is on its checkbox")
+            // A grouped form's toggle is a switch (macOS 13+), its title the row's label.
+            guard let switchRow = allViews(h).compactMap({ $0 as? _SwiftUISwitchRow }).first else { return XCTFail("a toggle in a grouped form is a switch row") }
+            XCTAssertEqual(switchRow.label.stringValue, "Enabled", "a toggle's title labels its switch")
             w.close()
         }
     }
@@ -363,6 +365,7 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
                                                           ("Add to this show", "Footer four"), ("Start Free Trial", "Footer five")]
             for (row, footer) in pairs {
                 let rowView: NSView? = textView(doc, row) ?? allViews(doc).compactMap { $0 as? NSButton }.first { $0.title == row }
+                    ?? allViews(doc).compactMap { $0 as? NSTextField }.first { $0.stringValue == row }      // a switch row's label
                 guard let rowView, let f = frame(footer), let c = card(containing: docFrame(doc, rowView), in: doc) else { XCTFail("\(row)/\(footer) missing"); continue }
                 XCTAssertGreaterThanOrEqual(f.minY, c.maxY - 0.5, "\(footer) \(f) is below the card \(c) of \(row)")
                 XCTAssertFalse(cards(doc).contains { $0.insetBy(dx: 1, dy: 1).intersects(f) }, "\(footer) is inside no card")

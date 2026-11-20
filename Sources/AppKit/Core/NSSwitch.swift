@@ -117,7 +117,8 @@ import CoreText
         let dark = effectiveAppearance.isDark
         // Track: the accent colour blended in as the knob travels, over a grey track.
         let off: NSColor = dark ? NSColor(white: 1, alpha: 0.2) : NSColor(white: 0, alpha: 0.09)
-        let accent: NSColor = .controlAccentColor
+        // Grey in an inactive window under the macOS control look (ADR-0051).
+        let accent: NSColor = _NSControlStyle.isActive(self) ? .controlAccentColor : _NSControlStyle.inactiveAccent
         let track = NSBezierPath(roundedRect: t, xRadius: t.height / 2, yRadius: t.height / 2)
         (dark ? NSColor(white: 0.16, alpha: 1) : NSColor.white).setFill()
         track.fill()
