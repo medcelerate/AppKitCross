@@ -154,7 +154,27 @@ granularity rounds the glass-off cadence up too. `--interval 0` drives frames ba
 back and reports the gap between frame starts, which is the number to read for what the
 paint and the pump allow (host 2x release: 79 fps with glass, 237 without).
 
-**The GPU stage on Windows: scope.** At 18 ms a scroll frame with glass cannot hold 60 Hz
+**The PC baseline** (release, 1x, `Examples/Glass --autoscroll 10`, the scroll by copy
+engaged, 106 copies in 5 s), the numbers this ADR's software pass ships with:
+
+| | paint mean | fps at 16.7 ms | fps free-running |
+|---|---|---|---|
+| glass on | 21.2 ms | 27 | 37 |
+| glass off | 6.5 ms | 45 | 60 (11 ms mean, 61 ms max) |
+
+Glass costs about 15 ms a scroll frame there: the band's crop and blur, and nine lenses
+each re-sampled and re-shaded because the content under every one of them moved (the
+demo puts all of them over the scroll view). Every frame still paints seven rectangles
+whose union is the whole content: the strip the scroll exposed, each view over the clip
+view twice (where it was and where the copy carried its pixels, which is what a copy
+under an overlay costs), the band and the rows the base marks for its own lists. The
+Win32 backing keeps one dirty rectangle, so the union is what the platform repaints even
+though the port draws the parts. Shrinking that union is the follow-up on the live-list
+repaint branch after this merges: overlays the copy could skip, and lenses whose backdrop
+did not move not redrawing. The band already re-samples its own rectangle alone (a crop of
+the sample-scale frame), not the content.
+
+**The GPU stage on Windows: scope.** At 21 ms a scroll frame with glass cannot hold 60 Hz
 in software on the PC, so the seam is the next step there, not an option. What it takes:
 
 1. The frame beneath the glass rendered into a Direct2D bitmap render target (an
