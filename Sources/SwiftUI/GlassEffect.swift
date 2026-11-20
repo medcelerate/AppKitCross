@@ -1,4 +1,4 @@
-// Liquid Glass for SwiftUI (ADR-0051): `glassEffect`, `Glass`, `GlassEffectContainer`,
+// Liquid Glass for SwiftUI (ADR-0052): `glassEffect`, `Glass`, `GlassEffectContainer`,
 // `glassEffectID` and the glass button styles of the macOS 26 SDK. With the Liquid Glass
 // switch on (`APPKITWIN_LIQUID_GLASS=1`, `AppKitCrossLiquidGlass`) a glass effect is an
 // `NSGlassEffectView` behind the view and a glass button draws on a glass capsule; off,

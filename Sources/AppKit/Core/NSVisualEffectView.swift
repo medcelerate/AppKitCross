@@ -1,11 +1,11 @@
 // NSVisualEffectView (hand-written; seeded from the generated stub, see tools/apigen)
 // A translucent material. Blending behind the window asks the window for a system
 // backdrop (Mica/Acrylic on Windows 11); within the window it is a tinted fill, or with
-// Liquid Glass on (ADR-0051) the glass material over the content beneath.
+// Liquid Glass on (ADR-0052) the glass material over the content beneath.
 
 import Foundation
 
-// MARK: - Liquid Glass switch (ADR-0051)
+// MARK: - Liquid Glass switch (ADR-0052)
 
 /// Whether the port draws macOS 26's Liquid Glass: `APPKITWIN_LIQUID_GLASS=1` in the
 /// environment, else the `AppKitCrossLiquidGlass` Info.plist key. Off, every surface
@@ -167,7 +167,7 @@ public enum _MaterialBackground {
     open override func draw(_ dirtyRect: NSRect) {
         let active = _state == .active || (_state == .followsWindowActiveState && (window?.isKeyWindow ?? true))
         if _LiquidGlass.isEnabled, _blendingMode == .withinWindow, _maskImage == nil {
-            // Liquid Glass: the material over the content beneath (ADR-0051). HUD and dark
+            // Liquid Glass: the material over the content beneath (ADR-0052). HUD and dark
             // materials keep their dark veil; a selection its colour.
             var spec = _GlassSpec.material(in: self)
             switch _material {

@@ -1143,7 +1143,7 @@ open class CALayer: NSObject, CAMediaTiming {
 
     // MARK: Compositing
 
-    /// The layer a glass sample stops at (AppKit's Liquid Glass pass, ADR-0051): composing
+    /// The layer a glass sample stops at (AppKit's Liquid Glass pass, ADR-0052): composing
     /// the tree halts on reaching it, so the sample holds only what lies beneath the glass,
     /// and the layer being drawn is never composed again from inside its own drawing.
     public static var _composeStopLayer: CALayer?

@@ -1013,7 +1013,7 @@ final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
         case .plain, .borderless, .link: control.isBordered = false
         default: control.isBordered = true
         }
-        // Glass styles (ADR-0051): the glass capsule with Liquid Glass on, the bordered
+        // Glass styles (ADR-0052): the glass capsule with Liquid Glass on, the bordered
         // look otherwise; a prominent glass button titles in white on the accent.
         if let g = control as? _GlassButton {
             let glass: Bool?

@@ -1,5 +1,5 @@
 // NSGlassEffectContainerView (hand-written; seeded from the generated stub, see tools/apigen)
-// Liquid Glass (ADR-0051): a container whose glass views draw as one group. The port keeps
+// Liquid Glass (ADR-0052): a container whose glass views draw as one group. The port keeps
 // the API and the spacing; the glass views inside draw their own surfaces (the morphing
 // bridge macOS animates between neighbours closer than `spacing` is not drawn).
 

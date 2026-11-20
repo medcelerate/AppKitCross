@@ -92,7 +92,7 @@ final class _SplitPaneView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
     /// The navigation split view's sidebar column: with Liquid Glass on it draws the
-    /// sidebar material under its list (ADR-0051); off, nothing, as before.
+    /// sidebar material under its list (ADR-0052); off, nothing, as before.
     var isSidebar = false { didSet { if isSidebar != oldValue { needsDisplay = true } } }
     override func draw(_ dirtyRect: NSRect) {
         guard isSidebar else { return }

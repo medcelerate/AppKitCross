@@ -322,7 +322,7 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Software compositing instead of DirectComposition on Windows. |
 | `APPKITWIN_LEGACY_TEXT=1` | The pre-CoreText text path on Windows. |
 | `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12 (Windows) or Vulkan (Linux). |
-| `APPKITWIN_LIQUID_GLASS=1` | macOS 26's Liquid Glass (ADR-0051): the toolbar band and items, the sidebar column, `NSGlassEffectView`, within-window `NSVisualEffectView`, SwiftUI `glassEffect` and the `.glass`/`.glassProminent` button styles draw the blurred, veiled material over the content beneath. The `AppKitCrossLiquidGlass` Info.plist key (Boolean) does the same for a shipped app. Off (the default), every surface draws as it did before the switch existed. |
+| `APPKITWIN_LIQUID_GLASS=1` | macOS 26's Liquid Glass (ADR-0052): the toolbar band and items, the sidebar column, `NSGlassEffectView`, within-window `NSVisualEffectView`, SwiftUI `glassEffect` and the `.glass`/`.glassProminent` button styles draw the blurred, veiled material over the content beneath. The `AppKitCrossLiquidGlass` Info.plist key (Boolean) does the same for a shipped app. Off (the default), every surface draws as it did before the switch existed. |
 | `APPKITWIN_VULKAN_DEBUG=1` | Enables `VK_LAYER_KHRONOS_validation` on the Vulkan device when installed, with its messages on stderr. |
 | `APPKITWIN_VULKAN_DEVICE=n` | Picks Vulkan physical device `n` instead of the best one. |
 | `APPKITWIN_DXGI_DEBUG=1` | Reports live DXGI objects at exit. |

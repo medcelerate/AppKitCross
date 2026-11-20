@@ -1,5 +1,5 @@
 // NSGlassEffectView (hand-written; seeded from the generated stub, see tools/apigen)
-// Liquid Glass (ADR-0051): a lens over the content beneath it. With the Liquid Glass
+// Liquid Glass (ADR-0052): a lens over the content beneath it. With the Liquid Glass
 // switch on, the view samples what the window drew under its rectangle at a quarter of
 // the backing scale, blurs it through the backend's material pass, and draws the result
 // tinted with the rim highlight and shadow macOS 26 gives glass; the sample is cached and

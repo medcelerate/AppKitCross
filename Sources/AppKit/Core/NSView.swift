@@ -501,7 +501,7 @@ import CoreText
     internal func _displayHierarchy(in ctx: CGContext, dirtyRect: NSRect) {
         guard !_isHidden, _alphaValue > 0 else { return }
         guard _frame.intersects(dirtyRect) else { return }
-        // A glass pass samples what lies beneath its surface: the paint stops there (ADR-0051).
+        // A glass pass samples what lies beneath its surface: the paint stops there (ADR-0052).
         if let stop = NSView._glassStop { if CALayer._composeStopped { return }; if stop === self { CALayer._composeStopped = true; return } }
         if let l = _layer, _isLayerRoot {
             if let w = _window, w._hostsLayersNatively, w.contentView === self, !NSView._cachingDisplay {

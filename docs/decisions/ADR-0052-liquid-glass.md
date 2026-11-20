@@ -1,4 +1,4 @@
-# ADR-0051: Opt-in Liquid Glass
+# ADR-0052: Opt-in Liquid Glass
 
 Date: 2026-11-20. Status: accepted.
 

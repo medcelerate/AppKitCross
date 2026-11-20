@@ -1,4 +1,4 @@
-// Material backend (ADR-0051, Liquid Glass): the pixel work behind an in-window glass
+// Material backend (ADR-0052, Liquid Glass): the pixel work behind an in-window glass
 // pass. Core samples what the window drew beneath a glass rectangle into an offscreen
 // surface (`PlatformImageBackend.makeOffscreen`), hands the pixels here to be blurred, and
 // draws the result tinted under the glass shape. Every backend ships the software blur;

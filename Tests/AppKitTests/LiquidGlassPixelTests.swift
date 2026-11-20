@@ -1,4 +1,4 @@
-// Liquid Glass (ADR-0051), checked in pixels: a glass surface shows the content beneath it
+// Liquid Glass (ADR-0052), checked in pixels: a glass surface shows the content beneath it
 // blurred and veiled (no solid fill), carries a rim highlight, dims when the window is
 // inactive, and with the switch off every surface draws exactly as before.
 
