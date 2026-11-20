@@ -26,10 +26,14 @@ its own API: you never write AppKitCross-specific code to use it.
 | `OSLog`, `Network`, `CoreMIDI` | the port (ADR-0050) | Apple's |
 
 Observation-driven SwiftUI works (`@Observable` models, `@Environment(Model.self)`,
-`.environment(model)`, `@Bindable`; ADR-0050), as does `ObservableObject`. Not available
+`.environment(model)`, `@Bindable`; ADR-0050), as does `ObservableObject`, and an `App`'s
+own `@State`/model reads re-render its windows, `.commands` and `Settings`. Not available
 anywhere: SwiftData, Core Data, WebKit, MapKit, AVKit, nibs and storyboards
 (code-built UI only), the Objective-C runtime (`@objc`, `#selector`, `perform(_:)` with
-dynamic dispatch, `import ObjectiveC`), SF Symbols glyphs (`Image(systemName:)` draws nothing).
+dynamic dispatch, `import ObjectiveC`). SF Symbols: `Image(systemName:)` draws from a
+catalogue of about 120 common names (plus `.circle`/`.fill`/`.slash` variants); an unknown
+name draws nothing, as on macOS, so check the names an app uses against
+`Sources/AppKit/Core/NSImage+SystemImages.swift`.
 
 Three kinds of "missing", and how each shows up:
 
