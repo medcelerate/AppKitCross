@@ -824,15 +824,23 @@ final class TextKit2Tests: XCTestCase, @unchecked Sendable {
                 for _ in 0..<400 where tv._extras.spellCheckedCharacters < (big as NSString).length { RunLoop.main.run(until: Date().addingTimeInterval(0.005)) }
                 tv._extras.spellCheckedCharacters = 0
                 let layouts = tv.textLayoutManager?._fragmentLayoutCount ?? 0
+                let typeset = tv._layoutManager._typesetParagraphCount
+                let start = Date()
                 tv.insertNewline(nil)
                 tv.insertText("ok")
+                w.display()
+                let elapsed = Date().timeIntervalSince(start) * 1000
                 RunLoop.main.run(until: Date().addingTimeInterval(0.05))
                 w.contentView?.layoutSubtreeIfNeeded()
                 w.display()
                 XCTAssertLessThan(tv._extras.spellCheckedCharacters, 200, "textKit2 \(textKit2): typing checks the edited paragraph only")
                 if let tlm = tv.textLayoutManager {
                     XCTAssertLessThan(tlm._fragmentLayoutCount - layouts, 80, "only the visible fragments are laid out again")
+                } else {
+                    // TextKit 1 typesets the edited paragraphs and moves the rest.
+                    XCTAssertLessThan(tv._layoutManager._typesetParagraphCount - typeset, 10, "only the edited paragraphs are typeset again")
                 }
+                print("textKit2 \(textKit2): Return and \"ok\" at 3000 lines, laid out and drawn: \(String(format: "%.1f", elapsed)) ms")
             }
         }
     }

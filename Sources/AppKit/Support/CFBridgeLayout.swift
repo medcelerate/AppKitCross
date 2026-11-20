@@ -20,3 +20,20 @@
 /// A CF info word with a non-zero type ID that no CF class has (the last table slot).
 let _swiftObjectCFInfo: UInt64 = 0x3FF << 8
 #endif
+
+#if !canImport(Darwin)
+/// The AppKit classes that start with `_swiftObjectCFInfo`: CF compares and hashes them
+/// itself (through Swift), so NSTextStorage stores them as they are. Boxing one hides it
+/// behind a `__SwiftValue` whose first word is a heap address, which brings the
+/// intermittent trap back (PR 91: a copy of a text storage halted in Foundation one run
+/// in five on Windows).
+internal protocol _CFBridgedLayout: AnyObject {}
+extension NSColor: _CFBridgedLayout {}
+extension NSFont: _CFBridgedLayout {}
+extension NSParagraphStyle: _CFBridgedLayout {}
+extension NSTextAttachment: _CFBridgedLayout {}
+extension NSTextTab: _CFBridgedLayout {}
+extension NSTextList: _CFBridgedLayout {}
+extension NSTextBlock: _CFBridgedLayout {}
+extension NSCursor: _CFBridgedLayout {}
+#endif

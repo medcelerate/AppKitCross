@@ -109,7 +109,7 @@ import CoreText
         _storageReplace(r, with: text)
         _selectedRange = NSRange(location: r.location + text.utf16.count, length: 0)
         _markedRange = nil
-        _invalidateLayout()
+        _invalidateLayoutAfterEdit()
         if notify { _noteDidChange() }
         _scrollSelectionIntoView()
         needsDisplay = true
@@ -146,6 +146,9 @@ import CoreText
     }
 
     internal func _invalidateLayout() { _lines = nil }
+    /// The text was edited. NSText lays its lines out again; NSTextView's layout managers
+    /// hear the edit from the text storage and lay out only the paragraphs it touched.
+    internal func _invalidateLayoutAfterEdit() { _invalidateLayout() }
 
     internal func _width(_ r: NSRange) -> CGFloat {
         let s = _substring(r)
