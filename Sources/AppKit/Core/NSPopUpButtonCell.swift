@@ -330,12 +330,14 @@ import CoreText
             chevronColor = .white
         }
         chevronColor.setStroke()
+        // The small bezel of a borderless pop-up takes smaller chevrons, further apart.
+        let half: CGFloat = _isBordered || _pullsDown ? 3.5 : 2.5, rise: CGFloat = _isBordered || _pullsDown ? 2.5 : 1.5
         func chevron(centerY: CGFloat, up: Bool) {
             let p = NSBezierPath()
-            let dy: CGFloat = (up != flipped) ? -2.5 : 2.5
-            p.move(to: NSPoint(x: box.midX - 3.5, y: centerY + dy))
+            let dy: CGFloat = (up != flipped) ? -rise : rise
+            p.move(to: NSPoint(x: box.midX - half, y: centerY + dy))
             p.line(to: NSPoint(x: box.midX, y: centerY - dy))
-            p.line(to: NSPoint(x: box.midX + 3.5, y: centerY + dy))
+            p.line(to: NSPoint(x: box.midX + half, y: centerY + dy))
             p.lineWidth = 1.5
             p.lineCapStyle = .round
             p.lineJoinStyle = .round
@@ -344,7 +346,7 @@ import CoreText
         if _pullsDown {
             chevron(centerY: box.midY, up: false)
         } else {
-            let gap: CGFloat = _isBordered ? 3.5 : 2.5
+            let gap: CGFloat = _isBordered ? 3.5 : 3
             chevron(centerY: box.midY + (flipped ? -gap : gap), up: true)
             chevron(centerY: box.midY + (flipped ? gap : -gap), up: false)
         }
