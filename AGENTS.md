@@ -265,6 +265,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_TRACE=1` | every invalidation, SwiftUI node update (`setNeedsUpdate <View>`) and layout pass: repaint loops, a busy idle CPU |
 | `APPKITWIN_TRACE_FRAMES=1` | what each frame costs (solve, layout, draw, tick lateness) |
 | `APPKITWIN_TRACE_TEXTINPUT=1` | every input method step (`[textinput] ...`): composition that does not reach a text view, a candidate window in the wrong place |
+| `APPKITWIN_TRACE_SCROLLERS=1` | every overlay scroller step (`[scrollers] overlay shown/fading/hidden ...`, with the scroll view's document, its origin and the scroller's alpha and frame): a pill that never appears or never goes away under `APPKITWIN_MAC_CONTROLS=1` |
 | `APPKITWIN_INFO_PLIST=<path>` | the Info.plist the app reads when the executable has none beside it (document types, `CFBundleName`, UTIs) |
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
 | `APPKITWIN_MAC_CONTROLS=1` | controls drawn as macOS draws them (shaded push buttons, inset text-field bezels and the soft focus ring, tick combs and pill knobs on sliders, overlay scrollers, narrow centred alerts with the icon and stacked buttons over a dimmed window, accents that grey out in an inactive window); the flatter default look otherwise. `AppKitCrossMacControls` = YES in the Info.plist ships it with the app (ADR-0051) |

@@ -417,6 +417,158 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The overlay scrollers show on the first scroll of a fresh window, paint above the
+    /// content, stay a second, fade over a quarter of a second and hide: the composite of
+    /// the whole scroll view is sampled at the pill as the frame clock advances.
+    func testOverlayScrollerShowsOnTheFirstScrollThenFadesAndHides() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            withLook(mac: true) {
+                let window = makeWindow(NSSize(width: 200, height: 100), dark: false)
+                defer { window.close() }
+                let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+                scroll.hasVerticalScroller = true
+                scroll.drawsBackground = true
+                scroll.backgroundColor = .white
+                let doc = NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 1000))
+                scroll.documentView = doc
+                window.contentView?.addSubview(scroll)
+                window.makeKeyAndOrderFront(nil)
+                scroll.tile()
+                guard let scroller = scroll.verticalScroller else { return XCTFail("no scroller") }
+                XCTAssertTrue(scroller.isHidden, "hidden at rest")
+                // One wheel notch on the fresh window.
+                let wheel = NSEvent._scrollEvent(location: NSPoint(x: 100, y: 50), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, deltaX: 0, deltaY: 3, precise: false)
+                scroll.scrollWheel(with: wheel)
+                XCTAssertTrue(scroll._overlayScrollersShown, "the first scroll shows the overlay scrollers")
+                XCTAssertFalse(scroller.isHidden)
+                XCTAssertEqual(scroller.alphaValue, 1)
+                // The pill, in the scroll view's composite: the darkest pixel down the knob's
+                // centre column (the knob sits wherever the scroll put it).
+                let knob = scroll.convert(scroller.rect(for: .knob), from: scroller)
+                let column = knob.maxX - 5.5
+                @MainActor func darkest(_ rep: NSBitmapImageRep, scale: CGFloat) -> RGB {
+                    var best: RGB = (1, 1, 1)
+                    for y in stride(from: 0.5, to: scroll.bounds.height, by: 1) {
+                        let p = pixel(rep, column, y, scale: scale)
+                        if lum(p) < lum(best) { best = p }
+                    }
+                    return best
+                }
+                guard let (rep, scale) = render(scroll) else { return XCTFail("no bitmap") }
+                let shown = darkest(rep, scale: scale)
+                XCTAssertLessThan(lum(shown), 0.8, "the pill paints above the content: \(fmt(shown))")
+                // Half a second on: still fully shown.
+                scroll._advanceOverlayClock(by: 0.5)
+                XCTAssertTrue(scroll._overlayScrollersShown)
+                XCTAssertEqual(scroller.alphaValue, 1)
+                // Past the second: fading, part way through.
+                scroll._advanceOverlayClock(by: 0.6)
+                for _ in 0..<7 { scroll._advanceOverlayClock(by: 1.0 / 60.0) }
+                XCTAssertTrue(scroll._overlayScrollersShown, "still shown while fading")
+                XCTAssertFalse(scroller.isHidden)
+                XCTAssertLessThan(scroller.alphaValue, 0.7, "fading: alpha \(scroller.alphaValue)")
+                XCTAssertGreaterThan(scroller.alphaValue, 0.3, "fading: alpha \(scroller.alphaValue)")
+                guard let (rep2, _) = render(scroll) else { return XCTFail("no bitmap") }
+                let fading = darkest(rep2, scale: scale)
+                XCTAssertGreaterThan(lum(fading), lum(shown) + 0.05, "a fading pill is lighter: \(fmt(fading)) vs \(fmt(shown))")
+                // A scroll during the fade brings them straight back.
+                scroll.scrollWheel(with: wheel)
+                XCTAssertEqual(scroller.alphaValue, 1, "a scroll during the fade restores the pill")
+                // Through the whole fade: hidden, alpha reset for the next showing.
+                scroll._advanceOverlayClock(by: 1.0)
+                for _ in 0..<20 { scroll._advanceOverlayClock(by: 1.0 / 60.0) }
+                XCTAssertFalse(scroll._overlayScrollersShown, "hidden after the fade")
+                XCTAssertTrue(scroller.isHidden)
+                XCTAssertEqual(scroller.alphaValue, 1)
+                guard let (rep3, _) = render(scroll) else { return XCTFail("no bitmap") }
+                let gone = darkest(rep3, scale: scale)
+                XCTAssertGreaterThan(lum(gone), 0.97, "the content shows where the pill was: \(fmt(gone))")
+            }
+        }
+    }
+
+    /// An empty field being edited still shows its placeholder (a find bar opens with its
+    /// search field focused and empty): the composite with a placeholder differs from the
+    /// same editing field without one, under both looks.
+    func testPlaceholderShowsWhileAnEmptyFieldIsEdited() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            for mac in [false, true] {
+                withLook(mac: mac) {
+                    @MainActor func editingField(_ placeholder: String?, search: Bool) -> NSBitmapImageRep? {
+                        let window = makeWindow(NSSize(width: 200, height: 60), dark: false)
+                        defer { window.close() }
+                        let field: NSTextField = search ? NSSearchField(frame: NSRect(x: 10, y: 19, width: 180, height: 22)) : NSTextField(frame: NSRect(x: 10, y: 19, width: 180, height: 22))
+                        field.placeholderString = placeholder
+                        window.contentView?.addSubview(field)
+                        window.makeKeyAndOrderFront(nil)
+                        XCTAssertTrue(window.makeFirstResponder(field))
+                        XCTAssertNotNil(field.currentEditor(), "editing")
+                        XCTAssertEqual(field.currentEditor()?.string, "")
+                        return render(window.contentView!)?.rep
+                    }
+                    for search in [false, true] {
+                        let what = "\(mac ? "mac" : "default") \(search ? "search field" : "text field")"
+                        guard let with = editingField("Search", search: search), let without = editingField(nil, search: search),
+                              let a = with.tiffRepresentation, let b = without.tiffRepresentation else { return XCTFail("\(what): no bitmap") }
+                        XCTAssertNotEqual(a, b, "\(what): the placeholder is drawn under the empty editor")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Typing cost
+
+    /// A keystroke in a TextEdit-like window (a text view in a scroll view) costs the same
+    /// with the macOS look on: the look changes no per-keystroke drawing of a text view.
+    /// Printed for the PC checklist; asserted loosely (the host's load varies).
+    func testKeystrokeCostDoesNotGrowUnderTheMacLook() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            @MainActor func msPerKeystroke(mac: Bool) -> Double {
+                var ms = 0.0
+                withLook(mac: mac) {
+                    let window = makeWindow(NSSize(width: 600, height: 400), dark: false)
+                    defer { window.close() }
+                    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+                    scroll.hasVerticalScroller = true
+                    scroll.autohidesScrollers = true
+                    let tv = NSTextView(frame: NSRect(origin: .zero, size: scroll.contentSize))
+                    tv.isVerticallyResizable = true
+                    tv.autoresizingMask = [.width]
+                    tv.textContainer?.widthTracksTextView = true
+                    tv.isContinuousSpellCheckingEnabled = true
+                    tv.allowsUndo = true
+                    scroll.documentView = tv
+                    window.contentView = scroll
+                    window.makeKeyAndOrderFront(nil)
+                    _ = window.makeFirstResponder(tv)
+                    window.displayIfNeeded()
+                    let text = "The quick brown fox jumps over the lazy dog. "
+                    let chars = Array(repeating: text, count: 8).joined()
+                    let start = Date()
+                    for ch in chars {
+                        let s = String(ch)
+                        let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                 characters: s, charactersIgnoringModifiers: s, isARepeat: false, keyCode: 0)!
+                        window.sendEvent(e)
+                        CARuntime.tick()
+                        window.displayIfNeeded()
+                    }
+                    ms = Date().timeIntervalSince(start) * 1000 / Double(chars.count)
+                    XCTAssertEqual(tv.string, chars)
+                }
+                return ms
+            }
+            _ = msPerKeystroke(mac: false)        // warm the caches once
+            let off = msPerKeystroke(mac: false), on = msPerKeystroke(mac: true)
+            print("keystroke in a text view: default look \(String(format: "%.2f", off)) ms, mac look \(String(format: "%.2f", on)) ms")
+            XCTAssertLessThan(on, max(off * 1.5, off + 2), "the mac look does not slow typing: \(on) ms vs \(off) ms")
+        }
+    }
+
     // MARK: Inactive windows
 
     func testSwitchGreysInAnInactiveWindowOnlyUnderTheMacLook() throws {

@@ -170,7 +170,7 @@ import CoreText
     /// the centred placeholder of earlier releases is drawn only under
     /// `APPKITWIN_SEARCH_PLACEHOLDER=center`.
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        if _hidesText { return }
+        if _hidesText, !(stringValue.isEmpty && !_editorHasText) { return }
         if stringValue.isEmpty, _centersPlaceholder, NSSearchFieldCell._centersPlaceholderWhenAsked, let p = placeholderString, !p.isEmpty {
             var attrs = _attributes
             attrs[.foregroundColor] = NSColor.placeholderTextColor

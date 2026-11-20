@@ -352,7 +352,9 @@ open class NSTextFinder: NSObject, NSCoding {
 /// and a replace row (replace field, Replace, All) when replacing.
 @MainActor final class _NSFindBarView: NSView, NSTextFieldDelegate {
     private weak var finder: NSTextFinder?
-    let searchField = NSTextField(string: "")
+    /// A search field, as in macOS's find bar: rounded, with the search glyph and the
+    /// "Search" placeholder at its leading edge; the action is the whole string on Return.
+    let searchField = NSSearchField(string: "")
     let replaceField = NSTextField(string: "")
     private let options = NSPopUpButton(frame: .zero, pullsDown: true)
     private let status = NSTextField(labelWithString: "")
@@ -374,7 +376,7 @@ open class NSTextFinder: NSObject, NSCoding {
             options.lastItem?.tag = tag
         }
         searchField.delegate = self
-        searchField.placeholderString = "Find"
+        searchField.sendsWholeSearchString = true
         replaceField.delegate = self
         replaceField.placeholderString = "Replace"
         status.alignment = .right

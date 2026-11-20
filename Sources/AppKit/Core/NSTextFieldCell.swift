@@ -146,8 +146,14 @@ import CoreText
     /// NSTextField's `placeholderAttributedStrings` (macOS 26), longest first as given.
     internal var _placeholderCandidates: [NSAttributedString] = []
 
+    /// True while the field editor is up and holds no text (the cell's value may lag it by
+    /// a notification).
+    @MainActor internal var _editorIsEmpty: Bool { (_controlView as? NSTextField)?.currentEditor()?.string.isEmpty ?? true }
+
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        if _hidesText { return }
+        // The field editor shows the text while editing; the placeholder still shows under
+        // an empty editor, as on macOS (a find bar's field opens focused and empty).
+        if _hidesText, !(stringValue.isEmpty && _editorIsEmpty) { return }
         let rect = _textRect(forBounds: cellFrame)
         let flipped = controlView.isFlipped
         if stringValue.isEmpty {
