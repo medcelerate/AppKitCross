@@ -305,6 +305,63 @@ targets += [
     .testTarget(name: "ServiceManagementTests", dependencies: [serviceManagementModule], path: "Tests/ServiceManagementTests", swiftSettings: [.swiftLanguageMode(.v5)]),
 ]
 
+// OSLog, Network and CoreMIDI (ADR-0050): the three system frameworks Sibyl, the first
+// commercial app ported, imports beside AppKit. Built under Apple's names on Windows and
+// Linux (library products); on macOS apps use Apple's frameworks and the same sources build
+// as `OSLogPortable`, `NetworkPortable` and `CoreMIDIPortable` for the tests only (a module
+// named `Network` in the build directory would shadow Apple's for every macOS target).
+// `OSLog` writes to stderr (Windows: also OutputDebugString); `Network` is NWConnection/
+// NWListener/NWBrowser over BSD sockets and Winsock with a small mDNS responder and browser;
+// `CoreMIDI` is the output subset over WinMM (`CWinMIDI`) and the ALSA sequencer
+// (`CALSASeq`, dlopen'ed like `CALSA`).
+#if os(Windows)
+targets += [
+    .target(name: "CWinMIDI", path: "Sources/CWinMIDI", linkerSettings: [.linkedLibrary("winmm")]),
+    // Windows MIDI Services (MIDI 2.0, UMP) through C++/WinRT; compiles to the availability
+    // check alone without a Windows.Devices.Midi2 (or preview App SDK
+    // Microsoft.Windows.Devices.Midi2) projection on the include path, and WinMM is used.
+    // advapi32: RegGetValueW for the App SDK runtime's registry key (ADR-0050).
+    .target(name: "CWinMIDI2", path: "Sources/CWinMIDI2", linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32"), .linkedLibrary("advapi32")]),
+]
+let coreMIDIPlatformDependencies: [Target.Dependency] = ["CWinMIDI", "CWinMIDI2"]
+let networkLinkerSettings: [LinkerSetting] = [.linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi")]
+#elseif os(Linux)
+targets += [
+    .target(name: "CALSASeq", path: "Sources/CALSASeq", linkerSettings: [.linkedLibrary("dl")]),
+]
+let coreMIDIPlatformDependencies: [Target.Dependency] = ["CALSASeq"]
+let networkLinkerSettings: [LinkerSetting] = []
+#else
+let coreMIDIPlatformDependencies: [Target.Dependency] = []
+let networkLinkerSettings: [LinkerSetting] = []
+#endif
+#if os(Windows) || os(Linux)
+targets += [
+    .target(name: "OSLog", path: "Sources/OSLog", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "Network", path: "Sources/Network", swiftSettings: [.swiftLanguageMode(.v5)], linkerSettings: networkLinkerSettings),
+    .target(name: "CoreMIDI", dependencies: coreMIDIPlatformDependencies, path: "Sources/CoreMIDI", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+let systemFrameworkProducts: [Product] = [.library(name: "OSLog", targets: ["OSLog"]), .library(name: "Network", targets: ["Network"]), .library(name: "CoreMIDI", targets: ["CoreMIDI"])]
+let osLogModule: Target.Dependency = "OSLog"
+let networkModule: Target.Dependency = "Network"
+let coreMIDIModule: Target.Dependency = "CoreMIDI"
+#else
+targets += [
+    .target(name: "OSLogPortable", path: "Sources/OSLog", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "NetworkPortable", path: "Sources/Network", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .target(name: "CoreMIDIPortable", path: "Sources/CoreMIDI", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+let systemFrameworkProducts: [Product] = []
+let osLogModule: Target.Dependency = "OSLogPortable"
+let networkModule: Target.Dependency = "NetworkPortable"
+let coreMIDIModule: Target.Dependency = "CoreMIDIPortable"
+#endif
+targets += [
+    .testTarget(name: "OSLogTests", dependencies: [osLogModule], path: "Tests/OSLogTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .testTarget(name: "NetworkTests", dependencies: [networkModule], path: "Tests/NetworkTests", swiftSettings: [.swiftLanguageMode(.v5)]),
+    .testTarget(name: "CoreMIDITests", dependencies: [coreMIDIModule], path: "Tests/CoreMIDITests", swiftSettings: [.swiftLanguageMode(.v5)]),
+]
+
 // On macOS the tests import Apple's Combine; on Windows and Linux they need our target.
 #if os(Windows) || os(Linux)
 let combineProducts: [Product] = [.library(name: "Combine", targets: ["Combine"])]
@@ -426,7 +483,7 @@ let package = Package(
         .library(name: "MetalKit", targets: ["MetalKit"]),
         .library(name: "SwiftUI", targets: ["SwiftUI"]),
         .plugin(name: "AppBundle", targets: ["AppBundle"]),
-    ] + combineProducts + leafModuleProducts + avfAudioProducts + systemServiceProducts,
+    ] + combineProducts + leafModuleProducts + avfAudioProducts + systemServiceProducts + systemFrameworkProducts,
     targets: targets,
     cxxLanguageStandard: .cxx17
 )

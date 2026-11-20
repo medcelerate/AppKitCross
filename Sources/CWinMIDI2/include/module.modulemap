@@ -1,0 +1,7 @@
+module CWinMIDI2 {
+    umbrella header "cwinmidi2.h"
+    // The generated WinRT ABI header is the C++ shim's private input (windows.h and all);
+    // Swift sees only the C interface.
+    exclude header "midi2abi.h"
+    export *
+}

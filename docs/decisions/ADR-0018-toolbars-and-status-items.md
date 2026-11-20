@@ -42,6 +42,11 @@ same toolbar.
   (and `.automatic`, which resolves to unified for such windows and to expanded for the
   others) the item row shares the top 52 or 38 points with the standard buttons, starting
   after them; `.expanded` and `.preference` keep the 28-point title band above the row.
+  A SwiftUI `.toolbar` (`_SwiftUIToolbar`, `_automaticStyleIsUnified`) resolves
+  `.automatic` to unified on every window, as SwiftUI on macOS does: items from a
+  `Label` are image items drawn icon-only with the title as the tooltip, the navigation
+  title and subtitle lead the band, and under a system-drawn title bar the title-bar
+  accessories share that band instead of a strip of their own (ADR-0050, the Sibyl run).
   The band is not painted when `titlebarAppearsTransparent`, so the content shows through
   as it does under the buttons.
 - **Styles and modes.** `displayMode` picks icons, labels or both (`.default` is icon and

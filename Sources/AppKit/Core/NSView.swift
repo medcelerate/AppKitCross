@@ -73,7 +73,8 @@ import CoreText
     private var _postsFrameChangedNotifications = false
     private var _postsBoundsChangedNotifications = false
     private var _focusRingType: NSFocusRingType = .default
-    private var _layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy = .never
+    /// AppKit's default for a layer-backed view: its content redraws when it is resized.
+    private var _layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy = .duringViewResize
     private var _userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection?   // nil: inherited
     private var _frameRotation: CGFloat = 0
     private var _boundsRotation: CGFloat = 0
@@ -263,6 +264,8 @@ import CoreText
     /// Mirrors frame/bounds into the backing layer without animating.
     private func _syncLayerGeometry() {
         guard let l = _layer, !_layerIsHosted else { return }
+        let marks = _beginViewMarkedLayerChange()
+        defer { NSView._viewMarksLayerChange = marks }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         l.bounds = bounds
@@ -271,6 +274,37 @@ import CoreText
         let turn = CGAffineTransform(rotationAngle: _frameRotation * .pi / 180)
         if _frameRotation != 0 || l.affineTransform() != .identity { l.setAffineTransform(_frameRotation == 0 ? .identity : turn) }
         CATransaction.commit()
+    }
+
+    /// While true, a backing-layer change comes from the view itself (its frame, alpha or
+    /// hidden state), which marks what it covers in its superview already: the layer tree
+    /// does not repaint its root host as well (software compositing; a native host still
+    /// recommits). Only for an untransformed layer, whose frame is what it covers.
+    internal static var _viewMarksLayerChange: Bool {
+        get { CALayer._hostMarksChange }
+        set { CALayer._hostMarksChange = newValue }
+    }
+    /// Starts such a change; returns the previous state to restore.
+    private func _beginViewMarkedLayerChange() -> Bool {
+        let previous = NSView._viewMarksLayerChange
+        if _frameRotation == 0, _layer?.transform.isIdentity ?? false { NSView._viewMarksLayerChange = true }
+        return previous
+    }
+
+    /// A rect in this view's bounds as the window shows it. A layer `transform` set
+    /// directly (SwiftUI's offset, scale and rotation effects) moves what an ancestor
+    /// draws without moving its frame: under one, the rect goes through the layer tree.
+    internal func _dirtyRectInWindow(_ rect: NSRect) -> NSRect {
+        var v: NSView? = self
+        var transformed = false
+        while let cur = v, let l = cur._layer, !cur._layerIsHosted {
+            if cur._frameRotation == 0, !l.transform.isIdentity { transformed = true }
+            if cur._isLayerRoot { break }
+            v = cur._superview
+        }
+        guard transformed, let root = v, let l = _layer, root._isLayerRoot,
+              let inRoot = l._rectInRootBounds(rect) else { return convert(rect, to: nil) }
+        return root.convert(inRoot, to: nil)
     }
 
     /// Puts the backing layer into the superview's layer (or makes it a root this view hosts).
@@ -502,6 +536,7 @@ import CoreText
         _dirtyRect = localDirty
         let previousDrawing = NSView._drawingView
         NSView._drawingView = self
+        NSView._drawObserver?(self)
         draw(localDirty)
         NSView._drawingView = previousDrawing
         _dirtyRect = nil
@@ -553,8 +588,18 @@ import CoreText
 
     /// Every invalidation since launch (tests measure what an update costs).
     nonisolated(unsafe) public static var _invalidationCount = 0
+    /// Sees every invalidation (tests count them per view type and collect the dirty area).
+    nonisolated(unsafe) public static var _invalidationObserver: ((NSView, NSRect) -> Void)?
+    /// Sees every `draw(_:)` the display runs, directly or through the backing layer (tests
+    /// count which views a frame re-renders).
+    nonisolated(unsafe) public static var _drawObserver: ((NSView) -> Void)?
+    /// The view draws one solid colour over its whole bounds (a SwiftUI colour background):
+    /// a transparent clip view scrolling by copy over it may move its pixels, which are the
+    /// same everywhere (`NSWindow._scrollBacking`).
+    public var _drawsUniformFill = false
     private func _invalidate(_ rect: NSRect) {
         NSView._invalidationCount &+= 1
+        NSView._invalidationObserver?(self, rect)
         if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {
@@ -787,11 +832,14 @@ import CoreText
         set {
             let animate = _takeAnimator()
             let old = _alphaValue
+            guard newValue != old || animate else { return }
             _alphaValue = newValue
             if let l = _layer, !_layerIsHosted {
+                let marks = _beginViewMarkedLayerChange()
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.opacity = Float(newValue)
                 CATransaction.commit()
+                NSView._viewMarksLayerChange = marks
                 if animate { _animateLayer("opacity", from: CGFloat(old), to: newValue) }
             }
             setNeedsDisplay(bounds)
@@ -1345,9 +1393,11 @@ import CoreText
             _superview?._subviewDidChangeHidden(self)
             _window?._trackingAreasDidChange()
             if let l = _layer, !_layerIsHosted {
+                let marks = _beginViewMarkedLayerChange()
                 CATransaction.begin(); CATransaction.setDisableActions(true)
                 l.isHidden = newValue
                 CATransaction.commit()
+                NSView._viewMarksLayerChange = marks
             }
             _superview?.setNeedsDisplay(_frame)
             if newValue { viewDidHide() } else { viewDidUnhide() }
@@ -1584,9 +1634,17 @@ import CoreText
         set { if newValue { setNeedsDisplay(bounds) } else { _needsDisplay = false } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needslayout
+    /// Setting it asks the window for a frame: layout runs at the start of the next paint,
+    /// and what it moves or redraws marks itself from there. Without the request nothing
+    /// would paint (a model change that touches no view's frame marks only `needsLayout`;
+    /// the Sibyl run on Windows saw its status bar stay stale until a rebuild).
     @MainActor open var needsLayout: Bool {
         get { _needsLayout }
-        set { _needsLayout = newValue }
+        set {
+            let request = newValue && !_needsLayout
+            _needsLayout = newValue
+            if request { _window?._viewNeedsLayout() }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needspaneltobecomekey
     @MainActor open var needsPanelToBecomeKey: Bool { false }
@@ -1977,12 +2035,16 @@ import CoreText
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setboundsorigin(_:)
-    @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) {
+    @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) { _setBoundsOrigin(newOrigin, display: nil) }
+    /// The bounds origin change. `display`, when given, replaces marking the whole bounds
+    /// and runs before the bounds notification (a clip view that moved its pixels in the
+    /// backing store marks only the band the scroll uncovered).
+    internal func _setBoundsOrigin(_ newOrigin: NSPoint, display: (() -> Void)?) {
         guard newOrigin != _boundsOrigin else { return }
         _boundsOrigin = newOrigin
         _syncLayerGeometry()
         _setNeedsUpdateTrackingAreas()
-        setNeedsDisplay(bounds)
+        if let display { display() } else { setNeedsDisplay(bounds) }
         if _postsBoundsChangedNotifications {
             NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
         }
@@ -2013,7 +2075,16 @@ import CoreText
         _syncLayerGeometry()
         _setNeedsUpdateTrackingAreas()
         if animate { _animateLayer("position", from: old.origin, to: newOrigin) }
-        _superview?.setNeedsDisplay(old.union(_frame))
+        // Where it was and where it is: one area when they overlap, else each on its own
+        // (a new list row placed from the origin to the end of a list marked the strip between).
+        if let sup = _superview {
+            if old.intersects(_frame) || _frameRotation != 0 || _layer.map({ !$0.transform.isIdentity || $0.shadowOpacity > 0 }) == true {
+                sup.setNeedsDisplay(old.union(_frame))
+            } else {
+                sup.setNeedsDisplay(old)
+                sup.setNeedsDisplay(_frame)
+            }
+        }
         if _postsFrameChangedNotifications {
             NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
         }
@@ -2039,11 +2110,43 @@ import CoreText
         if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
         if !_applyingLayout { _needsLayout = true; _setNeedsConstraintLayout(force: false) }
-        _superview?.setNeedsDisplay(old.union(_frame))
-        setNeedsDisplay(bounds)
+        // As a layer-backed view in AppKit: content redraws on a resize unless the redraw
+        // policy says it redraws only when asked (`.onSetNeedsDisplay`, `.never`).
+        let redraws: Bool
+        switch layerContentsRedrawPolicy {
+        case .never, .onSetNeedsDisplay: redraws = false
+        default: redraws = true
+        }
+        if let sup = _superview {
+            // The superview repaints where the view's coverage changed: what it uncovered,
+            // and what it newly covers unless the view redraws that itself. Inside both
+            // frames the content is the view's to mark. A list's document growing by one
+            // row repainted the whole document (Sibyl's transcript: 1100x1349 a line), and a
+            // growing meter marked its row. A rotated, transformed or shadowed view covers
+            // more than its frame, so it keeps the union.
+            if _frameRotation != 0 || _layer.map({ !$0.transform.isIdentity || $0.shadowOpacity > 0 }) == true || old.width <= 0 || old.height <= 0 {
+                sup.setNeedsDisplay(old.union(_frame))
+            } else {
+                for r in NSView._difference(old, _frame) { sup.setNeedsDisplay(r) }
+                if !redraws { for r in NSView._difference(_frame, old) { sup.setNeedsDisplay(r) } }
+            }
+        }
+        if redraws { setNeedsDisplay(bounds) }
         if _postsFrameChangedNotifications {
             NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
         }
+    }
+    /// `a` minus `b`: up to four rects (bands above and below, then the sides between).
+    internal static func _difference(_ a: NSRect, _ b: NSRect) -> [NSRect] {
+        guard !a.isEmpty else { return [] }
+        let i = a.intersection(b)
+        guard !i.isNull, !i.isEmpty else { return [a] }
+        var out: [NSRect] = []
+        if i.minY > a.minY { out.append(NSRect(x: a.minX, y: a.minY, width: a.width, height: i.minY - a.minY)) }
+        if a.maxY > i.maxY { out.append(NSRect(x: a.minX, y: i.maxY, width: a.width, height: a.maxY - i.maxY)) }
+        if i.minX > a.minX { out.append(NSRect(x: a.minX, y: i.minY, width: i.minX - a.minX, height: i.height)) }
+        if a.maxX > i.maxX { out.append(NSRect(x: i.maxX, y: i.minY, width: a.maxX - i.maxX, height: i.height)) }
+        return out
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setkeyboardfocusringneedsdisplay(_:)
     /// Marks `rect` plus the focus ring's outset for display.
@@ -2460,6 +2563,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         let b = bounds
         if wantsDefaultClipping { ctx.clip(to: b) }
         _dirtyRect = b
+        NSView._drawObserver?(self)
         if wantsUpdateLayer { updateLayer() } else { draw(b) }
         _dirtyRect = nil
         NSAppearance.current = previousAppearance
@@ -2492,11 +2596,24 @@ extension NSView: CALayerDelegate, CALayerHost {
             w._setLayerSceneNeedsCommit()
             return
         }
+        if NSView._viewMarksLayerChange { return }
         if let r = rect, let sup = _superview {
             sup.setNeedsDisplay(r.intersection(_frame))
         } else {
             setNeedsDisplay(bounds)
         }
+    }
+
+    /// A layer inside this view's tree changed what it covers: only that area repaints
+    /// (before, any sublayer's geometry change repainted the whole root host in software).
+    public func layerNeedsDisplay(_ root: CALayer, inRootBounds rect: CGRect) {
+        guard root === _layer else { return }
+        if let w = _window, w._hostsLayersNatively {
+            w._setLayerSceneNeedsCommit()
+            return
+        }
+        if NSView._viewMarksLayerChange { return }
+        setNeedsDisplay(rect)
     }
 }
 

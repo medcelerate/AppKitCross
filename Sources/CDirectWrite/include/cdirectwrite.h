@@ -1,6 +1,6 @@
 // extern "C" shim over DirectWrite for the CoreText module (ADR-0007): fonts by name,
-// metrics, glyph mapping and metrics, outlines, tables, and shaping with fallback through
-// IDWriteTextLayout. All sizes are DIPs (= points at scale 1); y grows up in the values
+// metrics, glyph mapping and metrics, outlines, tables, and shaping with per-run font
+// fallback (IDWriteFontFallback::MapCharacters) through IDWriteTextLayout. All sizes are DIPs (= points at scale 1); y grows up in the values
 // returned here (DirectWrite's y-down numbers are flipped inside the shim).
 
 #ifndef CDIRECTWRITE_H
@@ -70,7 +70,10 @@ bool cdw_draw_glyphs(CD2DTarget *target, CDWFont *font, const uint16_t *glyphs, 
 uint32_t cdw_family_count(void);
 size_t cdw_family_name(uint32_t index, char *buf, size_t capacity);
 
-/// Shapes UTF-16 text in `font` with DirectWrite's fallback and bidi handling (no wrapping).
+/// Shapes UTF-16 text in `font` with bidi handling and per-run font fallback (no wrapping):
+/// characters the font has no glyph for are mapped with the system IDWriteFontFallback and
+/// shaped in the face it picks, so every run carries its own font (`CDWRun.font`), and the
+/// advances measured here are those of the glyphs that draw.
 CDWShaped *cdw_shape(const uint16_t *text, uint32_t count, CDWFont *font, const char *localeUTF8);
 uint32_t cdw_shaped_run_count(CDWShaped *shaped);
 typedef struct CDWRun {

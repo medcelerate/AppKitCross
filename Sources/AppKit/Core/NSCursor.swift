@@ -109,7 +109,16 @@ open class NSCursor: NSObject, NSSecureCoding, NSCoding {
     ///   - directions: The directions in which a rectangular frame can be resized. This must not be empty.
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/frameresize(position:directions:)
     @available(macOS 15.0, *)
-    public class func frameResize(position: NSCursor.FrameResizePosition, directions: NSCursor.FrameResizeDirection.Set) -> NSCursor { standard("resizeAll", .resizeAll) }
+    ///
+    /// Platform cursors have no one-way or diagonal resize shapes: an edge gets the two-way
+    /// cursor along its axis (left/right, up/down) and a corner the all-directions cursor.
+    public class func frameResize(position: NSCursor.FrameResizePosition, directions: NSCursor.FrameResizeDirection.Set) -> NSCursor {
+        switch position {
+        case .left, .right: return standard("frameResize.horizontal", .resizeLeftRight)
+        case .top, .bottom: return standard("frameResize.vertical", .resizeUpDown)
+        default: return standard("frameResize.corner", .resizeAll)
+        }
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscursor/hide()
     public class func hide() {
         _hiddenDepth += 1

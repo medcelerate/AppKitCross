@@ -128,7 +128,16 @@ public struct TabView<SelectionValue: Hashable, Content: View>: View, _Primitive
         self.selection = selection
         self.content = content()
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _TabViewPrimitive(selection: selection.map { AnyBinding($0) }, content: _ViewBox(content)) }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        _TabViewPrimitive(selection: selection.map { AnyBinding($0) }, content: _ViewBox(content), settingsStyle: _TabViewPrimitive._inSettingsScene(node))
+    }
+}
+
+extension EnvironmentValues {
+    private struct SettingsSceneKey: EnvironmentKey { static let defaultValue = false }
+    /// True for the content of a `Settings` scene's window (`_AppRunner.openSettings`): a
+    /// TabView there shows the macOS Settings tab bar rather than a segmented control.
+    var _isSettingsScene: Bool { get { self[SettingsSceneKey.self] } set { self[SettingsSceneKey.self] = newValue } }
 }
 
 /// A binding to any hashable selection, compared through AnyHashable.
@@ -148,18 +157,38 @@ final class _TabViewPrimitive: _Primitive {
     var localIndex = 0
     private var pages: [(meta: _ItemMetadata, box: _AnyViewBox)] = []
 
-    init(selection: AnyBinding?, content: _AnyViewBox) {
+    /// In a Settings window the tabs are the toolbar-style bar of icons over labels, and the
+    /// window's title is the selected tab's.
+    var settingsStyle: Bool
+
+    init(selection: AnyBinding?, content: _AnyViewBox, settingsStyle: Bool = false) {
         self.selection = selection
         contentBox = content
+        self.settingsStyle = settingsStyle
         super.init()
         rebuild()
+    }
+    /// The Settings scene marks its content through the environment; the window's class
+    /// answers too, for content the scene re-ran into an open Settings window.
+    static func _inSettingsScene(_ node: _ViewNode) -> Bool {
+        node.environment._isSettingsScene || node.root?.host?.hostView.window is _SettingsWindow
     }
     override var isLayoutTransparent: Bool { true }
     override func update(from other: _Primitive) {
         guard let o = other as? _TabViewPrimitive else { return }
         selection = o.selection
         contentBox = o.contentBox
+        settingsStyle = o.settingsStyle
         rebuild()
+    }
+    /// Selects page `i`: the binding takes its tag (or index), and the view re-renders.
+    func _select(_ i: Int) {
+        guard pages.indices.contains(i) else { return }
+        localIndex = i
+        if let sel = selection {
+            if let tag = pages[i].meta.tag { sel.set(tag) } else { sel.set(AnyHashable(i)) }
+        }
+        node?.setNeedsUpdate()
     }
     private var selectedIndex: Int {
         if let s = selection?.get(), let i = pages.firstIndex(where: { $0.meta.tag == s }) { return i }
@@ -170,15 +199,20 @@ final class _TabViewPrimitive: _Primitive {
         pages = _flattenBoxes(contentBox).map { _metadata(of: $0) }
         let index = selectedIndex
         let titles = pages.enumerated().map { i, p in p.meta.tabLabel?._string ?? "Tab \(i + 1)" }
-        let bar = _Segmented(titles: titles, selected: index) { [weak self] i in
-            guard let self else { return }
-            self.localIndex = i
-            if let sel = self.selection {
-                if let tag = self.pages[i].meta.tag { sel.set(tag) } else { sel.set(AnyHashable(i)) }
-            }
-            self.node?.setNeedsUpdate()
-        }
         let page = pages.isEmpty ? _ViewBox(EmptyView()) : pages[index].box
+        if settingsStyle {
+            // macOS's Settings window: a band of icon-over-label items under the title bar,
+            // the pane filling the rest of the window.
+            let items = zip(titles, pages).map { _SettingsTabBarView.Item(title: $0, image: $1.meta.tabImage?.image) }
+            let bar = _SettingsTabBar(items: items, selected: index) { [weak self] i in self?._select(i) }
+            let body = VStack(spacing: 0) {
+                bar
+                _Page(box: page).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            children = [_ViewBox(body, id: AnyHashable("settings-tabview"))]
+            return
+        }
+        let bar = _Segmented(titles: titles, selected: index) { [weak self] i in self?._select(i) }
         let body = VStack(spacing: 8) {
             bar
             // A page fills the space below the bar from the top, so a tall page spills past
@@ -187,6 +221,209 @@ final class _TabViewPrimitive: _Primitive {
         }
         children = [_ViewBox(body, id: AnyHashable("tabview"))]
         // The page keeps its identity across selection changes only when the same page shows.
+    }
+}
+
+// MARK: Settings tab bar
+
+/// A TabView's tabs in a Settings window, as macOS draws them: a full-width band under the
+/// title bar with one item per tab (the symbol above the label), the row centred, the
+/// selected item on a rounded grey background.
+struct _SettingsTabBar: View, _PrimitiveView {
+    typealias Body = Never
+    let items: [_SettingsTabBarView.Item]
+    let selected: Int
+    let onSelect: (Int) -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _SettingsTabBarPrimitive(items: items, selected: selected, onSelect: onSelect) }
+}
+
+@MainActor
+final class _SettingsTabBarPrimitive: _ControlPrimitive<_SettingsTabBarView> {
+    var items: [_SettingsTabBarView.Item]
+    var selected: Int
+    var onSelect: (Int) -> Void
+    init(items: [_SettingsTabBarView.Item], selected: Int, onSelect: @escaping (Int) -> Void) {
+        self.items = items; self.selected = selected; self.onSelect = onSelect
+        super.init(control: _SettingsTabBarView())
+        sync()
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _SettingsTabBarPrimitive else { return }
+        items = o.items; selected = o.selected; onSelect = o.onSelect
+        sync()
+    }
+    private func sync() {
+        control.onSelect = { [weak self] i in self?.onSelect(i) }
+        control.setItems(items, selected: selected)
+    }
+    /// The band spans the width it is offered, at the toolbar's height.
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? control.contentWidth
+        return CGSize(width: width, height: _SettingsTabBarView.height)
+    }
+}
+
+/// The band of Settings tab items. Accessibility sees a radio group of radio buttons, as
+/// for the segmented tab bar elsewhere; the value is the selected tab's title.
+@MainActor
+final class _SettingsTabBarView: NSView {
+    struct Item {
+        var title: String
+        var image: NSImage?
+        func same(as other: Item) -> Bool { title == other.title && image === other.image }
+    }
+    static let height: CGFloat = 54
+    static let itemHeight: CGFloat = 48
+    static let spacing: CGFloat = 4
+    static let font = NSFont.systemFont(ofSize: 13)
+
+    private(set) var items: [Item] = []
+    private(set) var buttons: [_SettingsTabButton] = []
+    private(set) var selectedIndex = 0
+    var onSelect: (Int) -> Void = { _ in }
+
+    init() {
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioGroup)
+    }
+    required init?(coder: NSCoder) { nil }
+    override var isFlipped: Bool { true }
+
+    func setItems(_ newItems: [Item], selected: Int) {
+        if newItems.count != items.count || zip(newItems, items).contains(where: { !$0.same(as: $1) }) {
+            items = newItems
+            for b in buttons { b.removeFromSuperview() }
+            buttons = newItems.enumerated().map { i, item in
+                let b = _SettingsTabButton(frame: .zero)
+                b.setButtonType(.radio)
+                b.isBordered = false
+                b.title = item.title
+                b.image = item.image
+                b.imagePosition = .imageAbove
+                b.tag = i
+                b.target = b
+                b.action = Selector(("swiftUISettingsTabAction:"))
+                b.setActionHandler(for: Selector(("swiftUISettingsTabAction:"))) { [weak self] sender in
+                    guard let self, let b = sender as? NSButton else { return }
+                    self.select(b.tag)
+                }
+                addSubview(b)
+                return b
+            }
+            layoutItems()
+        }
+        selectedIndex = selected
+        syncStates()
+        applyWindowTitle()
+    }
+
+    /// A click on an item (or the accessibility press): it shows selected at once, and the
+    /// owner updates the selection.
+    func select(_ index: Int) {
+        guard items.indices.contains(index) else { return }
+        selectedIndex = index
+        syncStates()
+        applyWindowTitle()
+        onSelect(index)
+    }
+
+    private func syncStates() {
+        for (i, b) in buttons.enumerated() {
+            let on = i == selectedIndex
+            if b.state != (on ? .on : .off) { b.state = on ? .on : .off }
+            let tint: NSColor = on ? .labelColor : .secondaryLabelColor
+            if b.contentTintColor != tint { b.contentTintColor = tint }
+        }
+        needsDisplay = true
+        _accessibilityValueDidChange()
+    }
+
+    private func _accessibilityValueDidChange() {
+        NSAccessibility.post(element: self, notification: .valueChanged)
+    }
+
+    /// The items' widths: the label's plus padding, never narrower than a square-ish item.
+    private func itemWidths() -> [CGFloat] {
+        items.map { item in
+            let label = (item.title as NSString).size(withAttributes: [.font: _SettingsTabBarView.font]).width
+            return max(48, (label + 16).rounded(.up))
+        }
+    }
+    var contentWidth: CGFloat {
+        let w = itemWidths()
+        return w.reduce(0, +) + CGFloat(max(0, w.count - 1)) * _SettingsTabBarView.spacing + 16
+    }
+
+    private func layoutItems() {
+        let widths = itemWidths()
+        let total = widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * _SettingsTabBarView.spacing
+        var x = max(8, ((bounds.width - total) / 2).rounded())
+        let y = ((_SettingsTabBarView.height - 1 - _SettingsTabBarView.itemHeight) / 2).rounded(.down)
+        for (b, w) in zip(buttons, widths) {
+            b.frame = NSRect(x: x, y: y, width: w, height: _SettingsTabBarView.itemHeight)
+            x += w + _SettingsTabBarView.spacing
+        }
+    }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layoutItems()
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        NSBezierPath(rect: bounds).fill()
+        NSColor.separatorColor.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1)).fill()
+    }
+
+    /// The window shows the selected tab's title, as macOS's Settings window does.
+    private func applyWindowTitle() {
+        guard let window, items.indices.contains(selectedIndex), !(window is NSPanel), window.sheetParent == nil else { return }
+        let title = items[selectedIndex].title
+        if window.title != title { window.title = title }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyWindowTitle()
+    }
+
+    override func accessibilityValue() -> Any? {
+        items.indices.contains(selectedIndex) ? items[selectedIndex].title : nil
+    }
+}
+
+/// One Settings tab item: a radio button (for the keyboard, clicks and accessibility) drawn
+/// as the symbol over the label, on a rounded fill when selected.
+@MainActor
+final class _SettingsTabButton: NSButton {
+    static let symbolSize: CGFloat = 24
+    override var isFlipped: Bool { true }
+    override func isAccessibilitySelected() -> Bool { state == .on }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let b = bounds
+        let on = state == .on
+        if on || isHighlighted {
+            (on ? NSColor.unemphasizedSelectedContentBackgroundColor : NSColor.unemphasizedSelectedContentBackgroundColor.withAlphaComponent(0.5)).setFill()
+            NSBezierPath(roundedRect: b, xRadius: 6, yRadius: 6).fill()
+        }
+        let color: NSColor = on ? .labelColor : .secondaryLabelColor
+        let side = _SettingsTabButton.symbolSize
+        if let image, let cell = cell as? NSButtonCell {
+            // Fit the image's aspect into the symbol square, centred over the label.
+            let s = image.size
+            let scale = s.width > 0 && s.height > 0 ? min(side / s.width, side / s.height) : 1
+            let w = (s.width * scale).rounded(), h = (s.height * scale).rounded()
+            let r = NSRect(x: (b.midX - w / 2).rounded(), y: 4 + ((side - h) / 2).rounded(), width: w, height: h)
+            cell.drawImage(image, withFrame: r, in: self)
+        }
+        let attrs: [NSAttributedString.Key: Any] = [.font: _SettingsTabBarView.font, .foregroundColor: color]
+        let text = title as NSString
+        let size = text.size(withAttributes: attrs)
+        let top: CGFloat = image == nil ? (b.height - size.height) / 2 : 4 + side + 2
+        text.draw(at: NSPoint(x: (b.midX - size.width / 2).rounded(), y: top.rounded()), withAttributes: attrs)
     }
 }
 
@@ -208,8 +445,71 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
     public init(selection: Binding<SelectionValue>, @ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
         self.selection = selection; self.content = content(); self.label = label()
     }
+    /// The picker inside its own form row: the row shows the label.
+    var _inFormRow = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
-        _PickerPrimitive(label: (label as? Text)?._string ?? "", selection: AnyBinding(selection), content: _ViewBox(content))
+        let env = node.environment
+        let hidden = _inFormRow || env._labelsHidden
+        // In a form the label leads the row (grouped) or sits in the label column (columns);
+        // radio groups and inline lists put it beside their first item (columns) or above
+        // their options (grouped).
+        if !hidden, env._formContext != nil, _formHasLabel(label) {
+            var inner = self; inner._inFormRow = true
+            let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
+            if env._formContext == .grouped, !stacked {
+                // A grouped row: the pop-up keeps the width its title needs and the label
+                // wraps beside it; only when the label is down to its widest word does the
+                // pop-up shrink and its title truncate (macOS 15's grouped forms).
+                return _GroupPrimitive(children: [_ViewBox(_PickerFormRowLayout() {
+                    label
+                    inner.environment(\._formContext, nil).padding(.leading, 8)
+                })])
+            }
+            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
+        }
+        return _PickerPrimitive(label: (label as? Text)?._string ?? _pickerItemFace(_ViewBox(label), environment: env).title, showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content))
+    }
+}
+
+/// A grouped form's picker row: the label leading, the pop-up trailing. The pop-up is
+/// given its ideal width while the label can still wrap to fit what is left (down to its
+/// widest word); past that the pop-up takes the rest and truncates its title. Both are
+/// centred vertically; the row is as tall as the wrapped label or the control.
+struct _PickerFormRowLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let (label, content) = widths(proposal, subviews)
+        let lh = subviews.first?.sizeThatFits(ProposedViewSize(width: label, height: nil)).height ?? 0
+        let ch = subviews.count > 1 ? subviews[1].sizeThatFits(ProposedViewSize(width: content, height: nil)).height : 0
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? (label + content)
+        return CGSize(width: width, height: max(lh, ch))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (label, content) = widths(ProposedViewSize(width: bounds.width, height: bounds.height), subviews)
+        let rtl = subviews.layoutDirection == .rightToLeft
+        if let l = subviews.first {
+            let p = ProposedViewSize(width: label, height: nil)
+            let h = l.sizeThatFits(p).height
+            l.place(at: CGPoint(x: rtl ? bounds.maxX - label : bounds.minX, y: bounds.midY - h / 2), proposal: p)
+        }
+        if subviews.count > 1 {
+            let p = ProposedViewSize(width: content, height: nil)
+            let h = subviews[1].sizeThatFits(p).height
+            subviews[1].place(at: CGPoint(x: rtl ? bounds.minX : bounds.maxX - content, y: bounds.midY - h / 2), proposal: p)
+        }
+    }
+    /// The label's and the control's widths for a proposal.
+    private func widths(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (CGFloat, CGFloat) {
+        guard let l = subviews.first else { return (0, 0) }
+        let labelIdeal = l.sizeThatFits(.unspecified).width
+        guard subviews.count > 1 else { return (labelIdeal, 0) }
+        let c = subviews[1]
+        let contentIdeal = c.sizeThatFits(.unspecified).width
+        guard let w = proposal.width, w.isFinite, labelIdeal + contentIdeal > w else { return (labelIdeal, contentIdeal) }
+        // The label's narrowest: wrapped at every word (a zero proposal).
+        let labelMin = min(labelIdeal, l.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width)
+        let content = c.sizeThatFits(ProposedViewSize(width: max(0, min(contentIdeal, w - labelMin)), height: nil)).width
+        let label = max(0, min(labelIdeal, w - content))
+        return (label, content)
     }
 }
 
@@ -251,49 +551,253 @@ extension View {
 @MainActor
 final class _PickerPrimitive: _Primitive {
     var label: String
+    /// False under `labelsHidden()` or in a form row that shows the label itself; the label
+    /// still names the control for assistive technology.
+    var showsLabel: Bool
     var selection: AnyBinding
     var contentBox: _AnyViewBox
-    init(label: String, selection: AnyBinding, content: _AnyViewBox) {
-        self.label = label; self.selection = selection; contentBox = content
+    init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox) {
+        self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content
         super.init()
     }
     override var isLayoutTransparent: Bool { true }
     override func attach(to node: _ViewNode) { super.attach(to: node); rebuild() }
     override func update(from other: _Primitive) {
         guard let o = other as? _PickerPrimitive else { return }
-        label = o.label; selection = o.selection; contentBox = o.contentBox
+        label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox
         rebuild()
     }
     private func rebuild() {
-        let items = _flattenBoxes(contentBox).map { _metadata(of: $0) }
-        let titles = items.map { ($0.content.value as? Text)?._string ?? String(describing: $0.content.viewType) }
-        let tags: [AnyHashable] = items.enumerated().map { i, item in item.meta.tag ?? AnyHashable(i) }
+        let leaves = _flattenBoxes(contentBox)
+        let items = leaves.map { _metadata(of: $0) }
+        // An item shows its view: a Text's string, a Label's title and icon (through the
+        // modifiers and custom views around it), never a type name.
+        let environment = node?.environment ?? EnvironmentValues()
+        let faces = items.map { _pickerItemFace($0.content, environment: environment) }
+        let titles = faces.map(\.title)
         let current = selection.get()
-        let index = tags.firstIndex(of: current) ?? 0
+        // An untagged row of a ForEach is tagged with its id when that is the selection's
+        // type, as in SwiftUI; else with its position.
+        let tags: [AnyHashable] = items.enumerated().map { i, item in
+            if let tag = item.meta.tag { return tag }
+            if let id = leaves[i].id, type(of: id.base) == type(of: current.base) { return id }
+            return AnyHashable(i)
+        }
+        // A selection no item carries (a nil optional) selects nothing: the pop-up's title
+        // is empty, as on macOS.
+        let index = tags.firstIndex(of: current) ?? -1
         let sel = selection
         let style = node?.environment.pickerStyle ?? .automatic
         let labelText = label
+        let shownLabel = showsLabel ? label : ""
         let body: AnyView
         if style == .radioGroup || style == .inline {
             body = AnyView(VStack(alignment: .leading, spacing: 4) {
-                if !labelText.isEmpty { Text(labelText) }
+                if !shownLabel.isEmpty { Text(shownLabel) }
                 ForEach(Array(titles.enumerated()), id: \.offset) { pair in
                     _RadioRow(title: pair.element, isOn: pair.offset == index) { sel.set(tags[pair.offset]) }
                 }
             })
         } else if style == .segmented {
             body = AnyView(HStack(spacing: 8) {
-                if !labelText.isEmpty { Text(labelText) }
+                if !shownLabel.isEmpty { Text(shownLabel) }
                 _Segmented(titles: titles, selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         } else {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
-                if !labelText.isEmpty { Text(labelText) }
-                _PopUp(titles: titles, selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
+                if !shownLabel.isEmpty { Text(shownLabel) }
+                _PickerPopUp(titles: titles, images: faces.map(\.image), iconOnly: faces.map(\.iconOnly), selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
+    }
+}
+
+/// What a picker item shows in a menu: its text and its first image, found through the
+/// item's view (a `Text`, a `Label`, modifiers and custom views around them, a stack of an
+/// image and text). Custom views are evaluated outside the tree with the picker's
+/// environment, as the menu has no place for their state.
+@MainActor
+func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = EnvironmentValues()) -> (title: String, image: NSImage?, iconOnly: Bool) {
+    var texts: [String] = []
+    var image: NSImage?
+    var iconOnly = false
+    func walk(_ box: _AnyViewBox, depth: Int, environment: EnvironmentValues) {
+        guard depth < 24, image == nil || texts.isEmpty else { return }
+        let value = box.value
+        if let t = value as? Text { texts.append(t._string); return }
+        if let i = value as? Image { if image == nil { image = _pickerItemImage(i, environment: environment) }; return }
+        // A shape (a colour swatch, `Circle().fill(color)`) is rendered to a colour image:
+        // it draws in its own colours, never as a template tinted with the row's text.
+        if let shape = value as? _ShapeView { if image == nil { image = _pickerShapeImage(shape, environment: environment) }; return }
+        if let l = value as? _LabelParts {
+            // An icon-only label (`.labelStyle(.iconOnly)` around it) shows its icon alone
+            // on the pop-up's face; the menu item keeps the title beside it.
+            if environment._labelStyle is IconOnlyLabelStyle { iconOnly = true }
+            for b in l._labelParts { walk(b, depth: depth + 1, environment: environment) }
+            return
+        }
+        if value is any NSViewRepresentable || value is any NSViewControllerRepresentable { return }
+        if box.isPrimitive {
+            guard let p = box.makePrimitive(node: _ViewNode.placeholder) else { return }
+            var inner = environment
+            p.environmentTransform?(&inner)
+            for c in p.children { walk(c, depth: depth + 1, environment: inner) }
+        } else {
+            let scratch = _ViewNode(box: box, parent: nil, root: nil)
+            scratch.environment = environment
+            if let body = box.body(node: scratch) { walk(body, depth: depth + 1, environment: environment) }
+        }
+    }
+    walk(box, depth: 0, environment: environment)
+    let title = texts.filter { !$0.isEmpty }.joined(separator: " ")
+    return (title, image, iconOnly && image != nil)
+}
+
+/// A picker item's image from an `Image` view. A symbol stays a template (the menu draws it
+/// in the row's text colour, white when highlighted) unless the item gave it its own colour
+/// (`.foregroundStyle(.red)` around it, Sibyl's tint swatches): then it is a colour image in
+/// that colour, as the Mac's menu shows it. Primary and secondary are the text's colours, so
+/// they keep the template.
+@MainActor
+func _pickerItemImage(_ view: Image, environment: EnvironmentValues) -> NSImage? {
+    guard let image = view.image else { return nil }
+    guard image.isTemplate, let color = environment.foregroundColor, color != .primary, color != .secondary else { return image }
+    let ns = color.nsColor
+    let rgb = ns.usingColorSpace(.sRGB) ?? ns
+    let key = "\(view.name)|\(ObjectIdentifier(image).hashValue)|\(rgb.redComponent),\(rgb.greenComponent),\(rgb.blueComponent),\(rgb.alphaComponent)"
+    if let cached = _PickerItemImages.tinted[key] { return cached }
+    let size = image.size
+    let tinted = NSImage(size: size, flipped: false) { rect in
+        // AppKit tints a template image in a button cell (`contentTintColor`).
+        let tinter = NSButton(frame: rect)
+        tinter.isBordered = false
+        tinter.contentTintColor = ns
+        (tinter.cell as? NSButtonCell)?.drawImage(image, withFrame: rect, in: tinter)
+        return true
+    }
+    tinted.isTemplate = false
+    if _PickerItemImages.tinted.count > 128 { _PickerItemImages.tinted.removeAll() }
+    _PickerItemImages.tinted[key] = tinted
+    return tinted
+}
+
+/// A shape view drawn into a 16-point colour image (a 12-point swatch centred in it, the
+/// size a Label's icon has beside 13-point text).
+@MainActor
+func _pickerShapeImage(_ view: _ShapeView, environment: EnvironmentValues) -> NSImage? {
+    let side: CGFloat = 16
+    let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        let bounds = rect.insetBy(dx: 2, dy: 2)
+        let path = view.shape.path(in: bounds).cgPath
+        if let f = view.fill {
+            ctx.saveGState()
+            if view.fillStyle.isEOFilled { ctx.addPath(path); ctx.clip(using: .evenOdd) }
+            f._fill(ctx, path: path, in: bounds, environment: environment)
+            ctx.restoreGState()
+        }
+        if let s = view.stroke, view.strokeStyle.lineWidth > 0 {
+            s._stroke(ctx, path: path, in: bounds, style: view.strokeStyle, environment: environment)
+        }
+        return true
+    }
+    image.isTemplate = false
+    return image
+}
+
+@MainActor
+enum _PickerItemImages {
+    /// Coloured copies of symbols by symbol, image and colour, so a re-rendered picker hands
+    /// the pop-up the same images and does not rebuild its menu.
+    static var tinted: [String: NSImage] = [:]
+}
+
+/// A `Label`'s title and icon views, for a picker item to show them.
+protocol _LabelParts { var _labelParts: [_AnyViewBox] { get } }
+
+/// The pop-up of a menu-style picker: `_PopUp` with an image per item (a Label's icon) and
+/// no selected item when the selection matches none (`selected` -1). It shrinks to the
+/// width it is offered (its title truncates), so a form row never pushes it out of its
+/// column.
+struct _PickerPopUp: View, _PrimitiveView {
+    typealias Body = Never
+    let titles: [String]
+    let images: [NSImage?]
+    /// Per item: its face is the image alone (an icon-only Label).
+    var iconOnly: [Bool] = []
+    let selected: Int
+    let onSelect: (Int) -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive {
+        let p = _PickerPopUpPrimitive(titles: titles, images: images, selected: selected, onSelect: onSelect)
+        p.iconOnly = iconOnly
+        return p
+    }
+}
+
+@MainActor
+final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
+    var titles: [String]
+    var images: [NSImage?]
+    var iconOnly: [Bool] = []
+    var selected: Int
+    var onSelect: (Int) -> Void
+    /// The items are built when the primitive attaches (see `_PopUpPrimitive`).
+    init(titles: [String], images: [NSImage?], selected: Int, onSelect: @escaping (Int) -> Void) {
+        self.titles = titles; self.images = images; self.selected = selected; self.onSelect = onSelect
+        let b = NSPopUpButton(frame: .zero, pullsDown: false)
+        super.init(control: b)
+        b.target = b
+        b.action = Selector(("swiftUIPopUpAction:"))
+        b.setActionHandler(for: Selector(("swiftUIPopUpAction:"))) { [weak self] _ in
+            guard let self else { return }
+            self.selected = self.control.indexOfSelectedItem
+            self.applyImagePosition()
+            self.onSelect(self.control.indexOfSelectedItem)
+        }
+    }
+    private func rebuildItems() {
+        control.removeAllItems()
+        control.addItems(withTitles: titles)
+        for (i, image) in images.enumerated() { control.item(at: i)?.image = image }
+        control.selectItem(at: selected)
+        applyImagePosition()
+        control.sizeToFit()
+    }
+    /// The face draws the selected item's image: alone for an icon-only item (Sibyl's
+    /// Icon picker shows the glyph, not the symbol's name), else before its title.
+    func applyImagePosition() {
+        let i = control.indexOfSelectedItem
+        let want: NSControl.ImagePosition = i >= 0 && i < iconOnly.count && iconOnly[i] ? .imageOnly : .imageLeft
+        if control.imagePosition != want { control.imagePosition = want }
+    }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        if control.numberOfItems != titles.count { rebuildItems() }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _PickerPopUpPrimitive else { return }
+        onSelect = o.onSelect
+        let iconOnlyChanged = o.iconOnly != iconOnly
+        iconOnly = o.iconOnly
+        if iconOnlyChanged { applyImagePosition() }
+        let imagesChanged = o.images.count != images.count || zip(o.images, images).contains { ($0 == nil) != ($1 == nil) || ($0 !== $1 && $0?.name() != $1?.name()) }
+        if o.titles != titles || imagesChanged {
+            titles = o.titles; images = o.images; selected = o.selected
+            rebuildItems()
+        } else if o.selected != selected || control.indexOfSelectedItem != o.selected {
+            selected = o.selected
+            control.selectItem(at: o.selected)
+            applyImagePosition()
+            control.sizeToFit()
+        }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let s = intrinsicSize
+        guard let w = proposal.width, w.isFinite else { return s }
+        return CGSize(width: max(min(s.width, w), 44), height: s.height)
     }
 }
 
@@ -808,9 +1312,15 @@ final class _AlertPrimitive: _Primitive {
         current = ns
         ns.messageText = alert.title._string
         ns.informativeText = alert.message?._string ?? ""
+        // As SwiftUI does on macOS: the cancel role takes Escape, and a destructive role
+        // draws red and is never the default (Return) button.
         for b in alert.buttons {
             let button = ns.addButton(withTitle: b.title)
-            if b.role == .cancel { button.keyEquivalent = "\u{1B}" }
+            switch b.role {
+            case .cancel?: button.keyEquivalent = "\u{1B}"
+            case .destructive?: button.keyEquivalent = ""; button.hasDestructiveAction = true
+            default: break
+            }
         }
         let buttons = alert.buttons
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
@@ -850,7 +1360,9 @@ extension View {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:actions:)
     public func confirmationDialog<A: View>(_ title: String, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, @ViewBuilder actions: @escaping () -> A) -> some View {
-        alert(title, isPresented: isPresented, actions: actions)
+        _AlertModified(content: self, isPresented: isPresented) {
+            Alert._fromViews(title: Text(title), actions: AnyView(actions()), message: nil)._confirmationDialog
+        }
     }
 }
 
@@ -868,6 +1380,12 @@ extension Alert {
         var a = Alert(title: title, message: message)
         a = Alert(title: title, message: message, buttons: buttons)
         return a
+    }
+    /// A confirmation dialog always offers Cancel: SwiftUI adds one (last) when no action
+    /// has the cancel role.
+    var _confirmationDialog: Alert {
+        guard !buttons.contains(where: { $0.role == .cancel }) else { return self }
+        return Alert(title: title, message: message, buttons: buttons + [.cancel()])
     }
     init(title: Text, message: Text?, buttons: [Button]) { self.title = title; self.message = message; self.buttons = buttons }
 }

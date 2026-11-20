@@ -34,11 +34,18 @@ struct _NSToolbarMetrics: Equatable {
     /// Space kept free at the trailing edge for the caption buttons at the right (Windows).
     var trailingInset: CGFloat
     var itemGap: CGFloat
+    /// The unified styles: the band is the window's title bar (the title and subtitle lead
+    /// the row after the navigational items, the side title bar accessories share it).
+    var isUnified: Bool = false
 
+    /// `automaticIsUnified`: `.automatic` resolves to unified whatever the style mask, as
+    /// it does on macOS 11 for a SwiftUI window's toolbar (`NSToolbar._automaticStyleIsUnified`);
+    /// otherwise only for a window whose content covers the title bar, and to expanded for
+    /// the others (ADR-0018).
     static func resolve(style: NSWindow.ToolbarStyle, displayMode: NSToolbar.DisplayMode, sizeMode: NSToolbar.SizeMode, contentCoversTitleBar: Bool,
-                        buttonStyle: PlatformWindowButtonStyle = .trafficLights) -> _NSToolbarMetrics {
+                        buttonStyle: PlatformWindowButtonStyle = .trafficLights, automaticIsUnified: Bool = false) -> _NSToolbarMetrics {
         var resolved = style
-        if resolved == .automatic { resolved = contentCoversTitleBar ? .unified : .expanded }
+        if resolved == .automatic { resolved = contentCoversTitleBar || automaticIsUnified ? .unified : .expanded }
         let unified = resolved == .unified || resolved == .unifiedCompact
         let topInset: CGFloat = contentCoversTitleBar && !unified ? NSWindow._titleBarBandHeight : 0
         let small = sizeMode == .small
@@ -63,7 +70,8 @@ struct _NSToolbarMetrics: Equatable {
         return _NSToolbarMetrics(placement: contentCoversTitleBar ? .overContent : .belowTitleBar, height: height + topInset, topInset: topInset,
                                  iconSize: icon, buttonSize: button, showsLabels: labels, showsIcons: icons, labelFontSize: labelSize,
                                  leadingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.leadingInset(for: buttonStyle)) : 8,
-                                 trailingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.trailingInset(for: buttonStyle)) : 8, itemGap: 8)
+                                 trailingInset: contentCoversTitleBar && unified ? max(8, _NSWindowButtonsView.trailingInset(for: buttonStyle)) : 8, itemGap: 8,
+                                 isUnified: unified)
     }
 }
 
@@ -142,6 +150,10 @@ final class _NSToolbarItemButton: NSButton {
     var iconSize: CGFloat = 24
     var showsIcon = true
     private(set) var pressed = false
+    /// The pointer is over the button: a borderless item shows the rounded hover fill of
+    /// macOS 11's toolbar buttons.
+    private(set) var hovered = false
+    private var hoverArea: NSTrackingArea?
 
     init(item: NSToolbarItem) {
         self.item = item
@@ -162,8 +174,40 @@ final class _NSToolbarItemButton: NSButton {
         isEnabled = item.isEnabled
         isBordered = item.isBordered
         toolTip = item.toolTip
+        keyEquivalent = item._keyEquivalent
+        keyEquivalentModifierMask = item._keyEquivalentModifierMask
         setAccessibilityLabel(item.label.isEmpty ? item.title : item.label)
+        if !isEnabled { hovered = false }
         needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if hoverArea == nil {
+            let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+            addTrackingArea(area)
+            hoverArea = area
+        }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateTrackingAreas()
+    }
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled, !hovered else { return }
+        hovered = true
+        needsDisplay = true
+    }
+    override func mouseExited(with event: NSEvent) {
+        guard hovered else { return }
+        hovered = false
+        needsDisplay = true
+    }
+
+    /// A click from code or a key equivalent fires the item as a click does.
+    override func performClick(_ sender: Any?) {
+        guard isEnabled else { return }
+        _activate(indicator: false)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -177,8 +221,8 @@ final class _NSToolbarItemButton: NSButton {
             NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
             path.lineWidth = 1
             path.stroke()
-        } else if highlighted {
-            NSColor.labelColor.withAlphaComponent(0.12).setFill()
+        } else if highlighted || (hovered && isEnabled) {
+            NSColor.labelColor.withAlphaComponent(highlighted ? 0.14 : 0.07).setFill()
             NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
         }
         let alpha: CGFloat = isEnabled ? 1 : 0.35
@@ -187,7 +231,13 @@ final class _NSToolbarItemButton: NSButton {
             let scale = size.width > 0 && size.height > 0 ? min(iconSize / size.width, iconSize / size.height, 1) : 1
             let w = size.width * scale, h = size.height * scale
             let dest = NSRect(x: (r.width - w) / 2, y: (r.height - h) / 2, width: w, height: h)
-            image.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            // A template (a symbol) takes the toolbar's icon grey, as macOS 11's toolbar
+            // buttons draw their symbols, not the black of the template's own pixels.
+            if image.isTemplate, let tinted = image._tintedForTemplate(_NSToolbarItemButton._iconColor, size: dest.size) {
+                tinted.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            } else {
+                image.draw(in: dest, from: .zero, operation: .sourceOver, fraction: alpha)
+            }
             if let m = item as? NSMenuToolbarItem, m.showsIndicator { _drawIndicator(alpha: alpha) }
         } else {
             let text = item.title.isEmpty ? item.label : item.title
@@ -206,6 +256,10 @@ final class _NSToolbarItemButton: NSButton {
         NSColor.labelColor.withAlphaComponent(alpha).setStroke()
         p.stroke()
     }
+
+    /// The colour of a toolbar symbol: the label colour at reduced emphasis (a mid grey on
+    /// the light title bar, measured at about 108/255 on macOS 14 and 15).
+    static var _iconColor: NSColor { NSColor.labelColor.withAlphaComponent(0.55) }
 
     /// The width the button wants: the fixed size, or the title's width for titled items.
     func preferredWidth(_ standard: CGFloat) -> CGFloat {
@@ -320,6 +374,10 @@ final class _NSToolbarView: NSView {
     /// anchors on it for `show(relativeTo:)`.
     func _frame(ofItem item: NSToolbarItem) -> NSRect? { slots.first { $0.item === item }?.frame }
     private var separators: [NSRect] = []
+    /// Where the window's title and subtitle are drawn in a unified band (nil when not).
+    private(set) var _titleFrame: NSRect?
+    /// Stands for the title in the layout pass; never one of the toolbar's items.
+    private let titleSlot = NSToolbarItem(itemIdentifier: NSToolbarItem.Identifier("_NSToolbarWindowTitle"))
     static let overflowChosen = Selector(("_toolbarOverflowItemChosen:"))
 
     init(toolbar: NSToolbar) {
@@ -346,7 +404,7 @@ final class _NSToolbarView: NSView {
     /// the band with a unified toolbar (NSTitlebarAccessoryViewController).
     func apply(style: NSWindow.ToolbarStyle, contentCoversTitleBar: Bool, accessoryInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)) {
         var m = _NSToolbarMetrics.resolve(style: style, displayMode: toolbar.displayMode, sizeMode: toolbar.sizeMode, contentCoversTitleBar: contentCoversTitleBar,
-                                          buttonStyle: window?._windowButtonStyle ?? Platform.windowButtonStyle)
+                                          buttonStyle: window?._windowButtonStyle ?? Platform.windowButtonStyle, automaticIsUnified: toolbar._automaticStyleIsUnified)
         m.leadingInset += accessoryInsets.leading
         m.trailingInset += accessoryInsets.trailing
         if m != metrics { metrics = m; needsLayout = true; needsDisplay = true }
@@ -376,7 +434,7 @@ final class _NSToolbarView: NSView {
         // Drop buttons of items that left.
         for (id, b) in buttons where !itemSet.contains(id) { b.removeFromSuperview(); buttons[id] = nil }
         // Measure.
-        struct Entry { let item: NSToolbarItem; var width: CGFloat; let flexible: Bool; let isSeparator: Bool; let kind: Kind; enum Kind { case button, view, space, separator } }
+        struct Entry { let item: NSToolbarItem; var width: CGFloat; let flexible: Bool; let isSeparator: Bool; let kind: Kind; enum Kind { case button, view, space, separator, title } }
         var entries: [Entry] = []
         for item in items {
             let id = item.itemIdentifier
@@ -403,18 +461,40 @@ final class _NSToolbarView: NSView {
                 entries.append(Entry(item: item, width: width, flexible: false, isSeparator: false, kind: .button))
             }
         }
-        // Navigational items lead.
-        let navigational = entries.filter { $0.item.isNavigational }
-        entries = navigational + entries.filter { !$0.item.isNavigational }
+        // Navigational items lead; in a unified band the window's title follows them, as
+        // on macOS 11 (buttons, sidebar toggle, title and subtitle, then the items).
+        // With a sidebar tracking separator (a split view's sidebar under the band), the
+        // items up to it sit over the sidebar (the sidebar toggle) and the title leads the
+        // rest, after the sidebar column, as macOS 11 lays out a sidebar window.
+        var title: [Entry] = []
+        if let w = _titleWidth() { title = [Entry(item: titleSlot, width: w, flexible: false, isSeparator: false, kind: .title)] }
+        if let split = entries.firstIndex(where: { _isSidebarTrackingSeparator($0.item) }) {
+            let overSidebar = Array(entries[...split])
+            let rest = entries[(split + 1)...]
+            entries = overSidebar + rest.filter { $0.item.isNavigational } + title + rest.filter { !$0.item.isNavigational }
+        } else {
+            let navigational = entries.filter { $0.item.isNavigational }
+            entries = navigational + title + entries.filter { !$0.item.isNavigational }
+        }
         // Overflow: drop the lowest-priority items (rightmost first among equals) until
         // the fixed widths fit, keeping room for the chevron.
         let available = bounds.width - m.leadingInset - m.trailingInset
-        func needed(_ es: [Entry]) -> CGFloat { es.reduce(0) { $0 + $1.width } + CGFloat(max(0, es.count - 1)) * m.itemGap }
+        // A tracking separator jumps the row to its divider: that jump is room the items
+        // cannot use.
+        func jump(_ es: [Entry]) -> CGFloat {
+            var x = m.leadingInset, total: CGFloat = 0
+            for e in es {
+                if let t = e.item as? NSTrackingSeparatorToolbarItem, let tx = t._trackedX, tx > x { total += tx - x; x = tx }
+                x += (e.flexible ? 0 : e.width) + m.itemGap
+            }
+            return total
+        }
+        func needed(_ es: [Entry]) -> CGFloat { es.reduce(0) { $0 + $1.width } + CGFloat(max(0, es.count - 1)) * m.itemGap + jump(es) }
         var overflow: [NSToolbarItem] = []
         var shown = entries
         if needed(shown) > available {
             let reserve = _NSToolbarOverflowButton.width + m.itemGap
-            while needed(shown) + reserve > available, let victim = shown.indices.filter({ shown[$0].kind != .space && shown[$0].kind != .separator }).min(by: { a, b in
+            while needed(shown) + reserve > available, let victim = shown.indices.filter({ shown[$0].kind != .space && shown[$0].kind != .separator && shown[$0].kind != .title }).min(by: { a, b in
                 let pa = shown[a].item.visibilityPriority, pb = shown[b].item.visibilityPriority
                 return pa != pb ? pa < pb : a > b
             }) {
@@ -435,6 +515,7 @@ final class _NSToolbarView: NSView {
         var x = m.leadingInset
         slots.removeAll()
         separators.removeAll()
+        _titleFrame = nil
         let rowHeight = bounds.height - m.topInset
         let rowTop: CGFloat = m.topInset + (m.showsLabels && m.showsIcons ? 4 : ((rowHeight - m.buttonSize.height) / 2).rounded())
         var frames: [NSRect] = []
@@ -481,6 +562,8 @@ final class _NSToolbarView: NSView {
                 slots.append((e.item, f))
             case .space:
                 slots.append((e.item, f))
+            case .title:
+                _titleFrame = NSRect(x: f.minX, y: m.topInset, width: f.width, height: rowHeight)
             }
         }
         for item in overflowItems {
@@ -489,6 +572,61 @@ final class _NSToolbarView: NSView {
         }
         overflowButton.isHidden = overflowItems.isEmpty
         overflowButton.frame = NSRect(x: bounds.width - m.trailingInset - _NSToolbarOverflowButton.width, y: rowTop, width: _NSToolbarOverflowButton.width, height: m.buttonSize.height)
+    }
+
+    /// The separator that tracks a sidebar's divider: the standard identifier, or a tracking
+    /// separator on the first divider of a split view whose first pane starts at the
+    /// window's leading edge (a sidebar, not an inspector further in).
+    private func _isSidebarTrackingSeparator(_ item: NSToolbarItem) -> Bool {
+        if item.itemIdentifier == .sidebarTrackingSeparator { return true }
+        // `_trackedX` is nil without a split view in a window (reading `splitView` then
+        // would trap); such a separator stays a plain one until the split view is shown.
+        guard let t = item as? NSTrackingSeparatorToolbarItem, t.dividerIndex == 0, t._trackedX != nil else { return false }
+        let sv = t.splitView
+        guard let first = (sv.arrangedSubviews.isEmpty ? sv.subviews : sv.arrangedSubviews).first else { return false }
+        return sv.convert(NSPoint(x: first.frame.minX, y: first.frame.midY), to: nil).x <= 1
+    }
+
+    // MARK: Title
+
+    /// What the band shows of the window's title: the unified styles, a visible title,
+    /// and no title band of the package's own above the toolbar (Wayland client-side
+    /// decorations draw the title there already).
+    private var _titleStrings: (title: String, subtitle: String)? {
+        guard metrics.isUnified, let w = window, w.titleVisibility == .visible, !w.title.isEmpty else { return nil }
+        if w._hasClientSideTitleBar, !w.styleMask.contains(.fullSizeContentView) { return nil }
+        return (w.title, w.subtitle)
+    }
+    static var _titleFont: NSFont { NSFont.systemFont(ofSize: 13, weight: .semibold) }
+    static var _subtitleFont: NSFont { NSFont.systemFont(ofSize: 11) }
+
+    /// The width the title takes in the row (the wider of title and subtitle, at most 260
+    /// points, then truncated), or nil when the band shows no title.
+    private func _titleWidth() -> CGFloat? {
+        guard let (title, subtitle) = _titleStrings else { return nil }
+        let tw = title.size(withAttributes: [.font: _NSToolbarView._titleFont]).width
+        let sw = subtitle.isEmpty ? 0 : subtitle.size(withAttributes: [.font: _NSToolbarView._subtitleFont]).width
+        return min(max(tw, sw), 260).rounded(.up) + 8
+    }
+
+    private func _drawTitle() {
+        guard let frame = _titleFrame, let (title, subtitle) = _titleStrings else { return }
+        let key = window?.isKeyWindow ?? true
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byTruncatingTail
+        let titleAttrs: [NSAttributedString.Key: Any] = [.font: _NSToolbarView._titleFont, .paragraphStyle: para,
+                                                         .foregroundColor: key ? NSColor.labelColor : NSColor.secondaryLabelColor]
+        let subAttrs: [NSAttributedString.Key: Any] = [.font: _NSToolbarView._subtitleFont, .paragraphStyle: para,
+                                                       .foregroundColor: key ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor]
+        let th = title.size(withAttributes: titleAttrs).height
+        let sh = subtitle.isEmpty ? 0 : subtitle.size(withAttributes: subAttrs).height
+        let width = frame.width - 8
+        var y = (frame.midY - (th + sh) / 2).rounded()
+        NSAttributedString(string: title, attributes: titleAttrs).draw(in: NSRect(x: frame.minX, y: y, width: width, height: th))
+        y += th
+        if !subtitle.isEmpty {
+            NSAttributedString(string: subtitle, attributes: subAttrs).draw(in: NSRect(x: frame.minX, y: y, width: width, height: sh))
+        }
     }
 
     private func _labelWidth(_ label: String) -> CGFloat {
@@ -514,6 +652,7 @@ final class _NSToolbarView: NSView {
         }
         NSColor.separatorColor.setFill()
         for s in separators { NSBezierPath.fill(s) }
+        _drawTitle()
         if metrics.showsLabels {
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: metrics.labelFontSize), .foregroundColor: NSColor.labelColor]
             let disabledAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: metrics.labelFontSize), .foregroundColor: NSColor.labelColor.withAlphaComponent(0.35)]

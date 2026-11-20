@@ -51,6 +51,50 @@ Shape:
   the host for layout; the next AppKit layout pass re-evaluates dirty bodies top-down,
   reconciles, lays out and resizes backing views. Updates coalesce in AppKit's display
   cycle, so tests drive them with `layoutSubtreeIfNeeded()` or a window display.
+- Measurement memo (2026-11-19, after a Windows run of Sibyl spent about 1.2 s per event-loop
+  iteration re-measuring every transcript row whenever a 50 Hz meter changed): each node
+  memoises `sizeThatFits` per proposal across passes. The memo of a node and of all its
+  ancestors is dropped when the node re-runs or `setNeedsUpdate()` marks it, and through
+  `_ViewNode.invalidateMeasurement()` when a backing view changed size on its own (a split
+  divider drag). The whole tree drops it when `_ViewRoot.measureGeneration` moves (new
+  content, a new root environment, `invalidateAllMeasurements()`); layout passes no longer
+  move it. An unforced pass hands kept children of a primitive their own box, so they no
+  longer re-run on every pass. Primitives whose size reads backing-view state that changes
+  without a re-run (`_MeasuresBackingViewState`: representables, the AppKit table, vertical
+  text fields, date pickers) are re-measured, with their ancestors, at the start of each pass.
+  Animations interpolate presentation frames only, so they need no re-measurement. A
+  scheduled update invalidates the hosting view's intrinsic size only when its
+  `sizingOptions` include `.intrinsicContentSize` and it is not its window's content view
+  (`NSHostingRootHost.rootDidScheduleUpdate()`).
+- Invalidation (2026-11-19, the same Sibyl run: every meter tick and keystroke redrew every
+  text and shape in the window): a scheduled update no longer marks the whole hosting view
+  for display. Frame changes mark what they move, and a primitive marks its own view when
+  its content changes. Primitives whose `didLayout` only invalidates their view
+  (`_RedrawsWhenChanged`: text, shapes, decorations, gradients, masks) are told only when
+  their rect or primitive changed. A forced pass keeps a `Text` child whose value and
+  environment are equal (`_sameLeafValue`, `_equalEnvironment`; a value that is neither
+  `Equatable` nor an object counts as changed), so a list whose body re-ran for an appended
+  row keeps its other rows' primitives, memos and pixels. `syncBackingViews` inserts new
+  backing views next to their neighbours instead of re-adding every sibling. A view's
+  baselines (`ViewDimensions`) are found on first read, not for every alignment query (a
+  leading-aligned stack around a list laid out every row's text on every pass).
+  `NSScrollView.tile()` and `reflectScrolledClipView(_:)` set scroller values, frames and
+  visibility only when they differ. `SwiftUIUpdateCostTests` counts it: a meter tick marks
+  no text (was 40) and measures no row; an appended row marks only itself (was 41 texts).
+- Layer damage (2026-11-20, the Sibyl capture window on Windows marked `_ContainerView` and
+  `_SwiftUISplitView` on every 50 Hz meter tick): the hosting view is layer-backed, and any
+  sublayer property change (a capsule's `bounds` through the view's frame) told the root's
+  host to repaint everything, so every tick repainted the whole window and drew every text.
+  A backing-layer change the view makes to follow its own frame, alpha or hidden state no
+  longer reaches the host (`CALayer._hostMarksChange`: the view marks old and new frames in
+  its superview); a change made to a layer directly (an `offset` effect's transform) repaints
+  what the layer's subtree covered before and after (`layerNeedsDisplay(_:inRootBounds:)`),
+  and dirty rects under a transformed layer go through the layer tree. The software
+  compositor skips a layer's own drawing when the dirty area misses its bounds, the window
+  paints each pending dirty area on its own rather than their bounding box (three meters in
+  three rows no longer repaint the row labels between them), `_SplitPrimitive` re-arranges
+  its split view only when its size or panes changed, and `alphaValue` ignores a value it
+  already has. `SwiftUIMeterCascadeTests` measures the scene.
 - `App` runs `NSApplication`: `WindowGroup` makes an `NSWindow` whose content is an
   `NSHostingView` of the scene's content, sized to the content's ideal size.
 

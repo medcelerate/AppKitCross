@@ -87,11 +87,19 @@ public protocol AlignmentID {
 public struct ViewDimensions {
     public let width: CGFloat
     public let height: CGFloat
-    /// Baselines from the top (nil: no text inside; the bottom edge stands in).
-    let firstBaseline: CGFloat?
-    let lastBaseline: CGFloat?
+    /// Baselines from the top (nil: no text inside; the bottom edge stands in). Worked out
+    /// on first use: only a baseline guide reads them, and finding them lays out every text
+    /// in the view (a leading-aligned stack around a 40-row list did that on every pass).
+    var firstBaseline: CGFloat? { baselines.value.first }
+    var lastBaseline: CGFloat? { baselines.value.last }
+    private let baselines: _LazyBaselines
     init(width: CGFloat, height: CGFloat, firstBaseline: CGFloat? = nil, lastBaseline: CGFloat? = nil) {
-        self.width = width; self.height = height; self.firstBaseline = firstBaseline; self.lastBaseline = lastBaseline
+        self.width = width; self.height = height
+        baselines = _LazyBaselines(value: (firstBaseline, lastBaseline))
+    }
+    init(width: CGFloat, height: CGFloat, baselines compute: @escaping @MainActor () -> (first: CGFloat?, last: CGFloat?)) {
+        self.width = width; self.height = height
+        baselines = _LazyBaselines(compute: compute)
     }
     public subscript(guide: HorizontalAlignment) -> CGFloat { guide.custom?(self) ?? width * guide.fraction }
     public subscript(guide: VerticalAlignment) -> CGFloat {
@@ -102,6 +110,21 @@ public struct ViewDimensions {
     /// Explicit guides (`alignmentGuide`) are not kept yet.
     public subscript(explicit guide: HorizontalAlignment) -> CGFloat? { nil }
     public subscript(explicit guide: VerticalAlignment) -> CGFloat? { nil }
+}
+
+/// A view's baselines, computed once when first read.
+final class _LazyBaselines: @unchecked Sendable {
+    private var compute: (@MainActor () -> (first: CGFloat?, last: CGFloat?))?
+    private var stored: (first: CGFloat?, last: CGFloat?)
+    init(value: (first: CGFloat?, last: CGFloat?)) { stored = value }
+    init(compute: @escaping @MainActor () -> (first: CGFloat?, last: CGFloat?)) { self.compute = compute; stored = (nil, nil) }
+    var value: (first: CGFloat?, last: CGFloat?) {
+        if let c = compute {
+            compute = nil
+            stored = MainActor.assumeIsolated { c() }
+        }
+        return stored
+    }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/alignment
@@ -205,7 +228,9 @@ final class _StackPrimitive: _Primitive {
         let priorities = Set(items.map(\.layoutPriority)).sorted(by: >)
         for p in priorities {
             var group = items.indices.filter { items[$0].layoutPriority == p }
-            group.sort { flex[$0] < flex[$1] }
+            // Stable: equally flexible items keep their order (fixed-size items, which take
+            // the same room whatever they are offered, go first either way).
+            group.sort { flex[$0] != flex[$1] ? flex[$0] < flex[$1] : $0 < $1 }
             var left = group.count
             for i in group {
                 let share = max(0, remaining / CGFloat(left))

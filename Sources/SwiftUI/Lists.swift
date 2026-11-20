@@ -43,11 +43,42 @@ public struct List<SelectionValue: Hashable, Content: View>: View {
     public init(selection: Binding<Set<SelectionValue>>?, @ViewBuilder content: () -> Content) {
         self.content = content(); self.selection = selection.map { _ListSelection(multiple: $0) }
     }
+    /// A list in a navigation split view's sidebar column takes the sidebar style.
+    @Environment(\._inSidebarColumn) private var inSidebarColumn
     public var body: some View {
-        ScrollView {
-            _ListRows(content: content, selection: selection, rowInset: 10, rowPadding: 6)
+        if inSidebarColumn {
+            // The sidebar style: no separators, small grey section headers, rows leading
+            // from the column edge under a rounded selection, on the column's own background.
+            ScrollView {
+                _ListRows(content: content, selection: selection, rowInset: _ListRowsPrimitive.sidebarContentInset, rowPadding: 6, sidebar: true)
+            }
+            .environment(\._inSidebarList, true)
+        } else {
+            ScrollView {
+                _ListRows(content: content, selection: selection, rowInset: 10, rowPadding: 6)
+            }
+            .background(Color(nsColor: .controlBackgroundColor))
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+// MARK: Sidebar style
+
+private struct _InSidebarColumnKey: EnvironmentKey { static let defaultValue = false }
+private struct _InSidebarListKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// Inside a `NavigationSplitView`'s sidebar column, where a `List` takes the sidebar
+    /// style (macOS's `.automatic` list style there). `.listStyle(.sidebar)` means the same.
+    var _inSidebarColumn: Bool {
+        get { self[_InSidebarColumnKey.self] }
+        set { self[_InSidebarColumnKey.self] = newValue }
+    }
+    /// The content of a sidebar-style list: section headers are small and grey, and a
+    /// `Label`'s icon takes the accent colour unless it has a foreground style of its own.
+    var _inSidebarList: Bool {
+        get { self[_InSidebarListKey.self] }
+        set { self[_InSidebarListKey.self] = newValue }
     }
 }
 
@@ -84,6 +115,9 @@ protocol _ListRowsProvider {}
 /// A row that is not content (a section's header or footer): never selected, no separator.
 protocol _ListSupplementaryRow {}
 
+/// A section's header row (the sidebar style spaces it from the section above).
+protocol _ListSectionHeaderRow: _ListSupplementaryRow {}
+
 /// Rows stacked with padding, separators and a selection highlight.
 struct _ListRows<Content: View>: View, _PrimitiveView {
     typealias Body = Never
@@ -91,8 +125,9 @@ struct _ListRows<Content: View>: View, _PrimitiveView {
     let selection: _ListSelection?
     let rowInset: CGFloat
     let rowPadding: CGFloat
+    var sidebar = false
     func _makePrimitive(node: _ViewNode) -> _Primitive {
-        _ListRowsPrimitive(content: _ViewBox(content), selection: selection, rowInset: rowInset, rowPadding: rowPadding)
+        _ListRowsPrimitive(content: _ViewBox(content), selection: selection, rowInset: rowInset, rowPadding: rowPadding, sidebar: sidebar)
     }
 }
 
@@ -103,33 +138,132 @@ final class _ListView: NSView, NSSelectorHandling {
     var selectedRows: Set<Int> = []
     /// Section headers and footers: no separator above or below them.
     var supplementaryRows: Set<Int> = []
+    /// Rows whose separator `listRowSeparator(.hidden)` removed: above, and below.
+    var hiddenSeparatorsAbove: Set<Int> = []
+    var hiddenSeparatorsBelow: Set<Int> = []
     /// Delete, Forward Delete and Edit > Delete on the selection (rows with `onDelete`).
     var onDelete: (() -> Bool)?
     var emphasized = true
+    /// The sidebar style: a rounded selection inset from the edges, no separators.
+    var sidebar = false
+    /// The window became or stopped being key (the selection's emphasis follows it).
+    var onKeyChange: (() -> Void)?
+    private var keyObservers: [NSObjectProtocol] = []
     var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     var onArrow: ((Int, Bool) -> Void)?       // delta, extend
     var onSelectAll: (() -> Void)?
+    /// Drag reordering (`onMove`): whether a row can be dragged, and the move to a gap.
+    var canReorder: ((Int) -> Bool)?
+    var onReorder: ((Int, Int) -> Void)?
+    private var dragRow: Int?
+    private var dragStart: NSPoint?
+    /// The gap a dragged row would drop into (0...rowFrames.count), drawn as a line.
+    private(set) var dropGap: Int?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { onClick != nil }
+    /// The rows' separators and selection repaint where rows moved (`place` marks them);
+    /// a list growing by a row does not repaint every row.
+    override var layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy {
+        get { .onSetNeedsDisplay }
+        set { super.layerContentsRedrawPolicy = newValue }
+    }
+    /// Marks the rows whose frames differ between `old` and `rowFrames`, or whose separators
+    /// were hidden or shown (`oldHidden*`, by index), with the separator lines on their edges.
+    func setNeedsDisplay(changedFrom old: [CGRect], hiddenAbove oldAbove: Set<Int>, hiddenBelow oldBelow: Set<Int>) {
+        var dirty: [NSRect] = []
+        /// The separator line under row `i` (drawn at its bottom edge), old and new.
+        func separator(below i: Int) {
+            for frames in [old, rowFrames] where frames.indices.contains(i) {
+                let f = frames[i]
+                dirty.append(NSRect(x: f.minX, y: f.maxY - 1, width: f.width, height: 3))
+            }
+        }
+        for i in 0..<max(old.count, rowFrames.count) {
+            let a = old.indices.contains(i) ? old[i] : .null
+            let b = rowFrames.indices.contains(i) ? rowFrames[i] : .null
+            guard a != b else { continue }
+            for r in [a, b] where !r.isNull { dirty.append(r.insetBy(dx: 0, dy: -1)) }
+            // The row above gains or loses its separator when this one appears or goes.
+            separator(below: i - 1)
+        }
+        // A separator hidden from below (row i) or above (row i + 1) lies between the two.
+        for i in oldBelow.symmetricDifference(hiddenSeparatorsBelow) { separator(below: i) }
+        for i in oldAbove.symmetricDifference(hiddenSeparatorsAbove) { separator(below: i - 1) }
+        let visible = bounds.insetBy(dx: 0, dy: -1)
+        var merged = NSRect.null
+        for r in dirty { merged = merged.union(r) }
+        // One mark for a contiguous band (the usual case), each on its own otherwise.
+        if !merged.isNull, dirty.reduce(0, { $0 + $1.width * $1.height }) * 2 >= merged.width * merged.height {
+            setNeedsDisplay(merged.intersection(visible))
+        } else {
+            for r in dirty { setNeedsDisplay(r.intersection(visible)) }
+        }
+    }
+
 
     override func draw(_ dirtyRect: NSRect) {
         for i in selectedRows where rowFrames.indices.contains(i) {
             (emphasized ? NSColor.selectedContentBackgroundColor : NSColor.unemphasizedSelectedContentBackgroundColor).setFill()
-            NSBezierPath.fill(rowFrames[i])
+            if sidebar {
+                let r = Self.sidebarSelectionRect(rowFrames[i])
+                NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5).fill()
+            } else {
+                NSBezierPath.fill(rowFrames[i])
+            }
         }
         NSColor.separatorColor.setFill()
-        for (i, f) in rowFrames.enumerated().dropLast() where (!selectedRows.contains(i) || !selectedRows.contains(i + 1)) && !supplementaryRows.contains(i) && !supplementaryRows.contains(i + 1) {
+        for (i, f) in rowFrames.enumerated().dropLast() where !sidebar && (!selectedRows.contains(i) || !selectedRows.contains(i + 1)) && !supplementaryRows.contains(i) && !supplementaryRows.contains(i + 1) && !hiddenSeparatorsBelow.contains(i) && !hiddenSeparatorsAbove.contains(i + 1) {
             NSBezierPath.fill(NSRect(x: f.minX, y: f.maxY, width: f.width, height: 1))
         }
+        if let g = dropGap, !rowFrames.isEmpty {
+            let y = g < rowFrames.count ? rowFrames[g].minY : rowFrames[rowFrames.count - 1].maxY
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath.fill(NSRect(x: 4, y: y - 1, width: bounds.width - 8, height: 2))
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let r = dragRow, let start = dragStart else { super.mouseDragged(with: event); return }
+        let p = convert(event.locationInWindow, from: nil)
+        guard dropGap != nil || abs(p.y - start.y) > 3 else { return }
+        // The gap whose row midpoint the pointer is above.
+        var gap = rowFrames.count
+        for (i, f) in rowFrames.enumerated() where p.y < f.midY { gap = i; break }
+        if gap != dropGap { dropGap = gap; needsDisplay = true }
+        _ = r
+    }
+    override func mouseUp(with event: NSEvent) {
+        defer { dragRow = nil; dragStart = nil }
+        guard let r = dragRow, let g = dropGap else { super.mouseUp(with: event); return }
+        dropGap = nil
+        needsDisplay = true
+        onReorder?(r, g)
     }
     func row(at point: NSPoint) -> Int? { rowFrames.firstIndex { $0.contains(point) } }
 
+    /// The sidebar selection of a row: inset 10 points from the column's sides, as macOS's.
+    static func sidebarSelectionRect(_ row: CGRect) -> CGRect { row.insetBy(dx: 10, dy: 0) }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        for o in keyObservers { NotificationCenter.default.removeObserver(o) }
+        keyObservers = []
+        guard let window else { return }
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            keyObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onKeyChange?() }
+            })
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
-        guard let onClick else { super.mouseDown(with: event); return }
+        let p = convert(event.locationInWindow, from: nil)
+        if let i = row(at: p), canReorder?(i) == true { dragRow = i; dragStart = p; dropGap = nil }
+        guard let onClick else { if dragRow == nil { super.mouseDown(with: event) }; return }
         // A click anywhere in a row (also on a row's own views) focuses the list for the keys.
         if let w = window, w.firstResponder !== self { _ = w.makeFirstResponder(self) }
-        if let i = row(at: convert(event.locationInWindow, from: nil)) { onClick(i, event.modifierFlags) }
+        if let i = row(at: p) { onClick(i, event.modifierFlags) }
     }
     override func keyDown(with event: NSEvent) {
         let extend = event.modifierFlags.contains(.shift)
@@ -163,18 +297,27 @@ final class _ListRowsPrimitive: _Primitive {
     var selection: _ListSelection?
     let rowInset: CGFloat
     let rowPadding: CGFloat
+    let sidebar: Bool
+    /// The sidebar style's leading inset of a row's content (the icon), and of a header.
+    static let sidebarContentInset: CGFloat = 18
+    static let sidebarHeaderInset: CGFloat = 14
     private var rowValues: [AnyHashable] = []
     private var rowNodes: [_ViewNode] = []
     /// Per row: the `onDelete` content it came from and its element's offset there.
     private var rowDeleteTargets: [(actions: _RowActionsPrimitive, offset: Int)?] = []
+    /// Per row: the `onMove` content it came from and its element's offset there.
+    private var rowMoveTargets: [(actions: _RowMovePrimitive, offset: Int)?] = []
     private var supplementary: Set<Int> = []
     private var anchor: Int?
 
-    init(content: _AnyViewBox, selection: _ListSelection?, rowInset: CGFloat, rowPadding: CGFloat) {
+    init(content: _AnyViewBox, selection: _ListSelection?, rowInset: CGFloat, rowPadding: CGFloat, sidebar: Bool = false) {
         self.selection = selection
         self.rowInset = rowInset
         self.rowPadding = rowPadding
+        self.sidebar = sidebar
         super.init()
+        view.sidebar = sidebar
+        view.onKeyChange = { [weak self] in self?.refreshHighlight() }
         children = [content]
         wireView()
     }
@@ -186,6 +329,8 @@ final class _ListRowsPrimitive: _Primitive {
         wireView()
     }
     private func wireView() {
+        view.canReorder = { [weak self] i in self?.rowMoveTargets.indices.contains(i) == true && self?.rowMoveTargets[i]?.actions.onMove != nil }
+        view.onReorder = { [weak self] row, gap in self?.reorder(row, toGap: gap) }
         guard selection != nil else { view.onClick = nil; view.onArrow = nil; view.onSelectAll = nil; view.onDelete = nil; return }
         view.onDelete = { [weak self] in self?.deleteSelected() ?? false }
         view.onClick = { [weak self] i, flags in self?.click(i, flags) }
@@ -202,29 +347,37 @@ final class _ListRowsPrimitive: _Primitive {
     private struct _Row {
         let node: _ViewNode
         let deleteTarget: (actions: _RowActionsPrimitive, offset: Int)?
+        var moveTarget: (actions: _RowMovePrimitive, offset: Int)? = nil
     }
     /// Where rows are being collected: the nearest `onDelete` content and, below its
     /// `ForEach`, the element's offset.
     private struct _RowContext {
         var actions: _RowActionsPrimitive?
+        /// The nearest `onMove` content (MoveAndDialogs.swift).
+        var move: _RowMovePrimitive?
         var offset: Int?
         var target: (actions: _RowActionsPrimitive, offset: Int)? {
             guard let actions, let offset else { return nil }
             return (actions, offset)
         }
+        var moveTarget: (actions: _RowMovePrimitive, offset: Int)? {
+            guard let move, let offset else { return nil }
+            return (move, offset)
+        }
     }
     private func collectRows(_ node: _ViewNode, context: _RowContext, into out: inout [_Row]) {
         for (i, c) in node.children.enumerated() {
             var inner = context
-            if node.primitive is _ForEachPrimitive, context.actions != nil, context.offset == nil { inner.offset = i }
-            if c.box.value is _MetadataView { out.append(_Row(node: c, deleteTarget: inner.target)); continue }
+            if node.primitive is _ForEachPrimitive, context.actions != nil || context.move != nil, context.offset == nil { inner.offset = i }
+            if c.box.value is _MetadataView { out.append(_Row(node: c, deleteTarget: inner.target, moveTarget: inner.moveTarget)); continue }
             if c.box.value is EmptyView { continue }
             if let p = c.primitive, p.isLayoutTransparent {
                 if let actions = p as? _RowActionsPrimitive { inner.actions = actions; inner.offset = nil }
+                if let move = p as? _RowMovePrimitive { inner.move = move; inner.offset = nil }
                 collectRows(c, context: inner, into: &out)
             }
             else if c.primitive == nil, c.box.value is any _ListRowsProvider { collectRows(c, context: inner, into: &out) }
-            else { out.append(_Row(node: c, deleteTarget: inner.target)) }
+            else { out.append(_Row(node: c, deleteTarget: inner.target, moveTarget: inner.moveTarget)) }
         }
     }
     private func rowEntries(_ node: _ViewNode) -> [_Row] {
@@ -237,16 +390,51 @@ final class _ListRowsPrimitive: _Primitive {
         row.box.value is any _ListSupplementaryRow
     }
     private func value(of row: _ViewNode, index: Int) -> AnyHashable {
-        _metadata(of: row.box).meta.tag ?? row.box.id ?? AnyHashable(index)
+        Self.tag(of: row) ?? row.box.id ?? AnyHashable(index)
+    }
+    /// A row's tag: on the row itself, or below it through single-child wrappers (a
+    /// context menu, padding, a custom view's body), as SwiftUI's tag trait reaches the list
+    /// through the modifiers applied after it. Sibyl's channel rows are
+    /// `ChannelRow(...).tag(...).contextMenu { ... }`: the tag sits under the context menu,
+    /// and without this the row's value was its `ForEach` id, which no selection holds.
+    /// A ForEach or a scroll view below is content of its own, not the row's wrapper.
+    static func tag(of row: _ViewNode) -> AnyHashable? {
+        var current: _ViewNode? = row
+        while let n = current {
+            if let tag = _metadata(of: n.box).meta.tag { return tag }
+            if n.primitive is _ForEachPrimitive || n.primitive is _ScrollPrimitive || n.primitive is _ListRowsPrimitive { return nil }
+            current = n.children.count == 1 ? n.children[0] : nil
+        }
+        return nil
+    }
+
+    /// How a row sits in the list: its content's leading and trailing insets, the padding
+    /// above and below it, and the gap after it (the separator's line).
+    private struct _RowMetrics { var leading, trailing, top, bottom, gap: CGFloat }
+    private func metrics(of row: _ViewNode, index: Int) -> _RowMetrics {
+        guard sidebar else { return _RowMetrics(leading: rowInset, trailing: rowInset, top: rowPadding, bottom: rowPadding, gap: 1) }
+        if row.box.value is any _ListSectionHeaderRow {
+            // A header: small text near the column edge, set off from the section above.
+            return _RowMetrics(leading: Self.sidebarHeaderInset, trailing: Self.sidebarHeaderInset, top: index == 0 ? 4 : 12, bottom: 4, gap: 0)
+        }
+        return _RowMetrics(leading: rowInset, trailing: rowInset - 4, top: rowPadding, bottom: rowPadding, gap: 0)
     }
 
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         var height: CGFloat = 0
         var width: CGFloat = 0
-        for r in rows(node) {
-            let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - 2 * rowInset) }, height: nil))
-            height += s.height + 2 * rowPadding + 1
-            width = max(width, s.width + 2 * rowInset)
+        for (i, r) in rows(node).enumerated() {
+            if _ListRowDecorationPrimitive.traits(of: r) != nil {
+                // A decorated row (listRowInsets/Background/Separator) insets itself.
+                let s = r.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+                height += s.height + 1
+                width = max(width, s.width)
+                continue
+            }
+            let m = metrics(of: r, index: i)
+            let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - m.leading - m.trailing) }, height: nil))
+            height += s.height + m.top + m.bottom + m.gap
+            width = max(width, s.width + m.leading + m.trailing)
         }
         return CGSize(width: proposal.width.map { $0.isFinite ? max($0, width) : width } ?? width, height: height)
     }
@@ -257,18 +445,45 @@ final class _ListRowsPrimitive: _Primitive {
         let nodes = entries.map(\.node)
         rowNodes = nodes
         rowDeleteTargets = entries.map(\.deleteTarget)
+        rowMoveTargets = entries.map(\.moveTarget)
         supplementary = Set(nodes.indices.filter { isSupplementary(nodes[$0]) })
-        view.supplementaryRows = supplementary
+        if view.supplementaryRows != supplementary { view.supplementaryRows = supplementary; view.needsDisplay = true }
         // A header or footer's value is the row object itself: no selection ever holds it.
         rowValues = nodes.enumerated().map { supplementary.contains($0) ? AnyHashable(ObjectIdentifier($1)) : value(of: $1, index: $0) }
-        for r in nodes {
-            let s = r.sizeThatFits(ProposedViewSize(width: rect.width - 2 * rowInset, height: nil))
-            let rowHeight = s.height + 2 * rowPadding
-            r.place(in: CGRect(x: rect.minX + rowInset, y: y + rowPadding, width: rect.width - 2 * rowInset, height: s.height).integralIfNeeded)
+        var hiddenAbove: Set<Int> = [], hiddenBelow: Set<Int> = []
+        for (i, r) in nodes.enumerated() {
+            if let traits = _ListRowDecorationPrimitive.traits(of: r) {
+                if traits.separatorHidden.contains(.top) { hiddenAbove.insert(i) }
+                if traits.separatorHidden.contains(.bottom) { hiddenBelow.insert(i) }
+                let s = r.sizeThatFits(ProposedViewSize(width: rect.width, height: nil))
+                r.place(in: CGRect(x: rect.minX, y: y, width: rect.width, height: s.height).integralIfNeeded)
+                frames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: s.height))
+                y += s.height + 1
+                continue
+            }
+            let m = metrics(of: r, index: i)
+            let available = max(0, rect.width - m.leading - m.trailing)
+            let s = r.sizeThatFits(ProposedViewSize(width: available, height: nil))
+            let rowHeight = s.height + m.top + m.bottom
+            // The row's content sits at its own width against the leading edge (a list
+            // row is leading-aligned; a stack given the full width would centre itself).
+            let w = min(s.width, available)
+            let x = node.environment.layoutDirection == .rightToLeft ? rect.maxX - m.trailing - w : rect.minX + m.leading
+            r.place(in: CGRect(x: x, y: y + m.top, width: w, height: s.height).integralIfNeeded)
             frames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: rowHeight))
-            y += rowHeight + 1
+            y += rowHeight + m.gap
         }
-        view.rowFrames = frames
+        // The rows' separators and selection repaint only when they moved or changed.
+        if view.rowFrames != frames || view.hiddenSeparatorsAbove != hiddenAbove || view.hiddenSeparatorsBelow != hiddenBelow {
+            // Only the rows that moved, changed size or gained or lost a separator: a line
+            // appended to a transcript repaints that line (and the sentinel row after it,
+            // whose hidden separator moved down one index), an insertion the rows it shifts.
+            let old = view.rowFrames, oldAbove = view.hiddenSeparatorsAbove, oldBelow = view.hiddenSeparatorsBelow
+            view.rowFrames = frames
+            view.hiddenSeparatorsAbove = hiddenAbove
+            view.hiddenSeparatorsBelow = hiddenBelow
+            view.setNeedsDisplay(changedFrom: old, hiddenAbove: oldAbove, hiddenBelow: oldBelow)
+        }
         refreshHighlight()
     }
     override func didSyncBackingViews(node: _ViewNode) { refreshHighlight() }
@@ -277,18 +492,40 @@ final class _ListRowsPrimitive: _Primitive {
     private func refreshHighlight() {
         let selected = selection?.get() ?? []
         let indices = Set(rowValues.indices.filter { selected.contains(rowValues[$0]) })
-        view.selectedRows = indices
-        view.emphasized = view.window?.isKeyWindow ?? true
+        let emphasized = view.window?.isKeyWindow ?? true
+        if view.selectedRows != indices || view.emphasized != emphasized {
+            view.selectedRows = indices
+            view.emphasized = emphasized
+            view.needsDisplay = true
+        }
         for (i, r) in rowNodes.enumerated() {
             var views: [NSView] = []
             r.collectBackingViews(into: &views)
-            for v in views { setSelected(indices.contains(i), in: v) }
+            // Text (and symbols) turn white on the accent selection of a key window; on the
+            // unemphasized grey selection of an inactive one they keep their colours.
+            for v in views { setSelected(indices.contains(i) && emphasized, in: v) }
         }
-        view.needsDisplay = true
     }
     private func setSelected(_ on: Bool, in v: NSView) {
         if let t = v as? _TextView { t.isInSelectedRow = on }
+        if let s = v as? _SymbolImageView { s.isInSelectedRow = on }
         for s in v.subviews { setSelected(on, in: s) }
+    }
+
+    // MARK: Moving
+
+    /// Moves `row` to the gap before row `gap` (`rowCount` for the end) within its own
+    /// `onMove` content, as `onMove(perform:)` offsets count.
+    private func reorder(_ row: Int, toGap gap: Int) {
+        guard rowMoveTargets.indices.contains(row), let target = rowMoveTargets[row], let onMove = target.actions.onMove else { return }
+        var destination = 0
+        for (i, t) in rowMoveTargets.enumerated() where i < gap {
+            if let t, t.actions === target.actions { destination = t.offset + 1 }
+        }
+        // A gap before the first row of the group (or anywhere above it) is offset zero.
+        if let first = rowMoveTargets.firstIndex(where: { $0?.actions === target.actions }), gap <= first { destination = 0 }
+        guard destination != target.offset, destination != target.offset + 1 else { return }
+        onMove(IndexSet(integer: target.offset), destination)
     }
 
     // MARK: Deleting

@@ -118,7 +118,8 @@ final class _DecorationPrimitive: _Primitive {
     var hasOverlay: Bool
     var backgroundAlignment: Alignment
     var overlayAlignment: Alignment
-    private let view = _ContainerView(frame: .zero)
+    /// Made on first use: the fresh primitive an update reads its style from never needs one.
+    private lazy var view = _ContainerView(frame: .zero)
 
     init(content: _AnyViewBox, background: _AnyViewBox?, overlay: _AnyViewBox?, backgroundAlignment: Alignment = .center, overlayAlignment: Alignment = .center, style: Style) {
         self.style = style
@@ -309,8 +310,17 @@ final class _DecorationPrimitive: _Primitive {
             }
         }
         view.drawHandler = { [weak self] _, v in self?.draw(in: v) }
-        view.needsDisplay = true
+        // The container draws only a border: it repaints when that changes, not on every
+        // update (a transcript row landing marked the whole list's background container).
+        // Opacity, hiding and the layer's clip and shadow mark what they change themselves.
+        let border = drawsBorder ? _DrawnBorder(color: style.borderColor, width: style.borderWidth, cornerRadius: style.cornerRadius, clipped: style.clipShape != nil) : nil
+        view.redrawsOnResize = border != nil
+        if border != drawnBorder { view.needsDisplay = true }
+        drawnBorder = border
     }
+    private struct _DrawnBorder: Equatable { var color: Color?; var width, cornerRadius: CGFloat; var clipped: Bool }
+    private var drawnBorder: _DrawnBorder?
+    private var drawsBorder: Bool { style.borderColor != nil && style.borderWidth > 0 }
 
     private func draw(in v: NSView) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -349,7 +359,9 @@ final class _DecorationPrimitive: _Primitive {
         }
     }
 
-    override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+    /// A resize repaints the border through the redraw policy; a container without one
+    /// draws nothing a layout pass could change.
+    override func didLayout(node: _ViewNode) { if drawsBorder { view.needsDisplay = true } }
     override func didSyncBackingViews(node: _ViewNode) { applyPresentation() }
 }
 
@@ -777,11 +789,17 @@ extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/datepickerstyle(_:)
     public func datePickerStyle<S: DatePickerStyle>(_ style: S) -> some View { environment(\.datePickerStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/liststyle(_:)
-    public func listStyle<S: ListStyle>(_ style: S) -> some View { self }
+    /// `.sidebar` turns the sidebar look on anywhere; any other explicit style turns it
+    /// off inside a NavigationSplitView's sidebar column (Lists.swift).
+    public func listStyle<S: ListStyle>(_ style: S) -> some View { environment(\._inSidebarColumn, style is SidebarListStyle) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/controlsize(_:)
     public func controlSize(_ size: ControlSize) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/labelshidden()
-    public func labelsHidden() -> some View { self }
+    ///
+    /// Controls under it show no label of their own: a picker or toggle shows its control
+    /// alone, and a text field in a form is not a labelled row (its title stays the
+    /// placeholder). The label still names the control for assistive technology.
+    public func labelsHidden() -> some View { environment(\._labelsHidden, true) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/keyboardshortcut(_:modifiers:)
     public func keyboardShortcut(_ key: KeyEquivalent, modifiers: EventModifiers = .command) -> some View { _KeyShortcut(content: self, key: key, modifiers: modifiers) }
 }

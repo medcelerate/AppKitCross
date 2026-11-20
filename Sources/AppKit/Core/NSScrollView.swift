@@ -31,6 +31,15 @@ import CoreText
     private var _verticalPageScroll: CGFloat = 10
     private var _horizontalPageScroll: CGFloat = 10
     private var _scrollerStyle: NSScroller.Style = .legacy
+    /// The app set `scrollerStyle`; otherwise the style follows the content (below).
+    private var _scrollerStyleIsSet = false
+    /// Overlay scrollers are on screen (scrolling just happened); they fade out after.
+    private var _overlayRevealed = false
+    private var _overlayFadeGeneration = 0
+    /// The scrollers the content needs, from the last tile (overlay scrollers may be
+    /// hidden while needed).
+    private var _scrollersNeeded = (vertical: false, horizontal: false)
+    private var _lastReflectedOrigin: NSPoint?
     private var _scrollerKnobStyle: NSScroller.KnobStyle = .default
     private var _contentInsets = NSEdgeInsets()
     private var _scrollerInsets = NSEdgeInsets()
@@ -64,9 +73,10 @@ import CoreText
     }
 
     @MainActor private func _makeScroller(horizontal: Bool) -> NSScroller {
-        let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
+        let style = _effectiveScrollerStyle
+        let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: style)
         let s = NSScroller(frame: horizontal ? NSRect(x: 0, y: 0, width: 100, height: w) : NSRect(x: 0, y: 0, width: w, height: 100))
-        s.scrollerStyle = _scrollerStyle
+        s.scrollerStyle = style
         s.target = self
         s.action = NSScrollView.scrollerAction
         addSubview(s)
@@ -103,6 +113,12 @@ import CoreText
     @MainActor open override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         tile()
+    }
+
+    /// Joining SwiftUI content (or leaving it) can change the scroller style in force.
+    @MainActor open override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if !_scrollerStyleIsSet, (_verticalScroller ?? _horizontalScroller)?.scrollerStyle != _effectiveScrollerStyle { tile() }
     }
 
     /// Scrolls so that `rect` (in document coordinates) is visible.
@@ -149,7 +165,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/backgroundcolor
     @MainActor open var backgroundColor: NSColor {
         get { _backgroundColor }
-        set { _backgroundColor = newValue; needsDisplay = true }
+        set { _backgroundColor = newValue; _contentView.backgroundColor = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/bordertype
     @MainActor open var borderType: NSBorderType {
@@ -201,9 +217,12 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/documentvisiblerect
     @MainActor open var documentVisibleRect: NSRect { _contentView.documentVisibleRect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/drawsbackground
+    /// The clip view follows, as AppKit's does: a scroll view that draws no background is
+    /// transparent all the way down to its document (a SwiftUI ScrollView over a page
+    /// colour; the clip view's own white hid every grouped Form card).
     @MainActor open var drawsBackground: Bool {
         get { _drawsBackground }
-        set { _drawsBackground = newValue; needsDisplay = true }
+        set { _drawsBackground = newValue; _contentView.drawsBackground = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/findbarposition
     @MainActor open var findBarPosition: NSScrollView.FindBarPosition {
@@ -211,7 +230,8 @@ import CoreText
         set { _findBarPosition = newValue; tile() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/flashscrollers()
-    @MainActor open func flashScrollers() { }
+    /// Overlay scrollers appear and fade out again; legacy scrollers are always shown.
+    @MainActor open func flashScrollers() { _revealOverlayScrollers() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/framesize(forcontentsize:horizontalscrollerclass:verticalscrollerclass:bordertype:controlsize:scrollerstyle:)
     @MainActor public class func frameSize(forContentSize cSize: NSSize, horizontalScrollerClass: AnyClass?, verticalScrollerClass: AnyClass?, borderType type: NSBorderType, controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> NSSize {
         let inset: CGFloat = type == .noBorder ? 0 : (type == .lineBorder ? 1 : 2)
@@ -327,25 +347,36 @@ import CoreText
             if _hasHorizontalRuler { _horizontalRuler?.needsDisplay = true }
             if _hasVerticalRuler { _verticalRuler?.needsDisplay = true }
         }
+        // The scrollers repaint only when their knob moved or resized (each layout pass
+        // reflects the clip view, usually with nothing changed).
         if let v = _verticalScroller {
             let range = max(0, doc.height - b.height)
-            v.knobProportion = doc.height > 0 ? min(1, b.height / doc.height) : 1
+            let proportion = doc.height > 0 ? min(1, b.height / doc.height) : 1
+            if v.knobProportion != proportion { v.knobProportion = proportion }
             let fromTop = cView.isFlipped ? b.minY - doc.minY : doc.maxY - b.maxY
-            v.doubleValue = range > 0 ? Double(min(max(fromTop / range, 0), 1)) : 0
-            v.needsDisplay = true
+            let value = range > 0 ? Double(min(max(fromTop / range, 0), 1)) : 0
+            if v.doubleValue != value { v.doubleValue = value }
         }
         if let h = _horizontalScroller {
             let range = max(0, doc.width - b.width)
-            h.knobProportion = doc.width > 0 ? min(1, b.width / doc.width) : 1
-            h.doubleValue = range > 0 ? Double(min(max((b.minX - doc.minX) / range, 0), 1)) : 0
-            h.needsDisplay = true
+            let proportion = doc.width > 0 ? min(1, b.width / doc.width) : 1
+            if h.knobProportion != proportion { h.knobProportion = proportion }
+            let value = range > 0 ? Double(min(max((b.minX - doc.minX) / range, 0), 1)) : 0
+            if h.doubleValue != value { h.doubleValue = value }
         }
+        let style = _effectiveScrollerStyle
         if _autohidesScrollers && !_tiling {
-            let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
+            let w = style == .overlay ? 0 : NSScroller.scrollerWidth(for: .regular, scrollerStyle: style)
             let needV = _hasVerticalScroller && doc.height > bounds.height - 2 * _borderInset
             let needH = _hasHorizontalScroller && doc.width > bounds.width - 2 * _borderInset - (needV ? w : 0)
-            if needV != !(_verticalScroller?.isHidden ?? true) || needH != !(_horizontalScroller?.isHidden ?? true) { tile() }
+            if style == .overlay {
+                if needV != _scrollersNeeded.vertical || needH != _scrollersNeeded.horizontal { tile() }
+            } else if needV != !(_verticalScroller?.isHidden ?? true) || needH != !(_horizontalScroller?.isHidden ?? true) { tile() }
         }
+        // Overlay scrollers appear while the content scrolls (the first reflection only
+        // records where it starts).
+        if let last = _lastReflectedOrigin, last != b.origin, style == .overlay { _revealOverlayScrollers() }
+        _lastReflectedOrigin = b.origin
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/rulerviewclass
     @MainActor class public var rulerViewClass: AnyClass! {
@@ -409,10 +440,80 @@ import CoreText
         set { _scrollerKnobStyle = newValue; _verticalScroller?.knobStyle = newValue; _horizontalScroller?.knobStyle = newValue }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/scrollerstyle
+    /// Unless the app sets it, a scroll view showing SwiftUI content (inside an
+    /// NSHostingView: a List, Table or ScrollView) takes `NSScroller.preferredScrollerStyle`,
+    /// overlay scrollers hidden until the content scrolls, as on a Mac with a trackpad; an
+    /// AppKit scroll view keeps legacy scrollers. Setting `.legacy` (or `.overlay`) wins.
     @MainActor open var scrollerStyle: NSScroller.Style {
-        get { _scrollerStyle }
-        set { _scrollerStyle = newValue; tile() }
+        get { _effectiveScrollerStyle }
+        set { _scrollerStyle = newValue; _scrollerStyleIsSet = true; tile() }
     }
+
+    /// The style in force: the app's, else overlay for SwiftUI-hosted content.
+    @MainActor internal var _effectiveScrollerStyle: NSScroller.Style {
+        if _scrollerStyleIsSet { return _scrollerStyle }
+        var v = superview
+        while let s = v {
+            if s is NSHostingRootHost { return NSScroller.preferredScrollerStyle }
+            v = s.superview
+        }
+        return _scrollerStyle
+    }
+
+    /// How long overlay scrollers stay after the last scroll before fading (tests shorten it).
+    internal static var _overlayHoldInterval: TimeInterval = 0.8
+    /// The fade: this many steps, this far apart.
+    private static let _overlayFadeSteps = 6
+    private static let _overlayFadeStepInterval: TimeInterval = 1.0 / 30
+
+    /// Shows the overlay scrollers the content needs and starts their fade-out clock again.
+    @MainActor private func _revealOverlayScrollers() {
+        guard _effectiveScrollerStyle == .overlay else { return }
+        _overlayRevealed = true
+        _overlayFadeGeneration += 1
+        _applyOverlayVisibility(alpha: 1)
+        let generation = _overlayFadeGeneration
+        Timer.scheduledTimer(withTimeInterval: NSScrollView._overlayHoldInterval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?._fadeOverlayScrollers(generation: generation, step: 1) }
+        }
+    }
+
+    @MainActor private func _fadeOverlayScrollers(generation: Int, step: Int) {
+        guard generation == _overlayFadeGeneration, _overlayRevealed else { return }
+        // A knob being dragged stays.
+        if [_verticalScroller, _horizontalScroller].contains(where: { $0?.hitPart == .knob }) {
+            Timer.scheduledTimer(withTimeInterval: NSScrollView._overlayHoldInterval, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?._fadeOverlayScrollers(generation: generation, step: 1) }
+            }
+            return
+        }
+        let steps = NSScrollView._overlayFadeSteps
+        if step >= steps {
+            _overlayRevealed = false
+            _applyOverlayVisibility(alpha: 1)
+            return
+        }
+        _applyOverlayVisibility(alpha: 1 - CGFloat(step) / CGFloat(steps))
+        Timer.scheduledTimer(withTimeInterval: NSScrollView._overlayFadeStepInterval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?._fadeOverlayScrollers(generation: generation, step: step + 1) }
+        }
+    }
+
+    /// Overlay scrollers are shown while revealed and needed, at `alpha`.
+    @MainActor private func _applyOverlayVisibility(alpha: CGFloat) {
+        guard _effectiveScrollerStyle == .overlay else { return }
+        for (scroller, needed) in [(_verticalScroller, _scrollersNeeded.vertical), (_horizontalScroller, _scrollersNeeded.horizontal)] {
+            guard let scroller else { continue }
+            let shown = needed && _overlayRevealed
+            if scroller.isHidden != !shown { scroller.isHidden = !shown }
+            // A hidden scroller is made whole again for the next reveal.
+            let a = shown ? alpha : 1
+            if scroller.alphaValue != a { scroller.alphaValue = a; if shown { scroller.needsDisplay = true } }
+        }
+    }
+
+    /// The overlay scrollers are on screen (tests).
+    internal var _overlayScrollersRevealed: Bool { _overlayRevealed }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/scrollsdynamically
     @MainActor open var scrollsDynamically: Bool {
         get { _scrollsDynamically }
@@ -467,33 +568,66 @@ import CoreText
             if isFlipped { content.origin.y += h }
         }
         let doc = _contentView.documentRect
-        let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
+        let style = _effectiveScrollerStyle
+        let overlay = style == .overlay
+        let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: style)
+        // Overlay scrollers float over the content and take none of its room.
+        let room = overlay ? 0 : w
         var showV = _hasVerticalScroller, showH = _hasHorizontalScroller
         if _autohidesScrollers {
             // Two passes: showing one scroller can make the other necessary.
             showV = _hasVerticalScroller && doc.height > content.height
-            showH = _hasHorizontalScroller && doc.width > content.width - (showV ? w : 0)
-            showV = _hasVerticalScroller && doc.height > content.height - (showH ? w : 0)
+            showH = _hasHorizontalScroller && doc.width > content.width - (showV ? room : 0)
+            showV = _hasVerticalScroller && doc.height > content.height - (showH ? room : 0)
         }
-        if showV { content.size.width = max(0, content.size.width - w) }
-        if showH {
-            content.size.height = max(0, content.size.height - w)
-            if !isFlipped { content.origin.y += w }
-        }
-        if let v = _verticalScroller {
-            v.isHidden = !showV
-            v.frame = NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
-        }
-        if let h = _horizontalScroller {
-            h.isHidden = !showH
-            h.frame = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
+        _scrollersNeeded = (showV, showH)
+        for s in [_verticalScroller, _horizontalScroller] { if let s, s.scrollerStyle != style { s.scrollerStyle = style } }
+        if overlay {
+            // Over the content's trailing and bottom edges; the vertical one stops short of
+            // the horizontal one.
+            if let v = _verticalScroller {
+                let height = max(0, content.height - (showH ? w : 0))
+                let f = NSRect(x: content.maxX - w, y: isFlipped || !showH ? content.minY : content.minY + w, width: w, height: height)
+                if v.frame != f { v.frame = f }
+            }
+            if let h = _horizontalScroller {
+                let f = NSRect(x: content.minX, y: isFlipped ? content.maxY - w : content.minY, width: max(0, content.width - (showV ? w : 0)), height: w)
+                if h.frame != f { h.frame = f }
+            }
+            // Above the clip view, which a document view may have been put in after them.
+            for s in [_verticalScroller, _horizontalScroller] {
+                guard let s, s.superview === self, let si = subviews.firstIndex(where: { $0 === s }),
+                      let ci = subviews.firstIndex(where: { $0 === _contentView }), si < ci else { continue }
+                addSubview(s, positioned: .above, relativeTo: _contentView)
+            }
+            _applyOverlayVisibility(alpha: _verticalScroller?.alphaValue ?? _horizontalScroller?.alphaValue ?? 1)
+        } else {
+            if showV { content.size.width = max(0, content.size.width - w) }
+            if showH {
+                content.size.height = max(0, content.size.height - w)
+                if !isFlipped { content.origin.y += w }
+            }
+            // Frames and visibility are set only when they change (the setters mark what they
+            // move), so a tile that changes nothing repaints nothing.
+            if let v = _verticalScroller {
+                if v.isHidden != !showV { v.isHidden = !showV }
+                if v.alphaValue != 1 { v.alphaValue = 1 }
+                let f = NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
+                if v.frame != f { v.frame = f }
+            }
+            if let h = _horizontalScroller {
+                if h.isHidden != !showH { h.isHidden = !showH }
+                if h.alphaValue != 1 { h.alphaValue = 1 }
+                let f = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
+                if h.frame != f { h.frame = f }
+            }
         }
         if _contentView.frame != content {
             _contentView.frame = content
             _contentView.documentView?._clipViewDidResize()
+            needsDisplay = true
         }
         reflectScrolledClipView(_contentView)
-        needsDisplay = true
     }
     private var _headerView: NSTableHeaderView?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/usespredominantaxisscrolling

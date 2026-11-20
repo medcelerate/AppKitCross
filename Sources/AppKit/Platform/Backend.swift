@@ -167,6 +167,20 @@ public protocol PlatformWindow: AnyObject {
     func close()
     /// Marks the content area (or `rect`, in content coordinates) for repainting.
     func setNeedsDisplay(_ rect: NSRect?)
+    /// Scrolling by copy (`NSClipView.copiesOnScroll`): moves the pixels already painted in
+    /// `rect` (content coordinates, bottom-left, points) by `delta` within the backing store,
+    /// at once, between paints. The pixels that land outside `rect` are dropped; the band
+    /// the move uncovers is left as it was, for the caller to repaint. The next frame shows
+    /// the moved pixels without the window drawing them again: a backend that presents only
+    /// what it repaints marks the destination for presentation itself. Returns false when
+    /// the backend cannot (the default, a fresh or lost backing store, a delta that is not
+    /// whole pixels): the caller then repaints all of `rect`.
+    func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool
+    /// Asks for a layout pass (`PlatformWindowOwner.platformWindowLayout`) before the next
+    /// paint, without dirtying any pixel: what layout moves or updates invalidates itself.
+    /// The default dirties one pixel, which on a backend that unions dirty rects can grow
+    /// the paint to the whole window; backends with their own loop override it.
+    func requestLayout()
     /// `NSWindow.isDocumentEdited`: platforms with native title bars mark the title (an
     /// asterisk before it, as their own editors do); the default does nothing.
     func setDocumentEdited(_ edited: Bool)
@@ -294,10 +308,12 @@ extension PlatformBackend {
 }
 
 extension PlatformWindow {
+    public func requestLayout() { setNeedsDisplay(NSRect(x: 0, y: 0, width: 1, height: 1)) }
     public func setDocumentEdited(_ edited: Bool) { }
     public func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool { false }
     public func makePresentationSurface(frame: NSRect) -> (any PlatformPresentationSurface)? { nil }
     public func captureContent() -> CGImage? { nil }
+    public func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool { false }
     public func attachSheet(to parent: PlatformWindow?) { }
     public var supportsTransparency: Bool { true }
     public func setResizeConstraints(_ constraints: PlatformResizeConstraints) { }
@@ -353,6 +369,9 @@ public protocol PlatformWindowOwner: AnyObject {
     /// Draw the content area. `context` is in content coordinates (points, bottom-left
     /// origin, already scaled for the backing store). `dirtyRect` is in content coordinates.
     func platformWindowDraw(into context: CGContext, dirtyRect: NSRect)
+    /// Lays the window's views out (a `requestLayout` was made); the paint that follows
+    /// covers what layout invalidated.
+    func platformWindowLayout()
     /// Draw the title band of a window whose platform has `hasClientSideTitleBar`: the band
     /// background, title and standard buttons. `context` and `dirtyRect` are in window
     /// coordinates (the content at the origin, the band above it, y up).
@@ -414,6 +433,7 @@ public enum PlatformWindowHitRegion: Sendable { case client, caption, closeButto
 
 extension PlatformWindowOwner {
     public func platformWindowDrawTitleBar(into context: CGContext, dirtyRect: NSRect) {}
+    public func platformWindowLayout() {}
     public func platformWindowTitleBarDoubleClicked() {}
 }
 

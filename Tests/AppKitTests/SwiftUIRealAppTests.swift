@@ -71,7 +71,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             let (w, h) = host(Settings())
             let t = texts(h)
             for s in ["Workday", "Schedule", "Next reminder", "Disabled"] { XCTAssertTrue(t.contains(s), s) }
-            XCTAssertNotNil(buttons(h).first { $0.title == "Midday reminder" })
+            XCTAssertNotNil(allViews(h).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == "Midday reminder" }, "a grouped form's toggle is a switch")
             w.close()
             let (w2, h2) = host(Form { Text("columns") }.formStyle(.columns))
             XCTAssertTrue(texts(h2).contains("columns"))
@@ -294,10 +294,12 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             (Platform.backend as! HostBackend).drain()
             h.layoutSubtreeIfNeeded()
             guard let tb = w.toolbar as? _SwiftUIToolbar else { return XCTFail("the toolbar button did not reach the window's NSToolbar") }
-            // A Button whose label is a Label (icon and title) is the port's custom button view.
-            let settingsButton = tb.items.compactMap(\.view).flatMap(allViews).compactMap { $0 as? _ContainerView }.first { $0.accessibilityPress != nil }
-            XCTAssertNotNil(settingsButton, "the primary-action item hosts the Settings button")
-            XCTAssertTrue(tb.items.compactMap(\.view).flatMap(allViews).compactMap { ($0 as? _TextView)?.storage.string }.contains("Settings"))
+            // A Button whose label is a Label (icon and title) is an image item the toolbar
+            // draws itself (unified style: icon only, the title as the tooltip).
+            let settingsButton = tb._view?.subviews.compactMap { $0 as? _NSToolbarItemButton }.first { $0.item?.label == "Settings" }
+            XCTAssertNotNil(settingsButton, "the primary-action item is the Settings image item")
+            XCTAssertNotNil(settingsButton?.item?.image, "the Label's symbol is the item's image")
+            XCTAssertEqual(settingsButton?.toolTip, "Settings")
             // A press on the button (or on the label inside it) is the button's, not a
             // title-bar drag: the Win32 frame asks the window before it moves the window.
             if let b = settingsButton {
@@ -360,7 +362,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThanOrEqual(checkboxes.count, 2, "one checkbox per row")
 
             // The settings sheet: a grouped form with a time picker, a pop-up and read-only rows.
-            settingsButton?.accessibilityPress?()
+            settingsButton?.performClick(nil)
             (Platform.backend as! HostBackend).drain()
             h.layoutSubtreeIfNeeded()
             guard w.sheets.count == 1 else { return XCTFail("the Settings sheet did not attach to the main window") }
@@ -383,7 +385,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             XCTAssertNotNil(firstOpenInset)
             XCTAssertNotNil(allViews(sheet.contentView!).first { $0 is NSDatePicker }, "the hour-and-minute picker is an NSDatePicker")
             XCTAssertNotNil(allViews(sheet.contentView!).first { $0 is NSPopUpButton }, "the time zone picker is a pop-up")
-            buttons(sheet.contentView!).first { $0.title == "Midday reminder" }?.performClick(nil)
+            allViews(sheet.contentView!).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == "Midday reminder" }?.toggle.performClick(nil)
             (Platform.backend as! HostBackend).drain()
             sheet.contentView!.layoutSubtreeIfNeeded()   // the sheet hosts its own view tree
             XCTAssertFalse(store.reminder)
@@ -421,7 +423,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             h.layoutSubtreeIfNeeded()
             XCTAssertTrue(w.sheets.isEmpty, "Done dismisses the sheet")
             // A second open lays the grouped form out the same way as the first.
-            settingsButton?.accessibilityPress?()
+            settingsButton?.performClick(nil)
             (Platform.backend as! HostBackend).drain()
             h.layoutSubtreeIfNeeded()
             if let again = w.sheets.first {

@@ -37,12 +37,12 @@ import CoreText
             if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) == true {
                 _hostsLayersNatively = true
                 _layerSceneDirty = false
-                _platform?.setNeedsDisplay(nil)      // the backing store must stop showing the software composite
+                _setNeedsDisplayWhole()      // the backing store must stop showing the software composite
             }
         } else if !wantsHosting && _hostsLayersNatively {
             _hostsLayersNatively = false
             _ = _platform?.hostLayerScene(nil)
-            _platform?.setNeedsDisplay(nil)
+            _setNeedsDisplayWhole()
         }
     }
 
@@ -181,7 +181,7 @@ import CoreText
     internal var _toolbarMetrics: _NSToolbarMetrics? {
         guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
         return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView),
-                                         buttonStyle: _windowButtonStyle)
+                                         buttonStyle: _windowButtonStyle, automaticIsUnified: t._automaticStyleIsUnified)
     }
     /// The height the toolbar takes out of the content area (below the title band). Zero
     /// when the content covers the title bar: the toolbar then overlays the content.
@@ -203,9 +203,17 @@ import CoreText
     /// the band to the package (Wayland client-side decorations).
     internal var _ownsTitleBand: Bool { _styleMask.contains(.titled) && (_styleMask.contains(.fullSizeContentView) || _hasClientSideTitleBar) }
     private var _visibleAccessories: [NSTitlebarAccessoryViewController] { _styleMask.contains(.titled) ? _titlebarAccessories.filter { !$0.isHidden } : [] }
+    /// A unified toolbar under a title bar the package does not draw (the Win32 system
+    /// frame, X11 server-side decorations) is the title bar as far as the window's content
+    /// goes: the leading and trailing accessories share its row instead of a strip of
+    /// their own, as they share the title bar with a unified toolbar on macOS.
+    private var _toolbarSharesAccessoryRow: Bool {
+        guard !_ownsTitleBand, let m = _toolbarMetrics else { return false }
+        return m.isUnified && m.placement == .belowTitleBar
+    }
     /// The strip under a server-side title bar for the leading and trailing accessories.
     private var _accessoryTopStripHeight: CGFloat {
-        guard !_ownsTitleBand else { return 0 }
+        guard !_ownsTitleBand, !_toolbarSharesAccessoryRow else { return 0 }
         return _visibleAccessories.filter { $0.layoutAttribute != .bottom }.map { $0._measuredSize.height }.max() ?? 0
     }
     /// The bottom accessories, stacked under the toolbar.
@@ -249,9 +257,11 @@ import CoreText
             if strip > 0 { l.paintedBands.append(l.titleRow) }
             top -= strip
         }
+        let sharesRow = _toolbarSharesAccessoryRow
         if let m = _toolbarMetrics {
             l.toolbar = NSRect(x: 0, y: top - m.height, width: pc.width, height: m.height)
             top -= m.height
+            if sharesRow, let t = l.toolbar { l.titleRow = t }
         } else if fullSize {
             top -= NSWindow._titleBarBandHeight
         }
@@ -282,7 +292,7 @@ import CoreText
                 rightX -= size.width + 8
             }
         }
-        if fullSize, let t = l.toolbar, t.maxY == pc.height, _toolbarMetrics?.topInset == 0 {
+        if (fullSize && l.toolbar?.maxY == pc.height && _toolbarMetrics?.topInset == 0) || sharesRow {
             // A unified toolbar shares the row: its items start after the left-hand
             // accessories and stop before the right-hand ones.
             l.toolbarInsets = (max(0, leftX - leadingInset), max(0, pc.width - trailingInset - rightX))
@@ -353,7 +363,14 @@ import CoreText
         _contentView?.needsLayout = true     // contentLayoutRect changed with the band
         _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
+    }
+
+    /// A unified toolbar shows the title and subtitle in its row: they changed.
+    private func _toolbarTitleDidChange() {
+        guard let v = _toolbarView, !v.isHidden else { return }
+        v.needsLayout = true
+        v.needsDisplay = true
     }
 
     /// An accessory's attribute, visibility or view size changed.
@@ -422,7 +439,7 @@ import CoreText
         _layerSceneFrame += 1
         if let scene = _makeLayerScene(), _platform?.hostLayerScene(scene) != true {
             _hostsLayersNatively = false            // the platform gave hosting up: back to software
-            _platform?.setNeedsDisplay(nil)
+            _setNeedsDisplayWhole()
         }
     }
     private var _contentView: NSView?
@@ -683,7 +700,7 @@ import CoreText
         view.frame = NSRect(origin: .zero, size: cr.size)
         if let vc = view._viewController { view.nextResponder = vc; vc.nextResponder = self } else { view.nextResponder = self }
         view._setWindow(self)
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
         _ensureWindowButtons()
         _updateLayerHosting()
     }
@@ -704,13 +721,13 @@ import CoreText
         if _lastFrame.width > 0 { _platform?.frame = _lastFrame }
         NSApplication.shared._register(window: self)
         _contentView?.needsDisplay = true
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/appearance
     @MainActor public var appearance: NSAppearance? {
         get { _appearance }
-        set { _appearance = newValue; _contentView?._effectiveAppearanceDidChange(); _platform?.setNeedsDisplay(nil) }
+        set { _appearance = newValue; _contentView?._effectiveAppearanceDidChange(); _setNeedsDisplayWhole() }
     }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/effectiveappearance
@@ -866,8 +883,206 @@ import CoreText
 
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
-        let r = view.convert(rect, to: nil)
+        var r = view._dirtyRectInWindow(rect)
+        // What a scroll view's clip hides is not drawn: a row appended below the visible
+        // rows marks nothing on screen. An empty area marks nothing either (a view added
+        // with a zero frame grew the platform's dirty rectangle to its origin).
+        var ancestor = view.superview
+        while let v = ancestor, !r.isNull, !r.isEmpty {
+            if v is NSClipView { r = r.intersection(v._dirtyRectInWindow(v.bounds)) }
+            ancestor = v.superview
+        }
+        guard !r.isNull, !r.isEmpty, r.width.isFinite, r.height.isFinite else { return }
+        _noteDirty(r)
         _platform?.setNeedsDisplay(r)
+    }
+
+    /// The areas views asked to repaint since the last paint (window coordinates, whole
+    /// points), nil when the whole window must be. A platform keeps one dirty rectangle
+    /// (the Host window, Win32's `rcPaint`), so three meters in three list rows would
+    /// repaint the rows' text between them; the paint draws these areas one by one instead.
+    private var _pendingDirtyRects: [NSRect]? = []
+    private static let _maxPendingDirtyRects = 12
+
+    /// The window repaints as a whole (a new appearance, background, scale or layer host).
+    internal func _setNeedsDisplayWhole() {
+        _pendingDirtyRects = nil
+        _scrolledAreas = []
+        _platform?.setNeedsDisplay(nil)
+    }
+
+    private func _noteDirty(_ rect: NSRect) {
+        guard var rects = _pendingDirtyRects else { return }
+        guard !rect.isNull, !rect.isEmpty, rect.width.isFinite, rect.height.isFinite else { return }
+        // Overlapping areas become one, so no pixel is drawn twice in a paint; unless their
+        // union is mostly neither (a row band across a list and the scroller down its side:
+        // the whole list). Then the new area loses what is already pending and the rest is
+        // kept in pieces.
+        var queue = [rect.integral]
+        while let r0 = queue.popLast() {
+            var r = r0
+            var i = 0
+            var split = false
+            while i < rects.count {
+                let e = rects[i]
+                if e.contains(r) { split = true; break }
+                // A positive-area overlap, not `intersects`: corelibs Foundation answers true for
+                // rects that only touch, whose difference is the rect itself, over and over.
+                let inter = r.intersection(e)
+                let overlaps = !inter.isNull && inter.width > 0 && inter.height > 0
+                if overlaps || r.contains(e) {
+                    let u = r.union(e)
+                    let covered = r.width * r.height + e.width * e.height - (overlaps ? inter.width * inter.height : 0)
+                    if r.contains(e) || u.width * u.height <= covered * 1.25 {
+                        r = u; rects.remove(at: i); i = 0; continue
+                    }
+                    let pieces = NSView._difference(r, e)
+                    guard pieces.count != 1 || pieces[0] != r else { i += 1; continue }
+                    queue.append(contentsOf: pieces)
+                    split = true
+                    break
+                }
+                i += 1
+            }
+            if !split { rects.append(r) }
+        }
+        if rects.count > NSWindow._maxPendingDirtyRects { rects = [rects.reduce(NSRect.null) { $0.union($1) }] }
+        _pendingDirtyRects = rects
+    }
+
+    /// The areas this paint draws within the platform's `dirtyRect`: the views' own when
+    /// they account for all of it, else the whole dirty rectangle (an expose, a resize,
+    /// a repaint the platform asked for itself). A clip view's area the backing store
+    /// scrolled by copy is accounted for: the platform may present it (Win32 marks it
+    /// dirty so the moved pixels reach the screen) without the window drawing it.
+    private func _takePaintRects(_ dirtyRect: NSRect) -> [NSRect] {
+        let pending = _pendingDirtyRects
+        let scrolled = _scrolledAreas
+        _pendingDirtyRects = []
+        _scrolledAreas = []
+        guard _isOpaque, let rects = pending, rects.count > 1 || !scrolled.isEmpty else { return [dirtyRect] }
+        let box = (rects + scrolled).reduce(NSRect.null) { $0.union($1) }
+        guard box.insetBy(dx: -2, dy: -2).contains(dirtyRect) else { return [dirtyRect] }
+        let parts = rects.map { $0.intersection(dirtyRect) }.filter { !$0.isNull && !$0.isEmpty }
+        if parts.isEmpty, !scrolled.isEmpty { return [] }
+        return parts.isEmpty ? [dirtyRect] : parts
+    }
+
+    // MARK: Scrolling by copy
+
+    /// Clip-view areas (window coordinates) whose pixels the backing store moved since the
+    /// last paint: they need no drawing.
+    private var _scrolledAreas: [NSRect] = []
+    /// A paint is drawing: the backing store is in use and the paint rects are taken.
+    private var _painting = false
+
+    /// What of `clip` the window shows (window coordinates, snapped inward to whole
+    /// pixels), when its pixels can be moved by copy: an untransformed clip view in an
+    /// opaque window that composites its views itself. Nil otherwise.
+    internal func _scrollCopyArea(of clip: NSClipView) -> NSRect? {
+        guard _isOpaque, !_hostsLayersNatively, !_painting, _pendingDirtyRects != nil, let cv = _contentView, clip.isDescendant(of: cv) else { return nil }
+        var v: NSView? = clip
+        while let cur = v {
+            if cur.frameRotation != 0 || cur.boundsRotation != 0 || cur.isHidden { return nil }
+            v = cur.superview
+        }
+        var r = clip.convert(clip.bounds, to: nil)
+        guard clip._dirtyRectInWindow(clip.bounds) == r else { return nil }      // a layer transform above
+        var ancestor = clip.superview
+        while let a = ancestor, !r.isNull {
+            if a is NSClipView || a.clipsToBounds || a === cv { r = r.intersection(a.convert(a.bounds, to: nil)) }
+            ancestor = a.superview
+        }
+        let scale = max(1, backingScaleFactor)
+        guard !r.isNull, r.minX.isFinite, r.minY.isFinite, r.width.isFinite, r.height.isFinite else { return nil }
+        let x0 = (r.minX * scale).rounded(.up) / scale, y0 = (r.minY * scale).rounded(.up) / scale
+        let x1 = (r.maxX * scale).rounded(.down) / scale, y1 = (r.maxY * scale).rounded(.down) / scale
+        guard x1 > x0, y1 > y0 else { return nil }
+        return NSRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
+    }
+
+    /// Moves the pixels of `visible` (from `_scrollCopyArea`, taken before the scroll) by
+    /// `delta` in the backing store and marks what the copy cannot supply: the uncovered
+    /// band, the views drawn over the clip view (their pixels moved with the content), the
+    /// slivers between the clip view's edge and the pixel grid, and the pending dirty areas
+    /// inside the clip, moved with their content. False when the copy is not possible; the
+    /// clip view then repaints what it shows.
+    internal func _scrollBacking(of clip: NSClipView, visible: NSRect, by delta: NSSize) -> Bool {
+        guard let platform = _platform, _pendingDirtyRects != nil, !_painting else { return false }
+        guard delta.width.isFinite, delta.height.isFinite, delta != .zero,
+              abs(delta.width) < visible.width, abs(delta.height) < visible.height else { return false }
+        let scale = max(1, backingScaleFactor)
+        func whole(_ v: CGFloat) -> Bool { abs(v * scale - (v * scale).rounded()) < 0.001 }
+        guard whole(delta.width), whole(delta.height) else { return false }
+        // Views over the clip view repaint where they were and where their pixels went. A
+        // view under a transparent clip view would move with the content: no copy.
+        var overlays: [(NSView, NSRect)] = []
+        var child: NSView = clip
+        while let sup = child.superview {
+            let subs = sup.subviews
+            if let i = subs.firstIndex(where: { $0 === child }) {
+                for (j, s) in subs.enumerated() where j != i && !s.isHidden {
+                    let r = s.convert(s.bounds, to: nil)
+                    guard r.intersects(visible) else { continue }
+                    if j < i {
+                        // One colour over the whole area looks the same moved.
+                        if !clip.isOpaque, !(s._drawsUniformFill && s.subviews.isEmpty && r.contains(visible)) { return false }
+                    } else {
+                        overlays.append((s, r.intersection(visible)))
+                        let moved = r.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)
+                        if !moved.isNull, !moved.isEmpty { overlays.append((s, moved)) }
+                    }
+                }
+            }
+            if sup === _contentView { break }
+            child = sup
+        }
+        // The window's own chrome drawn over the content.
+        if _showsWindowButtons, let cv = _contentView,
+           NSRect(x: 0, y: cv.bounds.height - NSWindow._titleBarBandHeight, width: cv.bounds.width, height: NSWindow._titleBarBandHeight).intersects(visible) { return false }
+        var chrome: [NSRect] = []
+        for t in [_toolbarView as NSView?, _accessoryHost as NSView?] {
+            guard let t, !t.isHidden else { continue }
+            let r = t.convert(t.bounds, to: nil)
+            if r.intersects(visible) { chrome.append(r.intersection(visible)); chrome.append(r.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)) }
+        }
+        guard platform.scrollBacking(visible, by: delta) else { return false }
+        if NSView._traceInvalidation { NSView._trace("scroll by copy \(type(of: clip)) \(visible) by \(delta)") }
+        // What was waiting to repaint inside the clip moved with its content.
+        let pending = _pendingDirtyRects ?? []
+        _pendingDirtyRects = []
+        for r in pending {
+            for outside in NSView._difference(r, visible) { _noteDirty(outside) }
+            let inside = r.intersection(visible)
+            guard !inside.isNull, !inside.isEmpty else { continue }
+            let moved = inside.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)
+            if !moved.isNull, !moved.isEmpty { _noteDirty(moved); platform.setNeedsDisplay(moved) }
+        }
+        _scrolledAreas.append(visible)
+        // The band the scroll uncovered, and the clip view's edges off the pixel grid.
+        let shown = clip.convert(clip.bounds, to: nil)
+        var exposed = NSView._difference(visible, visible.offsetBy(dx: delta.width, dy: delta.height))
+        exposed += NSView._difference(shown, visible)
+        for e in exposed where !e.isEmpty { clip.setNeedsDisplay(clip.convert(e, from: nil)) }
+        for (s, r) in overlays { s.setNeedsDisplay(s.convert(r, from: nil)) }
+        for r in chrome where !r.isNull && !r.isEmpty { _noteDirty(r); platform.setNeedsDisplay(r) }
+        return true
+    }
+
+    /// A view needs layout: the platform runs `platformWindowLayout` before its next paint,
+    /// and the views layout moves or updates invalidate themselves. No pixel is dirtied for
+    /// the request itself: the previous one-pixel tickle at the origin, unioned by Win32 with
+    /// a meter at the top of the window, made every frame a whole-window paint.
+    internal func _viewNeedsLayout() {
+        _platform?.requestLayout()
+    }
+
+    /// The layout pass a `requestLayout` asked for, before the platform paints: the same
+    /// views the paint lays out, so what moved marks itself before the paint area is fixed.
+    public func platformWindowLayout() {
+        _contentView?.layoutSubtreeIfNeeded()
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
     }
 
     /// Feeds the event to the gesture recognizers of the target view and its ancestors
@@ -983,11 +1198,19 @@ import CoreText
         if let cv = _contentView { visit(cv) }
         _setLayerSceneNeedsCommit()
         // The backing store is a new pixel size: everything is drawn again at the new scale.
-        _platform?.setNeedsDisplay(nil)
+        _setNeedsDisplayWhole()
     }
+
+    /// The area (points) the last paint drew, its rects one by one (tests).
+    internal private(set) var _lastPaintArea: CGFloat = 0
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
+        // Taken before layout: what this paint's layout moves marks the next frame.
+        let paintRects = _takePaintRects(dirtyRect)
+        _painting = true
+        defer { _painting = false }
+        _lastPaintArea = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
         _commitLayerSceneIfNeeded()
         // Geometry settled for this frame: areas under a pointer that did not move still enter or exit.
         if _trackingAreasDirty { _contentView?.layoutSubtreeIfNeeded(); _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
@@ -996,27 +1219,35 @@ import CoreText
         // views do, so a dark-themed system gets a dark window behind its light text.
         let previousAppearance = NSAppearance.current
         NSAppearance.current = effectiveAppearance
-        if _isOpaque {
-            context.setFillColor(_backgroundColor.cgColor)
-            context.fill(dirtyRect)
-        }
         let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         _contentView?.layoutSubtreeIfNeeded()
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
-        _contentView?._displayHierarchy(in: context, dirtyRect: dirtyRect)
+        for rect in paintRects {
+            context.saveGState()
+            if paintRects.count > 1 || rect != dirtyRect { context.clip(to: rect) }
+            if _isOpaque {
+                context.setFillColor(_backgroundColor.cgColor)
+                context.fill(rect)
+            }
+            _contentView?._displayHierarchy(in: context, dirtyRect: rect)
+            if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t._displayHierarchy(in: context, dirtyRect: rect) }
+            if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a._displayHierarchy(in: context, dirtyRect: rect) }
+            if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
+                buttons._displayHierarchy(in: context, dirtyRect: rect)
+            }
+            if _dimsForSheet {
+                // macOS dims the window behind a sheet; a dark window a little more.
+                let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                context.setFillColor(CGColor(gray: 0, alpha: dark ? 0.3 : 0.15))
+                context.fill(rect)
+            }
+            context.restoreGState()
+        }
         if NSView._traceFrames {
-            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height))
-        }
-        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden {
-            t.layoutSubtreeIfNeeded()
-            t._displayHierarchy(in: context, dirtyRect: dirtyRect)
-        }
-        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden {
-            a.layoutSubtreeIfNeeded()
-            a._displayHierarchy(in: context, dirtyRect: dirtyRect)
-        }
-        if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
-            buttons._displayHierarchy(in: context, dirtyRect: dirtyRect)
+            let area = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
+            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f, %d rects, %.0f pt²", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area))
         }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
@@ -1184,6 +1415,13 @@ import CoreText
     /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
     /// linger hidden in the application's window list. Not part of Apple's API.
     public var _closesAfterSheetEnds = false
+    /// The sheet sits centred on its parent (clamped under the title band and toolbar)
+    /// rather than hanging from the top of the content: alert sheets, as on macOS 26. Not
+    /// part of Apple's API: NSAlert sets it on its panel.
+    public var _sheetCentresInParent = false
+    /// While a sheet is up the parent's content is drawn dimmed, as macOS dims a window
+    /// behind its sheet.
+    internal var _dimsForSheet: Bool { attachedSheet != nil }
 
     /// A window with an attached sheet does not take input; the sheet does.
     private var _isBlockedBySheet: Bool { attachedSheet != nil }
@@ -1213,6 +1451,7 @@ import CoreText
     private func _presentSheet(_ sheet: NSWindow) {
         post(NSWindow.willBeginSheetNotification)
         sheet._sheetIsPresented = true
+        _setNeedsDisplayWhole()                 // the content dims behind the sheet
         sheet._sheetSlide?.finish()
         sheet._reopenIfNeeded()
         sheet._attachAsSheet(to: self)
@@ -1256,7 +1495,12 @@ import CoreText
         // reported a frame, until nothing but the toolbar was left).
         let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
-        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
+        var top = layout.maxY
+        if sheet._sheetCentresInParent {
+            // Centred on the whole window, never over the title band or the toolbar.
+            top = min(layout.maxY, max(size.height, ((frame.height + size.height) / 2).rounded()))
+        }
+        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: top, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
         let origin = convertPoint(toScreen: rect.origin)
         let width = rect.width > 0 ? rect.width : size.width
@@ -1316,7 +1560,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backgroundcolor
     @MainActor open var backgroundColor: NSColor! {
         get { _backgroundColor }
-        set { _backgroundColor = newValue ?? .windowBackgroundColor; _platform?.setNeedsDisplay(nil) }
+        set { _backgroundColor = newValue ?? .windowBackgroundColor; _setNeedsDisplayWhole() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/backingalignedrect(_:options:)
     /// Aligns the rect's edges to backing pixels (in window coordinates), each edge
@@ -1833,6 +2077,7 @@ import CoreText
         } else if sheetWindow._closesAfterSheetEnds {
             sheetWindow.close()                         // ended while still queued
         }
+        _setNeedsDisplayWhole()                 // the content is no longer dimmed
         completion?(returnCode)
         post(NSWindow.didEndSheetNotification)
         // The next queued sheet comes up; otherwise the parent takes the keyboard back.
@@ -1963,7 +2208,7 @@ import CoreText
             _platform?.setDocumentEdited(newValue)
             _ensureWindowButtons()
             _windowButtons?.close.isDocumentEdited = newValue
-            if _hasClientSideTitleBar { _platform?.setNeedsDisplay(nil) }
+            if _hasClientSideTitleBar { _setNeedsDisplayWhole() }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isexcludedfromwindowsmenu
@@ -2008,7 +2253,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isopaque
     @MainActor open var isOpaque: Bool {
         get { _isOpaque }
-        set { _isOpaque = newValue; _updateChrome(); _platform?.setNeedsDisplay(nil) }
+        set { _isOpaque = newValue; _updateChrome(); _setNeedsDisplayWhole() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/isreleasedwhenclosed
     @MainActor open var isReleasedWhenClosed: Bool {
@@ -2541,7 +2786,9 @@ import CoreText
                 _ = _contentView?.performKeyEquivalent(with: event)
                 return
             }
-            if !(_contentView?.performKeyEquivalent(with: event) ?? false) {
+            // Then the toolbar's buttons, whose key equivalents SwiftUI's `.keyboardShortcut`
+            // sets (the toolbar is an overlay root, not under the content view).
+            if !(_contentView?.performKeyEquivalent(with: event) ?? false), !(_toolbarView.map { !$0.isHidden && $0.performKeyEquivalent(with: event) } ?? false) {
                 // Escape ends a sheet that opted in (SwiftUI's), when no Cancel button took it.
                 if _sheetParent != nil, _cancelsSheetOnEscape, event.charactersIgnoringModifiers == "\u{1B}",
                    event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
@@ -2724,7 +2971,7 @@ import CoreText
     @available(macOS 11.0, *)
     @MainActor open var subtitle: String {
         get { _subtitle }
-        set { _subtitle = newValue }
+        set { guard _subtitle != newValue else { return }; _subtitle = newValue; _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tab
     @available(macOS 10.13, *)
@@ -2754,13 +3001,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/title
     @MainActor open var title: String {
         get { _title }
-        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)) }
+        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)); _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlevisibility
     @available(macOS 10.10, *)
     @MainActor open var titleVisibility: NSWindow.TitleVisibility {
         get { _titleVisibility }
-        set { _titleVisibility = newValue; _updateChrome() }
+        set { _titleVisibility = newValue; _updateChrome(); _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebaraccessoryviewcontrollers
     @available(macOS 10.10, *)
@@ -2873,7 +3120,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/viewsneeddisplay
     @MainActor open var viewsNeedDisplay: Bool {
         get { _contentView?.needsDisplay ?? false }
-        set { if newValue { _platform?.setNeedsDisplay(nil) } }
+        set { if newValue { _setNeedsDisplayWhole() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/visualizeconstraints(_:)
     /// Out of scope (ADR-0036): the constraint debugging overlay is a macOS developer tool.
@@ -3042,8 +3289,13 @@ import CoreText
     }
 }
 
+/// A window that carries no in-window menu bar where menus attach per window (Windows,
+/// Linux), as `NSPanel`s do not: dialogs such as SwiftUI's Settings window. Its key
+/// equivalents still reach the main menu through `NSApplication.sendEvent`.
+public protocol _MenuBarExemptWindow: AnyObject {}
+
 extension NSWindow: PlatformWindowOwner {
-    public var platformWantsMenuBar: Bool { !(self is NSPanel) }
+    public var platformWantsMenuBar: Bool { !(self is NSPanel) && !(self is any _MenuBarExemptWindow) }
     public var platformAccessibility: any PlatformAccessibilityProvider { self }
 }
 

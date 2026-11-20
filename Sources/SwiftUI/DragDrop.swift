@@ -167,6 +167,8 @@ struct _DropTarget<Content: View>: View, _PrimitiveView {
 @MainActor
 final class _DragSourceView: NSView, NSDraggingSource {
     var makeProvider: (() -> NSItemProvider)?
+    /// `.draggable(_:preview:)`: the image dragged instead of the view's snapshot.
+    var makePreview: (() -> NSImage?)?
     private var pressed: NSPoint?
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
@@ -180,7 +182,11 @@ final class _DragSourceView: NSView, NSDraggingSource {
         pressed = nil
         let item = _ItemProviderPasteboardSource.pasteboardItem(for: makeProvider())
         let dragging = NSDraggingItem(pasteboardWriter: item)
-        dragging.setDraggingFrame(bounds, contents: snapshot())
+        if let makePreview, let image = makePreview() {
+            dragging.setDraggingFrame(NSRect(origin: bounds.origin, size: image.size), contents: image)
+        } else {
+            dragging.setDraggingFrame(bounds, contents: snapshot())
+        }
         _ = beginDraggingSession(with: [dragging], event: event, source: self)
     }
     private func snapshot() -> NSImage? {
@@ -222,15 +228,16 @@ final class _ItemProviderPasteboardSource: NSObject, NSPasteboardItemDataProvide
 @MainActor
 final class _DragSourcePrimitive: _Primitive {
     let view = _DragSourceView(frame: .zero)
-    init(content: _AnyViewBox, makeProvider: @escaping () -> NSItemProvider) {
+    init(content: _AnyViewBox, makeProvider: @escaping () -> NSItemProvider, makePreview: (() -> NSImage?)? = nil) {
         super.init()
         children = [content]
         view.makeProvider = makeProvider
+        view.makePreview = makePreview
     }
     override var nsView: NSView? { view }
     override func update(from other: _Primitive) {
         super.update(from: other)
-        if let o = other as? _DragSourcePrimitive { view.makeProvider = o.view.makeProvider }
+        if let o = other as? _DragSourcePrimitive { view.makeProvider = o.view.makeProvider; view.makePreview = o.view.makePreview }
     }
 }
 
@@ -238,7 +245,8 @@ struct _DragSource<Content: View>: View, _PrimitiveView {
     typealias Body = Never
     let content: Content
     let makeProvider: () -> NSItemProvider
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _DragSourcePrimitive(content: _ViewBox(content), makeProvider: makeProvider) }
+    var makePreview: (() -> NSImage?)? = nil
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _DragSourcePrimitive(content: _ViewBox(content), makeProvider: makeProvider, makePreview: makePreview) }
 }
 
 // MARK: Modifiers

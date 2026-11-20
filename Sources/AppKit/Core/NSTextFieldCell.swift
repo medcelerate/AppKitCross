@@ -74,14 +74,19 @@ import CoreText
 
     @MainActor open override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
         _controlView = controlView
+        // A bezeled field's background is the inside of its bezel: a rounded (search)
+        // field is a capsule, and the view behind it (a toolbar band) shows past the
+        // rounded ends, as on macOS. Only an unbezeled field fills its whole frame.
+        let radius: CGFloat = _bezelStyle == .roundedBezel ? cellFrame.height / 2 : 3
+        let bezelPath = NSBezierPath(roundedRect: cellFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
         if _drawsBackground {
             (_backgroundColor ?? .textBackgroundColor).setFill()
-            NSBezierPath.fill(cellFrame)
+            if _isBezeled { bezelPath.fill() } else { NSBezierPath.fill(cellFrame) }
         }
         if _isBezeled {
             let focused = (controlView.window?.firstResponder === controlView) && (controlView.window?.isKeyWindow ?? false)
             (focused ? NSColor.keyboardFocusIndicatorColor : NSColor.separatorColor.withAlphaComponent(0.7)).setStroke()
-            let path = NSBezierPath(roundedRect: cellFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: _bezelStyle == .roundedBezel ? cellFrame.height / 2 : 3, yRadius: _bezelStyle == .roundedBezel ? cellFrame.height / 2 : 3)
+            let path = bezelPath
             path.lineWidth = focused ? 2 : 1
             path.stroke()
         } else if _isBordered {

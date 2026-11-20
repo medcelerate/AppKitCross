@@ -23,11 +23,26 @@ its own API: you never write AppKitCross-specific code to use it.
 | `Combine`, `UniformTypeIdentifiers`, `ImageIO` | the port | Apple's |
 | `AVFAudio`, `AVFoundation` (audio only) | the port | Apple's |
 | `UserNotifications`, `ServiceManagement` | the port (ADR-0043) | Apple's |
+| `OSLog`, `Network`, `CoreMIDI` | the port (ADR-0050) | Apple's |
 
-Not available anywhere: Observation-driven SwiftUI (`@Observable` models do not update views;
-use `ObservableObject`), SwiftData, Core Data, WebKit, MapKit, AVKit, nibs and storyboards
+Observation-driven SwiftUI works (`@Observable` models, `@Environment(Model.self)`,
+`.environment(model)`, `@Bindable`; ADR-0050), as does `ObservableObject`, and an `App`'s
+own `@State`/model reads re-render its windows, `.commands` and `Settings`. Not available
+anywhere: SwiftData, Core Data, WebKit, MapKit, AVKit, nibs and storyboards
 (code-built UI only), the Objective-C runtime (`@objc`, `#selector`, `perform(_:)` with
-dynamic dispatch, `import ObjectiveC`), SF Symbols glyphs (`Image(systemName:)` draws nothing).
+dynamic dispatch, `import ObjectiveC`). SF Symbols: `Image(systemName:)` draws from a
+catalogue of about 120 common names (plus `.circle`/`.fill`/`.slash` variants); an unknown
+name draws nothing, as on macOS, so check the names an app uses against
+`Sources/AppKit/Core/NSImage+SystemImages.swift`. Two things a Windows run of a real app
+taught (ADR-0050): on Windows and Linux the dispatch pool is Swift concurrency's executor,
+so blocking work (a model decode, a capture pump) belongs on a `Thread` of its own, never
+on a `DispatchQueue` or a detached `Task`; and a `URLSessionConfiguration` made at launch
+(an eager `URLSession` stored property) touches corelibs' `HTTPCookieStorage.shared`,
+which creates `%LOCALAPPDATA%\<CFBundleName>` (and `URLCache.shared` creates
+`%LOCALAPPDATA%\Temp\org.swift.foundation.URLCache\<bundle id>`) on Windows the moment
+the configuration exists, so make sessions lazily on the first request if a launch must
+write nothing outside the app's own folder. (`UserDefaults` itself writes a flat
+`<identifier>.plist` under `%LOCALAPPDATA%` and creates no folder.)
 
 Three kinds of "missing", and how each shows up:
 
@@ -49,7 +64,7 @@ every call works; grep before you rely on a rarely used member (section 5, step 
 
 Products by platform: `AppKit`, `Cocoa`, `SwiftUI`, `Metal`, `MetalKit` everywhere; `Combine`,
 `UniformTypeIdentifiers`, `ImageIO`, `AVFAudio`, `AVFoundation`, `UserNotifications`,
-`ServiceManagement` **only on Windows and Linux**. SwiftPM refuses a product that does not
+`ServiceManagement`, `OSLog`, `Network`, `CoreMIDI` **only on Windows and Linux**. SwiftPM refuses a product that does not
 exist on the host even under `condition: .when(platforms:)`
 (`product 'Combine' ... not found in package 'AppKitCross'`), so gate those with `#if os` in
 the manifest:

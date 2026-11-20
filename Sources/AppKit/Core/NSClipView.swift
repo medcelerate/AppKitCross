@@ -46,6 +46,26 @@ import CoreText
         NSBezierPath.fill(dirtyRect)
     }
 
+    /// Scrolling moves what the clip view already shows (`copiesOnScroll`, as AppKit's
+    /// layer-backed scrolling moves the document's layer): the window copies the visible
+    /// pixels by the scroll in its backing store and repaints only the band the scroll
+    /// uncovered and the views floating over the clip view (overlay scrollers). Following a
+    /// live transcript repainted the whole visible list for every line that landed. Where
+    /// the backing store cannot copy, the whole visible area repaints as before.
+    @MainActor open override func setBoundsOrigin(_ newOrigin: NSPoint) {
+        guard newOrigin != bounds.origin else { return }
+        guard _copiesOnScroll, let window else { super.setBoundsOrigin(newOrigin); return }
+        let anchor = bounds.origin
+        let visible = window._scrollCopyArea(of: self)
+        let before = convert(anchor, to: nil)
+        _setBoundsOrigin(newOrigin, display: { [unowned self] in
+            let after = self.convert(anchor, to: nil)
+            let delta = NSSize(width: after.x - before.x, height: after.y - before.y)
+            if let visible, window._scrollBacking(of: self, visible: visible, by: delta) { return }
+            self.setNeedsDisplay(self.bounds)
+        })
+    }
+
     @MainActor open override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         _reconstrain()
@@ -158,5 +178,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/viewboundschanged(_:)
     @MainActor open func viewBoundsChanged(_ notification: Notification) { _reconstrain() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/viewframechanged(_:)
-    @MainActor open func viewFrameChanged(_ notification: Notification) { _reconstrain(); needsDisplay = true }
+    /// The document's own frame setter marks what it covers; the clip view repaints its
+    /// background only where the document no longer covers it.
+    @MainActor open func viewFrameChanged(_ notification: Notification) {
+        _reconstrain()
+        if _drawsBackground, let doc = _documentView, !convert(doc.bounds, from: doc).contains(bounds) { needsDisplay = true }
+    }
 }

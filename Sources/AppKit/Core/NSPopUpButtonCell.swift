@@ -202,7 +202,15 @@ import CoreText
             item?.state = .on
         }
         _selectedItem = item
-        synchronizeTitleAndSelectedItem()
+        // An explicit nil (`selectItem(at: -1)`) stays nil with an empty title, as AppKit
+        // leaves it; only `synchronizeTitleAndSelectedItem` itself falls back to the first
+        // item (a SwiftUI Picker with a nil selection shows a blank pop-up).
+        _updateTitle()
+    }
+    private func _updateTitle() {
+        super.stringValue = _displayTitle
+        (_controlView as? NSControl)?.invalidateIntrinsicContentSize()
+        _changed()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/selectitem(at:)
     @MainActor open func selectItem(at index: Int) { select(index >= 0 ? item(at: index) : nil) }
@@ -237,9 +245,7 @@ import CoreText
             _selectedItem = first
             if _altersStateOfSelectedItem { first.state = .on }
         }
-        super.stringValue = _displayTitle
-        (_controlView as? NSControl)?.invalidateIntrinsicContentSize()
-        _changed()
+        _updateTitle()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/titleofselecteditem
     @MainActor open var titleOfSelectedItem: String? { _selectedItem?.title }
@@ -254,11 +260,31 @@ import CoreText
 
     // MARK: Drawing
 
+    /// The side of the image the face draws (a menu item's image, as on macOS: 16 points,
+    /// vertically centred, 4 points before the title).
+    internal static let _faceImageSize: CGFloat = 16
+    internal static let _faceImageGap: CGFloat = 4
+    /// The image shown in the control: the selected item's (a pop-up), the first item's or
+    /// the button's own (a pull-down); none when the image position is `.noImage`.
+    private var _displayImage: NSImage? {
+        guard imagePosition != .noImage else { return nil }
+        if _pullsDown { return _usesItemFromMenu ? (_items.first?.image ?? image) : image }
+        return _selectedItem?.image
+    }
+    /// The width of a face showing `title` and `image`: the image alone without a title or
+    /// under `.imageOnly`, else the image, the gap and the title.
+    private func _faceContentWidth(title: String, image: NSImage?) -> CGFloat {
+        let hasImage = image != nil && imagePosition != .noImage
+        let showsTitle = !title.isEmpty && !(hasImage && imagePosition == .imageOnly)
+        let t = showsTitle ? title.size(withAttributes: _textAttributes).width : 0
+        guard hasImage else { return t }
+        return NSPopUpButtonCell._faceImageSize + (showsTitle ? NSPopUpButtonCell._faceImageGap + t : 0)
+    }
     @MainActor open override var cellSize: NSSize {
-        var titles = _items.map(\.title)
-        if _pullsDown { titles = _usesItemFromMenu ? Array(titles.prefix(1)) : [_pullDownTitle] }
-        if titles.isEmpty { titles = [_displayTitle] }
-        let widest = titles.map { $0.size(withAttributes: _textAttributes).width }.max() ?? 0
+        var faces = _items.map { ($0.title, $0.image) }
+        if _pullsDown { faces = _usesItemFromMenu ? Array(faces.prefix(1)) : [(_pullDownTitle, image)] }
+        if faces.isEmpty { faces = [(_displayTitle, _displayImage)] }
+        let widest = faces.map { _faceContentWidth(title: $0.0, image: $0.1) }.max() ?? 0
         let height = (_effectiveFont.ascender - _effectiveFont.descender) + 8
         return NSSize(width: (widest + NSPopUpButtonCell.titleInset + NSPopUpButtonCell.arrowAreaWidth).rounded(.up), height: height.rounded(.up))
     }
@@ -267,12 +293,63 @@ import CoreText
         drawBezel(withFrame: cellFrame, in: controlView)
         drawInterior(withFrame: cellFrame, in: controlView)
     }
+    /// The bezel's hairline border: a light grey that resolves per appearance. (The push
+    /// button's `separatorColor.withAlphaComponent(0.6)` replaces separator's 0.1 alpha, so
+    /// on a pop-up it read as near-black side lines that stopped short of the corner arcs.)
+    internal static let _bezelBorderColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.15)
+            : NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.2)
+    }
+    internal static let _bezelCornerRadius: CGFloat = 5
+    /// One rounded rect: filled to the bounds, then stroked once with a one-device-pixel hairline
+    /// inset by half its width, so the stroke lies inside the bounds and the arcs join the
+    /// straight runs. The same border in the normal, pressed and disabled states.
+    @MainActor open override func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
+        guard _isBordered, !isTransparent else { return }
+        let line = 1 / max(1, controlView.window?.backingScaleFactor ?? 1)
+        let r = frame.insetBy(dx: line / 2, dy: line / 2)
+        let radius = min(NSPopUpButtonCell._bezelCornerRadius, r.height / 2, r.width / 2)
+        let path = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+        // The fill reaches the bounds (the stroke's outer edge, concentric arcs) so the
+        // translucent border sits on the fill, not half on whatever is behind the button.
+        let fillPath = NSBezierPath(roundedRect: frame, xRadius: radius + line / 2, yRadius: radius + line / 2)
+        let fill: NSColor
+        if !_isEnabled { fill = NSColor.controlColor.withAlphaComponent(0.6) }
+        else if _isHighlighted { fill = NSColor.controlAccentColor }
+        else { fill = NSColor.controlColor }
+        fill.setFill()
+        fillPath.fill()
+        NSPopUpButtonCell._bezelBorderColor.setStroke()
+        path.lineWidth = line
+        path.stroke()
+    }
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         var attrs = _textAttributes
         if _isHighlighted && _isBordered { attrs[.foregroundColor] = NSColor.white }
-        let titleRect = NSRect(x: cellFrame.minX + NSPopUpButtonCell.titleInset, y: cellFrame.minY,
+        var titleRect = NSRect(x: cellFrame.minX + NSPopUpButtonCell.titleInset, y: cellFrame.minY,
                                width: max(0, cellFrame.width - NSPopUpButtonCell.titleInset - NSPopUpButtonCell.arrowAreaWidth), height: cellFrame.height)
-        _drawText(_displayTitle, attributes: attrs, in: titleRect, alignment: .left, flipped: controlView.isFlipped)
+        // The selected item's image leads the face (a template tinted with the title's
+        // colour); without a title, or under `.imageOnly`, it is drawn alone.
+        let title = _displayTitle
+        if let image = _displayImage, titleRect.width > 0 {
+            let side = min(NSPopUpButtonCell._faceImageSize, titleRect.width, cellFrame.height)
+            let natural = image.size
+            let scale = natural.width > 0 && natural.height > 0 ? min(side / natural.width, side / natural.height) : 1
+            let size = NSSize(width: (natural.width * scale).rounded(), height: (natural.height * scale).rounded())
+            let slot = NSRect(x: titleRect.minX, y: (cellFrame.midY - side / 2).rounded(), width: side, height: side)
+            let r = NSRect(x: slot.midX - size.width / 2, y: slot.midY - size.height / 2, width: size.width, height: size.height)
+            if image.isTemplate, let tinted = image._tintedForTemplate((attrs[.foregroundColor] as? NSColor) ?? .controlTextColor, size: r.size) {
+                tinted.draw(in: r, from: .zero, operation: .sourceOver, fraction: _isEnabled ? 1 : 0.5, respectFlipped: true, hints: nil)
+            } else {
+                image.draw(in: r, from: .zero, operation: .sourceOver, fraction: _isEnabled ? 1 : 0.5, respectFlipped: true, hints: nil)
+            }
+            let used = side + NSPopUpButtonCell._faceImageGap
+            titleRect.origin.x += used
+            titleRect.size.width = max(0, titleRect.width - used)
+            if imagePosition == .imageOnly { titleRect.size.width = 0 }
+        }
+        if !title.isEmpty, titleRect.width > 0 { _drawTruncatingText(title, attributes: attrs, in: titleRect, flipped: controlView.isFlipped) }
         guard _arrowPosition != .noArrow else { return }
         let flipped = controlView.isFlipped
         let boxHeight = min(cellFrame.height - 6, 18)

@@ -60,7 +60,7 @@ public struct WindowGroup<Content: View>: Scene, _PrimitiveScene {
     public var body: Never { fatalError() }
 
     @MainActor public func _makeWindows(app: _AppRunner) {
-        app.openWindow(title: title ?? app.applicationName, content: content(), defaultSize: defaultSize)
+        app._runWindowGroup(id: id, title: title ?? app.applicationName, content: content, defaultSize: defaultSize)
     }
 }
 
@@ -74,7 +74,9 @@ public struct Window<Content: View>: Scene, _PrimitiveScene {
         self.title = title; self.id = id; self.content = content
     }
     public var body: Never { fatalError() }
-    @MainActor public func _makeWindows(app: _AppRunner) { app.openWindow(title: title, content: content(), defaultSize: nil) }
+    /// Opens at launch only as the app's first scene; otherwise `openWindow(id:)` opens it
+    /// (WindowActions.swift).
+    @MainActor public func _makeWindows(app: _AppRunner) { app._runWindowScene(id: id, title: title, content: content) }
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/settings
@@ -86,7 +88,10 @@ public struct Settings<Content: View>: Scene, _PrimitiveScene {
     /// Registers the content: the app menu's "Settings…" item (Cmd-,) opens it in its own window.
     @MainActor public func _makeWindows(app: _AppRunner) {
         let make = content
-        app.settingsContent = { AnyView(make()) }
+        // The Settings scene's content knows where it is: a TabView there draws the
+        // Settings tab bar (Navigation.swift), on first open and on every scene re-run.
+        app.settingsContent = { AnyView(make().environment(\._isSettingsScene, true)) }
+        if app._isUpdatingScenes { app._refreshSettingsWindow() }
     }
 }
 
@@ -187,8 +192,7 @@ extension App {
         let runner = _AppRunner(name: _AppRunner.defaultName)
         runner._nameIsExecutableStem = _AppRunner.bundleName == nil
         runner.install(app)
-        runner.run(scene: app.body)
-        runner.installMenuBar()
+        runner._runScenes(of: app)
         // Launching finishes once the scenes exist, as on macOS: the delegate's
         // `applicationDidFinishLaunching` sees the scenes' windows, and a DocumentGroup's
         // document controller opens the files named on the command line, or an untitled
@@ -197,6 +201,10 @@ extension App {
         NSApplication.shared.run()
     }
 }
+
+/// The Settings scene's window: a dialog that carries no in-window menu bar on Windows
+/// and Linux (NSWindow+MenuBar: `_MenuBarExemptWindow`).
+final class _SettingsWindow: NSWindow, _MenuBarExemptWindow {}
 
 /// Runs an App: creates the NSApplication, installs the delegate adaptor, opens windows.
 @MainActor
@@ -221,9 +229,27 @@ public final class _AppRunner {
     var commands: [any Commands] = []
     /// The first WindowGroup, for File > New Window.
     var primaryWindowGroup: (() -> Void)?
+    /// The `Window` and identified `WindowGroup` scenes `openWindow(id:)` opens, and
+    /// whether a scene window opened at launch yet (WindowActions.swift).
+    var _windowScenes: [String: _WindowScene] = [:]
+    var _launchSceneOpened = false
     /// A DocumentGroup ran: the File menu gets the document commands (New, Open, Open
     /// Recent, Save, Save As, Revert) instead of New Window.
     var _hasDocumentGroups = false
+    /// The App's own node: its `@State`, `@StateObject`, `@AppStorage` and `@Environment`
+    /// properties are installed here as a view's are in its node, and the scene body and
+    /// the commands are evaluated under observation tracking against it. A change to any
+    /// of them re-runs the scenes in update mode (`_updateScenes`): open windows get their
+    /// content re-evaluated and the menu bar is rebuilt, as SwiftUI re-renders a `Window`'s
+    /// content and `.commands` when the App's state changes.
+    let _appNode = _ViewNode(box: _ViewBox(EmptyView()), parent: nil, root: nil)
+    private var _sceneBody: (() -> any Scene)?
+    /// True while the scenes re-run for an update: scene kinds then refresh what they
+    /// opened instead of opening it again.
+    var _isUpdatingScenes = false
+    private var _sceneUpdateScheduled = false
+    /// Ordinal of the id-less `WindowGroup`s in declaration order, so an update finds them.
+    var _windowGroupOrdinal = 0
 
     public init(name: String) {
         applicationName = name
@@ -276,6 +302,59 @@ public final class _AppRunner {
         }
     }
 
+    /// Runs an App's scenes for the first time and installs the menu bar; later state
+    /// changes re-run them through `_updateScenes`. `App.main()` calls this.
+    public func _runScenes<A: App>(of app: A) {
+        var slot = 0
+        _installDynamicProperties(in: app, node: _appNode, slot: &slot)
+        _appNode.onNeedsUpdate = { [weak self] in self?._scheduleSceneUpdate() }
+        _sceneBody = { app.body }
+        _evaluateScenes()
+    }
+
+    private func _evaluateScenes() {
+        guard let body = _sceneBody else { return }
+        commands = []
+        settingsContent = nil
+        _windowGroupOrdinal = 0
+        _appNode.needsUpdate = false
+        // Only the scene body itself is tracked (the App's @State, and the model reads in
+        // `.commands`, whose titles are built here). A window's content closure runs
+        // outside the scope: what it reads belongs to the window's own view tree, which
+        // re-renders by itself. Tracking it re-ran every scene, re-rendered every window
+        // and rebuilt the menu bar on each keystroke into a field bound to the model.
+        let scene = _trackingObservation(_appNode) { body() }
+        run(scene: scene)
+        installMenuBar()
+    }
+
+    private func _scheduleSceneUpdate() {
+        guard !_sceneUpdateScheduled else { return }
+        _sceneUpdateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self._sceneUpdateScheduled = false
+            self._updateScenes()
+        }
+    }
+
+    /// Re-runs the scenes in update mode now: every open scene window's content is
+    /// re-evaluated (its hosting view gets a new root view, so bindings such as a
+    /// `.fileExporter(isPresented:)` see the new value) and the menu bar is rebuilt from
+    /// the commands. Tests call it in place of the scheduled run.
+    public func _updateScenes() {
+        guard _sceneBody != nil else { return }
+        _isUpdatingScenes = true
+        defer { _isUpdatingScenes = false }
+        _evaluateScenes()
+    }
+
+    /// The Settings scene re-ran: its open window shows the new content.
+    func _refreshSettingsWindow() {
+        guard let window = settingsWindow, let make = settingsContent, let hosting = window.contentView as? NSHostingView<AnyView> else { return }
+        hosting.rootView = make()
+    }
+
     public func run(scene: any Scene) {
         if let p = scene as? any _PrimitiveScene { p._makeWindows(app: self) } else { _runBody(scene) }
     }
@@ -290,17 +369,26 @@ public final class _AppRunner {
         NSApplication.shared.mainMenu = builder.makeMenu()
     }
 
-    /// Opens (or brings forward) the Settings scene's window.
+    /// Opens (or brings forward) the Settings scene's window. It is sized like a scene
+    /// window under `.windowResizability(.contentSize)`: fixed when the content has one
+    /// size, resizable within the content's range otherwise (Apple's Settings window
+    /// resizes when its content's frame is flexible), never taller than the screen. On
+    /// Windows and Linux it carries no in-window menu bar, as a dialog does not; its
+    /// shortcuts still reach the main menu through the application.
     public func openSettings() {
         if let w = settingsWindow { w.makeKeyAndOrderFront(nil); return }
         guard let make = settingsContent else { return }
-        let hosting = NSHostingView(rootView: make())
-        let ideal = hosting.sizeThatFits(.unspecified)
-        let size = NSSize(width: max(ideal.width, 320), height: max(ideal.height, 200))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        // The content knows it is the Settings scene's (a TabView shows the Settings tab bar).
+        let hosting = NSHostingView(rootView: AnyView(make().environment(\._isSettingsScene, true)))
+        var geometry = _windowGeometry(for: hosting, defaultSize: nil, resizability: .contentSize, hidesTitleBar: false)
+        geometry.style.remove(.miniaturizable)
+        let window = _SettingsWindow(contentRect: NSRect(origin: .zero, size: geometry.size), styleMask: geometry.style, backing: .buffered, defer: false)
         window.title = "\(applicationName) Settings"
         window.isReleasedWhenClosed = false
-        hosting.frame = NSRect(origin: .zero, size: size)
+        window.backgroundColor = .windowBackgroundColor
+        window.minSize = geometry.contentMin
+        if let max = geometry.contentMax { window.maxSize = max }
+        hosting.frame = NSRect(origin: .zero, size: geometry.size)
         hosting.autoresizingMask = [.width, .height]
         window.contentView = hosting
         window.center()
@@ -339,20 +427,57 @@ public final class _AppRunner {
 
     /// A scene window hosting `content`, sized and styled as the scene modifiers say,
     /// tracked by the runner (closing the last one quits off macOS). Not yet shown.
-    private func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
+    func _makeWindow<Content: View>(title: String, content: Content, defaultSize: CGSize?, resizability: WindowResizability,
                                             hidesTitleBar: Bool, toolbarStyle: NSWindow.ToolbarStyle) -> NSWindow {
-        let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar, pendingToolbarStyle = toolbarStyle
         let hosting = NSHostingView(rootView: content)
-        let ideal = hosting.sizeThatFits(.unspecified)
+        let geometry = _windowGeometry(for: hosting, defaultSize: defaultSize, resizability: resizability, hidesTitleBar: hidesTitleBar)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: geometry.size), styleMask: geometry.style, backing: .buffered, defer: false)
+        window.title = title
+        switch resizability.kind {
+        case .contentSize: window.minSize = geometry.contentMin; if let contentMax = geometry.contentMax { window.maxSize = contentMax }
+        case .contentMinSize: window.minSize = geometry.ideal
+        case .automatic: break
+        }
+        observeClose(of: window)
+        if hidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
+        window.toolbarStyle = toolbarStyle
+        hosting.frame = NSRect(origin: .zero, size: geometry.size)
+        hosting.autoresizingMask = [.width, .height]
+        window.contentView = hosting
+        windows.append(window)
+        return window
+    }
+
+    struct _WindowGeometry {
+        var size: NSSize
+        var style: NSWindow.StyleMask
+        var ideal: NSSize
+        var contentMin: NSSize
+        var contentMax: NSSize?
+    }
+
+    /// The opening size, style mask and size range of a window hosting `hosting`, from the
+    /// scene modifiers (shared by scene windows and the Settings window).
+    func _windowGeometry(for hosting: NSHostingView<some View>, defaultSize: CGSize?, resizability: WindowResizability, hidesTitleBar: Bool) -> _WindowGeometry {
+        let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar
+        // A content size that is not finite (a List proposing an infinite height to its
+        // window) is no size for a window: that component falls back to the default size,
+        // or the 300×200 floor, before it can reach a frame or a minimum (Sibyl's main
+        // window snapped to the maximum track height after the first programmatic resize).
+        func finite(_ s: NSSize, or fallback: NSSize) -> NSSize {
+            NSSize(width: s.width.isFinite ? s.width : fallback.width, height: s.height.isFinite ? s.height : fallback.height)
+        }
+        let floor = NSSize(width: 300, height: 200)
+        let ideal = finite(hosting.sizeThatFits(.unspecified), or: pendingDefaultSize.map { NSSize(width: $0.width, height: $0.height) } ?? floor)
         var size: NSSize
         if let given = pendingDefaultSize {
             // `.defaultSize` is the window's size, grown only to the content's minimum (not
             // its ideal: a scroll view's ideal is its whole document, which opened MD Vault's
             // viewer 1460 points tall).
-            let least = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let least = finite(hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0)), or: .zero)
             size = NSSize(width: max(given.width, least.width), height: max(given.height, least.height))
         } else {
-            size = NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
+            size = NSSize(width: max(ideal.width, floor.width), height: max(ideal.height, floor.height))
         }
         // A new window fits the screen's visible frame (less the title bar), as AppKit
         // constrains a window's first frame.
@@ -368,7 +493,7 @@ public final class _AppRunner {
         // `.contentMinSize`: it cannot shrink below the content's ideal size.
         var contentMin = size, contentMax: NSSize? = nil
         if pendingResizability == .contentSize {
-            let lo = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let lo = finite(hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0)), or: .zero)
             let hi = hosting.sizeThatFits(NSHostingSizeProposal(width: .infinity, height: .infinity))
             contentMin = NSSize(width: max(lo.width, 1), height: max(lo.height, 1))
             contentMax = NSSize(width: hi.width.isFinite ? max(hi.width, contentMin.width) : .greatestFiniteMagnitude,
@@ -381,21 +506,7 @@ public final class _AppRunner {
             size = s
             if contentMin == contentMax { style.remove(.resizable) }
         }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height), styleMask: style, backing: .buffered, defer: false)
-        window.title = title
-        switch pendingResizability.kind {
-        case .contentSize: window.minSize = contentMin; if let contentMax { window.maxSize = contentMax }
-        case .contentMinSize: window.minSize = ideal
-        case .automatic: break
-        }
-        observeClose(of: window)
-        if pendingHidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
-        window.toolbarStyle = pendingToolbarStyle
-        hosting.frame = NSRect(origin: .zero, size: size)
-        hosting.autoresizingMask = [.width, .height]
-        window.contentView = hosting
-        windows.append(window)
-        return window
+        return _WindowGeometry(size: size, style: style, ideal: ideal, contentMin: contentMin, contentMax: contentMax)
     }
 
     private var closeObservers: [any NSObjectProtocol] = []

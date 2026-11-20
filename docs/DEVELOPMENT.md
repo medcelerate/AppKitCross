@@ -186,8 +186,12 @@ unzip it) anywhere and run `MyApp.exe` / `./MyApp`. It contains, side by side:
   application `Info.plist` or `<exe>-Info.plist` (in `Resources/` or the directory, the
   names ADR-0045 reads) or a `Resources/`; a resource bundle's
   plist (`CFBundlePackageType` BNDL, an identifier ending in `.resources`) is skipped. The
-  package root is searched only for a target whose sources live there; otherwise name the
-  plist with `--info-plist` (`--resources`, `--icon` override the rest). The bundle
+  package root is searched only for a target whose sources live there, except that a root
+  holding the app's own `Resources/Info.plist`, `Resources/<exe>-Info.plist` or
+  `<exe>-Info.plist` gives that plist (and its version), that `Resources/` and the icons
+  beside the plist when nothing nearer does (a bare root `Info.plist` never counts);
+  otherwise name the plist with `--info-plist` (`--resources`, `--icon` override the
+  rest). The bundle
   identity layout (ADR-0045) defines how the app reads them;
 - on Windows, `<Name>.pdb`: a release build through the plugin adds `-g
   -debug-info-format=codeview` and `-Xlinker -debug` so the linker writes one, and crash

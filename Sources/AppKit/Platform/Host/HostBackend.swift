@@ -178,7 +178,7 @@ final class HostWindow: PlatformWindow {
     var maxSize = NSSize(width: 100_000, height: 100_000)
     private var dirty: NSRect? = nil
     /// Whether a paint is pending (tests check that a paint does not invalidate itself).
-    var _needsPaint: Bool { dirty != nil }
+    var _needsPaint: Bool { dirty != nil || needsLayoutPass }
     private var _frame: NSRect
     /// Title bar height used by this fake window manager.
     static let titleBarHeight: CGFloat = 28
@@ -194,6 +194,8 @@ final class HostWindow: PlatformWindow {
     var clientSideTitleBar = false
     var hasClientSideTitleBar: Bool { clientSideTitleBar }
     private(set) var paintCount = 0
+    /// The area (content points) the last paint covered, for tests of what a change repaints.
+    private(set) var lastPaintRect: NSRect?
     /// Accessibility changes the core reported (ADR-0013), oldest first.
     private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { accessibilityChanges.append(change) }
@@ -300,14 +302,18 @@ final class HostWindow: PlatformWindow {
     }
 
     func displayIfNeeded() {
+        if needsLayoutPass { needsLayoutPass = false; owner?.platformWindowLayout() }
         if dirty != nil { display() }
     }
+    private var needsLayoutPass = false
+    func requestLayout() { needsLayoutPass = true }
 
     func display() {
         let content = contentRect(forFrameRect: _frame)
         let rect = dirty ?? NSRect(origin: .zero, size: content.size)
         dirty = nil
         paintCount += 1
+        lastPaintRect = rect
         #if canImport(CoreGraphics)
         let scale = backingScaleFactor
         let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))
@@ -334,6 +340,40 @@ final class HostWindow: PlatformWindow {
     }
 
     func captureContent() -> CGImage? { lastImage }
+
+    /// Copies within the retained surface: the source rect's pixels, cut from a snapshot,
+    /// drawn unscaled at the destination. The surface is presented whole (`lastImage`), so
+    /// nothing else needs marking. Not while a hosted scene is composited into the surface
+    /// (its layers would move with the content).
+    func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool {
+        #if canImport(CoreGraphics)
+        guard let ctx = surface, hostedScene == nil, !rect.isEmpty, rect.minX.isFinite, rect.minY.isFinite else { return false }
+        let content = contentRect(forFrameRect: _frame)
+        let scale = backingScaleFactor
+        let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))
+        guard ctx.width == w, ctx.height == h else { return false }
+        func whole(_ v: CGFloat) -> Bool { abs(v * scale - (v * scale).rounded()) < 0.001 }
+        guard whole(delta.width), whole(delta.height), whole(rect.minX), whole(rect.minY), whole(rect.width), whole(rect.height) else { return false }
+        let src = rect.intersection(rect.offsetBy(dx: -delta.width, dy: -delta.height))
+            .intersection(NSRect(origin: .zero, size: content.size))
+        guard !src.isNull, !src.isEmpty else { return true }      // everything is uncovered: nothing to keep
+        // The whole snapshot drawn offset by the delta under a clip to the destination (the
+        // port's CGImage on Linux has no cropping; the clip does the same job).
+        guard let snapshot = ctx.makeImage() else { return false }
+        ctx.saveGState()
+        ctx.clip(to: src.offsetBy(dx: delta.width, dy: delta.height))
+        ctx.setBlendMode(.copy)
+        ctx.interpolationQuality = .none
+        ctx.draw(snapshot, in: CGRect(origin: CGPoint(x: delta.width, y: delta.height), size: content.size))
+        ctx.restoreGState()
+        scrollCopyCount += 1
+        return true
+        #else
+        return false
+        #endif
+    }
+    /// Scrolls the backing store moved instead of repainting (tests).
+    private(set) var scrollCopyCount = 0
 
     func hostLayerScene(_ scene: PlatformLayerScene?) -> Bool {
         guard layerHostingEnabled else { return false }

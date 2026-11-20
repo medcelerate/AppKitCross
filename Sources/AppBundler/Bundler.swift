@@ -38,7 +38,9 @@ public struct BundleOptions: Sendable {
     public var name: String
     public var packageDirectory: URL
     /// Directories to look in for Info.plist / Resources / icons, nearest first (the
-    /// executable target's directory and its parents below the package root).
+    /// executable target's directory and its parents below the package root). When none
+    /// has them, `packageDirectory` is used if it holds the app's own plist
+    /// (`Resources/Info.plist`, `Resources/<Name>-Info.plist` or `<Name>-Info.plist`).
     public var appRootCandidates: [URL]
     /// Target names whose SwiftPM resource bundles belong to the product.
     public var targets: [String]
@@ -397,23 +399,49 @@ public final class Bundler {
         return nil
     }
 
+    /// The app's own plist at a package root that is not one of the candidates:
+    /// `Resources/Info.plist`, `Resources/<exe>-Info.plist` or `<exe>-Info.plist`, when it is
+    /// an application's. A bare `<root>/Info.plist` never is: the root is shared by every
+    /// product, and swift-build on Windows leaves resource bundles' plists there (ADR-0046).
+    static func packageRootInfoPlist(in root: URL, executableName: String? = nil) -> URL? {
+        let resources = root.appendingPathComponent("Resources", isDirectory: true)
+        var candidates = [resources.appendingPathComponent("Info.plist")]
+        if let executableName {
+            candidates += [resources.appendingPathComponent("\(executableName)-Info.plist"), root.appendingPathComponent("\(executableName)-Info.plist")]
+        }
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) && isApplicationInfoPlist($0) }
+    }
+
     /// The directory that holds the app's Info.plist and Resources: the first candidate with
-    /// an application `Info.plist` (or `Resources/Info.plist`) or a `Resources` directory.
-    public static func appRoot(in candidates: [URL], executableName: String? = nil) -> URL? {
+    /// an application `Info.plist` (or `Resources/Info.plist`) or a `Resources` directory;
+    /// failing that, `packageRoot` when it holds the app's own plist (`packageRootInfoPlist`).
+    public static func appRoot(in candidates: [URL], executableName: String? = nil, packageRoot: URL? = nil) -> URL? {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         for dir in candidates {
             if infoPlist(in: dir, executableName: executableName) != nil { return dir }
             if fm.fileExists(atPath: dir.appendingPathComponent("Resources").path, isDirectory: &isDirectory), isDirectory.boolValue { return dir }
         }
+        if let packageRoot, !isCandidate(packageRoot, of: candidates),
+           packageRootInfoPlist(in: packageRoot, executableName: executableName) != nil { return packageRoot }
         return nil
+    }
+
+    private static func isCandidate(_ dir: URL, of candidates: [URL]) -> Bool {
+        let path = dir.standardizedFileURL.resolvingSymlinksInPath().path
+        return candidates.contains { $0.standardizedFileURL.resolvingSymlinksInPath().path == path }
     }
 
     private func copyAppFiles() throws -> [String: Any]? {
         let exeStem = options.executable.deletingPathExtension().lastPathComponent
-        let root = Bundler.appRoot(in: options.appRootCandidates, executableName: exeStem)
+        let root = Bundler.appRoot(in: options.appRootCandidates, executableName: exeStem, packageRoot: options.packageDirectory)
+        // The package root reached as the fallback: only its app plist counts, and the icons
+        // are the ones beside that plist.
+        let atPackageRoot = root != nil && !Bundler.isCandidate(root!, of: options.appRootCandidates)
         var plistURL = options.infoPlist
-        if plistURL == nil, let root { plistURL = Bundler.infoPlist(in: root, executableName: exeStem) }
+        if plistURL == nil, let root {
+            plistURL = atPackageRoot ? Bundler.packageRootInfoPlist(in: root, executableName: exeStem) : Bundler.infoPlist(in: root, executableName: exeStem)
+        }
         var plist: [String: Any]?
         if let plistURL {
             try copy(plistURL, to: folder.appendingPathComponent("Info.plist"))
@@ -438,8 +466,19 @@ public final class Bundler {
         }
         var icons = options.icons
         if icons.isEmpty, let root {
-            let items = (try? fm.contentsOfDirectory(atPath: root.path)) ?? []
-            icons = items.sorted().filter { $0.lowercased().hasSuffix(".ico") || $0.lowercased().hasSuffix(".png") }.map { root.appendingPathComponent($0) }
+            let iconDir = atPackageRoot ? (Bundler.packageRootInfoPlist(in: root, executableName: exeStem)?.deletingLastPathComponent() ?? root) : root
+            let items = (try? fm.contentsOfDirectory(atPath: iconDir.path)) ?? []
+            // Every .ico, and only the .png that is the app's icon (named after the
+            // executable, or AppIcon/icon): other images beside the plist are resources,
+            // not icons (a logo and an icon preview landed at the top level).
+            let stem = exeStem.lowercased()
+            icons = items.sorted().filter { name in
+                let lower = name.lowercased()
+                if lower.hasSuffix(".ico") { return true }
+                guard lower.hasSuffix(".png") else { return false }
+                let base = String(lower.dropLast(4))
+                return base == stem || base == "appicon" || base == "icon"
+            }.map { iconDir.appendingPathComponent($0) }
         }
         for icon in icons {
             try copy(icon, to: folder.appendingPathComponent(icon.lastPathComponent))

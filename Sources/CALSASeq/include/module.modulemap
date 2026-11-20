@@ -1,0 +1,4 @@
+module CALSASeq {
+    umbrella header "calsaseq.h"
+    export *
+}
