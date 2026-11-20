@@ -116,6 +116,9 @@ public struct DocumentGroup<Document, Content: View>: Scene, _PrimitiveScene {
     public var body: Never { fatalError() }
 
     @MainActor public func _makeWindows(app: _AppRunner) {
+        // Document windows take their content from the document controller; an App state
+        // update re-registering the group would open a second controller.
+        if app._isUpdatingScenes { return }
         let entry = makeEntry()
         entry.defaultSize = app.pendingDefaultSize
         entry.resizability = app.pendingResizability

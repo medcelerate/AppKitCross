@@ -205,7 +205,9 @@ final class _StackPrimitive: _Primitive {
         let priorities = Set(items.map(\.layoutPriority)).sorted(by: >)
         for p in priorities {
             var group = items.indices.filter { items[$0].layoutPriority == p }
-            group.sort { flex[$0] < flex[$1] }
+            // Stable: equally flexible items keep their order (fixed-size items, which take
+            // the same room whatever they are offered, go first either way).
+            group.sort { flex[$0] != flex[$1] ? flex[$0] < flex[$1] : $0 < $1 }
             var left = group.count
             for i in group {
                 let share = max(0, remaining / CGFloat(left))

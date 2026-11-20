@@ -56,15 +56,63 @@ final class _TableBridge: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     /// Set while the primitive pushes state into the table, so callbacks do not echo it.
     var updating = false
     private static let cellID = NSUserInterfaceItemIdentifier("SwiftUI.TableCell")
+    /// The leading inset of each cell's content (see `tableView(_:viewFor:row:)`).
+    static let cellLeadingPadding: CGFloat = 4
+    /// Rows are never shorter than this, and get this much room around their tallest cell.
+    static let minimumRowHeight: CGFloat = 20
+    static let rowPadding: CGFloat = 6
+
+    /// False until the primitive is attached to a node: a primitive made only to hand its
+    /// model to the live one (`update(from:)`) answers the table's default row height
+    /// instead of measuring every row.
+    var measures = false
+    /// Measured row heights, by row, for the column widths in `measuredWidths`.
+    private var heights: [Int: CGFloat] = [:]
+    private(set) var measuredWidths: [CGFloat] = []
+    /// One reusable probe per column, so measuring a row does not build hosting views.
+    private var probes: [Int: NSHostingView<AnyView>] = [:]
 
     init(model: _TableModel) { self.model = model }
 
+    /// Forgets the measured heights (the model or the column widths changed).
+    func invalidateHeights(dropProbes: Bool = false) {
+        heights.removeAll(keepingCapacity: true)
+        measuredWidths = []
+        if dropProbes { probes.removeAll() }
+    }
+
+    /// The widths cells are laid out at, in column order (hidden columns count as zero).
+    static func columnWidths(of tableView: NSTableView) -> [CGFloat] {
+        tableView.tableColumns.map { $0.isHidden ? 0 : $0.width }
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { model.rowIDs.count }
+
+    /// Each row is as tall as its tallest cell measured at its column's width, so wrapped
+    /// text grows the row instead of overdrawing its neighbours.
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard measures, row >= 0, row < model.rowIDs.count, !model.columns.isEmpty else { return tableView.rowHeight }
+        let widths = _TableBridge.columnWidths(of: tableView)
+        if widths != measuredWidths { heights.removeAll(keepingCapacity: true); measuredWidths = widths }
+        if let h = heights[row] { return h }
+        var tallest: CGFloat = 0
+        for (c, width) in widths.enumerated() where c < model.columns.count && width > 0 {
+            let available = max(1, width - _TableBridge.cellLeadingPadding - tableView.intercellSpacing.width)
+            let content = model.cell(row, c)
+            let probe: NSHostingView<AnyView>
+            if let p = probes[c] { p.rootView = content; probe = p }
+            else { probe = NSHostingView(rootView: content); probes[c] = probe }
+            tallest = max(tallest, probe.sizeThatFits(NSHostingSizeProposal(width: available, height: nil)).height)
+        }
+        let h = max(_TableBridge.minimumRowHeight, tallest.rounded(.up) + _TableBridge.rowPadding)
+        heights[row] = h
+        return h
+    }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let tableColumn, let column = tableView.tableColumns.firstIndex(where: { $0 === tableColumn }), row < model.rowIDs.count else { return nil }
         // Cells sit at the leading edge of their column, as SwiftUI lays them out.
-        let content = AnyView(HStack(spacing: 0) { model.cell(row, column); Spacer(minLength: 0) }.padding(.leading, 4))
+        let content = AnyView(HStack(spacing: 0) { model.cell(row, column); Spacer(minLength: 0) }.padding(.leading, _TableBridge.cellLeadingPadding))
         if let v = tableView.makeView(withIdentifier: _TableBridge.cellID, owner: nil) as? NSHostingView<AnyView> {
             v.rootView = content
             return v
@@ -90,7 +138,9 @@ final class _TableBridge: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
     let table = NSTableView(frame: .zero)
     let bridge: _TableBridge
+    /// The default row height, answered before the rows are measured.
     private var rowHeight: CGFloat = 24
+    private var resizeObserver: NSObjectProtocol?
 
     init(model: _TableModel) {
         bridge = _TableBridge(model: model)
@@ -113,7 +163,46 @@ final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
         guard let o = other as? _NSTablePrimitive else { return }
         let columnsChanged = o.bridge.model.columns.map(\.title) != bridge.model.columns.map(\.title) || o.bridge.model.columns.count != bridge.model.columns.count
         bridge.model = o.bridge.model
+        // A new model may change any cell's content: the rows are measured again as the
+        // table asks for them.
+        bridge.invalidateHeights(dropProbes: columnsChanged)
         apply(o.bridge.model, columnsChanged: columnsChanged)
+    }
+
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        guard !bridge.measures else { return }
+        bridge.measures = true
+        bridge.invalidateHeights()
+        noteAllRowHeightsChanged()
+        // A column resized by the user rewraps its cells: the rows are measured again.
+        resizeObserver = NotificationCenter.default.addObserver(forName: NSTableView.columnDidResizeNotification, object: table, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.columnsDidResize() }
+        }
+    }
+
+    override func detach() {
+        if let o = resizeObserver { NotificationCenter.default.removeObserver(o); resizeObserver = nil }
+        super.detach()
+    }
+
+    /// Column autoresizing (the table followed its scroll view) changes widths without a
+    /// notification: once the scroll view has its frame, compare with the widths the
+    /// heights were measured at.
+    override func didSyncBackingViews(node: _ViewNode) {
+        super.didSyncBackingViews(node: node)
+        let measured = bridge.measuredWidths
+        if bridge.measures, !measured.isEmpty, measured != _TableBridge.columnWidths(of: table) { columnsDidResize() }
+    }
+
+    private func columnsDidResize() {
+        bridge.invalidateHeights()
+        noteAllRowHeightsChanged()
+    }
+
+    private func noteAllRowHeightsChanged() {
+        let n = table.numberOfRows
+        if n > 0 { table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<n)) }
     }
 
     private func apply(_ model: _TableModel, columnsChanged: Bool) {
@@ -143,7 +232,7 @@ final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
             table.sortDescriptors = []
             table.highlightedTableColumn = nil
         }
-        measureRowHeight(model)
+        if table.rowHeight != rowHeight { table.rowHeight = rowHeight }
         table.reloadData()
         if let selection = model.selection {
             let ids = selection.get()
@@ -152,22 +241,12 @@ final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
         }
     }
 
-    /// Rows are as tall as the first row's tallest cell, plus padding.
-    private func measureRowHeight(_ model: _TableModel) {
-        guard !model.rowIDs.isEmpty, !model.columns.isEmpty else { return }
-        var h: CGFloat = 0
-        for c in model.columns.indices {
-            let probe = NSHostingView(rootView: model.cell(0, c))
-            let s = probe.sizeThatFits(.unspecified)
-            h = max(h, s.height)
-        }
-        let height = max(20, h.rounded(.up) + 6)
-        if height != rowHeight { rowHeight = height; table.rowHeight = height }
-    }
-
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 400
-        let natural = CGFloat(bridge.model.rowIDs.count) * (rowHeight + table.intercellSpacing.height) + (table.headerView?.frame.height ?? 23) + 4
+        // The rows' real heights (each row as the delegate measured it), plus the header.
+        let rows = table.numberOfRows
+        let rowsHeight = rows > 0 ? table.rect(ofRow: rows - 1).maxY + table.intercellSpacing.height : 0
+        let natural = rowsHeight + (table.headerView?.frame.height ?? 23) + 4
         let height = proposal.height.flatMap { $0.isFinite ? $0 : nil } ?? min(natural, 400)
         return CGSize(width: width, height: height)
     }

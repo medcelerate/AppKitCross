@@ -181,7 +181,7 @@ import CoreText
     internal var _toolbarMetrics: _NSToolbarMetrics? {
         guard let t = _toolbar, t.isVisible, _styleMask.contains(.titled) else { return nil }
         return _NSToolbarMetrics.resolve(style: _toolbarStyle, displayMode: t.displayMode, sizeMode: t.sizeMode, contentCoversTitleBar: _styleMask.contains(.fullSizeContentView),
-                                         buttonStyle: _windowButtonStyle)
+                                         buttonStyle: _windowButtonStyle, automaticIsUnified: t._automaticStyleIsUnified)
     }
     /// The height the toolbar takes out of the content area (below the title band). Zero
     /// when the content covers the title bar: the toolbar then overlays the content.
@@ -203,9 +203,17 @@ import CoreText
     /// the band to the package (Wayland client-side decorations).
     internal var _ownsTitleBand: Bool { _styleMask.contains(.titled) && (_styleMask.contains(.fullSizeContentView) || _hasClientSideTitleBar) }
     private var _visibleAccessories: [NSTitlebarAccessoryViewController] { _styleMask.contains(.titled) ? _titlebarAccessories.filter { !$0.isHidden } : [] }
+    /// A unified toolbar under a title bar the package does not draw (the Win32 system
+    /// frame, X11 server-side decorations) is the title bar as far as the window's content
+    /// goes: the leading and trailing accessories share its row instead of a strip of
+    /// their own, as they share the title bar with a unified toolbar on macOS.
+    private var _toolbarSharesAccessoryRow: Bool {
+        guard !_ownsTitleBand, let m = _toolbarMetrics else { return false }
+        return m.isUnified && m.placement == .belowTitleBar
+    }
     /// The strip under a server-side title bar for the leading and trailing accessories.
     private var _accessoryTopStripHeight: CGFloat {
-        guard !_ownsTitleBand else { return 0 }
+        guard !_ownsTitleBand, !_toolbarSharesAccessoryRow else { return 0 }
         return _visibleAccessories.filter { $0.layoutAttribute != .bottom }.map { $0._measuredSize.height }.max() ?? 0
     }
     /// The bottom accessories, stacked under the toolbar.
@@ -249,9 +257,11 @@ import CoreText
             if strip > 0 { l.paintedBands.append(l.titleRow) }
             top -= strip
         }
+        let sharesRow = _toolbarSharesAccessoryRow
         if let m = _toolbarMetrics {
             l.toolbar = NSRect(x: 0, y: top - m.height, width: pc.width, height: m.height)
             top -= m.height
+            if sharesRow, let t = l.toolbar { l.titleRow = t }
         } else if fullSize {
             top -= NSWindow._titleBarBandHeight
         }
@@ -282,7 +292,7 @@ import CoreText
                 rightX -= size.width + 8
             }
         }
-        if fullSize, let t = l.toolbar, t.maxY == pc.height, _toolbarMetrics?.topInset == 0 {
+        if (fullSize && l.toolbar?.maxY == pc.height && _toolbarMetrics?.topInset == 0) || sharesRow {
             // A unified toolbar shares the row: its items start after the left-hand
             // accessories and stop before the right-hand ones.
             l.toolbarInsets = (max(0, leftX - leadingInset), max(0, pc.width - trailingInset - rightX))
@@ -354,6 +364,13 @@ import CoreText
         _updateChrome()        // the band drags the window (PlatformWindowChrome.hasDraggableBand)
         _toolbar?.validateVisibleItems()
         _platform?.setNeedsDisplay(nil)
+    }
+
+    /// A unified toolbar shows the title and subtitle in its row: they changed.
+    private func _toolbarTitleDidChange() {
+        guard let v = _toolbarView, !v.isHidden else { return }
+        v.needsLayout = true
+        v.needsDisplay = true
     }
 
     /// An accessory's attribute, visibility or view size changed.
@@ -2541,7 +2558,9 @@ import CoreText
                 _ = _contentView?.performKeyEquivalent(with: event)
                 return
             }
-            if !(_contentView?.performKeyEquivalent(with: event) ?? false) {
+            // Then the toolbar's buttons, whose key equivalents SwiftUI's `.keyboardShortcut`
+            // sets (the toolbar is an overlay root, not under the content view).
+            if !(_contentView?.performKeyEquivalent(with: event) ?? false), !(_toolbarView.map { !$0.isHidden && $0.performKeyEquivalent(with: event) } ?? false) {
                 // Escape ends a sheet that opted in (SwiftUI's), when no Cancel button took it.
                 if _sheetParent != nil, _cancelsSheetOnEscape, event.charactersIgnoringModifiers == "\u{1B}",
                    event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
@@ -2724,7 +2743,7 @@ import CoreText
     @available(macOS 11.0, *)
     @MainActor open var subtitle: String {
         get { _subtitle }
-        set { _subtitle = newValue }
+        set { guard _subtitle != newValue else { return }; _subtitle = newValue; _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/tab
     @available(macOS 10.13, *)
@@ -2754,13 +2773,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/title
     @MainActor open var title: String {
         get { _title }
-        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)) }
+        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)); _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlevisibility
     @available(macOS 10.10, *)
     @MainActor open var titleVisibility: NSWindow.TitleVisibility {
         get { _titleVisibility }
-        set { _titleVisibility = newValue; _updateChrome() }
+        set { _titleVisibility = newValue; _updateChrome(); _toolbarTitleDidChange() }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebaraccessoryviewcontrollers
     @available(macOS 10.10, *)
@@ -3042,8 +3061,13 @@ import CoreText
     }
 }
 
+/// A window that carries no in-window menu bar where menus attach per window (Windows,
+/// Linux), as `NSPanel`s do not: dialogs such as SwiftUI's Settings window. Its key
+/// equivalents still reach the main menu through `NSApplication.sendEvent`.
+public protocol _MenuBarExemptWindow: AnyObject {}
+
 extension NSWindow: PlatformWindowOwner {
-    public var platformWantsMenuBar: Bool { !(self is NSPanel) }
+    public var platformWantsMenuBar: Bool { !(self is NSPanel) && !(self is any _MenuBarExemptWindow) }
     public var platformAccessibility: any PlatformAccessibilityProvider { self }
 }
 

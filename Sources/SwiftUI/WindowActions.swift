@@ -13,20 +13,32 @@ import Foundation
 @MainActor
 final class _WindowScene {
     let isSingle: Bool
-    let make: () -> NSWindow
+    var make: () -> NSWindow
+    /// Re-evaluates the content into one of this scene's open windows (an App state
+    /// change re-ran the scenes, App.swift `_updateScenes`).
+    var refresh: (NSWindow) -> Void
     var windows: [NSWindow] = []
-    init(isSingle: Bool, make: @escaping () -> NSWindow) { self.isSingle = isSingle; self.make = make }
+    init(isSingle: Bool, make: @escaping () -> NSWindow, refresh: @escaping (NSWindow) -> Void) {
+        self.isSingle = isSingle; self.make = make; self.refresh = refresh
+    }
 }
 
 extension _AppRunner {
     /// A `Window` scene: registered by id, opened now only when it is the first scene.
     func _runWindowScene<Content: View>(id: String, title: String, content: @escaping () -> Content) {
         let size = pendingDefaultSize, resizability = pendingResizability, hides = pendingHidesTitleBar, toolbar = pendingToolbarStyle
-        let scene = _WindowScene(isSingle: true) { [unowned self] in
+        let make: () -> NSWindow = { [unowned self] in
             let w = self._makeWindow(title: title, content: content(), defaultSize: size, resizability: resizability, hidesTitleBar: hides, toolbarStyle: toolbar)
             w.center()
             return w
         }
+        let refresh: (NSWindow) -> Void = { w in (w.contentView as? NSHostingView<Content>)?.rootView = content() }
+        if _isUpdatingScenes, let scene = _windowScenes[id] {
+            scene.make = make; scene.refresh = refresh
+            _refresh(scene)
+            return
+        }
+        let scene = _WindowScene(isSingle: true, make: make, refresh: refresh)
         _windowScenes[id] = scene
         guard !_launchSceneOpened else { return }
         _launchSceneOpened = true
@@ -36,22 +48,43 @@ extension _AppRunner {
     /// A `WindowGroup`: one with an id is registered for `openWindow(id:)` and, after the
     /// first scene, waits for it; one without opens as it always has.
     func _runWindowGroup<Content: View>(id: String?, title: String, content: @escaping () -> Content, defaultSize: CGSize?) {
-        if let id {
-            let size = defaultSize ?? pendingDefaultSize, resizability = pendingResizability, hides = pendingHidesTitleBar, toolbar = pendingToolbarStyle
-            let scene = _WindowScene(isSingle: false) { [unowned self] in
-                let w = self._makeWindow(title: title, content: content(), defaultSize: size, resizability: resizability, hidesTitleBar: hides, toolbarStyle: toolbar)
-                w.center()
-                return w
-            }
-            _windowScenes[id] = scene
-            if _launchSceneOpened { return }
-            _launchSceneOpened = true
-            openWindow(title: title, content: content(), defaultSize: defaultSize)
-            if let w = windows.last { scene.windows.append(w) }
+        // An id-less group is registered under an ordinal key so an update finds its windows.
+        let key: String
+        if let id { key = id } else { key = "\u{1}WindowGroup#\(_windowGroupOrdinal)"; _windowGroupOrdinal += 1 }
+        let size = defaultSize ?? pendingDefaultSize, resizability = pendingResizability, hides = pendingHidesTitleBar, toolbar = pendingToolbarStyle
+        let make: () -> NSWindow = { [unowned self] in
+            let w = self._makeWindow(title: title, content: content(), defaultSize: size, resizability: resizability, hidesTitleBar: hides, toolbarStyle: toolbar)
+            w.center()
+            return w
+        }
+        let refresh: (NSWindow) -> Void = { w in (w.contentView as? NSHostingView<Content>)?.rootView = content() }
+        if _isUpdatingScenes, let scene = _windowScenes[key] {
+            scene.make = make; scene.refresh = refresh
+            _refresh(scene)
             return
         }
+        let scene = _WindowScene(isSingle: false, make: make, refresh: refresh)
+        _windowScenes[key] = scene
+        if id != nil, _launchSceneOpened { return }
         _launchSceneOpened = true
+        let wasPrimary = primaryWindowGroup == nil
         openWindow(title: title, content: content(), defaultSize: defaultSize)
+        if let w = windows.last { scene.windows.append(w) }
+        if wasPrimary {
+            // File > New Window opens another of this group's windows, tracked so that an
+            // App state update refreshes it too.
+            primaryWindowGroup = { [weak scene] in
+                guard let scene else { return }
+                let w = scene.make()
+                scene.windows.append(w)
+                w.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+
+    private func _refresh(_ scene: _WindowScene) {
+        scene.windows.removeAll { !_isOpen($0) }
+        for w in scene.windows { scene.refresh(w) }
     }
 
     private func _isOpen(_ w: NSWindow) -> Bool { windows.contains { $0 === w } }

@@ -276,6 +276,18 @@ final class CoreMIDITests: XCTestCase {
 
     // MARK: Windows MIDI Services paths (bytes to UMP, UMP passthrough)
 
+    func testWindowsStartupLineCarriesTheRoutes() {
+        let routes = "Windows MIDI Services: projection Windows.Devices.Midi2; Windows build 26200; in-box API not registered (0x80040154); no app-local Windows.Devices.Midi2.dll in C:\\App\\"
+        XCTAssertEqual(_MIDIWindowsStartupLine(backend: "WinMM backend", detail: "Windows MIDI Services unavailable", routes: routes),
+                       "WinMM backend (Windows MIDI Services unavailable) [\(routes)]")
+        XCTAssertEqual(_MIDIWindowsStartupLine(backend: "Windows MIDI Services backend", detail: "2 endpoints", routes: " \(routes)\n"),
+                       "Windows MIDI Services backend (2 endpoints) [\(routes)]", "trimmed")
+        // A forced WinMM never ran the check: no brackets.
+        XCTAssertEqual(_MIDIWindowsStartupLine(backend: "WinMM backend", detail: "APPKITWIN_MIDI_BACKEND=winmm", routes: ""),
+                       "WinMM backend (APPKITWIN_MIDI_BACKEND=winmm)")
+        XCTAssertEqual(_MIDIWindowsStartupLine(backend: "WinMM backend", detail: "", routes: ""), "WinMM backend")
+    }
+
     private func ump(_ bytes: [UInt8]) -> [UInt32] {
         var parser = _MIDIByteStreamParser()
         parser.feed(bytes)

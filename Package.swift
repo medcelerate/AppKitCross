@@ -317,9 +317,11 @@ targets += [
 #if os(Windows)
 targets += [
     .target(name: "CWinMIDI", path: "Sources/CWinMIDI", linkerSettings: [.linkedLibrary("winmm")]),
-    // Windows MIDI Services (MIDI 2.0, UMP) through C++/WinRT; compiles to stubs without the
-    // Microsoft.Windows.Devices.Midi2 projection headers, and the WinMM backend is used.
-    .target(name: "CWinMIDI2", path: "Sources/CWinMIDI2", linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32")]),
+    // Windows MIDI Services (MIDI 2.0, UMP) through C++/WinRT; compiles to the availability
+    // check alone without a Windows.Devices.Midi2 (or preview App SDK
+    // Microsoft.Windows.Devices.Midi2) projection on the include path, and WinMM is used.
+    // advapi32: RegGetValueW for the App SDK runtime's registry key (ADR-0050).
+    .target(name: "CWinMIDI2", path: "Sources/CWinMIDI2", linkerSettings: [.linkedLibrary("runtimeobject"), .linkedLibrary("ole32"), .linkedLibrary("advapi32")]),
 ]
 let coreMIDIPlatformDependencies: [Target.Dependency] = ["CWinMIDI", "CWinMIDI2"]
 let networkLinkerSettings: [LinkerSetting] = [.linkedLibrary("ws2_32"), .linkedLibrary("iphlpapi")]

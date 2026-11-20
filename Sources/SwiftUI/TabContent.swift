@@ -61,8 +61,8 @@ public struct DefaultTabLabel: View {
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/tab
 ///
 /// A tab of a `TabView`: the tab bar shows its title (the port's tab bar is a segmented
-/// control, so the icon is kept for accessibility and custom labels but not drawn) and its
-/// content is the page shown while it is selected. A `role` is accepted and ignored: the
+/// control, so the icon is not drawn there; in a Settings window the bar shows the icon
+/// above the title, as macOS does) and its content is the page shown while it is selected. A `role` is accepted and ignored: the
 /// search role's special placement belongs to iPadOS and tvOS tab bars.
 public struct Tab<Value, Content, Label> {
     let value: Value?

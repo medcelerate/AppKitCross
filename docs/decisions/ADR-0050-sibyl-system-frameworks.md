@@ -76,7 +76,7 @@ process, named in one stderr line when the first client is created:
 
 | Backend | Where | Path |
 |---|---|---|
-| Windows MIDI Services (`CWinMIDI2`) | Windows 11 25H2 (build 26200) and later, with the `Windows.Devices.Midi2` API resolvable (in Windows once it ships there; until then `Windows.Devices.Midi2.dll` and `.pri` from the NuGet package next to the executable) and the service in Full mode | UMP: event lists go out as built (MIDI 1.0 and 2.0 alike; the service translates for MIDI 1.0 devices), packet lists converted bytes to UMP in group 0 |
+| Windows MIDI Services (`CWinMIDI2`) | Windows 11 25H2 (build 26200) and later, with the `Windows.Devices.Midi2` API resolvable (from Windows once it ships there; until then `Windows.Devices.Midi2.dll` and `.pri` from the NuGet package next to the executable) and the service in Full or Hybrid mode | UMP: event lists go out as built (MIDI 1.0 and 2.0 alike; the service translates for MIDI 1.0 devices), packet lists converted bytes to UMP in group 0 |
 | WinMM (`CWinMIDI`) | Windows 10, Windows 11 24H2 (its older Windows MIDI Services never gets the API), Legacy API mode, a disabled `midisrv`, or a build without the API headers | MIDI 1.0 bytes: short messages, SysEx through prepared headers |
 | ALSA sequencer (`CALSASeq`, libasound `dlopen`ed as `CALSA` does) | Linux | MIDI 1.0 bytes |
 | null | macOS (the tests), or `APPKITWIN_MIDI_BACKEND=null` | records what was sent |
@@ -84,15 +84,82 @@ process, named in one stderr line when the first client is created:
 `CWinMIDI2` asks the three questions of Microsoft's detect-midi-services sample (Windows
 build, does `MidiApi` resolve, `EnsureServiceAvailable()`) through a hand-declared
 `IMidiApiStatics`, so it needs nothing at build time to decide; the session, endpoint
-watcher and sends go through the C++/WinRT projection, which the build machine generates
-with `cppwinrt.exe` from the `Windows.Devices.Midi2` NuGet package's `.winmd` (written
-against 0.99.92-preview.11, the API lock) and puts on the C++ include path. Without those
-headers the shim compiles to the check alone and Windows falls back to WinMM, saying why.
-`APPKITWIN_MIDI_BACKEND=winmm` or `=midi2` forces one; a forced but unavailable Windows MIDI
-Services reports the reason and has no destinations rather than falling back. One endpoint
-is one destination (a multi-port MIDI 1.0 interface is one endpoint with a group per port;
-byte sends use group 0). The earlier App SDK (`Microsoft.Windows.Devices.Midi2` with
-`MidiDesktopAppSdkInitializer`) is superseded and not supported. Setup changes are
+watcher and sends go through a C++/WinRT projection that the build machine generates with
+`cppwinrt.exe` and puts on the C++ include path. Without one the shim compiles to the check
+alone and Windows falls back to WinMM, saying why. `APPKITWIN_MIDI_BACKEND=winmm` or `=midi2`
+forces one; a forced but unavailable Windows MIDI Services reports the reason and has no
+destinations rather than falling back. One endpoint is one destination (a multi-port MIDI 1.0
+interface is one endpoint with a group per port; byte sends use group 0).
+
+**Windows MIDI Services, as Microsoft ships it (researched 2026-11-19).** Two WinRT APIs
+exist; only the first is a target:
+
+| | `Windows.Devices.Midi2` (in-box API) | `Microsoft.Windows.Devices.Midi2` (preview App SDK) |
+|---|---|---|
+| Status | The supported API: "in box in Windows 11 25H2 and later starting in 2027" ([porting guide](https://github.com/microsoft/MIDI/blob/main/docs/kb/porting-midi-libraries.md)); metadata locked at [In-box Preview 11](https://github.com/microsoft/MIDI/releases/tag/inbox-preview-11), still the API to build against at [In-box Preview 14](https://github.com/microsoft/MIDI/releases/tag/inbox-preview-14) (2026-11-17) | Out-of-band preview, releases RC 1 to [RC 4](https://github.com/microsoft/MIDI/releases/tag/rc-4) (1.0.14 to 1.0.17); "never supported for redistribution ... being dropped entirely in 2027"; In-box Preview 11 and 14 tell users to uninstall the "rc4 or similar SDK Runtime and Tools" |
+| Where the code comes from | System32 once Windows has it; until then `Windows.Devices.Midi2.dll` and `.pri` beside the executable (NuGet `runtimes\win-x64\native`, `win-arm64\native`; "go live" terms in the Preview 11 notes) | Installed centrally by "Windows MIDI Services SDK Runtime and Tools" (e.g. 1.0.16-rc.3.x) into `%ProgramFiles%\Windows MIDI Services\Desktop App SDK Runtime\` (`Microsoft.Windows.Devices.Midi2.dll`, `.winmd`, `.pri`), folder recorded at `HKLM\SOFTWARE\Microsoft\Windows MIDI Services\Desktop App SDK Runtime`, value `Installed` ([installer WiX](https://github.com/microsoft/MIDI/blob/rc-3/src/app-sdk/sdk-runtime-installer/sdk-package/WindowsMidiServicesSdkRedist.wxs), [MidiDefs.h](https://github.com/microsoft/MIDI/blob/rc-3/src/api/Inc/MidiDefs.h)) |
+| Activation Microsoft documents | `RoGetActivationFactory`; when that returns `REGDB_E_CLASSNOTREG` (not in Windows yet), `DllGetActivationFactory` on the app-local module, which C++/WinRT's own fallback also does ([detect-midi-services](https://github.com/microsoft/MIDI/blob/main/samples/cpp-winrt/detect-midi-services/main_detect_midi_services.cpp)) | `MidiDesktopAppSdkInitializer::InitializeSdkRuntime()` ([Initialization.hpp](https://github.com/microsoft/MIDI/blob/rc-3/src/app-sdk/client-initialization-redist/Microsoft.Windows.Devices.Midi2.Initialization.hpp)) CoCreates COM class `MidiClientInitializer` {c3263827-c3b0-bdbd-2500-ce63a3f3f2c3} (registered by the runtime DLL), interface `IMidiClientInitializer` {8087b303-d551-bce2-1ead-a2500d50c580} (`GetInstalledWindowsMidiServicesSdkVersion`, `EnsureServiceAvailable`), which Detours-hooks the Ro* activation functions for `Microsoft.Windows.Devices.Midi2.*` ([what SDK initialization does](https://github.com/microsoft/MIDI/blob/rc-3/docs/kb/what-is-sdk-initialization-doing.md)); `IsServiceInstalled()` CoCreates the MidiSrv transport {2BA15E4E-5417-4A66-85B8-2B2260EFBC84} |
+| Service check | `Windows.Devices.Midi2.MidiApi` (static class): `IMidiApiStatics` {8087b303-0519-c0de-31d1-ee0010000000} (`EnsureServiceAvailable`, `GetCurrentlySelectedApiMode`: 0 Full, 1 Legacy, 2 Hybrid), `IMidiApiStatics2` {...0002} (`IsSystemProvided`) | No `MidiApi`; the initializer's `EnsureServiceAvailable` |
+| Minimum Windows | Windows 11 25H2, build 26200; 24H2 (26100) never gets the API ([minimum requirements](https://github.com/microsoft/MIDI/blob/main/docs/kb/minimum-requirements.md)) | Same service; Microsoft no longer supports it on any build |
+| Metadata for the projection | NuGet `Windows.Devices.Midi2` 0.99.92-preview.11, a GitHub release asset of In-box Preview 11 (not on nuget.org), `ref\native\Windows.Devices.Midi2.winmd` | NuGet `Microsoft.Windows.Devices.Midi2` (e.g. 1.0.16-rc.3.7, an [RC 3](https://github.com/microsoft/MIDI/releases/tag/rc-3) asset), or the `.winmd` the runtime installed |
+
+So "`Windows.Devices.Midi2.MidiApi` did not resolve (0x80040154)" on a PC with only the RC
+SDK runtime installed is expected: Windows does not have the in-box API yet, nothing put the
+app-local DLL beside the executable (SwiftPM does not run the NuGet `.targets` that copy it),
+and the RC runtime serves only the other namespace.
+
+`CWinMIDI2` resolves factories in one function, each step written to an attempt log: (a)
+`RoGetActivationFactory` on the class name; (b) the module beside the executable
+(`Windows.Devices.Midi2.dll`) through `DllGetActivationFactory`; (c) the App SDK runtime,
+found as Microsoft's initializer finds it (the registry value, else the default folder),
+through `DllGetActivationFactory` on `Microsoft.Windows.Devices.Midi2.dll`, without the
+initializer's Detours. When (b) or (c) won, C++/WinRT's `winrt_activation_handler` hook (if
+nothing else set it) sends the projection's own activations through the same function.
+Route (c) serves only a build whose projection is the App SDK one (chosen when
+`winrt/Windows.Devices.Midi2.h` is absent and `winrt/Microsoft.Windows.Devices.Midi2.h`
+present, or with `CWINMIDI2_USE_APP_SDK`); for the in-box build a runtime found there is
+reported as present but unusable. The App SDK has no `MidiApi`, so that build checks the
+MidiSrv transport class and lets `MidiSession.Create` demand-start the service. The log is
+the error on failure and part of the success line, so both name every route tried:
+
+```
+CoreMIDI: WinMM backend (Windows MIDI Services unavailable) [Windows MIDI Services: projection Windows.Devices.Midi2; Windows build 26200; in-box API not registered (0x80040154); no app-local Windows.Devices.Midi2.dll in C:\Sibyl\; SDK runtime at C:\Program Files\Windows MIDI Services\Desktop App SDK Runtime\Microsoft.Windows.Devices.Midi2.dll (from the registry): present but not used: ...]
+CoreMIDI: Windows MIDI Services backend (3 endpoints) [Windows MIDI Services: projection Windows.Devices.Midi2; Windows build 26200; in-box API not registered (0x80040154); app-local C:\Sibyl\Windows.Devices.Midi2.dll: loaded; the app's own copy; service available (API mode 0, Full Windows MIDI Services mode); C++/WinRT activation hook installed; session created]
+```
+
+Build PC setup (Windows MIDI Services on the PC that builds and runs the port):
+
+1. Windows 11 25H2 or later (`winver`: build 26200+), MIDI service enabled (Full mode).
+2. Uninstall the old "Windows MIDI Services SDK Runtime and Tools" (any 1.0.x-rc) from
+   Settings > Apps > Installed apps, as Microsoft's In-box Preview 11/14 notes say; optionally
+   install the In-box Preview 14 Tools for MIDI Settings, Monitor and Troubleshooting.
+3. Download `Windows.Devices.Midi2.0.99.92-preview.11.nupkg` from the
+   [In-box Preview 11 release](https://github.com/microsoft/MIDI/releases/tag/inbox-preview-11)
+   and unzip it (it is a zip).
+4. Generate the projection with C++/WinRT 2.0 or later (`cppwinrt.exe` from the
+   `Microsoft.Windows.CppWinRT` NuGet package; Microsoft's samples use 3.0.x):
+   `cppwinrt -input <unzipped>\ref\native\Windows.Devices.Midi2.winmd -reference sdk -output <dir>`.
+   It writes `winrt\Windows.Devices.Midi2.h`, `winrt\Windows.Devices.Midi2.Enumeration.h`
+   and the rest of `winrt\` (including `base.h`) under `<dir>`.
+5. Build with that folder on the C++ include path, e.g.
+   `swift build -Xcxx -I<dir>` (or set `INCLUDE`); `<dir>` must be the folder that contains
+   `winrt\`. The `winrt\` headers of the Windows SDK are fine for the rest; use one
+   `base.h` (the generated one) so the versions match.
+6. Copy `runtimes\win-x64\native\Windows.Devices.Midi2.dll` and `Windows.Devices.Midi2.pri`
+   (`win-arm64` on Arm) beside the built executable (`.build\<triple>\debug\` or the app
+   folder). Remove them again once Windows has the API (the log then says "in-box API ...
+   resolved").
+7. Run; the `CoreMIDI:` line on stderr names the routes. Only to try the superseded RC
+   runtime instead: generate from its `Microsoft.Windows.Devices.Midi2.winmd`, leave the
+   `Windows.Devices.Midi2` headers off the include path (or add `-Xcxx -DCWINMIDI2_USE_APP_SDK`),
+   and keep the RC runtime installed.
+
+Not confirmed: whether the RC runtime's `DllGetActivationFactory` works without the
+initializer having run in the process (it is the route the initializer's own catalog uses);
+the exact `cppwinrt` command line (`-reference sdk` is the usual form for a component `.winmd`; Microsoft's samples generate through the NuGet MSBuild targets instead); the
+projection's behaviour with C++/WinRT older than the `winrt_activation_handler` hook. The
+earlier App SDK (`Microsoft.Windows.Devices.Midi2` with `MidiDesktopAppSdkInitializer`) is
+superseded and kept only as that fallback build. Setup changes are
 found by rescanning the destination list (every 2 s while a client exists, and at once on a
 Windows MIDI Services endpoint-watcher event) and delivered as
 `.msgSetupChanged`. On corelibs `CFString` is `NSString` (the CoreText alias), so
@@ -115,6 +182,33 @@ at launch, with `dismissWindow`; `Transferable` (`CodableRepresentation`,
 `Tests/AppKitTests/SwiftUISibylGapTests.swift`. Symbol effects and content transitions are
 declared as documented no-ops (the port draws no SF Symbol animations).
 
+### What the first Windows run of the app found
+
+The PC run of Sibyl (relayed by the orchestrating session) exercised paths no test had:
+
+- **App-level state.** A SwiftUI `App`'s own `@State` (`isExporting` behind a
+  `.fileExporter`), its `@Observable` model read in `.commands` ("Start Capture" / "Stop
+  Capture") and its `Settings` content had no node to re-render: the scene body ran once
+  at launch. The runner now owns a node for the App (`_AppRunner._appNode`): the App's
+  dynamic properties are installed in it and the scene body plus the menu build run under
+  observation tracking against it. A change re-runs the scenes in update mode: a
+  `Window`/`WindowGroup` scene re-evaluates its content into its open windows (so the
+  bindings a file panel modifier reads see the new value), the `Settings` scene refreshes
+  its window, `DocumentGroup` is skipped, and the menu bar is rebuilt from the commands.
+- **The Settings window** is a dialog: `_SettingsWindow` is `_MenuBarExemptWindow`, so it
+  carries no in-window menu bar on Windows and Linux (the main menu still handles its key
+  equivalents), and it is sized like a `.contentSize` scene window (fixed for fixed content,
+  resizable within the content's range otherwise, never taller than the screen).
+- **Grouped forms** scroll (macOS's `.grouped` form is an inset-grouped list);
+  `DisclosureGroup` content is a `VStack` (a padding on bare multi-view content placed its
+  rows like a `ZStack`); `TextField`, `SecureField` and `Picker` show their title as a
+  leading label inside a `Form`, `labelsHidden()` works, `LabeledContent` dims only text
+  content; `Image(systemName:)` now draws (it never looked its name up), 48 more symbols
+  are in the table with `.circle`/`.fill`/`.slash` composition; `Table` rows take the
+  height of their wrapped cells through `heightOfRow`.
+- **Windows MIDI Services**: see the matrix above; the PC had the superseded preview App
+  SDK, not the in-box API, so the check now reports every route it tried.
+
 ## Consequences
 
 - An `@Observable` app ports without model changes; the cost is one tracking scope per
@@ -134,8 +228,9 @@ declared as documented no-ops (the port draws no SF Symbol animations).
 ## Verification
 
 `SwiftUIObservationTests` (5), `OSLogTests` (12), `CoreMIDITests` (15), `NetworkTests` (25),
-`SwiftUIContainerGapTests` (12) and `SwiftUISibylGapTests` (11) on the macOS host build and in
-the Linux container; the Windows PC run is relayed by the orchestrating session. Sibyl
+`SwiftUIContainerGapTests` (12), `SwiftUISibylGapTests` (11), `SwiftUIAppTests` (App-state
+re-render), `SwiftUIFormFixTests` (9) and `SwiftUITableRowHeightTests` (5) on the macOS host
+build and in the Linux container; the Windows PC run is relayed by the orchestrating session. Sibyl
 builds on macOS with Apple's frameworks unchanged (140 tests), on the macOS host build
 against the port with whisper.cpp (144 tests plus hosting smoke tests of its windows), and in
 the Linux container.

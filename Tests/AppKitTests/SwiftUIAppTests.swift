@@ -2,8 +2,37 @@
 // the Settings scene's window.
 
 import XCTest
+import Observation
 @testable import AppKit
 @testable import SwiftUI
+
+@Observable private final class _SessionModel { var running = false }
+
+@MainActor private func _appTestTexts(_ view: NSView?) -> [String] {
+    guard let view else { return [] }
+    return view.subviews.flatMap { _appTestTexts($0) } + [(view as? NSTextField)?.stringValue].compactMap { $0 }
+}
+@MainActor private func _appTestMenu(_ title: String) -> NSMenu? { NSApplication.shared.mainMenu?.items.first { $0.title == title }?.submenu }
+
+/// An App whose scenes read its own `@State` and an `@Observable` model, in the window
+/// content, in the commands and in the Settings scene (as Sibyl's does).
+private struct _StatefulApp: App {
+    @State private var exporting = false
+    @State private var model = _SessionModel()
+    init() {}
+    var body: some Scene {
+        // Text fields rather than Text: the port draws Text without a backing view, and the
+        // test reads the hosted NSTextFields.
+        WindowGroup("Main") { TextField("", text: .constant(exporting ? "Exporting" : "Idle")) }
+            .commands {
+                CommandMenu("Session") {
+                    Button(model.running ? "Stop Capture" : "Start Capture") { model.running.toggle() }
+                    Button("Export Show…") { exporting = true }
+                }
+            }
+        Settings { TextField("", text: .constant(exporting ? "Settings: exporting" : "Settings: idle")).frame(minWidth: 200, maxWidth: .infinity, minHeight: 80, maxHeight: .infinity) }
+    }
+}
 
 final class SwiftUIAppTests: XCTestCase, @unchecked Sendable {
     // These tests make `_AppRunner`s and close their windows; off macOS closing a runner's
@@ -33,6 +62,41 @@ final class SwiftUIAppTests: XCTestCase, @unchecked Sendable {
             open.run(scene: WindowGroup("Open") { Fixed() })
             XCTAssertTrue(open.windows.last!.styleMask.contains(.resizable), "automatic: resizable")
             w.close(); open.windows.last!.close()
+        }
+    }
+
+    func testAppStateRerendersWindowsCommandsAndSettings() {
+        MainActor.assumeIsolated {
+            let texts = _appTestTexts, menu = _appTestMenu
+            let runner = _AppRunner(name: "Sibyl")
+            runner._runScenes(of: _StatefulApp())
+            let window = runner.windows.last!
+            window.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(window.contentView).contains("Idle"))
+            XCTAssertEqual(items(menu("Session")), ["Start Capture", "Export Show…"])
+
+            // An @Observable property the commands read: the menu follows it.
+            let start = menu("Session")!.items[0]
+            _ = NSApplication.shared.sendAction(start.action!, to: start.target, from: start)
+            runner._updateScenes()
+            XCTAssertEqual(items(menu("Session")), ["Stop Capture", "Export Show…"], "the Session menu re-reads the model")
+
+            // App @State read by the window content and the Settings scene.
+            let settings = NSApplication.shared.mainMenu!.items[0].submenu!.items.first { $0.title.hasPrefix("Settings") }!
+            _ = NSApplication.shared.sendAction(settings.action!, to: settings.target, from: settings)
+            let prefs = NSApplication.shared.windows.first { $0.title == "Sibyl Settings" }!
+            XCTAssertFalse(prefs.platformWantsMenuBar, "the Settings dialog carries no in-window menu bar")
+            XCTAssertTrue(prefs.styleMask.contains(.resizable), "flexible content: a resizable Settings window")
+            let export = menu("Session")!.items[1]
+            _ = NSApplication.shared.sendAction(export.action!, to: export.target, from: export)
+            runner._updateScenes()
+            window.contentView?.layoutSubtreeIfNeeded()
+            prefs.contentView?.layoutSubtreeIfNeeded()
+            XCTAssertTrue(texts(window.contentView).contains("Exporting"), "the WindowGroup content re-renders on App @State")
+            XCTAssertTrue(texts(prefs.contentView).contains("Settings: exporting"), "the open Settings window re-renders too")
+            for w in runner.windows { w.close() }
+            prefs.close()
+            NSApplication.shared.mainMenu = nil
         }
     }
 

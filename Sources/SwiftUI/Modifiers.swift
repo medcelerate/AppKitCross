@@ -777,11 +777,17 @@ extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/datepickerstyle(_:)
     public func datePickerStyle<S: DatePickerStyle>(_ style: S) -> some View { environment(\.datePickerStyle, style.kind) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/liststyle(_:)
-    public func listStyle<S: ListStyle>(_ style: S) -> some View { self }
+    /// `.sidebar` turns the sidebar look on anywhere; any other explicit style turns it
+    /// off inside a NavigationSplitView's sidebar column (Lists.swift).
+    public func listStyle<S: ListStyle>(_ style: S) -> some View { environment(\._inSidebarColumn, style is SidebarListStyle) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/controlsize(_:)
     public func controlSize(_ size: ControlSize) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/labelshidden()
-    public func labelsHidden() -> some View { self }
+    ///
+    /// Controls under it show no label of their own: a picker or toggle shows its control
+    /// alone, and a text field in a form is not a labelled row (its title stays the
+    /// placeholder). The label still names the control for assistive technology.
+    public func labelsHidden() -> some View { environment(\._labelsHidden, true) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/keyboardshortcut(_:modifiers:)
     public func keyboardShortcut(_ key: KeyEquivalent, modifiers: EventModifiers = .command) -> some View { _KeyShortcut(content: self, key: key, modifiers: modifiers) }
 }

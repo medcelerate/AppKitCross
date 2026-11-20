@@ -128,6 +128,10 @@ import CoreGraphics
         _insert(itemIdentifier, at: index)
         _itemsDidChange()
     }
+    /// Whether the window's `.automatic` toolbar style resolves to unified whatever its
+    /// style mask (SwiftUI's window toolbar does, as on macOS 11). Not part of Apple's API;
+    /// AppKit toolbars keep the port's rule (unified only over full-size content, ADR-0018).
+    @MainActor open var _automaticStyleIsUnified: Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstoolbar/isvisible
     @MainActor open var isVisible: Bool {
         get { _isVisible }

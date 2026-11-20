@@ -460,8 +460,14 @@ final class _TextPrimitive: _Primitive {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         refresh()
-        var s = view.size(for: proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
-        if let w = proposal.width, w.isFinite, w > 0, s.width > w, node.environment.lineLimit == 1 { s.width = w }
+        // A zero proposal asks for the text's minimum width (a stack measuring how far each
+        // child can shrink): a one-line text truncates to nothing, and a wrapping one narrows
+        // to its widest word. Answering with the full width made every text look inflexible,
+        // so a stack handed it an equal share before its fixed-size siblings had taken their
+        // room and truncated a title that fitted ("Produ…" beside a few icons).
+        let singleLine = node.environment.lineLimit == 1
+        var s = view.size(for: proposal.width.flatMap { $0.isFinite && ($0 > 0 || (!singleLine && $0 == 0)) ? $0 : nil })
+        if let w = proposal.width, w.isFinite, w >= 0, s.width > w, singleLine { s.width = w }
         // lineLimit(_:reservesSpace: true): the height of that many lines, however short the text.
         let extras = node.environment._lineLimitExtras
         if extras.reservesSpace, let lines = extras.minimum, lines > 1 {
@@ -1043,12 +1049,18 @@ final class _CustomButtonPrimitive: _Primitive {
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield
 public struct TextField<Label: View>: View, _PrimitiveView {
     public typealias Body = Never
-    let placeholder: String
+    /// The title (the label's text): the placeholder outside a form, the row's label in one.
+    let title: String
+    let prompt: String?
+    let label: Label
     let text: Binding<String>
     let onCommit: () -> Void
     var axis: Axis = .horizontal
     /// Set by the `value:` initialisers (FormattedText.swift): the field edits a formatted value.
     var _formatting: _TextFieldFormatting? = nil
+    /// The field inside its own form row: the label is beside it, so only a prompt is the placeholder.
+    var _inFormRow = false
+    var placeholder: String { _inFormRow ? (prompt ?? "") : (prompt ?? title) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-8rujz
     ///
     /// With `.vertical` the text wraps and the field grows with it, between the lines a
@@ -1058,7 +1070,7 @@ public struct TextField<Label: View>: View, _PrimitiveView {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:prompt:axis:)-7n1bo
     public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?, axis: Axis) where Label == Text {
-        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}; self.axis = axis
+        title = titleKey.key; self.prompt = prompt?._string; label = Text(titleKey); self.text = text; onCommit = {}; self.axis = axis
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/textfield/init(_:text:axis:)-1v9ln
     @_disfavoredOverload
@@ -1075,21 +1087,27 @@ public struct TextField<Label: View>: View, _PrimitiveView {
         self.init(text: text, prompt: prompt, label: label); self.axis = axis
     }
     public init(_ title: String, text: Binding<String>) where Label == Text {
-        placeholder = title; self.text = text; onCommit = {}
+        self.title = title; prompt = nil; label = Text(title); self.text = text; onCommit = {}
     }
     public init(_ titleKey: LocalizedStringKey, text: Binding<String>) where Label == Text {
-        placeholder = titleKey.key; self.text = text; onCommit = {}
+        title = titleKey.key; prompt = nil; label = Text(titleKey); self.text = text; onCommit = {}
     }
     public init(_ title: String, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
-        placeholder = title; self.text = text; self.onCommit = onCommit
+        self.title = title; prompt = nil; label = Text(title); self.text = text; self.onCommit = onCommit
     }
     public init(_ title: String, text: Binding<String>, prompt: Text?) where Label == Text {
-        placeholder = prompt?._string ?? title; self.text = text; onCommit = {}
+        self.title = title; self.prompt = prompt?._string; label = Text(title); self.text = text; onCommit = {}
     }
     public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
-        placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
+        let label = label()
+        title = (label as? Text)?._string ?? ""; self.prompt = prompt?._string; self.label = label; self.text = text; onCommit = {}
     }
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        // In a form the title is a label leading the field's row (unless labels are hidden).
+        if !_inFormRow, node.environment._formContext != nil, !node.environment._labelsHidden, _formHasLabel(label) {
+            var inner = self; inner._inFormRow = true
+            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner)))])
+        }
         if let f = _formatting { return _FormattedTextFieldPrimitive(placeholder: placeholder, formatting: f, axis: axis) }
         return _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis)
     }
@@ -1101,44 +1119,55 @@ public struct TextField<Label: View>: View, _PrimitiveView {
 /// (no copy, cut or drag of the text), and read as bullets by assistive technology.
 public struct SecureField<Label: View>: View, _PrimitiveView {
     public typealias Body = Never
-    let placeholder: String
+    /// The title: the placeholder outside a form, the row's label in one.
+    let title: String
+    let prompt: String?
+    let label: Label
     let text: Binding<String>
     let onCommit: () -> Void
+    /// The field inside its own form row: only a prompt is the placeholder.
+    var _inFormRow = false
+    var placeholder: String { _inFormRow ? (prompt ?? "") : (prompt ?? title) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-6ae2l
     public init(_ titleKey: LocalizedStringKey, text: Binding<String>) where Label == Text {
-        placeholder = titleKey.key; self.text = text; onCommit = {}
+        title = titleKey.key; prompt = nil; label = Text(titleKey); self.text = text; onCommit = {}
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:)-3p6b5
     @_disfavoredOverload
     public init<S: StringProtocol>(_ title: S, text: Binding<String>) where Label == Text {
-        placeholder = String(title); self.text = text; onCommit = {}
+        self.title = String(title); prompt = nil; label = Text(title); self.text = text; onCommit = {}
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-3kgqx
     public init(_ titleKey: LocalizedStringKey, text: Binding<String>, prompt: Text?) where Label == Text {
-        placeholder = prompt?._string ?? titleKey.key; self.text = text; onCommit = {}
+        title = titleKey.key; self.prompt = prompt?._string; label = Text(titleKey); self.text = text; onCommit = {}
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:prompt:)-5ve9a
     @_disfavoredOverload
     public init<S: StringProtocol>(_ title: S, text: Binding<String>, prompt: Text?) where Label == Text {
-        placeholder = prompt?._string ?? String(title); self.text = text; onCommit = {}
+        self.title = String(title); self.prompt = prompt?._string; label = Text(title); self.text = text; onCommit = {}
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(text:prompt:label:)
     public init(text: Binding<String>, prompt: Text? = nil, @ViewBuilder label: () -> Label) {
-        placeholder = prompt?._string ?? (label() as? Text)?._string ?? ""; self.text = text; onCommit = {}
+        let label = label()
+        title = (label as? Text)?._string ?? ""; self.prompt = prompt?._string; self.label = label; self.text = text; onCommit = {}
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-7xby2
     @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
     public init(_ titleKey: LocalizedStringKey, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
-        placeholder = titleKey.key; self.text = text; self.onCommit = onCommit
+        title = titleKey.key; prompt = nil; label = Text(titleKey); self.text = text; self.onCommit = onCommit
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/securefield/init(_:text:oncommit:)-9cs5n
     @available(*, deprecated, message: "Use View.onSubmit(of:_:) instead.")
     @_disfavoredOverload
     public init<S: StringProtocol>(_ title: S, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
-        placeholder = String(title); self.text = text; self.onCommit = onCommit
+        self.title = String(title); prompt = nil; label = Text(title); self.text = text; self.onCommit = onCommit
     }
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
-        _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
+        if !_inFormRow, node.environment._formContext != nil, !node.environment._labelsHidden, _formHasLabel(label) {
+            var inner = self; inner._inFormRow = true
+            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner)))])
+        }
+        return _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
     }
 }
 
@@ -1248,11 +1277,27 @@ public struct Toggle<Label: View>: View, _PrimitiveView {
     public typealias Body = Never
     let isOn: Binding<Bool>
     let label: Label
+    /// The toggle inside its own columns-form row (the control column).
+    var _inFormRow = false
     public init(isOn: Binding<Bool>, @ViewBuilder label: () -> Label) { self.isOn = isOn; self.label = label() }
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
-        let title = (label as? Text)?._string ?? ""
-        if node.environment.toggleStyle == .switch { return _SwitchTogglePrimitive(title: title, isOn: isOn) }
-        return _TogglePrimitive(title: title, isOn: isOn)
+        let env = node.environment
+        // A columns form puts a checkbox in the control column, its title on the checkbox.
+        if !_inFormRow, env._formContext == .columns || env._formContext == .automatic, env.toggleStyle != .switch, !env._labelsHidden {
+            var inner = self; inner._inFormRow = true
+            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(EmptyView()), content: AnyView(inner)))])
+        }
+        let label = (label as? Text)?._string ?? ""
+        // `labelsHidden()`: the control alone, still named for assistive technology.
+        let title = env._labelsHidden ? "" : label
+        if env.toggleStyle == .switch {
+            let p = _SwitchTogglePrimitive(title: title, isOn: isOn)
+            if title.isEmpty, !label.isEmpty { p.control.toggle.setAccessibilityLabel(label) }
+            return p
+        }
+        let p = _TogglePrimitive(title: title, isOn: isOn)
+        if title.isEmpty, !label.isEmpty { p.control.setAccessibilityLabel(label) }
+        return p
     }
 }
 
@@ -1458,7 +1503,9 @@ public struct Image: View, _PrimitiveView, Equatable, Sendable {
     let name: String
     var resizable = false
     public init(_ name: String, bundle: Bundle? = nil) { self.name = name; image = NSImage(named: name) }
-    public init(systemName: String) { name = systemName; image = nil }
+    /// A symbol from the port's drawn catalogue (`NSImage(systemSymbolName:)`); an unknown
+    /// name shows nothing, as on macOS.
+    public init(systemName: String) { name = systemName; image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil) }
     public init(nsImage: NSImage) { name = ""; image = nsImage }
     public init(decorative name: String, bundle: Bundle? = nil) { self.init(name, bundle: bundle) }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/image/init(_:bundle:label:)
@@ -1495,22 +1542,66 @@ public struct Image: View, _PrimitiveView, Equatable, Sendable {
     public func _makePrimitive(node: _ViewNode) -> _Primitive { _ImagePrimitive(image: self) }
 }
 
+/// An image view that draws a template image (a symbol) in the foreground colour, as SwiftUI
+/// draws a symbol in the current foreground style, and white on an emphasized list selection.
+@MainActor
+final class _SymbolImageView: NSImageView {
+    /// The colour a template image takes; nil draws it as it is.
+    var templateColor: NSColor? {
+        didSet { if templateColor != oldValue { needsDisplay = true } }
+    }
+    /// On a selected row of a key window's list: drawn in the selection's text colour.
+    var isInSelectedRow = false {
+        didSet { if isInSelectedRow != oldValue { needsDisplay = true } }
+    }
+    /// The colour the image is drawn in now (tests).
+    var _drawnTemplateColor: NSColor? {
+        guard image?.isTemplate == true else { return nil }
+        return isInSelectedRow ? NSColor.alternateSelectedControlTextColor : templateColor
+    }
+    /// AppKit tints a template image in a button's cell (`contentTintColor`); an image view
+    /// borrows one to draw its template in a colour.
+    private lazy var tinter: NSButton = {
+        let b = NSButton(frame: .zero)
+        b.isBordered = false
+        return b
+    }()
+    override func draw(_ dirtyRect: NSRect) {
+        guard let image, let color = _drawnTemplateColor, let cell = tinter.cell as? NSButtonCell,
+              image.size.width > 0, image.size.height > 0 else { super.draw(dirtyRect); return }
+        tinter.contentTintColor = color
+        // Scaled proportionally down to fit and centred, as the image view places it.
+        let scale = min(1, bounds.width / image.size.width, bounds.height / image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let rect = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height)
+        cell.drawImage(image, withFrame: rect, in: self)
+    }
+}
+
 @MainActor
 final class _ImagePrimitive: _ControlPrimitive<NSImageView> {
     var image: Image
     init(image: Image) {
         self.image = image
-        let v = NSImageView(frame: .zero)
+        let v = _SymbolImageView(frame: .zero)
         v.image = image.image
         super.init(control: v)
     }
+    override func attach(to node: _ViewNode) { super.attach(to: node); applyForeground() }
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ImagePrimitive else { return }
         image = o.image
         control.image = image.image
+        applyForeground()
+    }
+    /// A symbol takes the foreground colour (the primary label colour by default).
+    private func applyForeground() {
+        guard let node, let v = control as? _SymbolImageView else { return }
+        v.templateColor = node.environment.foregroundColor?.nsColor ?? NSColor.labelColor
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        applyForeground()
         let natural = image.image?.size ?? CGSize(width: 16, height: 16)
         guard image.resizable else { return natural }
         return CGSize(width: proposal.width.map { $0.isFinite ? $0 : natural.width } ?? natural.width, height: proposal.height.map { $0.isFinite ? $0 : natural.height } ?? natural.height)
@@ -1534,9 +1625,21 @@ public struct Label<Title: View, Icon: View>: View {
     let title: Title
     let icon: Icon
     @Environment(\._labelStyle) private var style
+    @Environment(\._inSidebarList) private var inSidebarList
+    @Environment(\.foregroundColor) private var foreground
     public init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) { self.title = title(); self.icon = icon() }
     public var body: some View {
-        AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: AnyView(icon))))
+        guard inSidebarList else {
+            return AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: AnyView(icon))))
+        }
+        // A sidebar row's icon takes the accent colour, unless the label or the icon itself
+        // has a foreground style (a modifier on the icon is nearer, so it wins), and sits in
+        // a fixed slot so the titles of a section line up.
+        let tinted = foreground == nil ? AnyView(icon.foregroundColor(.accentColor)) : AnyView(icon)
+        if style is DefaultLabelStyle {
+            return AnyView(HStack(spacing: 6) { tinted.frame(width: 16); title })
+        }
+        return AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: tinted)))
     }
 }
 
@@ -1623,11 +1726,31 @@ public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRow
     public init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Parent, @ViewBuilder footer: () -> Footer) {
         self.header = header(); self.content = content(); self.footer = footer()
     }
+    @Environment(\._formContext) private var formContext
     public var body: some View {
-        Group {
-            if !(header is EmptyView) { _SectionHeader(content: header) }
-            content
-            if !(footer is EmptyView) { _SectionFooter(content: footer) }
+        if formContext == .grouped {
+            // A grouped form's section is its own card: the header above it, the footer
+            // centred under it in the secondary colour, as macOS's inset-grouped form.
+            VStack(alignment: .leading, spacing: 8) {
+                if !(header is EmptyView) { header.font(.headline).padding(.leading, 4) }
+                VStack(alignment: .leading, spacing: 10) { content }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                if !(footer is EmptyView) {
+                    footer.font(.caption).foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
+                }
+            }
+            .preference(key: _GroupedFormSectionsPreference.self, value: true)
+        } else {
+            Group {
+                if !(header is EmptyView) { _SectionHeader(content: header) }
+                content
+                if !(footer is EmptyView) { _SectionFooter(content: footer) }
+            }
         }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/section/init(header:footer:content:)
@@ -1674,10 +1797,24 @@ extension Section where Parent == EmptyView, Footer == EmptyView {
     public init(@ViewBuilder content: () -> Content) { self.init(content: content, header: { EmptyView() }, footer: { EmptyView() }) }
 }
 
-/// A section's header: headline text, and a row that cannot be selected in a list.
-struct _SectionHeader<Content: View>: View, _ListSupplementaryRow {
+/// Set by a `Section` inside a grouped `Form`, so the form draws no card of its own.
+struct _GroupedFormSectionsPreference: PreferenceKey {
+    static var defaultValue: Bool { false }
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+/// A section's header: headline text, and a row that cannot be selected in a list. In a
+/// sidebar list it is small secondary text, as macOS's sidebar section titles are.
+struct _SectionHeader<Content: View>: View, _ListSectionHeaderRow {
     let content: Content
-    var body: some View { content.font(.headline) }
+    @Environment(\._inSidebarList) private var inSidebarList
+    var body: some View {
+        if inSidebarList {
+            content.font(.subheadline.weight(.medium)).foregroundColor(.secondary)
+        } else {
+            content.font(.headline)
+        }
+    }
 }
 
 /// A section's footer: secondary caption text under the content.
@@ -1691,16 +1828,44 @@ public struct Form<Content: View>: View {
     let content: Content
     public init(@ViewBuilder content: () -> Content) { self.content = content() }
     @Environment(\._formStyle) private var style
+    /// A columns form's label column (the widest label its rows report).
+    @State private var labelWidth: CGFloat? = nil
+    /// A grouped form with `Section`s draws one card per section (the sections report
+    /// themselves); bare rows share one card.
+    @State private var hasSections = false
     public var body: some View {
         switch style {
         case .grouped:
-            // The grouped style boxes the rows on the window's background, as macOS's does.
-            VStack(alignment: .leading, spacing: 12) { content }
-                .padding(14)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                .padding()
+            // The grouped style boxes the rows on the window's background and scrolls, as
+            // macOS's inset-grouped list does: rows keep their ideal heights and a form
+            // taller than its container scrolls rather than squeezing them.
+            ScrollView(.vertical) {
+                if hasSections {
+                    VStack(alignment: .leading, spacing: 18) { content }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) { content }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .padding()
+                }
+            }
+            .environment(\._formContext, .grouped)
+            .onPreferenceChange(_GroupedFormSectionsPreference.self) { sections in
+                if hasSections != sections { hasSections = sections }
+            }
         case .automatic, .columns:
-            VStack(alignment: .leading, spacing: 10) { content }.padding()
+            // Labels in a trailing-aligned column, controls leading the next one.
+            VStack(alignment: .leading, spacing: 10) { content }
+                .environment(\._formLabelWidth, labelWidth)
+                .environment(\._formContext, style)
+                .onPreferenceChange(_FormLabelWidthPreference.self) { width in
+                    let column: CGFloat? = width > 0 ? width : nil
+                    if labelWidth != column { labelWidth = column }
+                }
+                .padding()
         }
     }
 }

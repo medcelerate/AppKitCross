@@ -56,6 +56,17 @@ extension MIDIPlatformBackend {
     func startupLine(destinationCount: Int) -> String? { nil }
 }
 
+/// The Windows start-up line (after "CoreMIDI: "): the backend, a detail in parentheses, then
+/// the Windows MIDI Services attempt log in brackets, so the success line and the WinMM
+/// fallback line both name every activation route tried, e.g. "WinMM backend (Windows MIDI
+/// Services unavailable) [Windows MIDI Services: ...; in-box API not registered (0x80040154);
+/// ...]". Platform-independent so the macOS tests can check it.
+func _MIDIWindowsStartupLine(backend: String, detail: String, routes: String) -> String {
+    let routes = routes.trimmingCharacters(in: .whitespacesAndNewlines)
+    let head = detail.isEmpty ? backend : "\(backend) (\(detail))"
+    return routes.isEmpty ? head : "\(head) [\(routes)]"
+}
+
 /// Picks the backend: `APPKITWIN_MIDI_BACKEND=null`, else on Windows Windows MIDI Services
 /// when the PC has it (`=winmm` and `=midi2` force one) and WinMM otherwise, the ALSA
 /// sequencer on Linux, and the in-memory backend everywhere else (the macOS test build).

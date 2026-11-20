@@ -19,23 +19,33 @@ import CWinMIDI
 import CWinMIDI2
 
 /// Windows MIDI Services when the PC has it (Windows 11 25H2 or later with the
-/// `Windows.Devices.Midi2` API and the service in Full mode), WinMM otherwise.
+/// `Windows.Devices.Midi2` API resolvable and the service in Full mode), WinMM otherwise.
 /// `APPKITWIN_MIDI_BACKEND=winmm` forces WinMM; `=midi2` forces Windows MIDI Services and
 /// reports why it is unavailable (it then has no destinations) instead of falling back.
+/// Either way the start-up line carries the shim's attempt log (`cwinmidi2_routes`), which
+/// names every activation route tried and its HRESULT.
 func _makeWindowsMIDIBackend(choice: String?) -> MIDIPlatformBackend {
     if choice == "winmm" {
         return WinMMMIDIBackend(reason: "APPKITWIN_MIDI_BACKEND=winmm")
     }
-    var error = [CChar](repeating: 0, count: 512)
-    if cwinmidi2_available(&error, error.count) {
-        return WindowsMIDIServicesBackend()
+    let available = cwinmidi2_available(nil, 0)
+    let routes = _MIDIServicesRoutes()
+    if available {
+        return WindowsMIDIServicesBackend(routes: routes)
     }
-    let reason = String(cString: error)
     if choice == "midi2" {
-        _MIDIReportUnavailable("APPKITWIN_MIDI_BACKEND=midi2 but Windows MIDI Services is unavailable: \(reason)")
-        return WindowsMIDIServicesBackend(unavailableReason: reason)
+        _MIDIReportUnavailable("APPKITWIN_MIDI_BACKEND=midi2 but Windows MIDI Services is unavailable: \(routes)")
+        return WindowsMIDIServicesBackend(routes: routes, forcedButUnavailable: true)
     }
-    return WinMMMIDIBackend(reason: reason.isEmpty ? "Windows MIDI Services unavailable" : reason)
+    return WinMMMIDIBackend(reason: "Windows MIDI Services unavailable", routes: routes)
+}
+
+/// The shim's attempt log, "Windows MIDI Services: ..." (empty if the shim gave none).
+private func _MIDIServicesRoutes() -> String {
+    let length = cwinmidi2_routes(nil, 0)
+    var buffer = [CChar](repeating: 0, count: length + 1)
+    _ = cwinmidi2_routes(&buffer, buffer.count)
+    return String(cString: buffer)
 }
 
 /// Coalesces the shim's endpoint-change callbacks (a burst of watcher events at start-up
@@ -68,11 +78,15 @@ private final class _MIDIServicesChangeRelay: @unchecked Sendable {
 /// rescan at once; the 2-second poll still runs.
 final class WindowsMIDIServicesBackend: MIDIPlatformBackend {
     private var connections: [String: OpaquePointer] = [:]
+    /// The shim's attempt log, for the start-up line.
+    private let routes: String
+    /// Set when `APPKITWIN_MIDI_BACKEND=midi2` forced this backend on a PC without it.
     private let unavailableReason: String?
 
-    init(unavailableReason: String? = nil) {
-        self.unavailableReason = unavailableReason
-        if unavailableReason == nil {
+    init(routes: String, forcedButUnavailable: Bool = false) {
+        self.routes = routes
+        self.unavailableReason = forcedButUnavailable ? (routes.isEmpty ? "Windows MIDI Services unavailable" : routes) : nil
+        if !forcedButUnavailable {
             cwinmidi2_set_change_callback({ _ in _MIDIServicesChangeRelay.shared.changed() }, nil)
         }
     }
@@ -80,10 +94,12 @@ final class WindowsMIDIServicesBackend: MIDIPlatformBackend {
     var acceptsUMP: Bool { true }
 
     func startupLine(destinationCount: Int) -> String? {
-        if let unavailableReason {
-            return "Windows MIDI Services backend, forced but unavailable (\(unavailableReason))"
+        if unavailableReason != nil {
+            return _MIDIWindowsStartupLine(backend: "Windows MIDI Services backend",
+                                           detail: "forced by APPKITWIN_MIDI_BACKEND=midi2 but unavailable", routes: routes)
         }
-        return "Windows MIDI Services backend (\(destinationCount) endpoint\(destinationCount == 1 ? "" : "s"))"
+        return _MIDIWindowsStartupLine(backend: "Windows MIDI Services backend",
+                                       detail: "\(destinationCount) endpoint\(destinationCount == 1 ? "" : "s")", routes: routes)
     }
 
     func destinations() -> [MIDIPlatformDestination] {
@@ -147,15 +163,18 @@ final class WindowsMIDIServicesBackend: MIDIPlatformBackend {
 /// come and go; the server closes every open device on a setup change and reopens lazily.
 final class WinMMMIDIBackend: MIDIPlatformBackend {
     private var handles: [String: OpaquePointer] = [:]
-    /// Why Windows MIDI Services is not in use, for the start-up line.
+    /// Why Windows MIDI Services is not in use, and the shim's attempt log (empty when the
+    /// check did not run), for the start-up line.
     private let reason: String
+    private let routes: String
 
-    init(reason: String) {
+    init(reason: String, routes: String = "") {
         self.reason = reason
+        self.routes = routes
     }
 
     func startupLine(destinationCount: Int) -> String? {
-        "WinMM backend (\(reason))"
+        _MIDIWindowsStartupLine(backend: "WinMM backend", detail: reason, routes: routes)
     }
 
     func destinations() -> [MIDIPlatformDestination] {

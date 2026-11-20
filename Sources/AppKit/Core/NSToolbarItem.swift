@@ -39,6 +39,11 @@ import CoreGraphics
     internal var _isShownInToolbar = false
     /// `isHidden` without its availability gate, for the toolbar's own code.
     internal var _hiddenInToolbar: Bool { _isHidden }
+    /// The key equivalent the item's button answers: SwiftUI's `.keyboardShortcut` on a
+    /// toolbar button the toolbar draws itself. Not part of Apple's API (public only for
+    /// the SwiftUI module).
+    public var _keyEquivalent = "" { didSet { if _keyEquivalent != oldValue { _changed(layout: false) } } }
+    public var _keyEquivalentModifierMask: NSEvent.ModifierFlags = .command { didSet { if _keyEquivalentModifierMask != oldValue { _changed(layout: false) } } }
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstoolbaritem/init(itemidentifier:)
     @MainActor public init(itemIdentifier: NSToolbarItem.Identifier) {

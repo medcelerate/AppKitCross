@@ -81,7 +81,9 @@ public struct DisclosureGroup<Label: View, Content: View>: View {
                 label
             }
             if expanded {
-                content.padding(.leading, 18)
+                // The content's views are rows of their own, stacked at their ideal heights
+                // (padding the bare views together measured them as one overlapping layer).
+                VStack(alignment: .leading, spacing: 8) { content }.padding(.leading, 18)
             }
         }
     }

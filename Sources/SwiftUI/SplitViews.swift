@@ -411,7 +411,8 @@ public struct NavigationSplitView<Sidebar: View, Content: View, Detail: View>: V
         var panes: [(key: AnyHashable, role: _SplitPaneRole, box: _AnyViewBox)] = []
         if visibility != .detailOnly {
             if content == nil || visibility != .doubleColumn {
-                panes.append((AnyHashable("sidebar"), .column(defaults: (150, 200, 400)), _ViewBox(sidebar)))
+                // A list in the sidebar column takes the sidebar style.
+                panes.append((AnyHashable("sidebar"), .column(defaults: (150, 200, 400)), _ViewBox(sidebar.environment(\._inSidebarColumn, true))))
             }
             if let content { panes.append((AnyHashable("content"), .column(defaults: (150, 250, 400)), _ViewBox(content))) }
         }

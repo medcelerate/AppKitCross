@@ -171,7 +171,10 @@ public final class _ViewNode {
         needsUpdate = true
         root?.noteTransaction(Transaction._current)
         root?.scheduleUpdate()
+        if root == nil { onNeedsUpdate?() }
     }
+    /// A node outside any hosting tree (the App's own node, App.swift) is told this way.
+    var onNeedsUpdate: (() -> Void)?
 
     /// The animation in effect for changes found in this pass: the transaction's, else the
     /// nearest enclosing `.animation(_:value:)` scope whose value changed.
