@@ -1092,6 +1092,12 @@ import CoreText
             if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
                 buttons._displayHierarchy(in: context, dirtyRect: rect)
             }
+            if _dimsForSheet {
+                // macOS dims the window behind a sheet; a dark window a little more.
+                let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                context.setFillColor(CGColor(gray: 0, alpha: dark ? 0.3 : 0.15))
+                context.fill(rect)
+            }
             context.restoreGState()
         }
         if NSView._traceFrames {
@@ -1264,6 +1270,13 @@ import CoreText
     /// the framework makes and nobody keeps (alert panels, SwiftUI sheets), so they do not
     /// linger hidden in the application's window list. Not part of Apple's API.
     public var _closesAfterSheetEnds = false
+    /// The sheet sits centred on its parent (clamped under the title band and toolbar)
+    /// rather than hanging from the top of the content: alert sheets, as on macOS 26. Not
+    /// part of Apple's API: NSAlert sets it on its panel.
+    public var _sheetCentresInParent = false
+    /// While a sheet is up the parent's content is drawn dimmed, as macOS dims a window
+    /// behind its sheet.
+    internal var _dimsForSheet: Bool { attachedSheet != nil }
 
     /// A window with an attached sheet does not take input; the sheet does.
     private var _isBlockedBySheet: Bool { attachedSheet != nil }
@@ -1293,6 +1306,7 @@ import CoreText
     private func _presentSheet(_ sheet: NSWindow) {
         post(NSWindow.willBeginSheetNotification)
         sheet._sheetIsPresented = true
+        _setNeedsDisplayWhole()                 // the content dims behind the sheet
         sheet._sheetSlide?.finish()
         sheet._reopenIfNeeded()
         sheet._attachAsSheet(to: self)
@@ -1336,7 +1350,12 @@ import CoreText
         // reported a frame, until nothing but the toolbar was left).
         let size = sheet._sheetIsPresented ? sheet.frame.size : sheet.frameRect(forContentRect: sheet.contentRect(forFrameRect: sheet.frame)).size
         let layout = contentLayoutRect
-        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: layout.maxY, width: size.width, height: 0)
+        var top = layout.maxY
+        if sheet._sheetCentresInParent {
+            // Centred on the whole window, never over the title band or the toolbar.
+            top = min(layout.maxY, max(size.height, ((frame.height + size.height) / 2).rounded()))
+        }
+        var rect = NSRect(x: ((layout.width - size.width) / 2).rounded(), y: top, width: size.width, height: 0)
         if let d = delegate { rect = d.window(self, willPositionSheet: sheet, using: rect) }
         let origin = convertPoint(toScreen: rect.origin)
         let width = rect.width > 0 ? rect.width : size.width
@@ -1913,6 +1932,7 @@ import CoreText
         } else if sheetWindow._closesAfterSheetEnds {
             sheetWindow.close()                         // ended while still queued
         }
+        _setNeedsDisplayWhole()                 // the content is no longer dimmed
         completion?(returnCode)
         post(NSWindow.didEndSheetNotification)
         // The next queued sheet comes up; otherwise the parent takes the keyboard back.

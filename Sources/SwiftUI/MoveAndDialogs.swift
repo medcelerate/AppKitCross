@@ -46,19 +46,19 @@ final class _RowMovePrimitive: _Primitive {
 extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:presenting:actions:)-9ibgk
     ///
-    /// Shown, like the port's other confirmation dialogs, as an alert sheet; the actions are
-    /// built from `data` while it is non-nil.
+    /// Shown, as on macOS, as an alert sheet centred on the window (stacked buttons when an
+    /// action is destructive); the actions are built from `data` while it is non-nil.
     public func confirmationDialog<A: View, T>(_ titleKey: LocalizedStringKey, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, presenting data: T?, @ViewBuilder actions: (T) -> A) -> some View {
-        _presentingAlert(Text(titleKey)._string, isPresented: isPresented, actions: data.map(actions))
+        _presentingDialog(Text(titleKey)._string, isPresented: isPresented, actions: data.map(actions))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:presenting:actions:)-4l3pu
     @_disfavoredOverload
     public func confirmationDialog<S: StringProtocol, A: View, T>(_ title: S, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, presenting data: T?, @ViewBuilder actions: (T) -> A) -> some View {
-        _presentingAlert(String(title), isPresented: isPresented, actions: data.map(actions))
+        _presentingDialog(String(title), isPresented: isPresented, actions: data.map(actions))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:presenting:actions:)-2s7pa
     public func confirmationDialog<A: View, T>(_ title: Text, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, presenting data: T?, @ViewBuilder actions: (T) -> A) -> some View {
-        _presentingAlert(title._string, isPresented: isPresented, actions: data.map(actions))
+        _presentingDialog(title._string, isPresented: isPresented, actions: data.map(actions))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/alert(_:ispresented:presenting:actions:)-42vot
     public func alert<A: View, T>(_ titleKey: LocalizedStringKey, isPresented: Binding<Bool>, presenting data: T?, @ViewBuilder actions: (T) -> A) -> some View {
@@ -72,12 +72,12 @@ extension View {
 
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:presenting:actions:message:)-1jcl6
     public func confirmationDialog<A: View, M: View, T>(_ titleKey: LocalizedStringKey, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, presenting data: T?, @ViewBuilder actions: (T) -> A, @ViewBuilder message: (T) -> M) -> some View {
-        _presentingAlert(Text(titleKey)._string, isPresented: isPresented, actions: data.map(actions), message: data.map(message))
+        _presentingDialog(Text(titleKey)._string, isPresented: isPresented, actions: data.map(actions), message: data.map(message))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:presenting:actions:message:)-8y541
     @_disfavoredOverload
     public func confirmationDialog<S: StringProtocol, A: View, M: View, T>(_ title: S, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, presenting data: T?, @ViewBuilder actions: (T) -> A, @ViewBuilder message: (T) -> M) -> some View {
-        _presentingAlert(String(title), isPresented: isPresented, actions: data.map(actions), message: data.map(message))
+        _presentingDialog(String(title), isPresented: isPresented, actions: data.map(actions), message: data.map(message))
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/alert(_:ispresented:presenting:actions:message:)-8fpb1
     public func alert<A: View, M: View, T>(_ titleKey: LocalizedStringKey, isPresented: Binding<Bool>, presenting data: T?, @ViewBuilder actions: (T) -> A, @ViewBuilder message: (T) -> M) -> some View {
@@ -94,6 +94,18 @@ extension View {
         _AlertModified(content: self, isPresented: isPresented) {
             Alert._fromViews(title: Text(title), actions: AnyView(Group { if let actions { actions } }), message: message as? Text)
         }
+    }
+
+    /// A confirmation dialog: the alert sheet, with the Cancel button SwiftUI adds when no
+    /// action has the cancel role.
+    private func _presentingDialog<A: View, M: View>(_ title: String, isPresented: Binding<Bool>, actions: A?, message: M?) -> some View {
+        _AlertModified(content: self, isPresented: isPresented) {
+            Alert._fromViews(title: Text(title), actions: AnyView(Group { if let actions { actions } }), message: message as? Text)._confirmationDialog
+        }
+    }
+
+    private func _presentingDialog<A: View>(_ title: String, isPresented: Binding<Bool>, actions: A?) -> some View {
+        _presentingDialog(title, isPresented: isPresented, actions: actions, message: Optional<EmptyView>.none)
     }
 
     private func _presentingAlert<A: View>(_ title: String, isPresented: Binding<Bool>, actions: A?) -> some View {

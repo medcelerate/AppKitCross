@@ -205,10 +205,51 @@ final class _ToolbarPrimitive: _Primitive {
             w.toolbar = tb
         }
         if let id = identifier { tb.allowsUserCustomization = true; tb.autosavesConfiguration = true }
+        if let split = _sidebarSplit() { tb.sidebarSplit = split }
         tb.set(entries: entries, source: self)
         if let v = visibility { tb.isVisible = v != .hidden }
         installed = true
     }
+}
+
+extension _ToolbarPrimitive {
+    /// The navigation split view (one with a sidebar column) this toolbar's content sits in
+    /// or wraps: the toolbar gives it a sidebar toggle and starts the title after its sidebar.
+    func _sidebarSplit() -> _SplitPrimitive? {
+        func isSidebarSplit(_ n: _ViewNode) -> _SplitPrimitive? {
+            guard let p = n.primitive as? _SplitPrimitive, p.sideBySide, p.roles[AnyHashable("sidebar")] != nil else { return nil }
+            return p
+        }
+        var up = node?.parent
+        while let n = up {
+            if let p = isSidebarSplit(n) { return p }
+            up = n.parent
+        }
+        func down(_ n: _ViewNode, depth: Int) -> _SplitPrimitive? {
+            if let p = isSidebarSplit(n) { return p }
+            guard depth < 64 else { return nil }
+            for c in n.children { if let p = down(c, depth: depth + 1) { return p } }
+            return nil
+        }
+        return node.flatMap { down($0, depth: 0) }
+    }
+}
+
+/// A split container that can show and hide its sidebar column itself (the toolbar's
+/// sidebar toggle asks it when the navigation split view has no `columnVisibility`
+/// binding to write).
+@MainActor
+protocol _SidebarColumnToggling: AnyObject {
+    func _toggleSidebarColumn()
+}
+
+/// A navigation split view's `columnVisibility` binding, when the app passed one.
+@MainActor
+protocol _ColumnVisibilityProviding {
+    var _columnVisibilityBinding: Binding<NavigationSplitViewVisibility>? { get }
+}
+extension NavigationSplitView: _ColumnVisibilityProviding {
+    var _columnVisibilityBinding: Binding<NavigationSplitViewVisibility>? { columnVisibility }
 }
 
 /// The window's toolbar for SwiftUI content. An entry that is a button labelled with a
@@ -234,6 +275,51 @@ final class _SwiftUIToolbar: NSToolbar, NSToolbarDelegate {
     }
     private var slots: [String: Slot] = [:]
     private var entries: [String: _ToolbarEntry] = [:]
+
+    /// The navigation split view whose sidebar the band starts after; set by the toolbar
+    /// modifiers inside (or around) it. macOS adds the sidebar toggle and a separator
+    /// tracking the sidebar's divider for such a window.
+    weak var sidebarSplitPrimitive: _SplitPrimitive?
+    var sidebarSplit: _SplitPrimitive? {
+        get { sidebarSplitPrimitive }
+        set {
+            guard newValue !== sidebarSplitPrimitive else { return }
+            sidebarSplitPrimitive = newValue
+            sidebarSeparator = nil
+        }
+    }
+    private var sidebarSeparator: NSTrackingSeparatorToolbarItem?
+    private var sidebarResizeObserver: NSObjectProtocol?
+    private lazy var sidebarToggle: NSToolbarItem = {
+        let item = NSToolbarItem(itemIdentifier: _SwiftUIToolbar.toggleSidebarID)
+        item.image = NSImage(systemSymbolName: "sidebar.leading", accessibilityDescription: "Sidebar")
+        item.label = "Sidebar"
+        item.paletteLabel = "Sidebar"
+        item.toolTip = "Hide or show the sidebar"
+        item.isNavigational = true
+        item.autovalidates = false
+        item.target = sidebarToggleTarget
+        item.action = _SwiftUIToolbarActionTarget.selector
+        sidebarToggleTarget.action = { [weak self] in self?.toggleSidebar() }
+        return item
+    }()
+    private let sidebarToggleTarget = _SwiftUIToolbarActionTarget()
+    static let toggleSidebarID = NSToolbarItem.Identifier("com.apple.SwiftUI.navigationSplitView.toggleSidebar")
+    static let sidebarSeparatorID = NSToolbarItem.Identifier("com.apple.SwiftUI.navigationSplitView.sidebarTrackingSeparator")
+
+    /// The sidebar toggle: writes the split view's `columnVisibility` binding when the app
+    /// gave one (all columns ↔ detail only), else asks the split view to collapse or show
+    /// its sidebar column itself.
+    func toggleSidebar() {
+        guard let split = sidebarSplitPrimitive else { return }
+        if let binding = (split.node?.box.value as? _ColumnVisibilityProviding)?._columnVisibilityBinding {
+            binding.wrappedValue = binding.wrappedValue == .detailOnly ? .all : .detailOnly
+        } else if let toggling = split as? _SidebarColumnToggling {
+            toggling._toggleSidebarColumn()
+        }
+        // Once the columns have changed, the title moves with the sidebar's edge.
+        Platform.backend.post { [weak self] in self?.sidebarSeparator?.dividerIndex = 0 }
+    }
 
     override init(identifier: NSToolbar.Identifier) {
         super.init(identifier: identifier)
@@ -296,6 +382,7 @@ final class _SwiftUIToolbar: NSToolbar, NSToolbarDelegate {
         let trailing = items.filter { $0.entry.placement != .navigation && $0.entry.placement != .principal && $0.entry.showsByDefault }.map { NSToolbarItem.Identifier($0.id) }
         var defaults = leading + centered
         if !trailing.isEmpty { defaults.append(.flexibleSpace); defaults += trailing }
+        if sidebarSplitPrimitive != nil { defaults = [_SwiftUIToolbar.toggleSidebarID, _SwiftUIToolbar.sidebarSeparatorID] + defaults }
         return (defaults, centered)
     }
 
@@ -372,9 +459,24 @@ final class _SwiftUIToolbar: NSToolbar, NSToolbarDelegate {
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { layout.defaults }
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        all.map { NSToolbarItem.Identifier($0.id) } + [.flexibleSpace, .space]
+        (sidebarSplitPrimitive != nil ? [_SwiftUIToolbar.toggleSidebarID, _SwiftUIToolbar.sidebarSeparatorID] : [])
+            + all.map { NSToolbarItem.Identifier($0.id) } + [.flexibleSpace, .space]
     }
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        if itemIdentifier == _SwiftUIToolbar.toggleSidebarID { return sidebarSplitPrimitive != nil ? sidebarToggle : nil }
+        if itemIdentifier == _SwiftUIToolbar.sidebarSeparatorID {
+            guard let split = sidebarSplitPrimitive else { return nil }
+            if let existing = sidebarSeparator, existing.splitView === split.split { return existing }
+            let item = NSTrackingSeparatorToolbarItem(identifier: itemIdentifier, splitView: split.split, dividerIndex: 0)
+            sidebarSeparator = item
+            // The band lays out again when the sidebar's width changes (a divider drag, the
+            // sidebar shown or hidden), so the title keeps following it.
+            if let o = sidebarResizeObserver { NotificationCenter.default.removeObserver(o) }
+            sidebarResizeObserver = NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification, object: split.split, queue: nil) { [weak item] _ in
+                MainActor.assumeIsolated { item?.dividerIndex = 0 }
+            }
+            return item
+        }
         guard let e = entries[itemIdentifier.rawValue] else { return nil }
         if let existing = slots[itemIdentifier.rawValue] { return existing.item }
         let slot = Slot(item: NSToolbarItem(itemIdentifier: itemIdentifier))

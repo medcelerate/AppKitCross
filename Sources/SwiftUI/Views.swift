@@ -980,8 +980,12 @@ extension Button where Label == Text {
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/buttonrole
 public struct ButtonRole: Equatable, Sendable {
-    public static let destructive = ButtonRole()
-    public static let cancel = ButtonRole()
+    // Each role is its own value: with no stored identity every role compared equal, so
+    // an alert took a destructive button for the cancel one (Escape) and kept it default.
+    private let _kind: Int
+    private init(_kind: Int) { self._kind = _kind }
+    public static let destructive = ButtonRole(_kind: 1)
+    public static let cancel = ButtonRole(_kind: 2)
 }
 
 @MainActor
@@ -1102,14 +1106,19 @@ public struct TextField<Label: View>: View, _PrimitiveView {
         let label = label()
         title = (label as? Text)?._string ?? ""; self.prompt = prompt?._string; self.label = label; self.text = text; onCommit = {}
     }
+    /// The field is in a grouped form (its own row or a row of its own making).
+    var _inGroupedForm = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         // In a form the title is a label leading the field's row (unless labels are hidden).
         if !_inFormRow, node.environment._formContext != nil, !node.environment._labelsHidden, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true
+            var inner = self; inner._inFormRow = true; inner._inGroupedForm = node.environment._formContext == .grouped
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner)))])
         }
-        if let f = _formatting { return _FormattedTextFieldPrimitive(placeholder: placeholder, formatting: f, axis: axis) }
-        return _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis)
+        let p: _TextFieldPrimitive
+        if let f = _formatting { p = _FormattedTextFieldPrimitive(placeholder: placeholder, formatting: f, axis: axis) }
+        else { p = _TextFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit, axis: axis) }
+        p.inGroupedForm = _inGroupedForm || node.environment._formContext == .grouped
+        return p
     }
 }
 
@@ -1162,12 +1171,16 @@ public struct SecureField<Label: View>: View, _PrimitiveView {
     public init<S: StringProtocol>(_ title: S, text: Binding<String>, onCommit: @escaping () -> Void) where Label == Text {
         self.title = String(title); prompt = nil; label = Text(title); self.text = text; self.onCommit = onCommit
     }
+    /// The field is in a grouped form: plain and trailing, as a `TextField` there.
+    var _inGroupedForm = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         if !_inFormRow, node.environment._formContext != nil, !node.environment._labelsHidden, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true
+            var inner = self; inner._inFormRow = true; inner._inGroupedForm = node.environment._formContext == .grouped
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner)))])
         }
-        return _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
+        let p = _SecureFieldPrimitive(placeholder: placeholder, text: text, onCommit: onCommit)
+        p.inGroupedForm = _inGroupedForm || node.environment._formContext == .grouped
+        return p
     }
 }
 
@@ -1186,6 +1199,9 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     var onCommit: () -> Void
     var placeholder: String
     var axis: Axis
+    /// In a grouped form the automatic style is macOS's: no bezel or background, the text
+    /// trailing-aligned against the row's edge.
+    var inGroupedForm = false
     init(placeholder: String, text: Binding<String>, onCommit: @escaping () -> Void, axis: Axis = .horizontal,
          field: NSTextField? = nil) {
         self.text = text; self.onCommit = onCommit; self.placeholder = placeholder; self.axis = axis
@@ -1212,7 +1228,7 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _TextFieldPrimitive else { return }
-        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis
+        text = o.text; onCommit = o.onCommit; placeholder = o.placeholder; axis = o.axis; inGroupedForm = o.inGroupedForm
         apply()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); apply() }
@@ -1233,10 +1249,13 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         }
         control.isEnabled = node.environment.isEnabled
         if let f = node.environment.font { control.font = f.nsFont }
-        switch node.environment.textFieldStyle {
+        let style = node.environment.textFieldStyle
+        switch style {
         case .plain: control.isBezeled = false; control.drawsBackground = false
+        case .automatic where inGroupedForm: control.isBezeled = false; control.drawsBackground = false
         default: control.isBezeled = true; control.drawsBackground = true
         }
+        if style == .automatic, inGroupedForm, control.alignment != .right { control.alignment = .right }
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let w = proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160
@@ -1290,7 +1309,10 @@ public struct Toggle<Label: View>: View, _PrimitiveView {
         let label = (label as? Text)?._string ?? ""
         // `labelsHidden()`: the control alone, still named for assistive technology.
         let title = env._labelsHidden ? "" : label
-        if env.toggleStyle == .switch {
+        // macOS 13 and later: a grouped form's automatic toggle is a switch (a columns form's
+        // is a checkbox).
+        let style: _ToggleStyleKind = env.toggleStyle == .automatic && env._formContext == .grouped ? .switch : env.toggleStyle
+        if style == .switch {
             let p = _SwitchTogglePrimitive(title: title, isOn: isOn)
             if title.isEmpty, !label.isEmpty { p.control.toggle.setAccessibilityLabel(label) }
             return p
@@ -1348,6 +1370,7 @@ final class _SwiftUISwitchRow: NSView {
     let toggle = NSSwitch(frame: .zero)
     override init(frame: NSRect) {
         super.init(frame: frame)
+        label.lineBreakMode = .byTruncatingTail
         addSubview(label)
         addSubview(toggle)
     }
@@ -1409,7 +1432,9 @@ final class _SwitchTogglePrimitive: _ControlPrimitive<_SwiftUISwitchRow> {
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         let s = intrinsicSize
         guard !control.label.stringValue.isEmpty, let w = proposal.width, w.isFinite else { return s }
-        return CGSize(width: max(s.width, w), height: s.height)
+        // Narrower than the label: the label truncates, the switch keeps its size (a form
+        // row in a narrow inspector stays inside its column).
+        return CGSize(width: max(control.toggle.intrinsicContentSize.width, w), height: s.height)
     }
 }
 
@@ -1437,7 +1462,36 @@ public struct Slider<Label: View, ValueLabel: View>: View, _PrimitiveView {
         self.onEditingChanged = onEditingChanged
         self.label = (label() as? Text)?._string
     }
-    public func _makePrimitive(node: _ViewNode) -> _Primitive { _SliderPrimitive(value: value, range: range, step: step, label: label) }
+    /// The views at the slider's ends (`minimumValueLabel` and `maximumValueLabel`), drawn
+    /// beside it as given.
+    var valueLabels: (min: AnyView, max: AnyView)? = nil
+    /// The slider inside the row that draws its value labels.
+    var _inValueLabelRow = false
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider/init(value:in:step:label:minimumvaluelabel:maximumvaluelabel:oneditingchanged:)
+    public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V>, step: V.Stride = 1, @ViewBuilder label: () -> Label, @ViewBuilder minimumValueLabel: () -> ValueLabel, @ViewBuilder maximumValueLabel: () -> ValueLabel, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V.Stride: BinaryFloatingPoint {
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound)
+        self.step = Double(step)
+        self.onEditingChanged = onEditingChanged
+        self.label = (label() as? Text)?._string
+        valueLabels = (AnyView(minimumValueLabel()), AnyView(maximumValueLabel()))
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/swiftui/slider/init(value:in:label:minimumvaluelabel:maximumvaluelabel:oneditingchanged:)
+    public init<V: BinaryFloatingPoint>(value: Binding<V>, in bounds: ClosedRange<V> = 0...1, @ViewBuilder label: () -> Label, @ViewBuilder minimumValueLabel: () -> ValueLabel, @ViewBuilder maximumValueLabel: () -> ValueLabel, onEditingChanged: @escaping (Bool) -> Void = { _ in }) where V.Stride: BinaryFloatingPoint {
+        self.value = Binding(get: { Double(value.wrappedValue) }, set: { value.wrappedValue = V($0) })
+        range = Double(bounds.lowerBound)...Double(bounds.upperBound)
+        step = nil
+        self.onEditingChanged = onEditingChanged
+        self.label = (label() as? Text)?._string
+        valueLabels = (AnyView(minimumValueLabel()), AnyView(maximumValueLabel()))
+    }
+    public func _makePrimitive(node: _ViewNode) -> _Primitive {
+        if !_inValueLabelRow, let labels = valueLabels {
+            var inner = self; inner._inValueLabelRow = true
+            return _GroupPrimitive(children: [_ViewBox(HStack(spacing: 6) { labels.min; inner; labels.max })])
+        }
+        return _SliderPrimitive(value: value, range: range, step: step, label: label)
+    }
 }
 
 @MainActor
@@ -1455,6 +1509,7 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         s.doubleValue = value.wrappedValue
         // The step is what an increment from assistive technology (and the arrow keys) moves.
         if let step, step > 0 { s.altIncrementValue = step }
+        _SliderPrimitive.applyTicks(to: s, range: range, step: step)
         if let label, !label.isEmpty { s.setAccessibilityLabel(label) }
         super.init(control: s)
         s.target = s
@@ -1477,6 +1532,8 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
         value = o.value
         control.minValue = o.control.minValue; control.maxValue = o.control.maxValue
         if o.step != step { step = o.step; control.altIncrementValue = (step ?? 0) > 0 ? step! : -1 }
+        if control.numberOfTickMarks != o.control.numberOfTickMarks { control.numberOfTickMarks = o.control.numberOfTickMarks }
+        if control.allowsTickMarkValuesOnly != o.control.allowsTickMarkValuesOnly { control.allowsTickMarkValuesOnly = o.control.allowsTickMarkValuesOnly }
         if o.label != label {
             // Only the label this primitive set is replaced; an `.accessibilityLabel` modifier
             // above re-applies its own after the update.
@@ -1492,6 +1549,18 @@ final class _SliderPrimitive: _ControlPrimitive<NSSlider> {
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         CGSize(width: max(20, proposal.width.map { $0.isFinite ? $0 : 160 } ?? 160), height: 20)
+    }
+    /// macOS's stepped slider: a tick mark per step (the range's steps plus one) and values
+    /// only on the ticks. A step that does not divide the range draws no ticks (the action
+    /// still snaps to the steps).
+    static func applyTicks(to slider: NSSlider, range: ClosedRange<Double>, step: Double?) {
+        var ticks = 0
+        if let step, step > 0 {
+            let steps = (range.upperBound - range.lowerBound) / step
+            if steps.isFinite, steps >= 1, steps <= 1000, abs(steps - steps.rounded()) < 1e-6 { ticks = Int(steps.rounded()) + 1 }
+        }
+        slider.numberOfTickMarks = ticks
+        slider.allowsTickMarkValuesOnly = ticks > 1
     }
 }
 
@@ -1554,6 +1623,8 @@ final class _SymbolImageView: NSImageView {
     var isInSelectedRow = false {
         didSet { if isInSelectedRow != oldValue { needsDisplay = true } }
     }
+    /// A symbol sized by its font draws at the size it was laid out at, larger than its artwork.
+    var scalesUp = false
     /// The colour the image is drawn in now (tests).
     var _drawnTemplateColor: NSColor? {
         guard image?.isTemplate == true else { return nil }
@@ -1570,8 +1641,10 @@ final class _SymbolImageView: NSImageView {
         guard let image, let color = _drawnTemplateColor, let cell = tinter.cell as? NSButtonCell,
               image.size.width > 0, image.size.height > 0 else { super.draw(dirtyRect); return }
         tinter.contentTintColor = color
-        // Scaled proportionally down to fit and centred, as the image view places it.
-        let scale = min(1, bounds.width / image.size.width, bounds.height / image.size.height)
+        // Scaled proportionally to fit and centred, as the image view places it; a symbol
+        // grows with its font (a 44 pt empty-state glyph), other images only shrink.
+        var scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+        if !image.isTemplate || !scalesUp { scale = min(1, scale) }
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         let rect = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2, width: size.width, height: size.height)
         cell.drawImage(image, withFrame: rect, in: self)
@@ -1600,9 +1673,28 @@ final class _ImagePrimitive: _ControlPrimitive<NSImageView> {
         guard let node, let v = control as? _SymbolImageView else { return }
         v.templateColor = node.environment.foregroundColor?.nsColor ?? NSColor.labelColor
     }
+    /// A symbol follows the environment's font and `imageScale`, as SF Symbols do: the
+    /// artwork is drawn for the 13 pt body text, so `.font(.system(size: 44))` makes it
+    /// 44/13 as large (a ContentUnavailableView's glyph), `.imageScale(.large)` about 1.27.
+    private func symbolScale(_ node: _ViewNode) -> CGFloat {
+        guard image.image?.isTemplate == true, !image.resizable else { return 1 }
+        let pointSize = node.environment.font?.nsFont.pointSize ?? 13
+        let scale: CGFloat
+        switch node.environment.imageScale {
+        case .small: scale = 0.78
+        case .large: scale = 1.27
+        default: scale = 1
+        }
+        return max(0.25, pointSize / 13 * scale)
+    }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         applyForeground()
-        let natural = image.image?.size ?? CGSize(width: 16, height: 16)
+        var natural = image.image?.size ?? CGSize(width: 16, height: 16)
+        let factor = symbolScale(node)
+        if factor != 1 {
+            natural = CGSize(width: (natural.width * factor).rounded(), height: (natural.height * factor).rounded())
+            (control as? _SymbolImageView)?.scalesUp = factor > 1
+        }
         guard image.resizable else { return natural }
         return CGSize(width: proposal.width.map { $0.isFinite ? $0 : natural.width } ?? natural.width, height: proposal.height.map { $0.isFinite ? $0 : natural.height } ?? natural.height)
     }
@@ -1646,6 +1738,10 @@ public struct Label<Title: View, Icon: View>: View {
         }
         return AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: tinted)))
     }
+}
+
+extension Label: _LabelParts {
+    var _labelParts: [_AnyViewBox] { [_ViewBox(title), _ViewBox(icon)] }
 }
 
 extension Label where Title == Text, Icon == Image {
@@ -1829,10 +1925,12 @@ struct _GroupedFormCard: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(rows.indices, id: \.self) { i in
                 if i > 0 { Divider().padding(.leading, 12) }
+                // macOS 15's rows are 36 points tall at least (a line of text, a pop-up or
+                // a switch alike), 37 apart with the separator.
                 _Page(box: rows[i])
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 8)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1883,6 +1981,8 @@ public struct Form<Content: View>: View {
     /// A grouped form with `Section`s draws one card per section (the sections report
     /// themselves); bare rows share one card.
     @State private var hasSections = false
+    /// The widest a grouped form's cards get (606 pt, as macOS's inset-grouped form).
+    static var _groupedContentMaxWidth: CGFloat { 606 }
     public var body: some View {
         switch style {
         case .grouped:
@@ -1890,17 +1990,23 @@ public struct Form<Content: View>: View {
             // macOS's inset-grouped list does: rows keep their ideal heights and a form
             // taller than its container scrolls rather than squeezing them.
             let rows = _formSectionRows(_ViewBox(content))
+            // macOS caps a grouped form's content at about 606 pt and centres it (measured
+            // on macOS 15: spans 147–753 in a 900 pt window, 297–903 in 1200): a Settings
+            // pane in a wide window keeps a readable column instead of spanning the width.
             ScrollView(.vertical) {
-                if hasSections || rows.contains(where: { $0.value is any _FormSectionMarker }) {
-                    VStack(alignment: .leading, spacing: 18) { content }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                } else {
-                    // Bare rows share one card, split and separated as a section's are (the
-                    // Destinations editor: Name, Host, Port, Transport, Enabled).
-                    _GroupedFormCard(rows: rows)
-                        .padding(16)
+                Group {
+                    if hasSections || rows.contains(where: { $0.value is any _FormSectionMarker }) {
+                        VStack(alignment: .leading, spacing: 18) { content }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        // Bare rows share one card, split and separated as a section's are (the
+                        // Destinations editor: Name, Host, Port, Transport, Enabled).
+                        _GroupedFormCard(rows: rows)
+                    }
                 }
+                .frame(maxWidth: Form._groupedContentMaxWidth)
+                .padding(16)
+                .frame(maxWidth: .infinity)
             }
             // The page behind the cards is the window background (light grey), painted
             // here because a Windows window's own backing is white, which hid the cards.

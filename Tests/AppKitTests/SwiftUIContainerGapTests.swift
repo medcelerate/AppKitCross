@@ -186,8 +186,9 @@ final class SwiftUIContainerGapTests: XCTestCase, @unchecked Sendable {
             h.layoutSubtreeIfNeeded()
             XCTAssertEqual(split.arrangedSubviews.count, 2, "shown: a trailing column")
             XCTAssertTrue(split.arrangedSubviews[0] === contentPane, "the content keeps its pane")
-            XCTAssertEqual(split.arrangedSubviews[1].frame.width, 330, "at the inspector's ideal width")
-            XCTAssertEqual(contentPane.frame.width, 800 - 330 - split.dividerThickness)
+            // macOS 15 opens it at the modifier's minimum (589 + 1 + 210 in an 800-point window).
+            XCTAssertEqual(split.arrangedSubviews[1].frame.width, 210, "at the inspector's minimum width")
+            XCTAssertEqual(contentPane.frame.width, 800 - 210 - split.dividerThickness)
             XCTAssertEqual(texts(split.arrangedSubviews[1]), ["Inspector"])
 
             model.shown = false

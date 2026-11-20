@@ -202,7 +202,15 @@ import CoreText
             item?.state = .on
         }
         _selectedItem = item
-        synchronizeTitleAndSelectedItem()
+        // An explicit nil (`selectItem(at: -1)`) stays nil with an empty title, as AppKit
+        // leaves it; only `synchronizeTitleAndSelectedItem` itself falls back to the first
+        // item (a SwiftUI Picker with a nil selection shows a blank pop-up).
+        _updateTitle()
+    }
+    private func _updateTitle() {
+        super.stringValue = _displayTitle
+        (_controlView as? NSControl)?.invalidateIntrinsicContentSize()
+        _changed()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/selectitem(at:)
     @MainActor open func selectItem(at index: Int) { select(index >= 0 ? item(at: index) : nil) }
@@ -237,9 +245,7 @@ import CoreText
             _selectedItem = first
             if _altersStateOfSelectedItem { first.state = .on }
         }
-        super.stringValue = _displayTitle
-        (_controlView as? NSControl)?.invalidateIntrinsicContentSize()
-        _changed()
+        _updateTitle()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nspopupbuttoncell/titleofselecteditem
     @MainActor open var titleOfSelectedItem: String? { _selectedItem?.title }
