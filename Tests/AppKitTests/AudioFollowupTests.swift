@@ -646,7 +646,10 @@ final class AudioFollowupTests: XCTestCase, @unchecked Sendable {
         let url = temporaryURL("rate.wav")
         do {
             let writer = try AVAudioFile(forWriting: url, settings: [AVFormatIDKey: Int(kAudioFormatLinearPCM), AVSampleRateKey: 48000.0, AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false])
-            try writer.write(from: sine(frequency: 440, amplitude: 0.5, rate: 48000, channels: 1, frames: 19200))   // 0.4 s
+            // 4 s of audio: long enough that currentTime is observed past 0.1 s before the
+            // file ends even on a loaded CI runner (a 0.4 s file at rate 2 could finish inside
+            // one poll interval, leaving currentTime below the threshold: main 59686aa twice).
+            try writer.write(from: sine(frequency: 440, amplitude: 0.5, rate: 48000, channels: 1, frames: 192000))
         }
         try withNullBackend { _ in
             let player = try AVAudioPlayer(contentsOf: url)
@@ -665,7 +668,7 @@ final class AudioFollowupTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(player.currentTime, 0.1)
             wait(for: [delegate.finished], timeout: 5)
             let elapsed = Date().timeIntervalSince(started)
-            print("0.4 s at rate 2 finished after \(elapsed) s")
+            print("4 s at rate 2 finished after \(elapsed) s")
             XCTAssertFalse(player.isPlaying)
             XCTAssertEqual(player.currentDevice, "null", "the player reports the device it plays on")
         }
