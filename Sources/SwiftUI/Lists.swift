@@ -351,7 +351,22 @@ final class _ListRowsPrimitive: _Primitive {
         row.box.value is any _ListSupplementaryRow
     }
     private func value(of row: _ViewNode, index: Int) -> AnyHashable {
-        _metadata(of: row.box).meta.tag ?? row.box.id ?? AnyHashable(index)
+        Self.tag(of: row) ?? row.box.id ?? AnyHashable(index)
+    }
+    /// A row's tag: on the row itself, or below it through single-child wrappers (a
+    /// context menu, padding, a custom view's body), as SwiftUI's tag trait reaches the list
+    /// through the modifiers applied after it. Sibyl's channel rows are
+    /// `ChannelRow(...).tag(...).contextMenu { ... }`: the tag sits under the context menu,
+    /// and without this the row's value was its `ForEach` id, which no selection holds.
+    /// A ForEach or a scroll view below is content of its own, not the row's wrapper.
+    static func tag(of row: _ViewNode) -> AnyHashable? {
+        var current: _ViewNode? = row
+        while let n = current {
+            if let tag = _metadata(of: n.box).meta.tag { return tag }
+            if n.primitive is _ForEachPrimitive || n.primitive is _ScrollPrimitive || n.primitive is _ListRowsPrimitive { return nil }
+            current = n.children.count == 1 ? n.children[0] : nil
+        }
+        return nil
     }
 
     /// How a row sits in the list: its content's leading and trailing insets, the padding

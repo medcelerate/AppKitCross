@@ -28,12 +28,16 @@ internal enum _NSSystemImages {
             NSColor.black.setFill(); NSBezierPath(ovalIn: NSRect(x: 5, y: 5, width: 6, height: 6)).fill()
         })
         d["headphones"] = (true, stroke {
-            $0.appendArc(withCenter: NSPoint(x: 8, y: 7), radius: 5.5, startAngle: 180, endAngle: 0, clockwise: false)
+            // The headband over the top (clockwise from the left, through 90°; counterclockwise
+            // from 180° to 0° runs under the centre and drew a "u").
+            $0.appendArc(withCenter: NSPoint(x: 8, y: 7), radius: 5.5, startAngle: 180, endAngle: 0, clockwise: true)
             $0.appendRoundedRect(NSRect(x: 2, y: 2.5, width: 3, height: 5), xRadius: 1, yRadius: 1)
             $0.appendRoundedRect(NSRect(x: 11, y: 2.5, width: 3, height: 5), xRadius: 1, yRadius: 1)
         })
         d["lightbulb"] = (true, stroke {
-            $0.appendArc(withCenter: NSPoint(x: 8, y: 9.5), radius: 4.5, startAngle: 215, endAngle: -35, clockwise: false)
+            // The bulb: 250° over the top, open at the bottom for the base (from 215° to -35°
+            // counterclockwise ran the short way under the centre, leaving no top).
+            $0.appendArc(withCenter: NSPoint(x: 8, y: 9.5), radius: 4.5, startAngle: -35, endAngle: 215, clockwise: false)
             line($0, [(5.5, 6.2), (6, 3.5), (10, 3.5), (10.5, 6.2)])
             line($0, [(6.5, 1.8), (9.5, 1.8)])
         })
@@ -71,9 +75,10 @@ internal enum _NSSystemImages {
             line($0, [(5, 4), (6.5, 6.5)])
         })
         d["theatermasks"] = (true, stroke {
-            $0.appendArc(withCenter: NSPoint(x: 5.5, y: 9), radius: 4, startAngle: 180, endAngle: 0, clockwise: true)
+            // Each mask's chin curves below its brow line (through 270°).
+            $0.appendArc(withCenter: NSPoint(x: 5.5, y: 9), radius: 4, startAngle: 180, endAngle: 0, clockwise: false)
             line($0, [(1.5, 9), (1.5, 13), (9.5, 13), (9.5, 9)])
-            $0.appendArc(withCenter: NSPoint(x: 11, y: 6), radius: 3.5, startAngle: 180, endAngle: 0, clockwise: true)
+            $0.appendArc(withCenter: NSPoint(x: 11, y: 6), radius: 3.5, startAngle: 180, endAngle: 0, clockwise: false)
             line($0, [(7.5, 6), (7.5, 9.5), (14.5, 9.5), (14.5, 6)])
         })
         d["wrench.and.screwdriver"] = (true, stroke {
