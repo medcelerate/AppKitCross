@@ -138,8 +138,12 @@ debug build takes 77 ms, because the per-pixel loops run unoptimised (they were 
 before the shared frame and the material short path). Performance is measured on release
 builds; the per-pixel stages are the ones a GPU backend replaces, which is the path to 60
 Hz on every platform. On Windows the scroll itself dirtied the whole content area in that
-run; the clip view's scroll blit (PR 92, round 10c) shrinks the dirty rectangle to the
-exposed strip, and with it the number of surfaces a scroll re-samples.
+run; the clip view's scroll by copy (PR 92, round 10c, `NSClipView.copiesOnScroll`) moves
+the pixels it already has and dirties the exposed strip alone. A copy moves the content
+beneath any glass over the scrolled area without a view dirtying it, so the window's
+`_scrollBacking` tells the registry the area moved: the samples over it (and the band
+mirroring from it) go stale and their surfaces redraw, nothing else does, and the scrolled
+frame matches a full repaint (a host-backend test checks it).
 
 **Measured on the PC** (release, 1x, `Examples/Glass --autoscroll 10`): a scroll frame
 paints in 18 ms with glass and 4 ms without, while the frame rate sat at 29 and 51 fps.
@@ -252,7 +256,7 @@ column are the glass material over the window.
 
 ## Consequences
 
-- Twenty pixel tests (`LiquidGlassPixelTests`): the glass is a blurred function of the
+- Twenty-one pixel tests (`LiquidGlassPixelTests`): the glass is a blurred function of the
   backdrop (red on the left, blue on the right, a softened edge; a different backdrop gives
   different glass; black and white stripes lose over 90 % of their variance through it);
   the rim highlight along the top and none along the bottom; refraction (the lens stage
@@ -269,7 +273,8 @@ column are the glass material over the window.
   sample cache (kept across the surface's own redraw and an invalidation outside it, stale
   after one beneath it, the shaded image kept with it); the shared frame (three lenses
   sample one render of the window, content dirtied under one lens re-samples that lens
-  alone, an unchanged window samples nothing); the switch-off flat tint with no
+  alone, an unchanged window samples nothing); a scroll by copy under a lens staling its
+  sample and the scrolled frame matching a repaint (host backend); the switch-off flat tint with no
   rim and no groups; the SwiftUI fallbacks (no extra view from `glassEffect`, a glass
   button identical in PNG to the bordered one); the sidebar pane flag; the software blur,
   saturation and luminance probe. They run on the host and in the Linux container;

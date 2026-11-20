@@ -42,6 +42,23 @@ private final class _StripesView: NSView {
     }
 }
 
+/// Horizontal bands of changing colour, so a scroll changes what lies beneath a lens.
+@MainActor
+private final class _BandsView: NSView {
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        var y: CGFloat = 0, i = 0
+        while y < bounds.height {
+            let band = NSRect(x: 0, y: y, width: bounds.width, height: 25)
+            if band.intersects(dirtyRect) {
+                NSColor(hue: CGFloat(i % 12) / 12, saturation: 0.8, brightness: 0.9, alpha: 1).setFill()
+                band.fill()
+            }
+            y += 25; i += 1
+        }
+    }
+}
+
 @MainActor
 private func render(_ v: NSView) -> NSBitmapImageRep {
     v.layoutSubtreeIfNeeded()
@@ -228,6 +245,51 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             let rendersBeforeThird = _GlassRegistry.frameRenders
             _ = render(w.contentView!)
             XCTAssertEqual(_GlassRegistry.frameRenders, rendersBeforeThird, "an unchanged window is not sampled again")
+        }
+    }
+
+    /// A scroll by copy (`NSClipView.copiesOnScroll`, the backing store moved rather than
+    /// repainted) moves the content beneath a lens over the scroll view: the lens's sample
+    /// goes stale, and the scrolled frame matches a full repaint.
+    func testScrollByCopyUnderGlassResamples() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+            w.appearance = NSAppearance(named: .aqua)
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+            scroll.documentView = _BandsView(frame: NSRect(x: 0, y: 0, width: 300, height: 2000))
+            w.contentView!.addSubview(scroll)
+            let lens = NSGlassEffectView(frame: NSRect(x: 60, y: 60, width: 180, height: 80))
+            w.contentView!.addSubview(lens)
+            w.makeKeyAndOrderFront(nil)
+            defer { w.close() }
+            guard let host = w._platformWindow as? HostWindow else { XCTFail("not the host backend"); return }
+            var frames = 0
+            while host._needsPaint, frames < 10 { host.displayIfNeeded(); frames += 1 }
+            let sample = _GlassRegistry.sample(for: lens)
+            XCTAssertFalse(sample.dirty)
+            let copies = host.scrollCopyCount
+            let clip = scroll.contentView
+            clip.scroll(to: NSPoint(x: 0, y: 37))
+            scroll.reflectScrolledClipView(clip)
+            XCTAssertEqual(host.scrollCopyCount, copies + 1, "the scroll moved the backing store by copy")
+            XCTAssertTrue(sample.dirty, "the content beneath the lens moved with the copy: its sample is stale")
+            XCTAssertTrue(lens.needsDisplay)
+            frames = 0
+            while host._needsPaint, frames < 6 { host.displayIfNeeded(); frames += 1 }
+            XCTAssertFalse(sample.dirty)
+            guard let scrolled = host.lastImage.map(_pixels) else { XCTFail("no image"); return }
+            w._setNeedsDisplayWhole()
+            host.displayIfNeeded()
+            guard let full = host.lastImage.map(_pixels), let image = host.lastImage else { XCTFail("no image"); return }
+            // Across the lens (y 100 in content points, y up) the scrolled frame is the repaint.
+            let scale = Int(w.backingScaleFactor)
+            let row = (image.height - 1 - 100 * scale) * image.bytesPerRow
+            var maxDiff = 0
+            for x in stride(from: 70 * scale, to: 230 * scale, by: scale) {
+                for c in 0..<3 { maxDiff = max(maxDiff, abs(Int(scrolled[row + x * 4 + c]) - Int(full[row + x * 4 + c]))) }
+            }
+            XCTAssertLessThanOrEqual(maxDiff, 4, "the lens over a copied scroll shows the content now beneath it")
         }
     }
 
