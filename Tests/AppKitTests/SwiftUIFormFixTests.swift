@@ -48,7 +48,7 @@ private func cards(_ doc: NSView) -> [CGRect] {
     var seen: [CGRect] = []
     for v in allViews(doc) where v is _ShapeDrawingView {
         let f = docFrame(doc, v)
-        if f.height > 4, f.width > 100, !seen.contains(where: { $0.equalTo(f) }) { seen.append(f) }
+        if f.height > 4, f.width > 100, !seen.contains(where: { (r: CGRect) in r == f }) { seen.append(f) }
     }
     return seen
 }
@@ -353,7 +353,8 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             XCTAssertFalse(_formSectionRows(_ViewBox(Group { Text("Name"); Toggle("On", isOn: .constant(true)) })).contains { $0.value is any _FormSectionMarker })
             if let first = formDocument(h) {
                 let c = cards(first)
-                XCTAssertFalse(c.contains { a in c.contains { b in !a.equalTo(b) && a.contains(b) } }, "no card holds another on the first pass: \(c)")
+                let nested = c.contains(where: { (a: CGRect) -> Bool in c.contains(where: { (b: CGRect) -> Bool in a != b && a.contains(b) }) })
+                XCTAssertFalse(nested, "no card holds another on the first pass: \(c)")
             } else { XCTFail("no scroll document on the first pass") }
             h.layoutSubtreeIfNeeded()
             guard let doc = formDocument(h) else { return XCTFail("no scroll document") }
