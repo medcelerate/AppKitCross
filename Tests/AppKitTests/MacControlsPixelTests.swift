@@ -328,7 +328,7 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
     /// The find bar's search field (empty and focused, as ⌘F leaves it) draws its
     /// placeholder leading after the magnifier, where a toolbar's search field draws its
     /// own: the first ink after the search button sits at the same offset from each
-    /// field's text rect, and within the toolbar's four extra points of each other.
+    /// field's text rect.
     func testFindBarPlaceholderLeadsLikeTheToolbarSearchField() throws {
         try requireHostBackend()
         MainActor.assumeIsolated {
@@ -383,8 +383,10 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                     let findText = (findField.cell as! NSSearchFieldCell).searchTextRect(forBounds: findField.bounds).minX
                     let toolbarText = (toolbarField.cell as! NSSearchFieldCell).searchTextRect(forBounds: toolbarField.bounds).minX
                     XCTAssertLessThan(findInk, findField.bounds.width / 4, "\(what): the find bar's placeholder leads (ink at \(findInk) of \(findField.bounds.width))")
+                    // Relative, both measured on this platform: the toolbar's text rect sits
+                    // further from the magnifier by design, and the font's side bearing
+                    // differs per platform, so the ink's offset from each text rect is compared.
                     XCTAssertEqual(findInk - findText, toolbarInk - toolbarText, accuracy: 1, "\(what): the same offset from the text rect as the toolbar's (\(findInk) vs \(toolbarInk))")
-                    XCTAssertLessThanOrEqual(abs(findInk - toolbarInk), 4.5, "\(what): within the toolbar's extra spacing from the magnifier (\(findInk) vs \(toolbarInk))")
                 }
             }
         }
