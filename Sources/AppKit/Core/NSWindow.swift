@@ -930,13 +930,20 @@ import CoreText
         return parts.isEmpty ? [dirtyRect] : parts
     }
 
-    /// A view needs layout: a frame is requested with the smallest dirty area, so the
-    /// paint runs layout (`platformWindowDraw`), and the views layout moves or updates
-    /// invalidate themselves for the frame after. Nothing is repainted wholesale.
+    /// A view needs layout: the platform runs `platformWindowLayout` before its next paint,
+    /// and the views layout moves or updates invalidate themselves. No pixel is dirtied for
+    /// the request itself: the previous one-pixel tickle at the origin, unioned by Win32 with
+    /// a meter at the top of the window, made every frame a whole-window paint.
     internal func _viewNeedsLayout() {
-        let r = NSRect(x: 0, y: 0, width: 1, height: 1)
-        _noteDirty(r)
-        _platform?.setNeedsDisplay(r)
+        _platform?.requestLayout()
+    }
+
+    /// The layout pass a `requestLayout` asked for, before the platform paints: the same
+    /// views the paint lays out, so what moved marks itself before the paint area is fixed.
+    public func platformWindowLayout() {
+        _contentView?.layoutSubtreeIfNeeded()
+        if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
     }
 
     /// Feeds the event to the gesture recognizers of the target view and its ancestors

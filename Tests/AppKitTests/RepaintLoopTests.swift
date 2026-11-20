@@ -72,10 +72,10 @@ final class RepaintLoopTests: XCTestCase {
                 clock += 1.0 / 60; CARuntime.tick()
                 w.displayIfNeeded()
                 if frame == 6 {
-                    // The frame after a text change re-lays the window; the frames the
-                    // engine applied are shown by one more paint, and that one settles.
-                    XCTAssertTrue(platform._needsPaint, "a layout change paints once more")
-                    w.displayIfNeeded()
+                    // The frame after a text change lays the window out before it paints
+                    // (the platform's layout pass), so the one paint shows the frames the
+                    // engine applied and settles: no second frame for the moves.
+                    XCTAssertFalse(platform._needsPaint, "a layout change settles in one frame")
                 }
                 XCTAssertFalse(platform._needsPaint, "frame \(frame): a paint must not invalidate the window again")
                 if frame == 5 { status.stringValue = "Stepper: 4"; value.integerValue = 4 }

@@ -416,12 +416,32 @@ final class Win32Window: PlatformWindow {
         set {
             guard let hwnd else { return }
             var f = newValue
+            // A size that is not finite (a layout proposal that leaked into a frame) is
+            // not a frame: Windows would clamp it to its maximum track size, taller than
+            // the screen, and every later resize would meet that clamp.
+            guard f.size.width.isFinite, f.size.height.isFinite, f.origin.x.isFinite, f.origin.y.isFinite else {
+                if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) refused: not finite") }
+                return
+            }
             f.size.width = min(max(f.size.width, minSize.width), maxSize.width)
             f.size.height = min(max(f.size.height, minSize.height), maxSize.height)
+            // A programmatic frame stays within the work area of the monitor it is on, as
+            // the window manager keeps a user's window (AppKit constrains to the screen).
+            if let work = workArea(near: f), work.width > 0, work.height > 0 {
+                f.size.width = min(f.size.width, work.width)
+                f.size.height = min(f.size.height, work.height)
+            }
             let r = Win32Backend.win32Rect(f, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
-            if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) (was \(frame))") }
+            if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) (was \(frame); asked \(newValue.size))") }
             SetWindowPos(hwnd, nil, r.left, r.top, r.right - r.left, r.bottom - r.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
         }
+    }
+
+    /// The work area (points) of the monitor nearest `frame`.
+    private func workArea(near frame: NSRect) -> NSRect? {
+        var r = Win32Backend.win32Rect(frame, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
+        guard let monitor = MonitorFromRect(&r, DWORD(MONITOR_DEFAULTTONEAREST)) else { return nil }
+        return Win32Backend.display(for: monitor, primaryHeight: Win32Backend.primaryHeightPixels)?.visibleFrame
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
@@ -536,8 +556,22 @@ final class Win32Window: PlatformWindow {
         }
     }
 
+    /// A posted message runs the owner's layout; what layout changes invalidates itself, so
+    /// the update region stays what the views asked for. (A dirty pixel at the origin, the
+    /// previous request, unioned by Windows with a meter at the top into the whole window.)
+    static let layoutMessage: Int32 = WM_APP + 0x41
+    private var layoutPosted = false
+    func requestLayout() {
+        guard let hwnd, !layoutPosted else { return }
+        layoutPosted = true
+        _ = PostMessageW(hwnd, UINT(Win32Window.layoutMessage), 0, 0)
+    }
+
     func displayIfNeeded() {
         guard let hwnd else { return }
+        // A layout still posted runs now, so its invalidations are in this frame's update
+        // region (the posted message then finds nothing left to lay out).
+        if layoutPosted { layoutPosted = false; owner?.platformWindowLayout() }
         var r = RECT()
         if GetUpdateRect(hwnd, &r, false) { UpdateWindow(hwnd) }
     }
@@ -697,9 +731,14 @@ final class Win32Window: PlatformWindow {
                            height: CGFloat(ps.rcPaint.bottom - ps.rcPaint.top) / scale)
         // A new or resized canvas has nothing to keep: paint everything this frame. A
         // transparent window repaints whole every frame: its cleared pixels must meet the
-        // DWM backdrop edge to edge, and a partial clear left dark bands after resizes.
-        if cd2d_target_is_swapchain(rt), cd2d_target_canvas_is_fresh(rt) || cd2d_target_is_composition(rt) { dirty = NSRect(origin: .zero, size: size) }
-        if NSView._traceInvalidation { NSView._trace("win32 paint dirty \(ps.rcPaint.left),\(ps.rcPaint.top)-\(ps.rcPaint.right),\(ps.rcPaint.bottom) px of \(Int(size.width * scale))x\(Int(size.height * scale))") }
+        // DWM backdrop edge to edge, and a partial clear left dark bands after resizes. An
+        // opaque window on the composition chain (it hosts its layer tree) keeps its pixels
+        // like the HWND chain and paints only the update region: whole-window paints there
+        // made a 2 KHz meter repaint 2.7 Mpt² a frame.
+        let fresh = cd2d_target_is_swapchain(rt) && cd2d_target_canvas_is_fresh(rt)
+        let transparent = cd2d_target_is_composition(rt) && _chrome.isTransparent
+        if fresh || transparent { dirty = NSRect(origin: .zero, size: size) }
+        if NSView._traceInvalidation { NSView._trace("win32 paint dirty \(ps.rcPaint.left),\(ps.rcPaint.top)-\(ps.rcPaint.right),\(ps.rcPaint.bottom) px of \(Int(size.width * scale))x\(Int(size.height * scale))\(fresh ? " (whole: fresh canvas)" : transparent ? " (whole: transparent)" : "")") }
         painting = true
         defer { painting = false }
         cd2d_target_begin_draw(rt)
@@ -1259,6 +1298,10 @@ final class Win32Window: PlatformWindow {
             return 0
         case WM_PAINT:
             paint()
+            return 0
+        case Win32Window.layoutMessage:
+            layoutPosted = false
+            owner?.platformWindowLayout()
             return 0
         case WM_ERASEBKGND:
             return 1

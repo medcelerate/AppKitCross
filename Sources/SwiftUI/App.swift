@@ -460,16 +460,24 @@ public final class _AppRunner {
     /// scene modifiers (shared by scene windows and the Settings window).
     func _windowGeometry(for hosting: NSHostingView<some View>, defaultSize: CGSize?, resizability: WindowResizability, hidesTitleBar: Bool) -> _WindowGeometry {
         let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar
-        let ideal = hosting.sizeThatFits(.unspecified)
+        // A content size that is not finite (a List proposing an infinite height to its
+        // window) is no size for a window: that component falls back to the default size,
+        // or the 300×200 floor, before it can reach a frame or a minimum (Sibyl's main
+        // window snapped to the maximum track height after the first programmatic resize).
+        func finite(_ s: NSSize, or fallback: NSSize) -> NSSize {
+            NSSize(width: s.width.isFinite ? s.width : fallback.width, height: s.height.isFinite ? s.height : fallback.height)
+        }
+        let floor = NSSize(width: 300, height: 200)
+        let ideal = finite(hosting.sizeThatFits(.unspecified), or: pendingDefaultSize.map { NSSize(width: $0.width, height: $0.height) } ?? floor)
         var size: NSSize
         if let given = pendingDefaultSize {
             // `.defaultSize` is the window's size, grown only to the content's minimum (not
             // its ideal: a scroll view's ideal is its whole document, which opened MD Vault's
             // viewer 1460 points tall).
-            let least = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let least = finite(hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0)), or: .zero)
             size = NSSize(width: max(given.width, least.width), height: max(given.height, least.height))
         } else {
-            size = NSSize(width: max(ideal.width, 300), height: max(ideal.height, 200))
+            size = NSSize(width: max(ideal.width, floor.width), height: max(ideal.height, floor.height))
         }
         // A new window fits the screen's visible frame (less the title bar), as AppKit
         // constrains a window's first frame.
@@ -485,7 +493,7 @@ public final class _AppRunner {
         // `.contentMinSize`: it cannot shrink below the content's ideal size.
         var contentMin = size, contentMax: NSSize? = nil
         if pendingResizability == .contentSize {
-            let lo = hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0))
+            let lo = finite(hosting.sizeThatFits(NSHostingSizeProposal(width: 0, height: 0)), or: .zero)
             let hi = hosting.sizeThatFits(NSHostingSizeProposal(width: .infinity, height: .infinity))
             contentMin = NSSize(width: max(lo.width, 1), height: max(lo.height, 1))
             contentMax = NSSize(width: hi.width.isFinite ? max(hi.width, contentMin.width) : .greatestFiniteMagnitude,
