@@ -1,8 +1,81 @@
 // NSVisualEffectView (hand-written; seeded from the generated stub, see tools/apigen)
 // A translucent material. Blending behind the window asks the window for a system
-// backdrop (Mica/Acrylic on Windows 11); within the window it is a tinted fill.
+// backdrop (Mica/Acrylic on Windows 11); within the window it is a tinted fill, or with
+// Liquid Glass on (ADR-0051) the glass material over the content beneath.
 
 import Foundation
+
+// MARK: - Liquid Glass switch (ADR-0051)
+
+/// Whether the port draws macOS 26's Liquid Glass: `APPKITWIN_LIQUID_GLASS=1` in the
+/// environment, else the `AppKitCrossLiquidGlass` Info.plist key. Off, every surface
+/// keeps the look it had before the switch existed, pixel for pixel.
+@MainActor
+public enum _LiquidGlass {
+    /// Pins the switch (tests); nil reads the environment and Info.plist.
+    public static var _override: Bool?
+    private static var _resolved: Bool?
+
+    public static var isEnabled: Bool {
+        if let o = _override { return o }
+        if let r = _resolved { return r }
+        let r = _read()
+        _resolved = r
+        return r
+    }
+
+    private static func _read() -> Bool {
+        func truth(_ v: Any?) -> Bool? {
+            switch v {
+            case let b as Bool: return b
+            case let n as NSNumber: return n.boolValue
+            case let s as String:
+                switch s.lowercased() { case "1", "yes", "true": return true; case "0", "no", "false": return false; default: return nil }
+            default: return nil
+            }
+        }
+        if let v = truth(ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"]) { return v }
+        return truth(NSDocumentController._infoDictionary()["AppKitCrossLiquidGlass"]) ?? false
+    }
+}
+
+/// The surfaces the port draws with glass when the switch is on: the band behind a
+/// toolbar, one toolbar item's capsule, a sidebar column and a glass control.
+public enum _MaterialKind {
+    case toolbarBand
+    case toolbarItem(highlighted: Bool)
+    case sidebar
+    case control(prominent: Bool, highlighted: Bool)
+}
+
+/// The hook a toolbar band, a sidebar column or a control calls before its own fill:
+/// with Liquid Glass on it draws the glass material in `rect` and answers true; off it
+/// draws nothing and answers false, so the caller keeps today's drawing untouched.
+@MainActor
+public enum _MaterialBackground {
+    @discardableResult
+    public static func draw(_ kind: _MaterialKind, in rect: NSRect, of view: NSView) -> Bool {
+        guard _LiquidGlass.isEnabled, rect.width > 0, rect.height > 0 else { return false }
+        switch kind {
+        case .toolbarBand:
+            _GlassRenderer.draw(_GlassSpec.material(in: view), path: NSBezierPath(rect: rect), in: rect, of: view)
+        case .sidebar:
+            _GlassRenderer.draw(_GlassSpec.material(in: view), path: NSBezierPath(rect: rect), in: rect, of: view)
+        case .toolbarItem(let highlighted):
+            var spec = _GlassSpec.lens(clear: false, in: view)
+            if highlighted { spec.tint = .labelColor; spec.tintAlpha = 0.14 }
+            let r = min(rect.height, rect.width) / 2
+            _GlassRenderer.draw(spec, path: NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r), in: rect, of: view)
+        case .control(let prominent, let highlighted):
+            var spec = _GlassSpec.lens(clear: false, in: view)
+            if prominent { spec.tint = .controlAccentColor; spec.tintAlpha = highlighted ? 0.95 : 0.85 }
+            else if highlighted { spec.tint = .labelColor; spec.tintAlpha = 0.14 }
+            let r = min(rect.height, rect.width) / 2
+            _GlassRenderer.draw(spec, path: NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r), in: rect, of: view)
+        }
+        return true
+    }
+}
 
 /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsvisualeffectview
 @MainActor open class NSVisualEffectView: NSView {
@@ -81,6 +154,7 @@ import Foundation
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         _applyBackdrop()
+        if _LiquidGlass.isEnabled { _GlassRegistry.observeKeyChanges(of: self) }
     }
 
     open override func setFrameSize(_ newSize: NSSize) {
@@ -92,6 +166,20 @@ import Foundation
     /// backdrop (behind-window) or is approximated by the tint (within-window).
     open override func draw(_ dirtyRect: NSRect) {
         let active = _state == .active || (_state == .followsWindowActiveState && (window?.isKeyWindow ?? true))
+        if _LiquidGlass.isEnabled, _blendingMode == .withinWindow, _maskImage == nil {
+            // Liquid Glass: the material over the content beneath (ADR-0051). HUD and dark
+            // materials keep their dark veil; a selection its colour.
+            var spec = _GlassSpec.material(in: self)
+            switch _material {
+            case .hudWindow, .dark, .ultraDark: spec.veil = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1); spec.veilAlpha = active ? 0.6 : 0.75
+            case .selection: spec.tint = _isEmphasized ? .controlAccentColor : .secondarySelectedControlColor; spec.tintAlpha = 0.6
+            default: if !active { spec.veilAlpha = 0.7 }
+            }
+            let radius = (layer?.cornerRadius ?? 0)
+            let path = radius > 0 ? NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius) : NSBezierPath(rect: bounds)
+            _GlassRenderer.draw(spec, path: path, in: bounds, of: self)
+            return
+        }
         let alpha: CGFloat
         switch _material {
         case .hudWindow, .dark, .ultraDark: alpha = active ? 0.55 : 0.7

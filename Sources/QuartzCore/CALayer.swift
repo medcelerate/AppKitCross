@@ -1143,9 +1143,19 @@ open class CALayer: NSObject, CAMediaTiming {
 
     // MARK: Compositing
 
+    /// The layer a glass sample stops at (AppKit's Liquid Glass pass, ADR-0051): composing
+    /// the tree halts on reaching it, so the sample holds only what lies beneath the glass,
+    /// and the layer being drawn is never composed again from inside its own drawing.
+    public static var _composeStopLayer: CALayer?
+    public static var _composeStopped = false
+
     /// Composites this layer into `ctx`, whose coordinate space is the superlayer's bounds
     /// space with orientation `parentFlipped`. `dirty` is in that space, nil for everything.
     public func _compose(into ctx: CGContext, parentFlipped: Bool, alpha: CGFloat, time: CFTimeInterval, dirty: CGRect?) {
+        if CALayer._composeStopLayer != nil {
+            if CALayer._composeStopped { return }
+            if self === CALayer._composeStopLayer { CALayer._composeStopped = true; return }
+        }
         hasPresentation = true
         let p = animations.isEmpty ? self : _presentation(at: time)
         guard !p._isHidden, p._opacity > 0 else { return }

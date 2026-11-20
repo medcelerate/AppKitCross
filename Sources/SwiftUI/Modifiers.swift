@@ -874,7 +874,7 @@ extension DatePickerStyle where Self == FieldDatePickerStyle { public static var
 extension DatePickerStyle where Self == StepperFieldDatePickerStyle { public static var stepperField: StepperFieldDatePickerStyle { StepperFieldDatePickerStyle() } }
 extension DatePickerStyle where Self == GraphicalDatePickerStyle { public static var graphical: GraphicalDatePickerStyle { GraphicalDatePickerStyle() } }
 
-public enum _ButtonStyleKind: Sendable { case automatic, bordered, borderedProminent, borderless, plain, link }
+public enum _ButtonStyleKind: Sendable { case automatic, bordered, borderedProminent, borderless, plain, link, glass, glassProminent }
 public enum _TextFieldStyleKind: Sendable { case automatic, roundedBorder, plain, squareBorder }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/primitivebuttonstyle

@@ -82,13 +82,22 @@ enum _SplitPaneRole {
 struct _SplitPane: View, _PrimitiveView {
     typealias Body = Never
     let box: _AnyViewBox
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _SplitPanePrimitive(content: box) }
+    /// The navigation split view's sidebar column (its pane draws the sidebar material).
+    var isSidebar = false
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _SplitPanePrimitive(content: box, isSidebar: isSidebar) }
 }
 
 @MainActor
 final class _SplitPaneView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
+    /// The navigation split view's sidebar column: with Liquid Glass on it draws the
+    /// sidebar material under its list (ADR-0051); off, nothing, as before.
+    var isSidebar = false { didSet { if isSidebar != oldValue { needsDisplay = true } } }
+    override func draw(_ dirtyRect: NSRect) {
+        guard isSidebar else { return }
+        _MaterialBackground.draw(.sidebar, in: bounds, of: self)
+    }
 }
 
 @MainActor
@@ -98,9 +107,10 @@ final class _SplitPanePrimitive: _Primitive {
         v.clipsToBounds = true
         return v
     }()
-    init(content: _AnyViewBox) {
+    init(content: _AnyViewBox, isSidebar: Bool = false) {
         super.init()
         children = [content]
+        if isSidebar { view.isSidebar = true }
     }
     override var nsView: NSView? { view }
     /// The column's content fills the pane (a list, a form), or sits centred in it when it
@@ -160,7 +170,7 @@ final class _SplitPrimitive: _Primitive {
         for p in panes { roles[p.key] = p.role }
         self.roles = roles
         super.init()
-        children = panes.map { _ViewBox(_SplitPane(box: $0.box), id: $0.key) }
+        children = panes.map { _ViewBox(_SplitPane(box: $0.box, isSidebar: $0.key == AnyHashable("sidebar")), id: $0.key) }
     }
     override var nsView: NSView? { split }
     override func update(from other: _Primitive) {

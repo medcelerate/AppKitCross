@@ -442,7 +442,7 @@ import CoreText
             _setNeedsDisplayWhole()
         }
     }
-    private var _contentView: NSView?
+    private(set) var _contentView: NSView?
     private var _accessibilityID = 0
     private var _a11yOverrides = _NSAccessibilityOverrides()
     private var _styleMask: NSWindow.StyleMask
@@ -454,14 +454,14 @@ import CoreText
     private var _isClosing = false
     private var _windowNumber = 0
     private var _level: NSWindow.Level = .normal
-    private var _backgroundColor: NSColor = .windowBackgroundColor
+    private(set) var _backgroundColor: NSColor = .windowBackgroundColor
     private var _isReleasedWhenClosed = true
     private weak var _firstResponder: NSResponder?
     private weak var _initialFirstResponder: NSView?
     private weak var _mouseDownView: NSView?
     private var _acceptsMouseMovedEvents = false
     private var _alphaValue: CGFloat = 1
-    private var _isOpaque = true
+    private(set) var _isOpaque = true
     private var _hasShadow = true
     private var _collectionBehavior: NSWindow.CollectionBehavior = []
     private var _identifier: NSUserInterfaceItemIdentifier? = nil
@@ -884,6 +884,7 @@ import CoreText
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
         let r = view._dirtyRectInWindow(rect)
+        _GlassRegistry.noteInvalidation(in: self, from: view, rect: r)
         _noteDirty(r)
         _platform?.setNeedsDisplay(r)
     }
@@ -898,6 +899,7 @@ import CoreText
     /// The window repaints as a whole (a new appearance, background, scale or layer host).
     internal func _setNeedsDisplayWhole() {
         _pendingDirtyRects = nil
+        _GlassRegistry.noteInvalidation(in: self, from: nil, rect: nil)
         _platform?.setNeedsDisplay(nil)
     }
 

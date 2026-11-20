@@ -989,7 +989,7 @@ final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
     var action: () -> Void
     init(title: String, action: @escaping () -> Void) {
         self.action = action
-        let b = NSButton(frame: .zero)
+        let b = _GlassButton(frame: .zero)
         b.title = title
         b.bezelStyle = .rounded
         super.init(control: b)
@@ -1012,6 +1012,19 @@ final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
         switch node.environment.buttonStyle {
         case .plain, .borderless, .link: control.isBordered = false
         default: control.isBordered = true
+        }
+        // Glass styles (ADR-0051): the glass capsule with Liquid Glass on, the bordered
+        // look otherwise; a prominent glass button titles in white on the accent.
+        if let g = control as? _GlassButton {
+            let glass: Bool?
+            switch node.environment.buttonStyle { case .glass: glass = false; case .glassProminent: glass = true; default: glass = nil }
+            let prominent = glass == true && _LiquidGlass.isEnabled
+            if g.glassProminent != glass { g.glassProminent = glass }
+            let tint: NSColor? = prominent ? .white : (g.contentTintColor == NSColor.white ? nil : g.contentTintColor)
+            if g.contentTintColor != tint { g.contentTintColor = tint }
+            if prominent {
+                g.attributedTitle = NSAttributedString(string: g.title, attributes: [.foregroundColor: NSColor.white, .font: g.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)])
+            }
         }
         if let (key, mods) = node.environment._keyShortcut {
             control.keyEquivalent = String(key.character)

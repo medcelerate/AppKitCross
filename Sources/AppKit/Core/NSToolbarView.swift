@@ -214,7 +214,9 @@ final class _NSToolbarItemButton: NSButton {
         guard let item else { return }
         let r = bounds
         let highlighted = pressed && isEnabled
-        if isBordered {
+        if isEnabled, _MaterialBackground.draw(.toolbarItem(highlighted: highlighted), in: r.insetBy(dx: 1, dy: 1), of: self) {
+            // Liquid Glass: every item sits on a glass capsule (ADR-0051).
+        } else if isBordered {
             let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
             (highlighted ? NSColor.selectedControlColor : NSColor.controlColor).setFill()
             path.fill()
@@ -595,8 +597,9 @@ final class _NSToolbarView: NSView {
         let dark = effectiveAppearance.isDark
         let key = window?.isKeyWindow ?? true
         let chrome = window?._chrome ?? PlatformWindowChrome()
-        if metrics.placement == .belowTitleBar || !chrome.transparentTitleBar || metrics.topInset > 0 {
-            // The band: AppKit's title bar colour, so the toolbar reads as part of the frame.
+        if metrics.placement == .belowTitleBar || !chrome.transparentTitleBar || metrics.topInset > 0, !_MaterialBackground.draw(.toolbarBand, in: bounds, of: self) {
+            // The band: AppKit's title bar colour, so the toolbar reads as part of the frame
+            // (with Liquid Glass on, the material; ADR-0051).
             let fill: NSColor
             if key { fill = dark ? NSColor(white: 0.23, alpha: 1) : NSColor(white: 0.91, alpha: 1) }
             else { fill = dark ? NSColor(white: 0.18, alpha: 1) : NSColor(white: 0.96, alpha: 1) }
