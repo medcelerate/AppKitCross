@@ -574,7 +574,17 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         if fi < _fragments.count { _fragments.removeSubrange(fi...) }
         if bi < _blockFrames.count { _blockFrames.removeSubrange(bi...) }
         _inPass = false
-        if NSView._traceInvalidation { _textTrace("layout manager pass widths \(geometry.map { $0.size.width }) units \(_units.count) lines \(_fragments.count) reused \(_reusedUnitCount)") }
+        if NSView._traceInvalidation {
+            _textTrace("layout manager pass widths \(geometry.map { $0.size.width }) units \(_units.count) lines \(_fragments.count) reused \(_reusedUnitCount)")
+            // Whether the lines fit what the typesetter was given: the widest line, how many
+            // reach past their container, and the first line with its text and width.
+            let widest = _fragments.map(\.usedRect.maxX).max() ?? 0
+            let over = _fragments.filter { $0.container < _textContainers.count && $0.usedRect.maxX > _textContainers[$0.container].size.width - _textContainers[$0.container].lineFragmentPadding + 0.5 }.count
+            if let f = _fragments.first {
+                let text = (storage.string as NSString).substring(with: f.charRange)
+                _textTrace("layout manager lines widest used maxX \(widest) past the container \(over); first line chars \(f.charRange.length) used \(f.usedRect) rect \(f.rect) lineBreakMode container \(first.lineBreakMode.rawValue) style \(_paragraphStyle(at: 0)?.lineBreakMode.rawValue ?? -1) text \(text.debugDescription)")
+            }
+        }
         if _invalidations != invalidations {
             // Invalidated while it ran (something the pass called out to changed the
             // geometry): what it laid out holds for nothing, and the next pass starts over.

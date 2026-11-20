@@ -414,6 +414,35 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The PC's step 3 path without a window: text inserted the way a paste inserts it
+    /// (CR LF lines, as the Windows clipboard has them), laid out wide, then only the text
+    /// view's frame narrows (setFrameSize -> container size -> layout manager) and a full
+    /// pass runs. Every paragraph must break at the new width.
+    func testTextViewFrameNarrowingRewrapsInsertedCRLFLines() {
+        MainActor.assumeIsolated {
+            let tv = NSTextView(frame: NSRect(x: 0, y: 0, width: 625, height: 400))
+            tv.isRichText = false
+            tv.isContinuousSpellCheckingEnabled = true
+            tv.allowsUndo = true
+            tv.font = NSFont.userFont(ofSize: 13)
+            let text = (0..<600).map { "Line \($0): The quick brown fox jumps over the lazy dog." }.joined(separator: "\r\n")
+            tv.insertText(text, replacementRange: NSRange(location: 0, length: 0))
+            let lm = tv.layoutManager!
+            let wide = lm._lineFragments.count
+            let wideLongest = lm._lineFragments.map(\.usedRect.maxX).max() ?? 0
+            XCTAssertEqual(wide, 600, "one line per paragraph at the wide width")
+            // Narrow to just over half the longest line: every paragraph needs two lines.
+            let narrow = (wideLongest * 0.55).rounded()
+            tv.setFrameSize(NSSize(width: narrow, height: tv.frame.height))
+            XCTAssertEqual(tv.textContainer!.size.width, narrow, "the container followed the frame")
+            XCTAssertGreaterThanOrEqual(lm._lineFragments.count, 2 * 600, "every paragraph wrapped")
+            let padding = tv.textContainer!.lineFragmentPadding
+            XCTAssertLessThanOrEqual(lm._lineFragments.map(\.usedRect.maxX).max() ?? 0, narrow - padding + 0.5, "no line is wider than the container")
+            assertMatchesFullLayout(lm, "after the frame narrowed")
+            withExtendedLifetime(tv) {}
+        }
+    }
+
     // MARK: Random edits
 
     /// A small deterministic generator (SplitMix64).

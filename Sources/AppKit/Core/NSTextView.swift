@@ -804,6 +804,11 @@ import CoreText
         // made typing slow).
         let dirty = dirtyRect.offsetBy(dx: -origin.x, dy: -origin.y)
         let all = _layoutManager.glyphRange(forBoundingRect: dirty, in: _container)
+        if NSView._traceInvalidation {
+            let lines = _layoutManager._lineFragments.filter { NSIntersectionRange($0.charRange, all).length > 0 }
+            let widest = lines.map(\.usedRect.maxX).max() ?? 0
+            NSView._trace("text view draw dirty \(dirtyRect) bounds \(bounds.size) visible \(visibleRect) clip \(superview.map { "\($0.bounds)" } ?? "none") lines \(lines.count) widest used maxX \(widest)")
+        }
         _layoutManager.drawBackground(forGlyphRange: all, at: origin)
         _drawTextHighlights()
         _drawFindHighlights(above: false)
