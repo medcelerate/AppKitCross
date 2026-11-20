@@ -325,6 +325,71 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The find bar's search field (empty and focused, as ⌘F leaves it) draws its
+    /// placeholder leading after the magnifier, where a toolbar's search field draws its
+    /// own: the first ink after the search button sits at the same offset from each
+    /// field's text rect, and within the toolbar's four extra points of each other.
+    func testFindBarPlaceholderLeadsLikeTheToolbarSearchField() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            /// The first column after the search button with placeholder ink, in field points.
+            @MainActor func firstInk(_ field: NSSearchField) -> CGFloat? {
+                guard let (rep, scale) = render(field), let cell = field.cell as? NSSearchFieldCell else { return nil }
+                let start = cell.searchButtonRect(forBounds: field.bounds).maxX
+                for x in stride(from: start + 0.5, to: field.bounds.width, by: 0.5) {
+                    for y in stride(from: 4.5, to: field.bounds.height - 4, by: 1) where lum(pixel(rep, x, y, scale: scale)) < 0.88 { return x }
+                }
+                return nil
+            }
+            for mac in [false, true] {
+                withLook(mac: mac) {
+                    let what = mac ? "mac" : "default"
+                    // A toolbar's search field (SwiftUI's `.searchable`, PR 92's unified toolbar).
+                    struct Screen: View {
+                        @State var text = ""
+                        var body: some View { Text("Body").searchable(text: $text, placement: .toolbar) }
+                    }
+                    let toolbarWindow = makeWindow(NSSize(width: 700, height: 300), dark: false)
+                    defer { toolbarWindow.close() }
+                    let hosting = NSHostingView(rootView: Screen())
+                    hosting.frame = NSRect(x: 0, y: 0, width: 700, height: 300)
+                    toolbarWindow.contentView = hosting
+                    toolbarWindow.makeKeyAndOrderFront(nil)
+                    (Platform.backend as! HostBackend).drain()
+                    guard let band = toolbarWindow._toolbarView, let toolbarField = _macViews(band).compactMap({ $0 as? NSSearchField }).first else { return XCTFail("\(what): no toolbar search field") }
+                    band.layoutSubtreeIfNeeded()
+                    // TextEdit's find bar: ⌘F shows it with its field focused and empty.
+                    let findWindow = makeWindow(NSSize(width: 480, height: 320), dark: false)
+                    defer { findWindow.close() }
+                    let scroll = NSTextView._scrollable(rich: false)
+                    scroll.frame = findWindow.contentView!.bounds
+                    findWindow.contentView!.addSubview(scroll)
+                    let tv = scroll.documentView as! NSTextView
+                    tv.string = "one two three"
+                    findWindow.makeKeyAndOrderFront(nil)
+                    _ = findWindow.makeFirstResponder(tv)
+                    tv.setSelectedRange(NSRange(location: 0, length: 0))
+                    let item = NSMenuItem(title: "Find…", action: Selector(("performFindPanelAction:")), keyEquivalent: "f")
+                    item.tag = NSFindPanelAction.showFindPanel.rawValue
+                    tv.performFindPanelAction(item)
+                    guard let bar = scroll.findBarView as? _NSFindBarView else { return XCTFail("\(what): no find bar") }
+                    bar.layoutSubtreeIfNeeded()
+                    let findField = bar.searchField
+                    XCTAssertNotNil(findField.currentEditor(), "\(what): the find bar's field is focused")
+                    XCTAssertEqual(findField.stringValue, "", "\(what): and empty")
+                    XCTAssertEqual(findField.placeholderString, toolbarField.placeholderString, "\(what): both fields say Search")
+                    guard let findInk = firstInk(findField) else { return XCTFail("\(what): the find bar's placeholder is not drawn under the empty editor") }
+                    guard let toolbarInk = firstInk(toolbarField) else { return XCTFail("\(what): the toolbar's placeholder is not drawn") }
+                    let findText = (findField.cell as! NSSearchFieldCell).searchTextRect(forBounds: findField.bounds).minX
+                    let toolbarText = (toolbarField.cell as! NSSearchFieldCell).searchTextRect(forBounds: toolbarField.bounds).minX
+                    XCTAssertLessThan(findInk, findField.bounds.width / 4, "\(what): the find bar's placeholder leads (ink at \(findInk) of \(findField.bounds.width))")
+                    XCTAssertEqual(findInk - findText, toolbarInk - toolbarText, accuracy: 1, "\(what): the same offset from the text rect as the toolbar's (\(findInk) vs \(toolbarInk))")
+                    XCTAssertLessThanOrEqual(abs(findInk - toolbarInk), 4.5, "\(what): within the toolbar's extra spacing from the magnifier (\(findInk) vs \(toolbarInk))")
+                }
+            }
+        }
+    }
+
     // MARK: Alerts
 
     /// macOS's compact alert is the port's only alert (PR 92): the look does not change it.

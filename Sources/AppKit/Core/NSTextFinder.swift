@@ -377,6 +377,9 @@ open class NSTextFinder: NSObject, NSCoding {
         }
         searchField.delegate = self
         searchField.sendsWholeSearchString = true
+        // The placeholder leads after the magnifier, as in a toolbar's search field (the
+        // cell centres it outside a toolbar unless told otherwise).
+        searchField.centersPlaceholder = false
         replaceField.delegate = self
         replaceField.placeholderString = "Replace"
         status.alignment = .right
