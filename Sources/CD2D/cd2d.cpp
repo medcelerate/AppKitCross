@@ -49,6 +49,11 @@ struct CD2DTarget {
     // into the back buffer (this frame's rect and the previous one's, since the two
     // buffers alternate) and presents with that rect as the dirty region.
     ID2D1Bitmap1 *canvas = nullptr;
+    // Scratch for cd2d_target_copy_rect (a bitmap cannot copy onto itself where the rects
+    // overlap): kept between frames, grown when a copy needs more, so a scrolling list does
+    // not allocate a canvas-sized bitmap every frame.
+    ID2D1Bitmap1 *scratch = nullptr;
+    UINT32 scratchW = 0, scratchH = 0;
     D2D1_RECT_U dirty = {};                       // this frame, pixels; whole when !hasDirty
     bool hasDirty = false;
     bool canvasFresh = true;                      // new or resized: the next frame copies everything
@@ -151,6 +156,8 @@ static bool createBackBufferBitmap(CD2DTarget *t) {
 static void releaseBackBufferBitmap(CD2DTarget *t) {
     if (t->dc) t->dc->SetTarget(nullptr);
     safeRelease(t->canvas);
+    safeRelease(t->scratch);
+    t->scratchW = t->scratchH = 0;
     safeRelease(t->backBuffer);
     // ResizeBuffers needs every reference to the buffers gone, including any the D3D
     // immediate context still holds for in-flight work.
@@ -478,6 +485,7 @@ bool cd2d_target_is_composition(CD2DTarget *target) {
 void cd2d_target_release(CD2DTarget *target) {
     if (!target) return;
     releaseBackBufferBitmap(target);   // no-op for HWND and offscreen targets
+    safeRelease(target->scratch);
     safeRelease(target->whiteScale);
     safeRelease(target->toLinear);
     safeRelease(target->target);
@@ -532,22 +540,26 @@ bool cd2d_target_copy_rect(CD2DTarget *target, int32_t srcX, int32_t srcY, int32
     D2D1_SIZE_U size = target->canvas->GetPixelSize();
     if ((UINT32)srcX + (UINT32)w > size.width || (UINT32)srcY + (UINT32)h > size.height) return false;
     if ((UINT32)dstX + (UINT32)w > size.width || (UINT32)dstY + (UINT32)h > size.height) return false;
-    // A bitmap cannot copy onto itself where the rects overlap: go through a temporary
-    // of the canvas's format.
-    D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
-        D2D1_BITMAP_OPTIONS_NONE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, target->alphaMode), target->dpi, target->dpi);
-    ID2D1Bitmap1 *temp = nullptr;
-    HRESULT hr = target->dc->CreateBitmap(D2D1::SizeU((UINT32)w, (UINT32)h), nullptr, 0, &props, &temp);
-    if (FAILED(hr) || !temp) { safeRelease(temp); return false; }
+    // A bitmap cannot copy onto itself where the rects overlap: go through the target's
+    // scratch bitmap (the canvas's format), made once and grown as needed.
+    HRESULT hr = S_OK;
+    if (!target->scratch || target->scratchW < (UINT32)w || target->scratchH < (UINT32)h) {
+        safeRelease(target->scratch);
+        target->scratchW = target->scratchW > (UINT32)w ? target->scratchW : (UINT32)w;
+        target->scratchH = target->scratchH > (UINT32)h ? target->scratchH : (UINT32)h;
+        D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_NONE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, target->alphaMode), target->dpi, target->dpi);
+        hr = target->dc->CreateBitmap(D2D1::SizeU(target->scratchW, target->scratchH), nullptr, 0, &props, &target->scratch);
+        if (FAILED(hr) || !target->scratch) { safeRelease(target->scratch); target->scratchW = target->scratchH = 0; return false; }
+    }
     D2D1_POINT_2U origin = D2D1::Point2U(0, 0);
     D2D1_RECT_U src = D2D1::RectU((UINT32)srcX, (UINT32)srcY, (UINT32)(srcX + w), (UINT32)(srcY + h));
-    hr = temp->CopyFromBitmap(&origin, target->canvas, &src);
+    hr = target->scratch->CopyFromBitmap(&origin, target->canvas, &src);
     if (SUCCEEDED(hr)) {
         D2D1_POINT_2U dest = D2D1::Point2U((UINT32)dstX, (UINT32)dstY);
         D2D1_RECT_U all = D2D1::RectU(0, 0, (UINT32)w, (UINT32)h);
-        hr = target->canvas->CopyFromBitmap(&dest, temp, &all);
+        hr = target->canvas->CopyFromBitmap(&dest, target->scratch, &all);
     }
-    safeRelease(temp);
     if (isDeviceLost(hr)) target->lost = true;
     return SUCCEEDED(hr);
 }

@@ -1203,6 +1203,8 @@ import CoreText
 
     /// The area (points) the last paint drew, its rects one by one (tests).
     internal private(set) var _lastPaintArea: CGFloat = 0
+    /// The areas the last paint drew (tests read what a scroll or an animation frame cost).
+    internal private(set) var _lastPaintRects: [NSRect] = []
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
@@ -1211,6 +1213,7 @@ import CoreText
         _painting = true
         defer { _painting = false }
         _lastPaintArea = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
+        _lastPaintRects = paintRects
         _commitLayerSceneIfNeeded()
         // Geometry settled for this frame: areas under a pointer that did not move still enter or exit.
         if _trackingAreasDirty { _contentView?.layoutSubtreeIfNeeded(); _evaluateTrackingAreas(at: _lastMouseLocation, event: nil, dragging: false) }
