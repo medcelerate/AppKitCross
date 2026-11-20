@@ -152,6 +152,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             writeScreenshot(to: CommandLine.arguments[i + 1])
             NSApp.terminate(nil)
         }
+        // `Glass --autoscroll <seconds>` (or `APPKITWIN_GLASS_AUTOSCROLL=<seconds>`) scrolls
+        // the content at 60 Hz for that long without a click, prints a line per second
+        // (frames, mean and p95 paint time) and a summary, then exits: the performance
+        // measurement of a release build on the PC.
+        let env = ProcessInfo.processInfo.environment["APPKITWIN_GLASS_AUTOSCROLL"]
+        let arg = CommandLine.arguments.firstIndex(of: "--autoscroll").flatMap { $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }
+        if let seconds = (arg ?? env).flatMap(Double.init), seconds > 0 {
+            window.display()
+            startAutoScroll(measuringFor: seconds)
+        }
     }
 
     private func writeScreenshot(to path: String) {
@@ -236,6 +246,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     }
     private func toggleAutoScroll() {
         if let t = timer { t.invalidate(); timer = nil; return }
+        startAutoScroll(measuringFor: nil)
+    }
+
+    /// Scrolls two points a frame at 60 Hz. With a duration, every frame is painted
+    /// synchronously (`displayIfNeeded`, the platform's paint) and timed, the stats go to
+    /// stdout once a second and in a summary, and the app exits when the time is up.
+    private func startAutoScroll(measuringFor seconds: Double?) {
+        var frames: [Double] = []
+        var second: [Double] = []
+        let start = Date()
+        var lastReport = start
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -246,8 +267,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                 if origin.y > maxY { origin.y = 0 }
                 clip.scroll(to: origin)
                 self.scrollView.reflectScrolledClipView(clip)
+                guard let seconds else { return }
+                let t0 = DispatchTime.now().uptimeNanoseconds
+                self.window.displayIfNeeded()
+                let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+                frames.append(ms); second.append(ms)
+                let now = Date()
+                if now.timeIntervalSince(lastReport) >= 1 {
+                    print(String(format: "autoscroll %4.1f s: %3d frames, paint mean %.2f ms, p95 %.2f ms, max %.2f ms", now.timeIntervalSince(start), second.count, Self.mean(second), Self.p95(second), second.max() ?? 0))
+                    second.removeAll(); lastReport = now
+                }
+                if now.timeIntervalSince(start) >= seconds {
+                    self.timer?.invalidate(); self.timer = nil
+                    let glass = ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] == "1" ? "on" : "off"
+                    print(String(format: "autoscroll summary (glass %@, %.0fx): %d frames in %.1f s, paint mean %.2f ms, p95 %.2f ms, max %.2f ms", glass, self.window.backingScaleFactor, frames.count, now.timeIntervalSince(start), Self.mean(frames), Self.p95(frames), frames.max() ?? 0))
+                    NSApp.terminate(nil)
+                }
             }
         }
+    }
+    private static func mean(_ v: [Double]) -> Double { v.isEmpty ? 0 : v.reduce(0, +) / Double(v.count) }
+    private static func p95(_ v: [Double]) -> Double {
+        guard !v.isEmpty else { return 0 }
+        let sorted = v.sorted()
+        return sorted[min(sorted.count - 1, Int((Double(sorted.count) * 0.95).rounded(.up)) - 1)]
     }
     private var tints: [NSColor?] = [.systemOrange, .systemPink, .systemTeal, nil]
     private func cycleTint() {

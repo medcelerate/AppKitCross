@@ -19,8 +19,11 @@ What it demonstrates:
   backdrop each frame: the lenses bend the bands' edges into their rims and flip between the
   light and dark variant over the dark and light bands. `APPKITWIN_TRACE_FRAMES=1` prints
   the draw times and each glass stage's (the shared frame, every sample's crop and blur,
-  every lens's shade). Measure with a release build (`swift run -c release Glass`): the
-  per-pixel stages are many times slower unoptimised.
+  every lens's shade). `Glass --autoscroll 5` (or `APPKITWIN_GLASS_AUTOSCROLL=5`) scrolls
+  for five seconds without a click, painting and timing every frame, prints a line a
+  second (frames, mean and p95 paint time) and a summary, then exits. Measure with a
+  release build (`swift run -c release Glass --autoscroll 5`): the per-pixel stages are
+  many times slower unoptimised.
 
 Run it:
 
