@@ -267,6 +267,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_TRACE_TEXTINPUT=1` | every input method step (`[textinput] ...`): composition that does not reach a text view, a candidate window in the wrong place |
 | `APPKITWIN_INFO_PLIST=<path>` | the Info.plist the app reads when the executable has none beside it (document types, `CFBundleName`, UTIs) |
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
+| `APPKITWIN_MAC_CONTROLS=1` | controls drawn as macOS draws them (shaded push buttons, inset text-field bezels and the soft focus ring, tick combs and pill knobs on sliders, overlay scrollers, narrow centred alerts with the icon and stacked buttons over a dimmed window, accents that grey out in an inactive window); the flatter default look otherwise. `AppKitCrossMacControls` = YES in the Info.plist ships it with the app (ADR-0051) |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
 | `APPKITWIN_METAL_REFERENCE=1` | the CPU Metal device instead of Direct3D 12 or Vulkan |
 
