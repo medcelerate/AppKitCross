@@ -393,7 +393,7 @@ final class _ListRowsPrimitive: _Primitive {
         rowDeleteTargets = entries.map(\.deleteTarget)
         rowMoveTargets = entries.map(\.moveTarget)
         supplementary = Set(nodes.indices.filter { isSupplementary(nodes[$0]) })
-        view.supplementaryRows = supplementary
+        if view.supplementaryRows != supplementary { view.supplementaryRows = supplementary; view.needsDisplay = true }
         // A header or footer's value is the row object itself: no selection ever holds it.
         rowValues = nodes.enumerated().map { supplementary.contains($0) ? AnyHashable(ObjectIdentifier($1)) : value(of: $1, index: $0) }
         var hiddenAbove: Set<Int> = [], hiddenBelow: Set<Int> = []
@@ -419,9 +419,13 @@ final class _ListRowsPrimitive: _Primitive {
             frames.append(CGRect(x: 0, y: y - rect.minY, width: rect.width, height: rowHeight))
             y += rowHeight + m.gap
         }
-        view.rowFrames = frames
-        view.hiddenSeparatorsAbove = hiddenAbove
-        view.hiddenSeparatorsBelow = hiddenBelow
+        // The rows' separators and selection repaint only when they moved or changed.
+        if view.rowFrames != frames || view.hiddenSeparatorsAbove != hiddenAbove || view.hiddenSeparatorsBelow != hiddenBelow {
+            view.rowFrames = frames
+            view.hiddenSeparatorsAbove = hiddenAbove
+            view.hiddenSeparatorsBelow = hiddenBelow
+            view.needsDisplay = true
+        }
         refreshHighlight()
     }
     override func didSyncBackingViews(node: _ViewNode) { refreshHighlight() }
@@ -430,9 +434,12 @@ final class _ListRowsPrimitive: _Primitive {
     private func refreshHighlight() {
         let selected = selection?.get() ?? []
         let indices = Set(rowValues.indices.filter { selected.contains(rowValues[$0]) })
-        view.selectedRows = indices
         let emphasized = view.window?.isKeyWindow ?? true
-        view.emphasized = emphasized
+        if view.selectedRows != indices || view.emphasized != emphasized {
+            view.selectedRows = indices
+            view.emphasized = emphasized
+            view.needsDisplay = true
+        }
         for (i, r) in rowNodes.enumerated() {
             var views: [NSView] = []
             r.collectBackingViews(into: &views)
@@ -440,7 +447,6 @@ final class _ListRowsPrimitive: _Primitive {
             // unemphasized grey selection of an inactive one they keep their colours.
             for v in views { setSelected(indices.contains(i) && emphasized, in: v) }
         }
-        view.needsDisplay = true
     }
     private func setSelected(_ on: Bool, in v: NSView) {
         if let t = v as? _TextView { t.isInSelectedRow = on }

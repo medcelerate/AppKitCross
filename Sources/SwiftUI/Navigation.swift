@@ -451,11 +451,12 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
         let env = node.environment
         let hidden = _inFormRow || env._labelsHidden
         // In a form the label leads the row (grouped) or sits in the label column (columns);
-        // radio groups and inline lists put it beside their first item.
+        // radio groups and inline lists put it beside their first item (columns) or above
+        // their options (grouped).
         if !hidden, env._formContext != nil, _formHasLabel(label) {
             var inner = self; inner._inFormRow = true
             let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
-            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center))])
+            return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
         }
         return _PickerPrimitive(label: (label as? Text)?._string ?? "", showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content))
     }

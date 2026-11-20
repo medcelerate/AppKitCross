@@ -66,6 +66,21 @@ Shape:
   scheduled update invalidates the hosting view's intrinsic size only when its
   `sizingOptions` include `.intrinsicContentSize` and it is not its window's content view
   (`NSHostingRootHost.rootDidScheduleUpdate()`).
+- Invalidation (2026-11-19, the same Sibyl run: every meter tick and keystroke redrew every
+  text and shape in the window): a scheduled update no longer marks the whole hosting view
+  for display. Frame changes mark what they move, and a primitive marks its own view when
+  its content changes. Primitives whose `didLayout` only invalidates their view
+  (`_RedrawsWhenChanged`: text, shapes, decorations, gradients, masks) are told only when
+  their rect or primitive changed. A forced pass keeps a `Text` child whose value and
+  environment are equal (`_sameLeafValue`, `_equalEnvironment`; a value that is neither
+  `Equatable` nor an object counts as changed), so a list whose body re-ran for an appended
+  row keeps its other rows' primitives, memos and pixels. `syncBackingViews` inserts new
+  backing views next to their neighbours instead of re-adding every sibling. A view's
+  baselines (`ViewDimensions`) are found on first read, not for every alignment query (a
+  leading-aligned stack around a list laid out every row's text on every pass).
+  `NSScrollView.tile()` and `reflectScrolledClipView(_:)` set scroller values, frames and
+  visibility only when they differ. `SwiftUIUpdateCostTests` counts it: a meter tick marks
+  no text (was 40) and measures no row; an appended row marks only itself (was 41 texts).
 - `App` runs `NSApplication`: `WindowGroup` makes an `NSWindow` whose content is an
   `NSHostingView` of the scene's content, sized to the content's ideal size.
 

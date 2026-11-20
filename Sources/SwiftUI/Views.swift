@@ -1630,6 +1630,11 @@ public struct Label<Title: View, Icon: View>: View {
     public init(@ViewBuilder title: () -> Title, @ViewBuilder icon: () -> Icon) { self.title = title(); self.icon = icon() }
     public var body: some View {
         guard inSidebarList else {
+            // A system image the catalogue has no artwork for draws nothing; under the
+            // default style it takes no slot either, so the title is not pushed in by an
+            // empty icon's width (a grouped section header built from a Label, Sibyl's
+            // integrations, lined up with the plain Text headers around it).
+            if let image = icon as? Image, image.image == nil, style is DefaultLabelStyle { return AnyView(title) }
             return AnyView(style.makeBody(configuration: LabelStyleConfiguration(title: AnyView(title), icon: AnyView(icon))))
         }
         // A sidebar row's icon takes the accent colour, unless the label or the icon itself
@@ -1719,7 +1724,7 @@ public struct ScrollView<Content: View>: View, _PrimitiveView {
 ///
 /// Under a `List` the header is a row of its own that cannot be selected, and the content's
 /// rows follow; under a `Form` or a stack the header sits above the content.
-public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRowsProvider {
+public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRowsProvider, _FormSectionMarker {
     let header: Parent
     let content: Content
     let footer: Footer
@@ -1732,21 +1737,9 @@ public struct Section<Parent: View, Content: View, Footer: View>: View, _ListRow
             // A grouped form's section is its own card: the header above it, the rows
             // separated by hairlines inside it, the footer centred under it in the
             // secondary colour, as macOS's inset-grouped form (the Settings screenshots).
-            let rows = _formSectionRows(_ViewBox(content))
             VStack(alignment: .leading, spacing: 8) {
                 if !(header is EmptyView) { header.font(.headline).padding(.leading, 4) }
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows.indices, id: \.self) { i in
-                        if i > 0 { Divider().padding(.leading, 12) }
-                        _Page(box: rows[i])
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+                _GroupedFormCard(rows: _formSectionRows(_ViewBox(content)))
                 if !(footer is EmptyView) {
                     footer.font(.caption).foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -1826,7 +1819,35 @@ func _formSectionRows(_ box: _AnyViewBox) -> [_AnyViewBox] {
     return p.children.flatMap { _formSectionRows($0) }
 }
 
-/// Set by a `Section` inside a grouped `Form`, so the form draws no card of its own.
+/// A grouped form's card: the rows one under another, each at its ideal height with the
+/// row insets, hairline separators between them (inset from the leading edge, as macOS
+/// draws them), on the control background with a rounded separator-coloured border. Used
+/// by each `Section` and, for a form of bare rows, by the form itself.
+struct _GroupedFormCard: View {
+    let rows: [_AnyViewBox]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows.indices, id: \.self) { i in
+                if i > 0 { Divider().padding(.leading, 12) }
+                _Page(box: rows[i])
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+    }
+}
+
+/// A `Section`, found among a grouped form's rows without rendering it: the form knows it
+/// has sections from its first pass, rather than drawing every section inside one outer
+/// card (their footers inside it) until the sections' preference arrives.
+protocol _FormSectionMarker {}
+
+/// Set by a `Section` inside a grouped `Form`, so the form draws no card of its own (a
+/// section inside a custom view, such as a `ForEach` of rows that are each a `Section`).
 struct _GroupedFormSectionsPreference: PreferenceKey {
     static var defaultValue: Bool { false }
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
@@ -1868,18 +1889,17 @@ public struct Form<Content: View>: View {
             // The grouped style boxes the rows on the window's background and scrolls, as
             // macOS's inset-grouped list does: rows keep their ideal heights and a form
             // taller than its container scrolls rather than squeezing them.
+            let rows = _formSectionRows(_ViewBox(content))
             ScrollView(.vertical) {
-                if hasSections {
+                if hasSections || rows.contains(where: { $0.value is any _FormSectionMarker }) {
                     VStack(alignment: .leading, spacing: 18) { content }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
                 } else {
-                    VStack(alignment: .leading, spacing: 12) { content }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(14)
-                        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(nsColor: .separatorColor), lineWidth: 1))
-                        .padding()
+                    // Bare rows share one card, split and separated as a section's are (the
+                    // Destinations editor: Name, Host, Port, Transport, Enabled).
+                    _GroupedFormCard(rows: rows)
+                        .padding(16)
                 }
             }
             // The page behind the cards is the window background (light grey), painted

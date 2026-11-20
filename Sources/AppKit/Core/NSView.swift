@@ -553,8 +553,11 @@ import CoreText
 
     /// Every invalidation since launch (tests measure what an update costs).
     nonisolated(unsafe) public static var _invalidationCount = 0
+    /// Sees every invalidation (tests count them per view type and collect the dirty area).
+    nonisolated(unsafe) public static var _invalidationObserver: ((NSView, NSRect) -> Void)?
     private func _invalidate(_ rect: NSRect) {
         NSView._invalidationCount &+= 1
+        NSView._invalidationObserver?(self, rect)
         if NSView._traceInvalidation { NSView._trace("setNeedsDisplay \(type(of: self)) \(rect)") }
         _needsDisplay = true
         if let l = _layer, !_layerIsHosted {

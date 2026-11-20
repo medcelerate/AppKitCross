@@ -158,5 +158,10 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/viewboundschanged(_:)
     @MainActor open func viewBoundsChanged(_ notification: Notification) { _reconstrain() }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/viewframechanged(_:)
-    @MainActor open func viewFrameChanged(_ notification: Notification) { _reconstrain(); needsDisplay = true }
+    /// The document's own frame setter marks what it covers; the clip view repaints its
+    /// background only where the document no longer covers it.
+    @MainActor open func viewFrameChanged(_ notification: Notification) {
+        _reconstrain()
+        if _drawsBackground, let doc = _documentView, !convert(doc.bounds, from: doc).contains(bounds) { needsDisplay = true }
+    }
 }

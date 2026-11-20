@@ -23,6 +23,10 @@ internal enum _NSSystemImages {
         func line(_ p: NSBezierPath, _ pts: [(CGFloat, CGFloat)]) { p.move(to: NSPoint(x: pts[0].0, y: pts[0].1)); for q in pts.dropFirst() { p.line(to: NSPoint(x: q.0, y: q.1)) } }
         d["plus"] = (true, stroke { line($0, [(8, 2.5), (8, 13.5)]); line($0, [(2.5, 8), (13.5, 8)]) })
         // Sibyl's channel symbols (its inspector's picker), 16-point line drawings.
+        d["record.circle"] = (true, { _ in
+            let ring = NSBezierPath(ovalIn: NSRect(x: 1.5, y: 1.5, width: 13, height: 13)); ring.lineWidth = 1.4; NSColor.black.setStroke(); ring.stroke()
+            NSColor.black.setFill(); NSBezierPath(ovalIn: NSRect(x: 5, y: 5, width: 6, height: 6)).fill()
+        })
         d["headphones"] = (true, stroke {
             $0.appendArc(withCenter: NSPoint(x: 8, y: 7), radius: 5.5, startAngle: 180, endAngle: 0, clockwise: false)
             $0.appendRoundedRect(NSRect(x: 2, y: 2.5, width: 3, height: 5), xRadius: 1, yRadius: 1)

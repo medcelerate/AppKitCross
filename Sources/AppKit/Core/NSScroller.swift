@@ -163,7 +163,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/knobproportion
     @MainActor open var knobProportion: CGFloat {
         get { _knobProportion }
-        set { _knobProportion = newValue; needsDisplay = true }
+        set { guard newValue != _knobProportion else { return }; _knobProportion = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/knobstyle
     @MainActor open var knobStyle: NSScroller.KnobStyle {

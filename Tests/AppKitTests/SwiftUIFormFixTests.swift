@@ -30,6 +30,38 @@ private func frameIn(_ h: NSView, _ v: NSView) -> CGRect { h.convert(v.bounds, f
 @MainActor
 private func fields(_ h: NSView) -> [NSTextField] { allViews(h).compactMap { $0 as? NSTextField }.filter { !($0 is NSSecureTextField) && $0.isEditable } }
 
+/// Sibyl's `settingsNote()`: a centred, secondary, full-width description.
+extension View {
+    fileprivate func _sibylNote() -> some View {
+        font(.callout).foregroundStyle(Color.secondary).frame(maxWidth: .infinity, alignment: .center).multilineTextAlignment(.center)
+    }
+}
+/// A grouped form's scroll document (flipped: y grows downward).
+@MainActor
+private func formDocument(_ h: NSView) -> NSView? { allViews(h).compactMap { $0 as? NSScrollView }.first?.documentView }
+@MainActor
+private func docFrame(_ doc: NSView, _ v: NSView) -> CGRect { doc.convert(v.bounds, from: v) }
+/// The grouped cards (their rounded backgrounds) in document coordinates: shape views wider
+/// and taller than a hairline.
+@MainActor
+private func cards(_ doc: NSView) -> [CGRect] {
+    var seen: [CGRect] = []
+    for v in allViews(doc) where v is _ShapeDrawingView {
+        let f = docFrame(doc, v)
+        if f.height > 4, f.width > 100, !seen.contains(where: { $0.equalTo(f) }) { seen.append(f) }
+    }
+    return seen
+}
+/// The hairline separators (dividers) in document coordinates.
+@MainActor
+private func hairlines(_ doc: NSView) -> [CGRect] {
+    allViews(doc).filter { $0 is _ShapeDrawingView }.map { docFrame(doc, $0) }.filter { $0.height <= 1.5 && $0.width > 50 }
+}
+@MainActor
+private func card(containing r: CGRect, in doc: NSView) -> CGRect? {
+    cards(doc).filter { $0.insetBy(dx: -0.5, dy: -0.5).contains(r) }.min { $0.height < $1.height }
+}
+
 private func render(_ image: NSImage) -> CGImage {
     let ctx = CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
                         space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -273,6 +305,220 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(color("0.5 s"), color("Cooldown"), "the control row keeps the primary colour")
             XCTAssertNotNil(allViews(h).first { $0 is NSSlider })
             w.close()
+        }
+    }
+
+    // MARK: Grouped form layout (the PC's Settings screenshots against macOS's)
+
+    /// Every footer shape Sibyl uses lands under its card: a Text after one Text row with no
+    /// header, a footer of a VStack, a Label footer, and after a header and an optional row.
+    /// A description written as a row (Audio ▸ Reliability, the License pane's "not active"
+    /// section) is a row on macOS too, inside the card.
+    func testGroupedFootersSitBelowTheirCards() {
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                var working = false
+                var body: some View {
+                    Form {
+                        Section { Text("Only row") } footer: { Text("Footer one").font(.caption) }
+                        Section {
+                            LabeledContent("Status") { Text("Not enforced") }
+                            if working { LabeledContent("") { Text("Contacting") } }
+                        } header: { Text("License") } footer: { Text("Footer two")._sibylNote() }
+                        Section("Reliability") {
+                            LabeledContent("Dropped frames", value: "0")
+                            Text("Row note")._sibylNote()
+                        }
+                        Section { Toggle("Add to this show", isOn: .constant(false)) } footer: {
+                            VStack(spacing: 4) { Text("Footer three"); Text("Footer four") }._sibylNote()
+                        }
+                        Section { Button("Start Free Trial") {} } footer: { Label("Footer five", systemImage: "info.circle")._sibylNote() }
+                    }
+                    .formStyle(.grouped)
+                }
+            }
+            let (w, h) = host(Probe(), width: 460, height: 700)
+            // From the first pass the sections are cards of their own: no outer card holds
+            // them (and their footers) while the sections' preference is on its way.
+            // The form finds its sections among its rows without waiting for them to render
+            // (inside a switch too, as the License pane's are).
+            @ViewBuilder func licenseRows(_ state: Int) -> some View {
+                Section { Text("Status") } header: { Text("License") } footer: { Text("Footer") }
+                switch state {
+                case 0: Section { Text("Not active") }
+                default: Section { Button("Activate") {} } footer: { Text("Trial") }
+                }
+            }
+            XCTAssertEqual(_formSectionRows(_ViewBox(licenseRows(0))).filter { $0.value is any _FormSectionMarker }.count, 2)
+            XCTAssertFalse(_formSectionRows(_ViewBox(Group { Text("Name"); Toggle("On", isOn: .constant(true)) })).contains { $0.value is any _FormSectionMarker })
+            if let first = formDocument(h) {
+                let c = cards(first)
+                XCTAssertFalse(c.contains { a in c.contains { b in !a.equalTo(b) && a.contains(b) } }, "no card holds another on the first pass: \(c)")
+            } else { XCTFail("no scroll document on the first pass") }
+            h.layoutSubtreeIfNeeded()
+            guard let doc = formDocument(h) else { return XCTFail("no scroll document") }
+            @MainActor func frame(_ s: String) -> CGRect? { textView(doc, s).map { docFrame(doc, $0) } }
+            let pairs: [(row: String, footer: String)] = [("Only row", "Footer one"), ("Status", "Footer two"), ("Add to this show", "Footer three"),
+                                                          ("Add to this show", "Footer four"), ("Start Free Trial", "Footer five")]
+            for (row, footer) in pairs {
+                let rowView: NSView? = textView(doc, row) ?? allViews(doc).compactMap { $0 as? NSButton }.first { $0.title == row }
+                guard let rowView, let f = frame(footer), let c = card(containing: docFrame(doc, rowView), in: doc) else { XCTFail("\(row)/\(footer) missing"); continue }
+                XCTAssertGreaterThanOrEqual(f.minY, c.maxY - 0.5, "\(footer) \(f) is below the card \(c) of \(row)")
+                XCTAssertFalse(cards(doc).contains { $0.insetBy(dx: 1, dy: 1).intersects(f) }, "\(footer) is inside no card")
+                XCTAssertEqual(f.midX, c.midX, accuracy: 30, "\(footer) is centred under the card")
+            }
+            guard let note = frame("Row note"), let reliability = frame("Dropped frames"), let c = card(containing: reliability, in: doc) else { return XCTFail("Reliability missing") }
+            XCTAssertTrue(c.contains(note), "a description written as a row stays inside its card, as on macOS")
+            w.close()
+        }
+    }
+
+    /// A grouped form of bare rows (Sibyl's Destinations editor) is one card with a hairline
+    /// between each pair of rows.
+    func testBareRowsGroupedFormHasSeparatorsBetweenRows() {
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                @State var name = "Lights"
+                @State var host = "10.0.0.2"
+                @State var port = 9000
+                @State var transport = "UDP"
+                @State var enabled = true
+                var body: some View {
+                    Form {
+                        TextField("Name", text: $name)
+                        TextField("Host", text: $host)
+                        TextField("Port", value: $port, format: .number)
+                        Picker("Transport", selection: $transport) { Text("UDP").tag("UDP"); Text("TCP").tag("TCP") }
+                        Toggle("Enabled", isOn: $enabled)
+                    }
+                    .formStyle(.grouped)
+                    .frame(height: 260)
+                }
+            }
+            let (w, h) = host(Probe(), width: 460, height: 300)
+            guard let doc = formDocument(h) else { return XCTFail("no scroll document") }
+            let lines = hairlines(doc)
+            XCTAssertEqual(lines.count, 4, "n-1 separators between 5 rows: \(lines)")
+            XCTAssertEqual(cards(doc).count, 1, "one card")
+            let labels = ["Name", "Host", "Port", "Transport"].compactMap { textView(doc, $0).map { docFrame(doc, $0) } }
+            XCTAssertEqual(labels.count, 4)
+            let sortedLines = lines.sorted { $0.minY < $1.minY }
+            for (i, l) in labels.enumerated() {
+                XCTAssertLessThanOrEqual(l.maxY, sortedLines[i].minY + 0.5, "row \(i) is above separator \(i)")
+                if i > 0 { XCTAssertGreaterThanOrEqual(l.minY, sortedLines[i - 1].maxY - 0.5, "row \(i) is below separator \(i - 1)") }
+            }
+            w.close()
+        }
+    }
+
+    /// A header built from a Label and a Link (Sibyl's integrations) lines up with a Text
+    /// header; a symbol without artwork does not push the title in by an empty icon slot;
+    /// the Link keeps its caption font.
+    func testNonTextSectionHeaderAlignsWithATextHeader() {
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                var body: some View {
+                    Form {
+                        Section { Text("Row a") } header: { Text("Plain") }
+                        Section { Text("Row b") } header: {
+                            HStack {
+                                Label("Vor", systemImage: "no.such.symbol.anywhere")
+                                Text("Added").font(.caption)
+                                Spacer()
+                                Link("Website", destination: URL(string: "https://example.com")!).font(.caption)
+                            }
+                        }
+                        Section { Text("Row c") } header: { Label("Globe", systemImage: "globe") }
+                    }
+                    .formStyle(.grouped)
+                }
+            }
+            let (w, h) = host(Probe(), width: 460, height: 500)
+            guard let doc = formDocument(h), let plain = textView(doc, "Plain"), let vor = textView(doc, "Vor"), let globe = textView(doc, "Globe") else { return XCTFail("headers missing") }
+            XCTAssertEqual(docFrame(doc, vor).minX, docFrame(doc, plain).minX, accuracy: 1, "an icon-less Label header starts where a Text header does")
+            let icon = allViews(doc).compactMap { $0 as? NSImageView }.filter { $0.image != nil }.map { docFrame(doc, $0) }.first { abs($0.midY - docFrame(doc, globe).midY) < 6 }
+            XCTAssertNotNil(icon, "a drawn symbol keeps its slot")
+            if let icon { XCTAssertEqual(icon.minX, docFrame(doc, plain).minX, accuracy: 1, "a Label header's icon starts where a Text header does") }
+            let font = plain.storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            let vorFont = vor.storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            XCTAssertEqual(vorFont?.pointSize, font?.pointSize, "the Label header takes the headline font")
+            guard let link = allViews(doc).compactMap({ $0 as? NSButton }).first(where: { $0.title == "Website" }) else { return XCTFail("no link") }
+            XCTAssertEqual(link.font?.pointSize ?? 0, Font.pointSize(.caption), accuracy: 0.1, "the link keeps its caption font")
+            XCTAssertGreaterThan(docFrame(doc, link).maxX, 380, "the link sits at the trailing edge")
+            w.close()
+        }
+    }
+
+    /// A radio-group or inline picker in a grouped form: the label at the top-left of the
+    /// row, the options under it, leading-aligned with it (the Look & Feel Motion picker).
+    func testStackedPickerRowListsOptionsUnderItsLabel() {
+        MainActor.assumeIsolated {
+            for style in [_PickerStyleKind.inline, .radioGroup] {
+                struct Probe: View {
+                    let style: _PickerStyleKind
+                    @State var motion = 1
+                    var body: some View {
+                        Form {
+                            Section {
+                                if style == .inline {
+                                    Picker("Motion", selection: $motion) { Text("Bouncy").tag(1); Text("Snappy").tag(2); Text("Smooth").tag(3) }.pickerStyle(.inline)
+                                } else {
+                                    Picker("Motion", selection: $motion) { Text("Bouncy").tag(1); Text("Snappy").tag(2); Text("Smooth").tag(3) }.pickerStyle(.radioGroup)
+                                }
+                            } header: { Text("Motion header") }
+                        }
+                        .formStyle(.grouped)
+                    }
+                }
+                let (w, h) = host(Probe(style: style), width: 460, height: 400)
+                guard let doc = formDocument(h), let label = textView(doc, "Motion").map({ docFrame(doc, $0) }) else { XCTFail("\(style): no label"); continue }
+                let options = ["Bouncy", "Snappy", "Smooth"].compactMap { t in allViews(doc).compactMap { $0 as? NSButton }.first { $0.title == t } }.map { docFrame(doc, $0) }
+                XCTAssertEqual(options.count, 3, "\(style): three options")
+                for (i, o) in options.enumerated() {
+                    XCTAssertGreaterThanOrEqual(o.minY, label.maxY - 0.5, "\(style): option \(i) \(o) is under the label \(label)")
+                    XCTAssertEqual(o.minX, label.minX, accuracy: 2, "\(style): option \(i) leads with the label")
+                    if i > 0 { XCTAssertGreaterThanOrEqual(o.minY, options[i - 1].maxY - 0.5, "\(style): one option per line") }
+                }
+                w.close()
+            }
+        }
+    }
+
+    /// A pane ending in a long footer, in a short window: the scroll document is tall enough
+    /// for the footer as wrapped at the width it is placed at.
+    func testLongFinalFooterIsInsideTheScrollDocument() {
+        MainActor.assumeIsolated {
+            let long = String(repeating: "Applies to view changes, list updates, the channel list and the status bar. ", count: 6)
+            struct Probe: View {
+                let long: String
+                var body: some View {
+                    Form {
+                        Section {
+                            Toggle("Auto-scroll to newest", isOn: .constant(true))
+                            Toggle("Newest line first", isOn: .constant(false))
+                            Toggle("Show timecode", isOn: .constant(true))
+                        } header: { Text("Reading") } footer: { Text("With newest first, the most recent line sits at the top.")._sibylNote() }
+                        Section {
+                            Toggle("Reduce", isOn: .constant(false))
+                        } header: { Text("Motion") } footer: { Text(long)._sibylNote() }
+                    }
+                    .formStyle(.grouped)
+                }
+            }
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 300), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            let hosting = NSHostingView(rootView: Probe(long: long))
+            window.contentView = hosting
+            hosting.layoutSubtreeIfNeeded()
+            hosting.layoutSubtreeIfNeeded()
+            guard let scroll = allViews(hosting).compactMap({ $0 as? NSScrollView }).first, let doc = scroll.documentView,
+                  let footer = textView(doc, long) else { return XCTFail("no scroll document or footer") }
+            let f = docFrame(doc, footer)
+            XCTAssertGreaterThan(doc.frame.height, scroll.contentSize.height, "the pane scrolls")
+            XCTAssertGreaterThan(f.height, 40, "the footer wraps onto several lines: \(f)")
+            XCTAssertLessThanOrEqual(f.maxY, doc.frame.height + 0.5, "the wrapped footer \(f) is inside the document \(doc.frame)")
+            XCTAssertLessThanOrEqual(f.maxX, doc.frame.width + 0.5, "the footer is wrapped at the document's width")
+            XCTAssertLessThanOrEqual(footer.size(for: footer.bounds.width).height, footer.bounds.height + 0.5, "the footer's frame holds its text as wrapped at the frame's width")
+            window.close()
         }
     }
 

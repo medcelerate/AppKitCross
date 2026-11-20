@@ -330,18 +330,22 @@ import CoreText
             if _hasHorizontalRuler { _horizontalRuler?.needsDisplay = true }
             if _hasVerticalRuler { _verticalRuler?.needsDisplay = true }
         }
+        // The scrollers repaint only when their knob moved or resized (each layout pass
+        // reflects the clip view, usually with nothing changed).
         if let v = _verticalScroller {
             let range = max(0, doc.height - b.height)
-            v.knobProportion = doc.height > 0 ? min(1, b.height / doc.height) : 1
+            let proportion = doc.height > 0 ? min(1, b.height / doc.height) : 1
+            if v.knobProportion != proportion { v.knobProportion = proportion }
             let fromTop = cView.isFlipped ? b.minY - doc.minY : doc.maxY - b.maxY
-            v.doubleValue = range > 0 ? Double(min(max(fromTop / range, 0), 1)) : 0
-            v.needsDisplay = true
+            let value = range > 0 ? Double(min(max(fromTop / range, 0), 1)) : 0
+            if v.doubleValue != value { v.doubleValue = value }
         }
         if let h = _horizontalScroller {
             let range = max(0, doc.width - b.width)
-            h.knobProportion = doc.width > 0 ? min(1, b.width / doc.width) : 1
-            h.doubleValue = range > 0 ? Double(min(max((b.minX - doc.minX) / range, 0), 1)) : 0
-            h.needsDisplay = true
+            let proportion = doc.width > 0 ? min(1, b.width / doc.width) : 1
+            if h.knobProportion != proportion { h.knobProportion = proportion }
+            let value = range > 0 ? Double(min(max((b.minX - doc.minX) / range, 0), 1)) : 0
+            if h.doubleValue != value { h.doubleValue = value }
         }
         if _autohidesScrollers && !_tiling {
             let w = NSScroller.scrollerWidth(for: .regular, scrollerStyle: _scrollerStyle)
@@ -483,20 +487,24 @@ import CoreText
             content.size.height = max(0, content.size.height - w)
             if !isFlipped { content.origin.y += w }
         }
+        // Frames and visibility are set only when they change (the setters mark what they
+        // move), so a tile that changes nothing repaints nothing.
         if let v = _verticalScroller {
-            v.isHidden = !showV
-            v.frame = NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
+            if v.isHidden != !showV { v.isHidden = !showV }
+            let f = NSRect(x: content.maxX, y: content.minY, width: w, height: content.height)
+            if v.frame != f { v.frame = f }
         }
         if let h = _horizontalScroller {
-            h.isHidden = !showH
-            h.frame = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
+            if h.isHidden != !showH { h.isHidden = !showH }
+            let f = NSRect(x: content.minX, y: isFlipped ? content.maxY : bounds.minY + inset, width: content.width, height: w)
+            if h.frame != f { h.frame = f }
         }
         if _contentView.frame != content {
             _contentView.frame = content
             _contentView.documentView?._clipViewDidResize()
+            needsDisplay = true
         }
         reflectScrolledClipView(_contentView)
-        needsDisplay = true
     }
     private var _headerView: NSTableHeaderView?
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscrollview/usespredominantaxisscrolling

@@ -61,7 +61,14 @@ final class _GeometryReaderPrimitive: _Primitive {
     override func update(from other: _Primitive) {
         guard let o = other as? _GeometryReaderPrimitive else { return }
         make = o.make
-        if let p = lastProxy { children = [make(GeometryProxy(size: p.size, safeAreaInsets: EdgeInsets(), globalFrame: p.frame))] }
+        if let p = lastProxy { children = [build(GeometryProxy(size: p.size, safeAreaInsets: EdgeInsets(), globalFrame: p.frame))] }
+    }
+    /// The content closure runs at layout time, outside the body evaluation the runtime
+    /// tracks: it is tracked here, so an `@Observable` property it reads (a status bar
+    /// reading the model's latest notice) re-renders the reader when it changes.
+    private func build(_ proxy: GeometryProxy) -> _AnyViewBox {
+        if let node { return _trackingObservation(node) { make(proxy) } }
+        return make(proxy)
     }
     /// A reader takes whatever it is offered; unspecified dimensions use 10 points.
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
@@ -71,7 +78,7 @@ final class _GeometryReaderPrimitive: _Primitive {
         if lastProxy?.size != rect.size || lastProxy?.frame != rect {
             lastProxy = (rect.size, rect)
             // The content depends on the size: rebuild it and let the root settle the pass.
-            children = [make(GeometryProxy(size: rect.size, safeAreaInsets: EdgeInsets(), globalFrame: rect))]
+            children = [build(GeometryProxy(size: rect.size, safeAreaInsets: EdgeInsets(), globalFrame: rect))]
             node.setNeedsUpdate()
         }
         // Content sits at the top-leading corner with its own size.

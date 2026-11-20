@@ -70,6 +70,9 @@ public final class _ViewNode {
     public internal(set) var frame = CGRect.zero
     var needsUpdate = true
     var isAttached = false
+    /// The primitive was made, updated or attached since the last `didLayout`: a primitive
+    /// that only redraws there (`_RedrawsWhenChanged`) is told again.
+    private var primitiveChanged = true
     private var cells: [Int: _StorageCell] = [:]
     private var retained: [Int: AnyObject] = [:]
     /// Set by an enclosing stack before measuring its items (Spacer reads it).
@@ -102,18 +105,20 @@ public final class _ViewNode {
     }
     /// The view's dimensions at `size`, with the baselines of the first and last text in it.
     func dimensions(for size: CGSize) -> ViewDimensions {
-        var first: CGFloat? = nil, last: CGFloat? = nil
-        func visit(_ n: _ViewNode) {
-            if let t = n.primitive as? _TextPrimitive {
-                let b = t.baselines(for: size)
-                if first == nil { first = b.first }
-                last = size.height - (t.lastMeasuredHeight - b.last)
-                return
+        ViewDimensions(width: size.width, height: size.height) { @MainActor [self] in
+            var first: CGFloat? = nil, last: CGFloat? = nil
+            @MainActor func visit(_ n: _ViewNode) {
+                if let t = n.primitive as? _TextPrimitive {
+                    let b = t.baselines(for: size)
+                    if first == nil { first = b.first }
+                    last = size.height - (t.lastMeasuredHeight - b.last)
+                    return
+                }
+                for c in n.children { visit(c) }
             }
-            for c in n.children { visit(c) }
+            visit(self)
+            return (first, last)
         }
-        visit(self)
-        return ViewDimensions(width: size.width, height: size.height, firstBaseline: first, lastBaseline: last)
     }
     /// Children in drawing order: by z-index, stable.
     var childrenByZIndex: [_ViewNode] {
@@ -258,6 +263,7 @@ public final class _ViewNode {
                     primitive = fresh
                     fresh.attach(to: self)
                 }
+                primitiveChanged = true
             }
             needsUpdate = false
             var childEnv = env
@@ -304,7 +310,11 @@ public final class _ViewNode {
             // not re-made): the child re-runs only if it is stale itself, so its measurements
             // stay valid.
             let unchanged = !force && match != nil && (b as AnyObject) === (node.box as AnyObject)
-            node.update(box: unchanged ? nil : b, environment: env, force: force || match == nil)
+            // A forced pass (the parent re-ran) hands a kept leaf an equal value under an
+            // equal environment (the 40 rows of a list whose body re-ran for an appended
+            // line): it keeps its primitive, its measurements and its pixels.
+            let equal = force && match != nil && !node.needsUpdate && _sameLeafValue(node.box, b) && _equalEnvironment(node.environment, env)
+            node.update(box: unchanged || equal ? nil : b, environment: env, force: (force && !equal) || match == nil)
             next.append(node)
         }
         for o in old where o !== _placeholder {
@@ -393,7 +403,11 @@ public final class _ViewNode {
         root?.scheduleUpdate()
     }
 
+    /// Sees every measurement the memo did not answer (tests count them per primitive).
+    nonisolated(unsafe) static var _measureObserver: ((_ViewNode, ProposedViewSize) -> Void)?
+
     private func computeSizeThatFits(_ proposal: ProposedViewSize) -> CGSize {
+        _ViewNode._measureObserver?(self, proposal)
         if let p = primitive, !p.isLayoutTransparent {
             let s = p.sizeThatFits(proposal, node: self)
             if NSView._traceInvalidation, !s.width.isFinite || !s.height.isFinite {
@@ -413,6 +427,7 @@ public final class _ViewNode {
     }
 
     public func place(in rect: CGRect) {
+        let moved = rect != frame
         if hasLaidOut, primitive?.nsView != nil, rect != frame, let anim = effectiveAnimation {
             let from = presentedFrame
             animate(.frame, from: [from.minX, from.minY, from.width, from.height], to: [rect.minX, rect.minY, rect.width, rect.height], with: anim)
@@ -432,7 +447,13 @@ public final class _ViewNode {
             }
             for c in children where !leaves.contains(where: { $0 === c }) { c.frame = rect }
         }
-        primitive?.didLayout(node: self)
+        if let p = primitive {
+            // A primitive that only invalidates its view there is told when something changed;
+            // an unchanged leaf in an unchanged place keeps its pixels (a meter tick used to
+            // redraw every text in the window).
+            if primitiveChanged || moved || !(p is _RedrawsWhenChanged) { p.didLayout(node: self) }
+            primitiveChanged = false
+        }
     }
 
     /// All backing views in this subtree in drawing order, stopping at nested backing views.
@@ -446,13 +467,30 @@ public final class _ViewNode {
     func syncBackingViews(in container: NSView, containerFrame: CGRect) {
         var views: [NSView] = []
         collectBackingViews(into: &views)
-        let current = container.subviews.filter { $0 is _SwiftUIBackedView || views.contains($0) }
+        let wanted = Set(views.map(ObjectIdentifier.init))
+        let current = container.subviews.filter { $0 is _SwiftUIBackedView || wanted.contains(ObjectIdentifier($0)) }
         if current.map({ ObjectIdentifier($0) }) != views.map({ ObjectIdentifier($0) }) {
             if NSView._traceInvalidation {
                 NSView._trace("syncBackingViews reorders \(type(of: container)): have \(current.map { "\(type(of: $0))" }) want \(views.map { "\(type(of: $0))" })")
             }
-            for v in current where !views.contains(v) { v.removeFromSuperview() }
-            for v in views { v.removeFromSuperview(); container.addSubview(v) }
+            for v in current where !wanted.contains(ObjectIdentifier(v)) { v.removeFromSuperview() }
+            let kept = current.filter { wanted.contains(ObjectIdentifier($0)) }
+            let keptIDs = Set(kept.map(ObjectIdentifier.init))
+            if kept.map(ObjectIdentifier.init) == views.filter({ keptIDs.contains(ObjectIdentifier($0)) }).map(ObjectIdentifier.init) {
+                // The views that stay are in order: only the new ones go in, next to their
+                // neighbours (an appended row no longer re-adds, and so repaints, every row).
+                var previous: NSView? = nil
+                for v in views {
+                    if !keptIDs.contains(ObjectIdentifier(v)) {
+                        if let p = previous { container.addSubview(v, positioned: .above, relativeTo: p) }
+                        else if let first = kept.first { container.addSubview(v, positioned: .below, relativeTo: first) }
+                        else { container.addSubview(v) }
+                    }
+                    previous = v
+                }
+            } else {
+                for v in views { v.removeFromSuperview(); container.addSubview(v) }
+            }
         }
         syncFrames(containerFrame: containerFrame)
     }
@@ -479,6 +517,37 @@ func _sameEnvironment(_ a: EnvironmentValues, _ b: EnvironmentValues) -> Bool {
     a.storage.keys == b.storage.keys && a._objects.count == b._objects.count && a._generation == b._generation
 }
 
+/// A leaf value a forced pass may keep: an equal `Text` (its value is all it draws).
+@MainActor func _sameLeafValue(_ a: _AnyViewBox, _ b: _AnyViewBox) -> Bool {
+    guard a.viewType == Text.self, b.viewType == Text.self, let x = a.value as? Text, let y = b.value as? Text else { return false }
+    return x == y
+}
+
+/// The environments hold the same values: equal where the values are `Equatable`, the
+/// same object where they are objects; any other value (a closure, an existential style)
+/// counts as changed.
+func _equalEnvironment(_ a: EnvironmentValues, _ b: EnvironmentValues) -> Bool {
+    guard a.storage.count == b.storage.count, a._objects.count == b._objects.count else { return false }
+    for (k, o) in a._objects { guard let p = b._objects[k], p === o else { return false } }
+    for (k, v) in a.storage {
+        guard let w = b.storage[k], _anyValuesEqual(v, w) else { return false }
+    }
+    return true
+}
+
+private func _anyValuesEqual(_ a: Any, _ b: Any) -> Bool {
+    if let e = a as? any Equatable { return e._isEqual(toAny: b) }
+    if type(of: a) is AnyClass, type(of: b) is AnyClass { return (a as AnyObject) === (b as AnyObject) }
+    return false
+}
+
+extension Equatable {
+    fileprivate func _isEqual(toAny other: Any) -> Bool {
+        guard let o = other as? Self else { return false }
+        return self == o
+    }
+}
+
 extension EnvironmentValues {
     /// Changes bump a generation so nodes notice new values without comparing every entry.
     var _generation: Int { storage.count &* 31 &+ _objects.count }
@@ -502,6 +571,16 @@ extension _ControllerRepresentablePrimitive: _MeasuresBackingViewState { var mea
 extension _NSTablePrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
 extension _TextFieldPrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { axis == .vertical } }
 extension _DatePickerPrimitive: _MeasuresBackingViewState { var measuresBackingViewState: Bool { true } }
+
+/// A primitive whose `didLayout` only invalidates its view: it is called when the node's
+/// rect or primitive changed, not on every pass (a frame change marks the view too).
+@MainActor
+protocol _RedrawsWhenChanged: AnyObject {}
+extension _TextPrimitive: _RedrawsWhenChanged {}
+extension _ShapeViewPrimitive: _RedrawsWhenChanged {}
+extension _DecorationPrimitive: _RedrawsWhenChanged {}
+extension _GradientPrimitive: _RedrawsWhenChanged {}
+extension _MaskPrimitive: _RedrawsWhenChanged {}
 
 /// Marker for AppKit views the runtime created (so it can reorder them safely).
 @MainActor
@@ -788,7 +867,8 @@ public final class _ViewRoot: NSHostingRoot {
         updateScheduled = true
         host.setNeedsLayout()
         host.rootDidScheduleUpdate()
-        host.setNeedsDisplay(in: nil)
+        // No repaint of the whole host: layout marks what it moved or resized, and each
+        // primitive marks its own view when its content changes.
     }
 
     /// Re-evaluates stale bodies and reconciles the tree.

@@ -157,6 +157,10 @@ struct _FormRow: View {
     let label: AnyView
     let content: AnyView
     var alignment: VerticalAlignment = .center
+    /// A control that lists its options (a radio-group or inline picker): in a grouped form
+    /// the label sits at the top of the row and the options under it, leading-aligned and
+    /// across the full width, as macOS's Settings forms show them.
+    var stacked = false
     @Environment(\._formContext) private var context
     @Environment(\._formLabelWidth) private var labelWidth
     var body: some View {
@@ -165,6 +169,13 @@ struct _FormRow: View {
                 _FormLabelWidthReporter(content: label).frame(width: labelWidth, alignment: .trailing)
                 content.environment(\._formContext, nil)
             }
+        } else if stacked {
+            VStack(alignment: .leading, spacing: 4) {
+                label
+                content.environment(\._formContext, nil)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             // The label and content are laid out first (a flexible control takes the rest
             // of the row, a fixed one leaves it to the spacer and sits at the trailing edge).
