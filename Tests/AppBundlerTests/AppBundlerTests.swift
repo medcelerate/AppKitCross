@@ -236,6 +236,74 @@ final class BundlerTests: XCTestCase {
         }
     }
 
+    /// Sibyl's layout: the executable target is `Sources/<Name>` and the app's plist and
+    /// resources live in `<package root>/Resources/`. The root is not a candidate, but its
+    /// `Resources/Info.plist` (an application's) is the app's: the folder gets that plist,
+    /// that Resources and the icons beside the plist, and the zip carries its version. A bare
+    /// root `Info.plist` is still never the app's, and `<Name>-Info.plist` at the root is.
+    func testPackageRootResourcesInfoPlistForAnExecutableTarget() throws {
+        let fm = FileManager.default
+        let pkg = temp.appendingPathComponent("Sibyl", isDirectory: true)
+        let target = pkg.appendingPathComponent("Sources/Sibyl", isDirectory: true)
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("print(1)\n".utf8).write(to: target.appendingPathComponent("main.swift"))
+        func write(_ plist: [String: Any], to url: URL) throws {
+            try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: url)
+        }
+        // Only a bare root Info.plist (an application's, even): refused.
+        try write(["CFBundleIdentifier": "com.example.stray", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "9.9"],
+                  to: pkg.appendingPathComponent("Info.plist"))
+        try Bundler.placeholderPNG.write(to: pkg.appendingPathComponent("RootBadge.png"))
+        let candidates = [target, pkg.appendingPathComponent("Sources", isDirectory: true)]
+        XCTAssertNil(Bundler.appRoot(in: candidates, executableName: "Sibyl", packageRoot: pkg))
+
+        let build = temp.appendingPathComponent("build", isDirectory: true)
+        try fm.createDirectory(at: build, withIntermediateDirectories: true)
+        let exe = build.appendingPathComponent("Sibyl")
+        try Data("not a binary".utf8).write(to: exe)
+        func bundle(_ outName: String) throws -> (URL, BundleReport) {
+            let out = temp.appendingPathComponent(outName, isDirectory: true)
+            let options = BundleOptions(executable: exe, name: "Sibyl", packageDirectory: pkg, appRootCandidates: candidates, targets: ["Sibyl"],
+                                        outputDirectory: out, zip: true, platform: .macos, architecture: "arm64")
+            let report = try Bundler(options: options, log: { _ in }).run()
+            return (out.appendingPathComponent("Sibyl", isDirectory: true), report)
+        }
+        var (folder, report) = try bundle("out-bare")
+        XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("Info.plist").path))
+        XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("RootBadge.png").path))
+        XCTAssertEqual(report.archive?.lastPathComponent, "Sibyl-0.0.0-macos-arm64.zip")
+
+        // The app's plist in Resources/, with its icons and other resources beside it.
+        let resources = pkg.appendingPathComponent("Resources", isDirectory: true)
+        try fm.createDirectory(at: resources, withIntermediateDirectories: true)
+        try write(["CFBundleIdentifier": "tech.clockworks.Sibyl", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.4.2", "CFBundleName": "Sibyl"],
+                  to: resources.appendingPathComponent("Info.plist"))
+        try Data("icns".utf8).write(to: resources.appendingPathComponent("Sibyl.icns"))
+        try Bundler.placeholderPNG.write(to: resources.appendingPathComponent("ClockworksMark.png"))
+        XCTAssertEqual(Bundler.appRoot(in: candidates, executableName: "Sibyl", packageRoot: pkg)?.standardizedFileURL.path, pkg.standardizedFileURL.path)
+        (folder, report) = try bundle("out-resources")
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: folder.appendingPathComponent("Info.plist")), format: nil) as? [String: Any])
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "tech.clockworks.Sibyl")
+        for item in ["Resources/Info.plist", "Resources/Sibyl.icns", "Resources/ClockworksMark.png", "ClockworksMark.png"] {
+            XCTAssertTrue(fm.fileExists(atPath: folder.appendingPathComponent(item).path), item)
+        }
+        XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("RootBadge.png").path))
+        XCTAssertEqual(report.archive?.lastPathComponent, "Sibyl-1.4.2-macos-arm64.zip")
+
+        // `<Name>-Info.plist` at the root, with no plist in Resources/: also the app's.
+        try fm.removeItem(at: resources.appendingPathComponent("Info.plist"))
+        try write(["CFBundleIdentifier": "tech.clockworks.Sibyl", "CFBundleShortVersionString": "1.5"], to: pkg.appendingPathComponent("Sibyl-Info.plist"))
+        (folder, report) = try bundle("out-named")
+        XCTAssertTrue(fm.fileExists(atPath: folder.appendingPathComponent("Info.plist").path))
+        XCTAssertTrue(fm.fileExists(atPath: folder.appendingPathComponent("Resources/Sibyl.icns").path))
+        XCTAssertEqual(report.archive?.lastPathComponent, "Sibyl-1.5-macos-arm64.zip")
+
+        // A resource bundle's plist in Resources/ is not the app's.
+        try fm.removeItem(at: pkg.appendingPathComponent("Sibyl-Info.plist"))
+        try write(["CFBundleIdentifier": "Sibyl.Sibyl.resources", "CFBundlePackageType": "BNDL"], to: resources.appendingPathComponent("Info.plist"))
+        XCTAssertNil(Bundler.appRoot(in: candidates, executableName: "Sibyl", packageRoot: pkg))
+    }
+
     /// Windows: the executable's PDB travels with it.
     func testProgramDatabaseIsCopiedOnWindows() throws {
         let build = temp.appendingPathComponent("build", isDirectory: true)

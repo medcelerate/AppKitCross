@@ -126,7 +126,10 @@ final class SwiftUISidebarFidelityTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(list.sidebar)
             XCTAssertEqual(list.selectedRows.count, 1)
             let row = list.rowFrames[list.selectedRows.first!]
-            XCTAssertEqual(row.height, 28, accuracy: 1, "a sidebar row is 28 points tall")
+            // Windows' fonts (Segoe UI through DirectWrite) run taller than macOS's: the row
+            // is at least macOS's 28 points and no taller than its label plus the row insets.
+            XCTAssertGreaterThanOrEqual(row.height, 28, "a sidebar row is at least 28 points tall")
+            XCTAssertLessThanOrEqual(row.height, max(28, t.size(for: nil).height + 14), "and no taller than its label plus the row insets")
             XCTAssertEqual(_ListView.sidebarSelectionRect(row).minX, 10)
             XCTAssertTrue(w.isKeyWindow)
             XCTAssertTrue(list.emphasized)

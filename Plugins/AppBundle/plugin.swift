@@ -68,7 +68,9 @@ struct AppBundlePlugin: CommandPlugin {
             // Info.plist / Resources / icons: the main target's directory and its parents,
             // nearest first, stopping below the package root. The root is shared by every
             // product (and Windows SwiftPM has left resource-bundle plists there), so it is
-            // searched only for a target that lives there; `--info-plist` names any other.
+            // searched as a candidate only for a target that lives there; for any other the
+            // bundler falls back to it only for the app's own `Resources/Info.plist`,
+            // `Resources/<Name>-Info.plist` or `<Name>-Info.plist` (`--info-plist` names others).
             if let main = ((product as? ExecutableProduct)?.mainTarget ?? product.targets.first) as? SwiftSourceModuleTarget {
                 var dir = main.directoryURL.standardizedFileURL
                 let root = context.package.directoryURL.standardizedFileURL

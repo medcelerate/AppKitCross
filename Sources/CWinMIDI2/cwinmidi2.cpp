@@ -1,41 +1,32 @@
 // Windows MIDI Services output for the CoreMIDI module (ADR-0050). See cwinmidi2.h.
 //
-// Two layers. The availability check (`checkPlatform`) needs nothing beyond the Windows SDK:
-// it declares the one statics interface it calls, IMidiApiStatics, by hand with the IID
-// Microsoft publishes for it (the "no build-time reference" path of the detect-midi-services
-// sample), so even a build without the MIDI headers can say whether the PC has Windows MIDI
-// Services. Everything else (session, enumeration, watcher, connections, sending) goes
-// through a C++/WinRT projection, which exists only when the build machine generated it with
-// cppwinrt.exe from a .winmd and put it on the include path (ADR-0050, "Build PC setup").
-// Without one, or without C++ exceptions (C++/WinRT reports failures by throwing), the
-// projection layer compiles out and the check reports why.
+// Written against the raw WinRT ABI of `Windows.Devices.Midi2` (in box in Windows 11 25H2
+// and later once it ships there; until then Windows.Devices.Midi2.dll and .pri from the NuGet
+// package next to the executable), so it builds with the Windows SDK alone: no C++/WinRT
+// projection, no cppwinrt.exe, no exceptions. The interfaces, IIDs, enums and runtime class
+// names come from include/midi2abi.h, generated from the API's .winmd by
+// tools/midi2abi/midi2abi.py; the few Windows.Foundation shapes it does not generate
+// (IVectorView<T>, the TypedEventHandler delegates) are declared below. Every call checks its
+// HRESULT; failures come back as `false` with the method and HRESULT in the message.
 //
-// Which API. Two WinRT APIs carry the same session/endpoint/connection surface:
-//   1. `Windows.Devices.Midi2` (projection `winrt/Windows.Devices.Midi2.h`), the API
-//      Microsoft supports: in box in Windows 11 25H2 and later once it ships there, until
-//      then Windows.Devices.Midi2.dll and .pri from the NuGet package next to the executable.
-//      Preferred whenever its projection is present.
-//   2. `Microsoft.Windows.Devices.Midi2` (projection `winrt/Microsoft.Windows.Devices.Midi2.h`),
-//      the out-of-band preview App SDK (1.0.x release candidates) installed centrally by the
-//      "Windows MIDI Services SDK Runtime and Tools" installer. Microsoft has superseded it and
-//      is dropping it; it is used only when its projection is the one present, or with
-//      CWINMIDI2_USE_APP_SDK defined.
+// ABI conventions (see the header comment of midi2abi.h): an interface is a struct whose
+// first member is its vtable; a method's return value is its trailing out parameter; a result
+// typed `IInspectable *` is the default interface of its runtime class, so the code
+// QueryInterfaces it for the interface it calls. Objects are held by `Ref`, which releases.
 //
-// Activation. `resolveApi` is the one place a factory is found, tried in order and logged:
+// Activation. `resolveApi` is the one place the API is located, tried in order and logged:
 //   (a) RoGetActivationFactory on the class name: the system registration (System32 once
-//       the API is in Windows; for the App SDK, only if something registered or detoured it);
-//   (b) the app-local module beside the executable, through its DllGetActivationFactory;
-//   (c) the App SDK runtime, located as Microsoft's initializer does (registry key
+//       the API is in Windows);
+//   (b) the app-local Windows.Devices.Midi2.dll beside the executable, through its
+//       DllGetActivationFactory;
+//   (c) the superseded preview App SDK runtime (`Microsoft.Windows.Devices.Midi2`, a
+//       different namespace), located as Microsoft's initializer does (registry key
 //       HKLM\SOFTWARE\Microsoft\Windows MIDI Services\Desktop App SDK Runtime, value
-//       "Installed"; else the installer's default folder, "Windows MIDI Services\Desktop App
-//       SDK Runtime" under %ProgramFiles%), through its
-//       DllGetActivationFactory. Microsoft's own initializer instead CoCreates the runtime's
-//       MidiClientInitializer, which detours every Ro* activation function in the process;
-//       the shim does not install detours. Route (c) only serves the App SDK projection; for
-//       the in-box projection a runtime found there is reported, not used.
-// When (b) or (c) won, C++/WinRT's own activations (MidiSession::Create and the rest) are sent
-// through `resolveFactory` by setting C++/WinRT's `winrt_activation_handler` hook (unless
-// another component set it first), so they use the same module.
+//       "Installed"; else the installer's default folder): only reported, never used, so a PC
+//       that has only it says why Windows MIDI Services is not in use.
+// Every later activation (MidiSession, MidiClock, MidiEndpointDeviceInformation,
+// MidiEndpointDeviceWatcher) goes through `resolveFactory`: the system registration first,
+// then the module route (b) loaded.
 //
 // Every check appends to an attempt log, which `cwinmidi2_available` returns as its error and
 // `cwinmidi2_routes` returns always, so the CoreMIDI start-up line names every route tried.
@@ -44,7 +35,8 @@
 // multithreaded apartment, so no caller's apartment (the Win32 backend's main thread is an
 // STA) is ever touched; this is the pattern of cwas_toast.cpp. The WinRT objects are kept in
 // a heap block that is never freed, so static destruction at exit cannot release them after
-// COM is gone. The activation hook may be called on any thread C++/WinRT activates from.
+// COM is gone. Watcher events arrive on WinRT thread-pool threads; their handlers only set a
+// flag and call the change callback.
 #if defined(_WIN32)
 #include "cwinmidi2.h"
 
@@ -57,6 +49,8 @@
 #include <activation.h>
 #include <roapi.h>
 #include <winstring.h>
+#include <eventtoken.h>
+#include "midi2abi.h"
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
@@ -73,51 +67,6 @@
 #pragma comment(lib, "ole32")
 #pragma comment(lib, "advapi32")
 
-#if defined(__cpp_exceptions) || defined(_CPPUNWIND)
-#define CWINMIDI2_EXCEPTIONS 1
-#else
-#define CWINMIDI2_EXCEPTIONS 0
-#endif
-
-#if __has_include(<winrt/Windows.Devices.Midi2.h>) && __has_include(<winrt/Windows.Devices.Midi2.Enumeration.h>)
-#define CWINMIDI2_HAVE_INBOX_PROJECTION 1
-#else
-#define CWINMIDI2_HAVE_INBOX_PROJECTION 0
-#endif
-#if __has_include(<winrt/Microsoft.Windows.Devices.Midi2.h>)
-#define CWINMIDI2_HAVE_APPSDK_PROJECTION 1
-#else
-#define CWINMIDI2_HAVE_APPSDK_PROJECTION 0
-#endif
-
-// 0: no projection layer; 1: Windows.Devices.Midi2; 2: Microsoft.Windows.Devices.Midi2.
-#if CWINMIDI2_EXCEPTIONS && CWINMIDI2_HAVE_INBOX_PROJECTION && !defined(CWINMIDI2_USE_APP_SDK)
-#define CWINMIDI2_PROJECTION 1
-#elif CWINMIDI2_EXCEPTIONS && CWINMIDI2_HAVE_APPSDK_PROJECTION
-#define CWINMIDI2_PROJECTION 2
-#else
-#define CWINMIDI2_PROJECTION 0
-#endif
-
-#if CWINMIDI2_PROJECTION
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Foundation.Collections.h>
-// C++/WinRT's imports (RoGetActivationFactory, SysAllocString, ...) live in the umbrella.
-#pragma comment(lib, "windowsapp")
-#pragma comment(lib, "oleaut32")
-#endif
-#if CWINMIDI2_PROJECTION == 1
-#include <winrt/Windows.Devices.Midi2.h>
-#include <winrt/Windows.Devices.Midi2.Enumeration.h>
-namespace midi2 = winrt::Windows::Devices::Midi2;
-namespace midi2enum = winrt::Windows::Devices::Midi2::Enumeration;
-#elif CWINMIDI2_PROJECTION == 2
-#include <winrt/Microsoft.Windows.Devices.Midi2.h>
-// The App SDK keeps the enumeration types in the root namespace.
-namespace midi2 = winrt::Microsoft::Windows::Devices::Midi2;
-namespace midi2enum = winrt::Microsoft::Windows::Devices::Midi2;
-#endif
-
 // MARK: - Helpers
 
 static void putError(char *error, size_t length, const std::string &message) {
@@ -127,7 +76,7 @@ static void putError(char *error, size_t length, const std::string &message) {
     error[n] = 0;
 }
 
-[[maybe_unused]] static void copyString(char *dest, size_t capacity, const std::string &value) {
+static void copyString(char *dest, size_t capacity, const std::string &value) {
     size_t n = value.size() < capacity - 1 ? value.size() : capacity - 1;
     memcpy(dest, value.data(), n);
     dest[n] = 0;
@@ -137,6 +86,11 @@ static std::string hex32(uint32_t value) {
     char buffer[16];
     snprintf(buffer, sizeof buffer, "0x%08lx", (unsigned long)value);
     return buffer;
+}
+
+/// "<what> failed (0x...)".
+static std::string failure(const char *what, HRESULT hr) {
+    return std::string(what) + " failed (" + hex32((uint32_t)hr) + ")";
 }
 
 static std::string narrow(const wchar_t *w, size_t length) {
@@ -151,7 +105,7 @@ static std::string narrow(const std::wstring &w) {
     return narrow(w.c_str(), w.size());
 }
 
-[[maybe_unused]] static std::wstring widen(const char *s) {
+static std::wstring widen(const char *s) {
     if (!s) return std::wstring();
     int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
     std::wstring w(n > 0 ? n - 1 : 0, L'\0');
@@ -159,7 +113,7 @@ static std::string narrow(const std::wstring &w) {
     return w;
 }
 
-[[maybe_unused]] static uint64_t fnv1a64(const std::string &value) {
+static uint64_t fnv1a64(const std::string &value) {
     uint64_t hash = 0xcbf29ce484222325ULL;
     for (unsigned char c : value) {
         hash ^= c;
@@ -168,8 +122,12 @@ static std::string narrow(const std::wstring &w) {
     return hash;
 }
 
+static bool sameIID(REFIID a, REFIID b) {
+    return memcmp(&a, &b, sizeof(IID)) == 0;
+}
+
 /// UMP words per message, by message type (the top nibble of the first word).
-[[maybe_unused]] static const uint32_t kWordsForType[16] = {1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4};
+static const uint32_t kWordsForType[16] = {1, 1, 1, 2, 2, 4, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4};
 
 /// Appends one step to the attempt log.
 static void logStep(std::string &log, const std::string &step) {
@@ -205,6 +163,88 @@ static std::wstring executableDirectory() {
     return path.substr(0, slash + 1);
 }
 
+// MARK: - ABI plumbing
+
+/// The runtime class names, `kClass_MidiSession` and so on, from the generated list.
+#define X(name, string) static const wchar_t kClass_##name[] = string;
+MIDI2ABI_CLASS_NAMES
+#undef X
+
+static const IID kIID_IUnknown = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const IID kIID_IAgileObject = {0x94ea2b94, 0xe9cc, 0x49e0, {0xc0, 0xff, 0xee, 0x64, 0xca, 0x8f, 0x5b, 0x90}};
+
+/// Release for the SDK's C++ interfaces (IUnknown, IInspectable, IActivationFactory)...
+static void comRelease(IUnknown *object) { object->Release(); }
+/// ...and for midi2abi.h's C vtable structs.
+template <typename T>
+static auto comRelease(T *object) -> decltype(object->lpVtbl, void()) {
+    object->lpVtbl->Release(object);
+}
+
+/// Owns one reference.
+template <typename T>
+struct Ref {
+    T *p = nullptr;
+    Ref() = default;
+    Ref(const Ref &) = delete;
+    Ref &operator=(const Ref &) = delete;
+    ~Ref() { reset(); }
+    void reset() {
+        if (p) comRelease(p);
+        p = nullptr;
+    }
+    T **put() { reset(); return &p; }
+    void **putVoid() { reset(); return reinterpret_cast<void **>(&p); }
+    T *get() const { return p; }
+    T *detach() { T *t = p; p = nullptr; return t; }
+    explicit operator bool() const { return p != nullptr; }
+};
+
+/// QueryInterface on an `IInspectable *` result for the interface the caller uses.
+template <typename T>
+static HRESULT queryAs(IInspectable *object, REFIID iid, Ref<T> &out) {
+    if (!object) return E_POINTER;
+    return object->QueryInterface(iid, out.putVoid());
+}
+
+/// An owned HSTRING.
+struct HStr {
+    HSTRING h = nullptr;
+    HStr() = default;
+    HStr(const HStr &) = delete;
+    HStr &operator=(const HStr &) = delete;
+    ~HStr() { reset(); }
+    void reset() {
+        if (h) WindowsDeleteString(h);
+        h = nullptr;
+    }
+    HSTRING *put() { reset(); return &h; }
+    HRESULT set(const std::wstring &value) { return WindowsCreateString(value.c_str(), (UINT32)value.size(), put()); }
+    std::string utf8() const {
+        UINT32 length = 0;
+        const wchar_t *raw = h ? WindowsGetStringRawBuffer(h, &length) : nullptr;
+        return narrow(raw, length);
+    }
+};
+
+/// Windows.Foundation.Collections.IVectorView<Windows.Devices.Midi2.Enumeration.
+/// MidiEndpointDeviceInformation>, the standard vtable (midi2abi.h has only its IID). Items
+/// are the class's default interface, received as IInspectable.
+struct DeviceInfoVectorView;
+struct DeviceInfoVectorViewVtbl {
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(DeviceInfoVectorView *self, REFIID riid, void **object);
+    ULONG(STDMETHODCALLTYPE *AddRef)(DeviceInfoVectorView *self);
+    ULONG(STDMETHODCALLTYPE *Release)(DeviceInfoVectorView *self);
+    HRESULT(STDMETHODCALLTYPE *GetIids)(DeviceInfoVectorView *self, ULONG *count, IID **iids);
+    HRESULT(STDMETHODCALLTYPE *GetRuntimeClassName)(DeviceInfoVectorView *self, HSTRING *name);
+    HRESULT(STDMETHODCALLTYPE *GetTrustLevel)(DeviceInfoVectorView *self, TrustLevel *level);
+    HRESULT(STDMETHODCALLTYPE *GetAt)(DeviceInfoVectorView *self, uint32_t index, IInspectable **item);
+    HRESULT(STDMETHODCALLTYPE *get_Size)(DeviceInfoVectorView *self, uint32_t *size);
+    HRESULT(STDMETHODCALLTYPE *IndexOf)(DeviceInfoVectorView *self, IInspectable *value, uint32_t *index, boolean *found);
+    HRESULT(STDMETHODCALLTYPE *GetMany)(DeviceInfoVectorView *self, uint32_t startIndex, uint32_t capacity, IInspectable **items, uint32_t *actual);
+};
+struct DeviceInfoVectorView { const DeviceInfoVectorViewVtbl *lpVtbl; };
+
 // MARK: - The MTA thread
 
 /// The shim's work queue. Allocated once and never freed (see the file comment).
@@ -231,8 +271,7 @@ static void midiThreadMain(MidiThread *t) {
     }
 }
 
-/// Runs `work` on the MIDI thread and waits for it (inline when already there). `work`
-/// must not throw: every job below catches at its own boundary.
+/// Runs `work` on the MIDI thread and waits for it (inline when already there).
 static void onMidiThread(const std::function<void()> &work) {
     std::call_once(g_threadOnce, [] {
         MidiThread *t = new MidiThread();
@@ -260,48 +299,17 @@ static void onMidiThread(const std::function<void()> &work) {
     doneReady.wait(d, [&] { return done; });
 }
 
-// MARK: - Activation (no MIDI headers needed)
+/// Runs `body` on the MIDI thread; false comes back with `message` set by `body`.
+static bool onMidiThreadChecked(const std::function<bool()> &body) {
+    bool ok = false;
+    onMidiThread([&] { ok = body(); });
+    return ok;
+}
 
-/// Windows.Devices.Midi2.IMidiApiStatics, declared by hand: the IID is the one Microsoft
-/// publishes in the API metadata and the detect-midi-services sample; method order is the
-/// vtable order (EnsureServiceAvailable, GetCurrentlySelectedApiMode).
-struct IMidiApiStaticsABI : public IInspectable {
-    virtual HRESULT STDMETHODCALLTYPE EnsureServiceAvailable(unsigned char *result) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetCurrentlySelectedApiMode(int32_t *result) = 0;
-};
-static const IID kIID_IMidiApiStatics = {0x8087b303, 0x0519, 0xc0de, {0x31, 0xd1, 0xee, 0x00, 0x10, 0x00, 0x00, 0x00}};
+// MARK: - Activation
 
-/// Windows.Devices.Midi2.IMidiApiStatics2 (Preview 11): IsSystemProvided.
-struct IMidiApiStatics2ABI : public IInspectable {
-    virtual HRESULT STDMETHODCALLTYPE IsSystemProvided(unsigned char *result) = 0;
-};
-static const IID kIID_IMidiApiStatics2 = {0x8087b303, 0x0519, 0xc0de, {0x31, 0xd1, 0xee, 0x00, 0x10, 0x00, 0x00, 0x02}};
-
-static const IID kIID_IActivationFactory = {0x00000035, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
-static const IID kIID_IUnknown = {0x00000000, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
-
-/// The MidiSrv transport's class, registered by the Windows MIDI Services service install
-/// (not by any SDK). Microsoft's App SDK initializer creates it to ask "is the service
-/// installed"; it is used here the same way for the App SDK route, which has no MidiApi.
-static const CLSID kCLSID_MidiSrvTransport = {0x2ba15e4e, 0x5417, 0x4a66, {0x85, 0xb8, 0x2b, 0x22, 0x60, 0xef, 0xbc, 0x84}};
-
-/// What the check resolves, per API (see the file comment).
-struct MidiApiInfo {
-    const wchar_t *rootNamespace;   // the activations the module route serves
-    const wchar_t *probeClass;      // the class the check resolves
-    const wchar_t *moduleName;      // the implementation DLL, app-local or in the SDK runtime
-    bool hasMidiApi;                // MidiApi statics (service and mode check) exist
-    bool usesSdkRuntime;            // route (c) may serve it
-};
-[[maybe_unused]] static const MidiApiInfo kInBoxApi = {L"Windows.Devices.Midi2", L"Windows.Devices.Midi2.MidiApi",
-                                      L"Windows.Devices.Midi2.dll", true, false};
-[[maybe_unused]] static const MidiApiInfo kAppSdkApi = {L"Microsoft.Windows.Devices.Midi2", L"Microsoft.Windows.Devices.Midi2.MidiSession",
-                                       L"Microsoft.Windows.Devices.Midi2.dll", false, true};
-#if CWINMIDI2_PROJECTION == 2
-static const MidiApiInfo &g_api = kAppSdkApi;
-#else
-static const MidiApiInfo &g_api = kInBoxApi;
-#endif
+static const wchar_t kApiNamespace[] = L"Windows.Devices.Midi2";
+static const wchar_t kModuleName[] = L"Windows.Devices.Midi2.dll";
 
 static const wchar_t kSdkRuntimeKey[] = L"SOFTWARE\\Microsoft\\Windows MIDI Services\\Desktop App SDK Runtime";
 static const wchar_t kSdkRuntimeValue[] = L"Installed";
@@ -311,8 +319,8 @@ static const wchar_t kSdkRuntimeModule[] = L"Microsoft.Windows.Devices.Midi2.dll
 #define RRF_SUBKEY_WOW6464KEY 0x00010000
 #endif
 
-/// The module route (b) or (c) chose, or null when the system registration serves the API.
-/// Set once by the check, before the activation hook is installed.
+/// The module route (b) loaded, or null when the system registration serves the API.
+/// Set once by the check, before any other activation.
 static std::atomic<HMODULE> g_routeModule{nullptr};
 
 /// The Windows 11 25H2 floor (24H2, 26100, has an older Windows MIDI Services that never
@@ -323,7 +331,7 @@ static const DWORD kMinimumBuild = 26200;
 static DWORD windowsBuildNumber() {
     typedef LONG(WINAPI * RtlGetVersionProc)(PRTL_OSVERSIONINFOW);
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    RtlGetVersionProc rtlGetVersion = ntdll ? (RtlGetVersionProc)GetProcAddress(ntdll, "RtlGetVersion") : nullptr;
+    RtlGetVersionProc rtlGetVersion = ntdll ? (RtlGetVersionProc)(void *)GetProcAddress(ntdll, "RtlGetVersion") : nullptr;
     RTL_OSVERSIONINFOW info;
     memset(&info, 0, sizeof info);
     info.dwOSVersionInfoSize = sizeof info;
@@ -334,7 +342,7 @@ static DWORD windowsBuildNumber() {
 /// DllGetActivationFactory on `module`, then QueryInterface for `iid`.
 static HRESULT factoryFromModule(HMODULE module, HSTRING name, REFIID iid, void **factory) {
     typedef HRESULT(STDMETHODCALLTYPE * GetFactoryProc)(HSTRING, IActivationFactory **);
-    GetFactoryProc getFactory = (GetFactoryProc)GetProcAddress(module, "DllGetActivationFactory");
+    GetFactoryProc getFactory = (GetFactoryProc)(void *)GetProcAddress(module, "DllGetActivationFactory");
     if (!getFactory) return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
     IActivationFactory *activation = nullptr;
     HRESULT hr = getFactory(name, &activation);
@@ -345,8 +353,7 @@ static HRESULT factoryFromModule(HMODULE module, HSTRING name, REFIID iid, void 
     return hr;
 }
 
-/// RoGetActivationFactory, joining the MTA first when the calling thread has no apartment
-/// (what C++/WinRT's default activation does).
+/// RoGetActivationFactory, joining the MTA first when the calling thread has no apartment.
 static HRESULT systemFactory(HSTRING name, REFIID iid, void **factory) {
     HRESULT hr = RoGetActivationFactory(name, iid, factory);
     if (hr == CO_E_NOTINITIALIZED) {
@@ -356,26 +363,35 @@ static HRESULT systemFactory(HSTRING name, REFIID iid, void **factory) {
     return hr;
 }
 
-/// True when `name` is in the namespace the chosen module serves.
+/// True when `name` is in the namespace the app-local module serves.
 static bool inApiNamespace(HSTRING name) {
     UINT32 length = 0;
     const wchar_t *raw = WindowsGetStringRawBuffer(name, &length);
-    size_t rootLength = wcslen(g_api.rootNamespace);
+    size_t rootLength = wcslen(kApiNamespace);
     if (!raw || length <= rootLength) return false;
-    return wcsncmp(raw, g_api.rootNamespace, rootLength) == 0 && raw[rootLength] == L'.';
+    return wcsncmp(raw, kApiNamespace, rootLength) == 0 && raw[rootLength] == L'.';
 }
 
 /// Every activation after the check: the system registration first, then, for the API's own
-/// classes, the module route (b) or (c) chose.
-[[maybe_unused]] static HRESULT resolveFactory(HSTRING name, REFIID iid, void **factory) {
+/// classes, the module route (b) loaded.
+static HRESULT resolveFactory(HSTRING name, REFIID iid, void **factory) {
     if (!factory) return E_POINTER;
     *factory = nullptr;
     HRESULT hr = systemFactory(name, iid, factory);
-    if (SUCCEEDED(hr)) return hr;
+    if (SUCCEEDED(hr) && *factory) return hr;
     HMODULE module = g_routeModule.load();
-    if (!module || !inApiNamespace(name)) return hr;
+    if (!module || !inApiNamespace(name)) return FAILED(hr) ? hr : E_POINTER;
     HRESULT moduleHr = factoryFromModule(module, name, iid, factory);
     return SUCCEEDED(moduleHr) ? moduleHr : hr;
+}
+
+/// The statics interface `iid` of runtime class `className` (a `kClass_` name).
+template <typename T>
+static HRESULT getStatics(const wchar_t *className, REFIID iid, Ref<T> &out) {
+    HStr name;
+    HRESULT hr = name.set(std::wstring(className));
+    if (FAILED(hr)) return hr;
+    return resolveFactory(name.h, iid, out.putVoid());
 }
 
 /// The App SDK runtime folder (trailing backslash), as Microsoft's initializer finds it:
@@ -403,8 +419,7 @@ static std::wstring sdkRuntimeDirectory(std::string &source) {
 /// returned in `module`.
 static HRESULT factoryFromPath(const std::wstring &path, HSTRING name, REFIID iid, void **factory, HMODULE &module,
                                std::string &step) {
-    // LOAD_WITH_ALTERED_SEARCH_PATH: the module's own dependencies resolve from its folder,
-    // as Microsoft's initializer loads the runtime.
+    // LOAD_WITH_ALTERED_SEARCH_PATH: the module's own dependencies resolve from its folder.
     HMODULE loaded = LoadLibraryExW(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (!loaded) {
         HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
@@ -413,7 +428,7 @@ static HRESULT factoryFromPath(const std::wstring &path, HSTRING name, REFIID ii
     }
     HRESULT hr = factoryFromModule(loaded, name, iid, factory);
     if (FAILED(hr)) {
-        step = "loaded, but DllGetActivationFactory(" + narrow(std::wstring(g_api.probeClass)) + ") failed (" + hex32((uint32_t)hr) + ")";
+        step = "loaded, but DllGetActivationFactory(" + narrow(std::wstring(kClass_MidiApi)) + ") failed (" + hex32((uint32_t)hr) + ")";
         FreeLibrary(loaded);
         return hr;
     }
@@ -422,33 +437,31 @@ static HRESULT factoryFromPath(const std::wstring &path, HSTRING name, REFIID ii
     return S_OK;
 }
 
-/// Routes (a), (b) and (c) for the API's probe class, each logged. On success `factory`
-/// holds the probe class's factory as `iid` and `g_routeModule` the module that served it
-/// (null for the system registration).
+/// Routes (a), (b) and (c) for MidiApi, each logged. On success `factory` holds the MidiApi
+/// factory as `iid` and `g_routeModule` the module that served it (null for the system
+/// registration).
 static HRESULT resolveApi(REFIID iid, void **factory, std::string &log) {
     *factory = nullptr;
-    const std::string api = narrow(std::wstring(g_api.rootNamespace));
-    const std::string probe = narrow(std::wstring(g_api.probeClass));
-    const std::string moduleName = narrow(std::wstring(g_api.moduleName));
-    HSTRING_HEADER header;
-    HSTRING name = nullptr;
-    HRESULT hr = WindowsCreateStringReference(g_api.probeClass, (UINT32)wcslen(g_api.probeClass), &header, &name);
+    const std::string probe = narrow(std::wstring(kClass_MidiApi));
+    const std::string moduleName = narrow(std::wstring(kModuleName));
+    HStr name;
+    HRESULT hr = name.set(std::wstring(kClass_MidiApi));
     if (FAILED(hr)) {
         logStep(log, "could not make the class name string (" + hex32((uint32_t)hr) + ")");
         return hr;
     }
 
     // (a) The system registration.
-    HRESULT systemHr = systemFactory(name, iid, factory);
+    HRESULT systemHr = systemFactory(name.h, iid, factory);
     if (SUCCEEDED(systemHr) && *factory) {
-        logStep(log, (g_api.hasMidiApi ? "in-box API " : "registered API ") + probe + " resolved");
+        logStep(log, "in-box API " + probe + " resolved");
         return S_OK;
     }
-    logStep(log, (g_api.hasMidiApi ? "in-box API not registered (" : api + " not registered (") + hex32((uint32_t)systemHr) + ")");
+    logStep(log, "in-box API not registered (" + hex32((uint32_t)systemHr) + ")");
 
     // (b) The app-local module beside the executable.
     std::wstring directory = executableDirectory();
-    std::wstring appLocal = directory + g_api.moduleName;
+    std::wstring appLocal = directory + kModuleName;
     if (directory.empty()) {
         logStep(log, "no app-local " + moduleName + " (executable folder unknown)");
     } else if (!fileExists(appLocal)) {
@@ -456,7 +469,7 @@ static HRESULT resolveApi(REFIID iid, void **factory, std::string &log) {
     } else {
         HMODULE module = nullptr;
         std::string step;
-        if (SUCCEEDED(factoryFromPath(appLocal, name, iid, factory, module, step))) {
+        if (SUCCEEDED(factoryFromPath(appLocal, name.h, iid, factory, module, step))) {
             g_routeModule.store(module);
             logStep(log, "app-local " + narrow(appLocal) + ": " + step);
             return S_OK;
@@ -464,26 +477,17 @@ static HRESULT resolveApi(REFIID iid, void **factory, std::string &log) {
         logStep(log, "app-local " + narrow(appLocal) + ": " + step);
     }
 
-    // (c) The App SDK runtime.
+    // (c) The superseded App SDK runtime: reported, not used.
     std::string source;
     std::wstring runtime = sdkRuntimeDirectory(source) + kSdkRuntimeModule;
     if (!fileExists(runtime)) {
         logStep(log, "no SDK runtime at " + narrow(runtime) + " (" + source + ")");
-    } else if (!g_api.usesSdkRuntime) {
+    } else {
         logStep(log, "SDK runtime at " + narrow(runtime) + " (" + source +
                          "): present but not used: it is the superseded preview App SDK (Microsoft.Windows.Devices.Midi2) "
                          "and this build targets Windows.Devices.Midi2; put Windows.Devices.Midi2.dll and .pri beside the executable");
-    } else {
-        HMODULE module = nullptr;
-        std::string step;
-        if (SUCCEEDED(factoryFromPath(runtime, name, iid, factory, module, step))) {
-            g_routeModule.store(module);
-            logStep(log, "SDK runtime at " + narrow(runtime) + " (" + source + "): " + step);
-            return S_OK;
-        }
-        logStep(log, "SDK runtime at " + narrow(runtime) + " (" + source + "): " + step);
     }
-    return systemHr;
+    return FAILED(systemHr) ? systemHr : E_POINTER;
 }
 
 static std::string apiModeName(int32_t mode) {
@@ -504,66 +508,27 @@ static bool checkPlatform(std::string &log) {
     }
     logStep(log, "Windows build " + std::to_string(build));
 
-    if (g_api.hasMidiApi) {
-        IMidiApiStaticsABI *statics = nullptr;
-        if (FAILED(resolveApi(kIID_IMidiApiStatics, (void **)&statics, log)) || !statics) return false;
-        IMidiApiStatics2ABI *statics2 = nullptr;
-        if (SUCCEEDED(statics->QueryInterface(kIID_IMidiApiStatics2, (void **)&statics2)) && statics2) {
-            unsigned char systemProvided = 0;
-            if (SUCCEEDED(statics2->IsSystemProvided(&systemProvided))) {
-                logStep(log, systemProvided ? "the copy that comes with Windows" : "the app's own copy");
-            }
-            statics2->Release();
+    Ref<IMidiApiStatics> statics;
+    if (FAILED(resolveApi(IID_IMidiApiStatics, statics.putVoid(), log)) || !statics) return false;
+    Ref<IMidiApiStatics2> statics2;
+    if (SUCCEEDED(statics.get()->lpVtbl->QueryInterface(statics.get(), IID_IMidiApiStatics2, statics2.putVoid())) && statics2) {
+        boolean systemProvided = 0;
+        if (SUCCEEDED(statics2.get()->lpVtbl->IsSystemProvided(statics2.get(), &systemProvided))) {
+            logStep(log, systemProvided ? "the copy that comes with Windows" : "the app's own copy");
         }
-        unsigned char serviceAvailable = 0;
-        int32_t mode = -1;
-        HRESULT hr = statics->EnsureServiceAvailable(&serviceAvailable);
-        statics->GetCurrentlySelectedApiMode(&mode);
-        statics->Release();
-        if (FAILED(hr) || !serviceAvailable) {
-            logStep(log, "MidiApi.EnsureServiceAvailable() is false (" + apiModeName(mode) +
-                             "; Legacy API mode or the midisrv service disabled)");
-            return false;
-        }
-        logStep(log, "service available (" + apiModeName(mode) + ")");
-        return true;
     }
-
-    // The App SDK has no MidiApi: the factory proves the runtime, the MidiSrv transport
-    // class the service, and MidiSession::Create (in startSession) demand-starts it.
-    IActivationFactory *factory = nullptr;
-    if (FAILED(resolveApi(kIID_IActivationFactory, (void **)&factory, log)) || !factory) return false;
-    factory->Release();
-    IUnknown *transport = nullptr;
-    HRESULT hr = CoCreateInstance(kCLSID_MidiSrvTransport, nullptr, CLSCTX_INPROC_SERVER, kIID_IUnknown, (void **)&transport);
-    if (FAILED(hr) || !transport) {
-        logStep(log, "the Windows MIDI Services service is not installed (MidiSrv transport " + hex32((uint32_t)hr) + ")");
+    boolean serviceAvailable = 0;
+    int32_t mode = -1;
+    HRESULT hr = statics.get()->lpVtbl->EnsureServiceAvailable(statics.get(), &serviceAvailable);
+    statics.get()->lpVtbl->GetCurrentlySelectedApiMode(statics.get(), &mode);
+    if (FAILED(hr) || !serviceAvailable) {
+        logStep(log, "MidiApi.EnsureServiceAvailable() is false (" + apiModeName(mode) +
+                         "; Legacy API mode or the midisrv service disabled)");
         return false;
     }
-    transport->Release();
-    logStep(log, "service installed");
+    logStep(log, "service available (" + apiModeName(mode) + ")");
     return true;
 }
-
-#if CWINMIDI2_PROJECTION
-/// C++/WinRT's activation hook (winrt/base.h), installed when route (b) or (c) won.
-static int32_t __stdcall midiActivationHandler(void *classId, winrt::guid const &iid, void **factory) noexcept {
-    return resolveFactory((HSTRING)classId, *reinterpret_cast<const IID *>(&iid), factory);
-}
-
-/// Points C++/WinRT's activations at the chosen module, unless another component already
-/// owns the hook (then C++/WinRT's own fallback, which loads <namespace>.dll by name from the
-/// default search path, still finds an app-local Windows.Devices.Midi2.dll).
-static void installActivationHook(std::string &log) {
-    if (!g_routeModule.load()) return;
-    if (winrt_activation_handler && winrt_activation_handler != midiActivationHandler) {
-        logStep(log, "C++/WinRT activation hook already set by another component, left alone");
-        return;
-    }
-    winrt_activation_handler = midiActivationHandler;
-    logStep(log, "C++/WinRT activation hook installed");
-}
-#endif
 
 // MARK: - Shared state
 
@@ -574,7 +539,7 @@ struct ChangeObserver {
 };
 static ChangeObserver *g_observer = new ChangeObserver();
 
-[[maybe_unused]] static void notifyChanged() {
+static void notifyChanged() {
     cwinmidi2_change_fn callback;
     void *context;
     {
@@ -594,46 +559,87 @@ struct Endpoint {
     uint16_t productID = 0;
 };
 
-#if CWINMIDI2_PROJECTION
-
+/// The session, the watcher and the cached list. Set once by `cwinmidi2_available`, never
+/// freed (nor are the references it holds).
 struct MidiState {
-    midi2::MidiSession session{nullptr};
-    midi2enum::MidiEndpointDeviceWatcher watcher{nullptr};
+    IMidiSession *session = nullptr;
+    Enumeration_IMidiEndpointDeviceWatcher *watcher = nullptr;
     uint64_t sendImmediately = 0;
     std::mutex listLock;                 // guards endpoints
     std::vector<Endpoint> endpoints;
     std::atomic<bool> dirty{true};       // set by watcher events; the list is rebuilt lazily
 };
-static MidiState *g_state = nullptr;     // set once by `cwinmidi2_available`, never freed
+static MidiState *g_state = nullptr;
 
 struct CWinMIDI2Connection {
-    midi2::MidiEndpointConnection connection{nullptr};
-    winrt::guid connectionId{};
+    IMidiEndpointConnection *connection = nullptr;
+    GUID connectionId{};
 };
 
-static std::string describe(const winrt::hresult_error &e) {
-    return winrt::to_string(e.message()) + " (HRESULT " + hex32((uint32_t)e.code()) + ")";
+// MARK: - Watcher event handlers
+
+/// TypedEventHandler<MidiEndpointDeviceWatcher, MidiEndpointDevice...EventArgs>, implemented
+/// by hand: a delegate is an IUnknown with Invoke(sender, args). One object per event, agile
+/// (the watcher calls it from a thread-pool thread), answering the pinterface IID of its event.
+/// The args are not read: like the list itself, the handler only marks the cache stale.
+struct WatcherHandler;
+struct WatcherHandlerVtbl {
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(WatcherHandler *self, REFIID riid, void **object);
+    ULONG(STDMETHODCALLTYPE *AddRef)(WatcherHandler *self);
+    ULONG(STDMETHODCALLTYPE *Release)(WatcherHandler *self);
+    HRESULT(STDMETHODCALLTYPE *Invoke)(WatcherHandler *self, IInspectable *sender, IInspectable *args);
+};
+struct WatcherHandler {
+    const WatcherHandlerVtbl *lpVtbl;
+    const IID *iid;                      // the delegate's pinterface IID
+    std::atomic<ULONG> references;
+    MidiState *state;
+};
+
+static HRESULT STDMETHODCALLTYPE watcherHandlerQueryInterface(WatcherHandler *self, REFIID riid, void **object) {
+    if (!object) return E_POINTER;
+    if (sameIID(riid, kIID_IUnknown) || sameIID(riid, kIID_IAgileObject) || sameIID(riid, *self->iid)) {
+        self->references.fetch_add(1);
+        *object = self;
+        return S_OK;
+    }
+    *object = nullptr;
+    return E_NOINTERFACE;
 }
 
-/// Runs `body` on the MIDI thread, turning any exception into `message` and false.
-static bool guarded(std::string &message, const std::function<bool()> &body) {
-    bool ok = false;
-    onMidiThread([&] {
-        try {
-            ok = body();
-        } catch (const winrt::hresult_error &e) {
-            message = describe(e);
-            ok = false;
-        } catch (const std::exception &e) {
-            message = e.what();
-            ok = false;
-        } catch (...) {
-            message = "unknown C++ exception";
-            ok = false;
-        }
-    });
-    return ok;
+static ULONG STDMETHODCALLTYPE watcherHandlerAddRef(WatcherHandler *self) {
+    return self->references.fetch_add(1) + 1;
 }
+
+static ULONG STDMETHODCALLTYPE watcherHandlerRelease(WatcherHandler *self) {
+    ULONG left = self->references.fetch_sub(1) - 1;
+    if (left == 0) delete self;
+    return left;
+}
+
+static HRESULT STDMETHODCALLTYPE watcherHandlerInvoke(WatcherHandler *self, IInspectable *sender, IInspectable *args) {
+    (void)sender;
+    (void)args;
+    self->state->dirty = true;
+    notifyChanged();
+    return S_OK;
+}
+
+static const WatcherHandlerVtbl kWatcherHandlerVtbl = {watcherHandlerQueryInterface, watcherHandlerAddRef,
+                                                       watcherHandlerRelease, watcherHandlerInvoke};
+
+/// A handler with one reference, which the caller hands back with `watcherHandlerRelease`
+/// after registering it (the watcher keeps its own).
+static WatcherHandler *makeWatcherHandler(const IID &iid, MidiState *state) {
+    WatcherHandler *handler = new WatcherHandler();
+    handler->lpVtbl = &kWatcherHandlerVtbl;
+    handler->iid = &iid;
+    handler->references = 1;
+    handler->state = state;
+    return handler;
+}
+
+// MARK: - Session, enumeration, watcher
 
 static std::string sessionName() {
     wchar_t path[MAX_PATH];
@@ -647,54 +653,64 @@ static std::string sessionName() {
     return result.empty() ? std::string("CoreMIDI") : result;
 }
 
-/// FindAll, keeping what an app sends to: normal endpoints and the in-box GM synth (the
-/// diagnostic loopbacks, ping and virtual-device responders are left out). MIDI thread.
-static std::vector<Endpoint> enumerateEndpoints() {
-    std::vector<Endpoint> result;
-    auto list = midi2enum::MidiEndpointDeviceInformation::FindAll(
-        midi2enum::MidiEndpointDeviceInformationSortOrder::Name,
-        midi2enum::MidiEndpointDeviceInformationFilters::AllStandardEndpoints);
-    if (!list) return result;
-    for (uint32_t i = 0; i < list.Size(); i++) {
-        midi2enum::MidiEndpointDeviceInformation info = list.GetAt(i);
-        if (!info) continue;
-        midi2enum::MidiEndpointDevicePurpose purpose = info.EndpointPurpose();
-        if (purpose != midi2enum::MidiEndpointDevicePurpose::NormalMessageEndpoint &&
-            purpose != midi2enum::MidiEndpointDevicePurpose::InBoxGeneralMidiSynth) continue;
+/// MidiEndpointDeviceInformation.FindAll(Name, AllStandardEndpoints), keeping what an app
+/// sends to: normal endpoints and the in-box GM synth (the diagnostic loopbacks, ping and
+/// virtual-device responders are left out). MIDI thread.
+static bool enumerateEndpoints(std::vector<Endpoint> &result, std::string &message) {
+    Ref<Enumeration_IMidiEndpointDeviceInformationStatics> statics;
+    HRESULT hr = getStatics(kClass_Enumeration_MidiEndpointDeviceInformation, IID_Enumeration_IMidiEndpointDeviceInformationStatics, statics);
+    if (FAILED(hr) || !statics) { message = failure("MidiEndpointDeviceInformation statics", hr); return false; }
+    Ref<IInspectable> listObject;
+    hr = statics.get()->lpVtbl->FindAll3(statics.get(), Enumeration_MidiEndpointDeviceInformationSortOrder_Name,
+                                         Enumeration_MidiEndpointDeviceInformationFilters_AllStandardEndpoints, listObject.put());
+    if (FAILED(hr)) { message = failure("MidiEndpointDeviceInformation.FindAll", hr); return false; }
+    if (!listObject) return true;
+    Ref<DeviceInfoVectorView> list;
+    hr = queryAs(listObject.get(), IID_WF_Collections_IVectorView_MidiEndpointDeviceInformation, list);
+    if (FAILED(hr) || !list) { message = failure("IVectorView<MidiEndpointDeviceInformation> QueryInterface", hr); return false; }
+    uint32_t size = 0;
+    hr = list.get()->lpVtbl->get_Size(list.get(), &size);
+    if (FAILED(hr)) { message = failure("IVectorView.Size", hr); return false; }
+    for (uint32_t i = 0; i < size; i++) {
+        Ref<IInspectable> item;
+        if (FAILED(list.get()->lpVtbl->GetAt(list.get(), i, item.put())) || !item) continue;
+        Ref<Enumeration_IMidiEndpointDeviceInformation> info;
+        if (FAILED(queryAs(item.get(), IID_Enumeration_IMidiEndpointDeviceInformation, info)) || !info) continue;
+        Enumeration_IMidiEndpointDeviceInformation *p = info.get();
+        int32_t purpose = -1;
+        if (FAILED(p->lpVtbl->get_EndpointPurpose(p, &purpose))) continue;
+        if (purpose != Enumeration_MidiEndpointDevicePurpose_NormalMessageEndpoint &&
+            purpose != Enumeration_MidiEndpointDevicePurpose_InBoxGeneralMidiSynth) continue;
         Endpoint endpoint;
-        endpoint.name = winrt::to_string(info.Name());
-        endpoint.id = winrt::to_string(info.EndpointDeviceId());
-        endpoint.purpose = (int32_t)purpose;
-#if CWINMIDI2_PROJECTION == 1
-        // A runtime class in Windows.Devices.Midi2.Enumeration.
-        midi2enum::MidiEndpointTransportSuppliedInfo transport = info.GetTransportSuppliedInfo();
-        if (transport) {
-            endpoint.manufacturer = winrt::to_string(transport.ManufacturerName());
-            endpoint.vendorID = transport.VendorId();
-            endpoint.productID = transport.ProductId();
+        HStr id, name;
+        if (FAILED(p->lpVtbl->get_EndpointDeviceId(p, id.put()))) continue;
+        endpoint.id = id.utf8();
+        if (endpoint.id.empty()) continue;
+        if (SUCCEEDED(p->lpVtbl->get_Name(p, name.put()))) endpoint.name = name.utf8();
+        endpoint.purpose = purpose;
+        Ref<IInspectable> transportObject;
+        Ref<Enumeration_IMidiEndpointTransportSuppliedInfo> transport;
+        if (SUCCEEDED(p->lpVtbl->GetTransportSuppliedInfo(p, transportObject.put())) && transportObject &&
+            SUCCEEDED(queryAs(transportObject.get(), IID_Enumeration_IMidiEndpointTransportSuppliedInfo, transport)) && transport) {
+            Enumeration_IMidiEndpointTransportSuppliedInfo *t = transport.get();
+            HStr manufacturer;
+            if (SUCCEEDED(t->lpVtbl->get_ManufacturerName(t, manufacturer.put()))) endpoint.manufacturer = manufacturer.utf8();
+            uint16_t vendor = 0, product = 0;
+            if (SUCCEEDED(t->lpVtbl->get_VendorId(t, &vendor))) endpoint.vendorID = vendor;
+            if (SUCCEEDED(t->lpVtbl->get_ProductId(t, &product))) endpoint.productID = product;
         }
-#else
-        // A struct (fields) in the App SDK.
-        midi2::MidiEndpointTransportSuppliedInfo transport = info.GetTransportSuppliedInfo();
-        endpoint.manufacturer = winrt::to_string(transport.ManufacturerName);
-        endpoint.vendorID = transport.VendorId;
-        endpoint.productID = transport.ProductId;
-#endif
         if (endpoint.name.empty()) endpoint.name = endpoint.id;
         result.push_back(endpoint);
     }
-    return result;
+    return true;
 }
 
 /// Rebuilds the cached list when a watcher event (or nothing yet) made it stale.
 static void refreshIfDirty() {
     if (!g_state || !g_state->dirty.exchange(false)) return;
-    std::string ignored;
+    std::string message;
     std::vector<Endpoint> fresh;
-    bool ok = guarded(ignored, [&] {
-        fresh = enumerateEndpoints();
-        return true;
-    });
+    bool ok = onMidiThreadChecked([&] { return enumerateEndpoints(fresh, message); });
     if (!ok) {
         g_state->dirty = true;   // try again next time
         return;
@@ -703,49 +719,84 @@ static void refreshIfDirty() {
     g_state->endpoints = std::move(fresh);
 }
 
+/// MidiEndpointDeviceWatcher.Create(AllStandardEndpoints) with Added, Removed and Updated
+/// handlers, started. Null with `message` set on failure. MIDI thread.
+static Enumeration_IMidiEndpointDeviceWatcher *startWatcher(MidiState *state, std::string &message) {
+    Ref<Enumeration_IMidiEndpointDeviceWatcherStatics> statics;
+    HRESULT hr = getStatics(kClass_Enumeration_MidiEndpointDeviceWatcher, IID_Enumeration_IMidiEndpointDeviceWatcherStatics, statics);
+    if (FAILED(hr) || !statics) { message = failure("MidiEndpointDeviceWatcher statics", hr); return nullptr; }
+    Ref<IInspectable> watcherObject;
+    hr = statics.get()->lpVtbl->Create2(statics.get(), Enumeration_MidiEndpointDeviceInformationFilters_AllStandardEndpoints, watcherObject.put());
+    if (FAILED(hr) || !watcherObject) { message = failure("MidiEndpointDeviceWatcher.Create", hr); return nullptr; }
+    Ref<Enumeration_IMidiEndpointDeviceWatcher> watcher;
+    hr = queryAs(watcherObject.get(), IID_Enumeration_IMidiEndpointDeviceWatcher, watcher);
+    if (FAILED(hr) || !watcher) { message = failure("IMidiEndpointDeviceWatcher QueryInterface", hr); return nullptr; }
+    Enumeration_IMidiEndpointDeviceWatcher *w = watcher.get();
+
+    struct Registration {
+        const IID &iid;
+        HRESULT(STDMETHODCALLTYPE *add)(Enumeration_IMidiEndpointDeviceWatcher *, IInspectable *, EventRegistrationToken *);
+        const char *what;
+    };
+    const Registration registrations[] = {
+        {IID_WF_TypedEventHandler_MidiEndpointDeviceWatcher_MidiEndpointDeviceInformationAddedEventArgs, w->lpVtbl->add_Added, "MidiEndpointDeviceWatcher.Added"},
+        {IID_WF_TypedEventHandler_MidiEndpointDeviceWatcher_MidiEndpointDeviceInformationRemovedEventArgs, w->lpVtbl->add_Removed, "MidiEndpointDeviceWatcher.Removed"},
+        {IID_WF_TypedEventHandler_MidiEndpointDeviceWatcher_MidiEndpointDeviceInformationUpdatedEventArgs, w->lpVtbl->add_Updated, "MidiEndpointDeviceWatcher.Updated"},
+    };
+    for (const Registration &registration : registrations) {
+        WatcherHandler *handler = makeWatcherHandler(registration.iid, state);
+        EventRegistrationToken token{};
+        hr = registration.add(w, reinterpret_cast<IInspectable *>(handler), &token);
+        watcherHandlerRelease(handler);
+        if (FAILED(hr)) { message = failure(registration.what, hr); return nullptr; }
+    }
+    hr = w->lpVtbl->Start(w);
+    if (FAILED(hr)) { message = failure("MidiEndpointDeviceWatcher.Start", hr); return nullptr; }
+    return watcher.detach();
+}
+
 /// The session, the send-immediately timestamp and the endpoint watcher. MIDI thread.
 static bool startSession(std::string &message) {
+    Ref<IMidiSessionStatics> sessionStatics;
+    HRESULT hr = getStatics(kClass_MidiSession, IID_IMidiSessionStatics, sessionStatics);
+    if (FAILED(hr) || !sessionStatics) { message = failure("MidiSession statics", hr); return false; }
+    HStr name;
+    hr = name.set(widen(sessionName().c_str()));
+    if (FAILED(hr)) { message = failure("WindowsCreateString", hr); return false; }
+    Ref<IInspectable> sessionObject;
+    hr = sessionStatics.get()->lpVtbl->Create(sessionStatics.get(), name.h, sessionObject.put());
+    if (FAILED(hr)) { message = failure("MidiSession.Create", hr); return false; }
+    if (!sessionObject) { message = "MidiSession.Create returned null"; return false; }
+    Ref<IMidiSession> session;
+    hr = queryAs(sessionObject.get(), IID_IMidiSession, session);
+    if (FAILED(hr) || !session) { message = failure("IMidiSession QueryInterface", hr); return false; }
+
+    Ref<IMidiClockStatics> clock;
+    hr = getStatics(kClass_MidiClock, IID_IMidiClockStatics, clock);
+    if (FAILED(hr) || !clock) { message = failure("MidiClock statics", hr); return false; }
+    uint64_t sendImmediately = 0;
+    hr = clock.get()->lpVtbl->get_TimestampConstantSendImmediately(clock.get(), &sendImmediately);
+    if (FAILED(hr)) { message = failure("MidiClock.TimestampConstantSendImmediately", hr); return false; }
+
     MidiState *state = new MidiState();
-    std::wstring name = widen(sessionName().c_str());
-    state->session = midi2::MidiSession::Create(winrt::hstring(name));
-    if (!state->session) {
-        message = "MidiSession.Create returned null";
-        delete state;
-        return false;
-    }
-    state->sendImmediately = midi2::MidiClock::TimestampConstantSendImmediately();
+    state->session = session.detach();
+    state->sendImmediately = sendImmediately;
     // The watcher keeps the cached list current; without it the list is rebuilt on every
     // read (the CoreMIDI server rescans every 2 s while a client exists).
-    try {
-        state->watcher = midi2enum::MidiEndpointDeviceWatcher::Create(
-            midi2enum::MidiEndpointDeviceInformationFilters::AllStandardEndpoints);
-        if (state->watcher) {
-            state->watcher.Added([state](midi2enum::MidiEndpointDeviceWatcher const &,
-                                         midi2enum::MidiEndpointDeviceInformationAddedEventArgs const &) {
-                state->dirty = true;
-                notifyChanged();
-            });
-            state->watcher.Removed([state](midi2enum::MidiEndpointDeviceWatcher const &,
-                                           midi2enum::MidiEndpointDeviceInformationRemovedEventArgs const &) {
-                state->dirty = true;
-                notifyChanged();
-            });
-            state->watcher.Updated([state](midi2enum::MidiEndpointDeviceWatcher const &,
-                                           midi2enum::MidiEndpointDeviceInformationUpdatedEventArgs const &) {
-                state->dirty = true;
-                notifyChanged();
-            });
-            state->watcher.Start();
-        }
-    } catch (const winrt::hresult_error &e) {
-        fprintf(stderr, "CoreMIDI: MidiEndpointDeviceWatcher unavailable (%s); rescanning on every read\n", describe(e).c_str());
-        state->watcher = nullptr;
+    std::string watcherMessage;
+    state->watcher = startWatcher(state, watcherMessage);
+    if (!state->watcher) {
+        fprintf(stderr, "CoreMIDI: MidiEndpointDeviceWatcher unavailable (%s); rescanning on every read\n", watcherMessage.c_str());
     }
     g_state = state;
     return true;
 }
 
-#endif // CWINMIDI2_PROJECTION
+/// "Succeeded" is a flag bit of MidiSendMessageResults (what
+/// MidiEndpointConnection.SendMessageSucceeded tests).
+static bool sendSucceeded(int32_t result) {
+    return (result & MidiSendMessageResults_Succeeded) != 0;
+}
 
 // MARK: - C interface
 
@@ -753,52 +804,17 @@ static std::once_flag g_availableOnce;
 static bool g_available = false;
 static std::string *g_routes = new std::string();   // the attempt log, "Windows MIDI Services: ..."
 
-/// The projection this build compiled, for the log.
-static const char *projectionDescription() {
-#if CWINMIDI2_PROJECTION == 1
-    return "projection Windows.Devices.Midi2";
-#elif CWINMIDI2_PROJECTION == 2
-    return "projection Microsoft.Windows.Devices.Midi2 (preview App SDK)";
-#else
-    return "no projection";
-#endif
-}
-
 bool cwinmidi2_available(char *error, size_t errorLength) {
     std::call_once(g_availableOnce, [] {
         std::string log;
-        logStep(log, projectionDescription());
+        logStep(log, "ABI Windows.Devices.Midi2");
         bool platform = false;
-        onMidiThread([&] {
-#if CWINMIDI2_EXCEPTIONS
-            try {
-                platform = checkPlatform(log);
-            } catch (...) {
-                logStep(log, "the check threw a C++ exception");
-                platform = false;
-            }
-#else
-            platform = checkPlatform(log);
-#endif
-        });
-#if CWINMIDI2_PROJECTION
+        onMidiThread([&] { platform = checkPlatform(log); });
         if (platform) {
-            onMidiThread([&] { installActivationHook(log); });
             std::string sessionMessage;
-            platform = guarded(sessionMessage, [&] { return startSession(sessionMessage); });
+            platform = onMidiThreadChecked([&] { return startSession(sessionMessage); });
             logStep(log, platform ? std::string("session created") : "session failed: " + sessionMessage);
         }
-#else
-        if (platform) {
-#if !CWINMIDI2_EXCEPTIONS
-            logStep(log, "but CWinMIDI2 was compiled without C++ exceptions, which C++/WinRT needs");
-#else
-            logStep(log, "but CWinMIDI2 was built without a C++/WinRT projection (winrt/Windows.Devices.Midi2.h, "
-                         "or winrt/Microsoft.Windows.Devices.Midi2.h; see ADR-0050)");
-#endif
-            platform = false;
-        }
-#endif
         g_available = platform;
         *g_routes = "Windows MIDI Services: " + log;
     });
@@ -813,19 +829,14 @@ size_t cwinmidi2_routes(char *buffer, size_t length) {
 }
 
 uint32_t cwinmidi2_destination_count(void) {
-#if CWINMIDI2_PROJECTION
     if (!g_state) return 0;
     if (!g_state->watcher) g_state->dirty = true;
     refreshIfDirty();
     std::lock_guard<std::mutex> l(g_state->listLock);
     return (uint32_t)g_state->endpoints.size();
-#else
-    return 0;
-#endif
 }
 
 bool cwinmidi2_destination(uint32_t index, CWinMIDI2EndpointInfo *info) {
-#if CWINMIDI2_PROJECTION
     if (!g_state || !info) return false;
     std::lock_guard<std::mutex> l(g_state->listLock);
     if (index >= g_state->endpoints.size()) return false;
@@ -839,34 +850,42 @@ bool cwinmidi2_destination(uint32_t index, CWinMIDI2EndpointInfo *info) {
     info->vendorID = endpoint.vendorID;
     info->productID = endpoint.productID;
     return true;
-#else
-    (void)index;
-    (void)info;
-    return false;
-#endif
 }
 
 CWinMIDI2Connection *cwinmidi2_open(const char *endpointDeviceId, char *error, size_t errorLength) {
-#if CWINMIDI2_PROJECTION
     if (!g_state) { putError(error, errorLength, "Windows MIDI Services is not initialized"); return nullptr; }
     if (!endpointDeviceId || !*endpointDeviceId) { putError(error, errorLength, "no endpoint device id"); return nullptr; }
     std::string message;
     CWinMIDI2Connection *result = nullptr;
     std::wstring id = widen(endpointDeviceId);
-    bool ok = guarded(message, [&] {
-        midi2::MidiEndpointConnection connection = g_state->session.CreateEndpointConnection(winrt::hstring(id));
-        if (!connection) {
-            message = "MidiSession.CreateEndpointConnection returned null";
-            return false;
-        }
-        if (!connection.Open()) {
-            g_state->session.DisconnectEndpointConnection(connection.ConnectionId());
-            message = "MidiEndpointConnection.Open() failed";
+    bool ok = onMidiThreadChecked([&] {
+        IMidiSession *session = g_state->session;
+        HStr idString;
+        HRESULT hr = idString.set(id);
+        if (FAILED(hr)) { message = failure("WindowsCreateString", hr); return false; }
+        Ref<IInspectable> connectionObject;
+        hr = session->lpVtbl->CreateEndpointConnection(session, idString.h, connectionObject.put());
+        if (FAILED(hr)) { message = failure("MidiSession.CreateEndpointConnection", hr); return false; }
+        if (!connectionObject) { message = "MidiSession.CreateEndpointConnection returned null"; return false; }
+        Ref<IMidiEndpointConnection> connection;
+        hr = queryAs(connectionObject.get(), IID_IMidiEndpointConnection, connection);
+        if (FAILED(hr) || !connection) { message = failure("IMidiEndpointConnection QueryInterface", hr); return false; }
+        // ConnectionId is on IMidiEndpointConnectionSource, which the class also implements.
+        GUID connectionId{};
+        Ref<IMidiEndpointConnectionSource> source;
+        hr = queryAs(connectionObject.get(), IID_IMidiEndpointConnectionSource, source);
+        if (SUCCEEDED(hr) && source) hr = source.get()->lpVtbl->get_ConnectionId(source.get(), &connectionId);
+        if (FAILED(hr)) { message = failure("MidiEndpointConnection.ConnectionId", hr); return false; }
+        boolean opened = 0;
+        hr = connection.get()->lpVtbl->Open(connection.get(), &opened);
+        if (FAILED(hr) || !opened) {
+            session->lpVtbl->DisconnectEndpointConnection(session, connectionId);
+            message = FAILED(hr) ? failure("MidiEndpointConnection.Open()", hr) : std::string("MidiEndpointConnection.Open() returned false");
             return false;
         }
         result = new CWinMIDI2Connection();
-        result->connection = connection;
-        result->connectionId = connection.ConnectionId();
+        result->connection = connection.detach();
+        result->connectionId = connectionId;
         return true;
     });
     if (!ok) {
@@ -874,21 +893,15 @@ CWinMIDI2Connection *cwinmidi2_open(const char *endpointDeviceId, char *error, s
         return nullptr;
     }
     return result;
-#else
-    (void)endpointDeviceId;
-    putError(error, errorLength, "Windows MIDI Services support is not compiled in");
-    return nullptr;
-#endif
 }
 
 bool cwinmidi2_send_ump(CWinMIDI2Connection *connection, const uint32_t *words, uint32_t wordCount, char *error, size_t errorLength) {
-#if CWINMIDI2_PROJECTION
-    if (!connection || !g_state) { putError(error, errorLength, "no connection"); return false; }
+    if (!connection || !connection->connection || !g_state) { putError(error, errorLength, "no connection"); return false; }
     if (wordCount == 0) return true;
     if (!words) { putError(error, errorLength, "no words"); return false; }
     std::string message;
-    bool ok = guarded(message, [&] {
-        midi2::MidiEndpointConnection &c = connection->connection;
+    bool ok = onMidiThreadChecked([&] {
+        IMidiEndpointConnection *c = connection->connection;
         uint64_t ts = g_state->sendImmediately;
         uint32_t index = 0;
         while (index < wordCount) {
@@ -899,14 +912,19 @@ bool cwinmidi2_send_ump(CWinMIDI2Connection *connection, const uint32_t *words, 
                 return false;
             }
             const uint32_t *w = words + index;
-            midi2::MidiSendMessageResults r;
+            int32_t r = 0;
+            HRESULT hr;
             switch (size) {
-            case 1: r = c.SendSingleMessageWords(ts, w[0]); break;
-            case 2: r = c.SendSingleMessageWords(ts, w[0], w[1]); break;
-            case 3: r = c.SendSingleMessageWords(ts, w[0], w[1], w[2]); break;
-            default: r = c.SendSingleMessageWords(ts, w[0], w[1], w[2], w[3]); break;
+            case 1: hr = c->lpVtbl->SendSingleMessageWords(c, ts, w[0], &r); break;
+            case 2: hr = c->lpVtbl->SendSingleMessageWords2(c, ts, w[0], w[1], &r); break;
+            case 3: hr = c->lpVtbl->SendSingleMessageWords3(c, ts, w[0], w[1], w[2], &r); break;
+            default: hr = c->lpVtbl->SendSingleMessageWords4(c, ts, w[0], w[1], w[2], w[3], &r); break;
             }
-            if (!midi2::MidiEndpointConnection::SendMessageSucceeded(r)) {
+            if (FAILED(hr)) {
+                message = failure("SendSingleMessageWords", hr) + " for word " + hex32(w[0]);
+                return false;
+            }
+            if (!sendSucceeded(r)) {
                 message = "SendSingleMessageWords failed with MidiSendMessageResults " + hex32((uint32_t)r) +
                           " for word " + hex32(w[0]);
                 return false;
@@ -917,27 +935,18 @@ bool cwinmidi2_send_ump(CWinMIDI2Connection *connection, const uint32_t *words, 
     });
     if (!ok) putError(error, errorLength, message);
     return ok;
-#else
-    (void)connection;
-    (void)words;
-    (void)wordCount;
-    putError(error, errorLength, "Windows MIDI Services support is not compiled in");
-    return false;
-#endif
 }
 
 void cwinmidi2_close(CWinMIDI2Connection *connection) {
     if (!connection) return;
-#if CWINMIDI2_PROJECTION
-    std::string ignored;
-    guarded(ignored, [&] {
-        if (g_state && g_state->session) g_state->session.DisconnectEndpointConnection(connection->connectionId);
+    onMidiThread([&] {
+        if (g_state && g_state->session) {
+            g_state->session->lpVtbl->DisconnectEndpointConnection(g_state->session, connection->connectionId);
+        }
+        if (connection->connection) comRelease(connection->connection);
         connection->connection = nullptr;
-        return true;
     });
     delete connection;
-#endif
-    // Without the projection `cwinmidi2_open` never returns a connection.
 }
 
 void cwinmidi2_set_change_callback(cwinmidi2_change_fn callback, void *context) {

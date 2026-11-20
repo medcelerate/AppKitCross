@@ -453,6 +453,9 @@ import CoreGraphics
         _reloadIfNeeded()
         _layoutRowViews()
         needsDisplay = true
+        // Rows that moved into view are made in layout, before a natively hosted window
+        // builds its layer scene (see reloadData).
+        needsLayout = true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nstableview/beginupdates()
     @MainActor open func beginUpdates() { _updateDepth += 1 }
@@ -588,6 +591,7 @@ import CoreGraphics
     /// Sizes the columns to the autoresizing style and the frame to the rows and columns.
     @MainActor open func tile() {
         let visible = _tableColumns.filter { !$0.isHidden }
+        let oldWidths = visible.map(\.width)
         if !visible.isEmpty, let available = _availableWidth, available > 0 {
             let spacing = CGFloat(max(0, visible.count - 1)) * _intercellSpacing.width
             switch _columnAutoresizingStyle {
@@ -612,6 +616,19 @@ import CoreGraphics
         let size = NSSize(width: max(_availableWidth ?? 0, _visibleColumnsWidth), height: max(_totalRowHeight, superview is NSClipView ? (superview?.bounds.height ?? 0) : frame.height))
         if frame.size != size { setFrameSize(size) }
         _headerView?.needsDisplay = true
+        // Autoresizing changed column widths: the delegate and observers hear of each, as on
+        // macOS, so a table whose row heights depend on its column widths (wrapped text)
+        // measures them again. Posted last, when the frame is final; a listener that asks
+        // for new heights re-tiles with the widths already settled.
+        let resized = visible.indices.filter { visible[$0].width != oldWidths[$0] }
+        if !resized.isEmpty {
+            _layoutRowViews()
+            for i in resized where _tableColumns.contains(where: { $0 === visible[i] }) {
+                let n = Notification(name: type(of: self).columnDidResizeNotification, object: self, userInfo: ["NSTableColumn": visible[i], "NSOldWidth": oldWidths[i]])
+                NotificationCenter.default.post(n)
+                _delegateColumnDidResize(n)
+            }
+        }
     }
 
     @MainActor open override func setFrameSize(_ newSize: NSSize) {

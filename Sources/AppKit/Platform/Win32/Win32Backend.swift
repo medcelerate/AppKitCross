@@ -325,6 +325,11 @@ final class Win32Backend: PlatformBackend {
             timeout = INFINITE
         }
         if let t = nextTimer { timeout = min(timeout, DWORD(min(t * 1000, 60_000))) }
+        // Never sleep longer than this between services: a block queued on the main
+        // queue, a @MainActor hop or a Timer then waits at most a quarter second even
+        // if its wake were missed (Sibyl's PC run saw main-queue work held for the whole
+        // length of a capture). Four idle wakes a second cost nothing measurable.
+        timeout = min(timeout, 250)
         pumpIterations += 1
         if NSView._traceInvalidation {
             let now = GetTickCount64()
@@ -340,11 +345,12 @@ final class Win32Backend: PlatformBackend {
             let r = MsgWaitForMultipleObjectsEx(1, &handles, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
             if r == WAIT_OBJECT_0 { wakesQueue += 1; PlatformMainQueue.service() }
             else if r == WAIT_OBJECT_0 + 1 { wakesInput += 1 }
-            else { wakesTimeout += 1 }
+            else { wakesTimeout += 1; PlatformMainQueue.service() }
         } else {
             let r = MsgWaitForMultipleObjectsEx(0, nil, timeout, DWORD(QS_ALLINPUT), DWORD(MWMO_INPUTAVAILABLE))
-            if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1 }
+            if r == WAIT_OBJECT_0 { wakesInput += 1 } else { wakesTimeout += 1; PlatformMainQueue.service() }
         }
+        PlatformMainQueue.probeIfTracing()
         return true
     }
     /// Keyboard and mouse-button messages (client and non-client): the events that start

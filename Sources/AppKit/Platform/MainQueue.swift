@@ -49,5 +49,27 @@ enum PlatformMainQueue {
         // yet (tolerance): wait a frame rather than spin.
         return max(interval, 1.0 / 60)
     }
+
+    /// Under `APPKITWIN_TRACE=1`: once a second a background thread queues a marker on
+    /// the main queue and the time until it runs is traced when it exceeds 250 ms
+    /// (`main queue latency`), so a PC run shows whether main-queue work is being
+    /// serviced while an app is busy.
+    static func probeIfTracing() {
+        guard NSView._traceInvalidation, !probeStarted else { return }
+        probeStarted = true
+        let thread = Thread {
+            while true {
+                Thread.sleep(forTimeInterval: 1)
+                let posted = Date()
+                DispatchQueue.main.async {
+                    let latency = Date().timeIntervalSince(posted)
+                    if latency > 0.25 { NSView._trace(String(format: "main queue latency %.0f ms", latency * 1000)) }
+                }
+            }
+        }
+        thread.name = "appkitcross.mainqueue.probe"
+        thread.start()
+    }
+    private static var probeStarted = false
 }
 #endif

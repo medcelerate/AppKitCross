@@ -64,7 +64,12 @@ final class SwiftUIFormFixTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(scroll.documentView?.frame.height ?? 0, 210, "the rows are taller than the frame: the form scrolls")
             let rows = fields(h)
             XCTAssertEqual(rows.count, 12)
-            for f in rows { XCTAssertEqual(f.frame.height, 21, accuracy: 2, "a field keeps its ideal height") }
+            // A field's ideal height follows the platform font (about 21 on macOS, taller
+            // with Segoe UI on Windows): every field keeps its own ideal height, unsqueezed.
+            for f in rows {
+                XCTAssertEqual(f.frame.height, f.fittingSize.height, accuracy: 1, "a field keeps its ideal height")
+                XCTAssertGreaterThan(f.frame.height, 16)
+            }
             let frames = rows.map { scroll.documentView!.convert($0.bounds, from: $0) }.sorted { $0.minY < $1.minY }
             for (a, b) in zip(frames, frames.dropFirst()) { XCTAssertLessThanOrEqual(a.maxY, b.minY + 0.5, "rows do not overlap") }
             w.close()

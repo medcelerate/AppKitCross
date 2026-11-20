@@ -97,22 +97,34 @@ final class _TableBridge: NSObject, NSTableViewDataSource, NSTableViewDelegate {
         if let h = heights[row] { return h }
         var tallest: CGFloat = 0
         for (c, width) in widths.enumerated() where c < model.columns.count && width > 0 {
-            let available = max(1, width - _TableBridge.cellLeadingPadding - tableView.intercellSpacing.width)
-            let content = model.cell(row, c)
+            // The probe holds exactly what the cell shows and is offered the cell's frame
+            // width (the column's, see NSTableView's cell frames), so the row is measured
+            // the way its cell lays out: measuring the bare content at a different width
+            // left a cell that wrapped inside a one-line row.
+            let content = cellContent(row: row, column: c)
             let probe: NSHostingView<AnyView>
             if let p = probes[c] { p.rootView = content; probe = p }
             else { probe = NSHostingView(rootView: content); probes[c] = probe }
-            tallest = max(tallest, probe.sizeThatFits(NSHostingSizeProposal(width: available, height: nil)).height)
+            tallest = max(tallest, probe.sizeThatFits(NSHostingSizeProposal(width: width, height: nil)).height)
         }
         let h = max(_TableBridge.minimumRowHeight, tallest.rounded(.up) + _TableBridge.rowPadding)
         heights[row] = h
         return h
     }
 
+    /// What a cell hosts: the column content at the cell's leading edge, as SwiftUI lays
+    /// table cells out. A leading-aligned flexible frame rather than an HStack with a
+    /// Spacer: the stack offers its least flexible child an equal share first, so a text
+    /// beside a spacer got half the column and wrapped although the column fitted it.
+    func cellContent(row: Int, column: Int) -> AnyView {
+        AnyView(model.cell(row, column)
+            .padding(.leading, _TableBridge.cellLeadingPadding)
+            .frame(maxWidth: .infinity, alignment: .leading))
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let tableColumn, let column = tableView.tableColumns.firstIndex(where: { $0 === tableColumn }), row < model.rowIDs.count else { return nil }
-        // Cells sit at the leading edge of their column, as SwiftUI lays them out.
-        let content = AnyView(HStack(spacing: 0) { model.cell(row, column); Spacer(minLength: 0) }.padding(.leading, _TableBridge.cellLeadingPadding))
+        let content = cellContent(row: row, column: column)
         if let v = tableView.makeView(withIdentifier: _TableBridge.cellID, owner: nil) as? NSHostingView<AnyView> {
             v.rootView = content
             return v
@@ -175,7 +187,8 @@ final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
         bridge.measures = true
         bridge.invalidateHeights()
         noteAllRowHeightsChanged()
-        // A column resized by the user rewraps its cells: the rows are measured again.
+        // A column resized by the user, or by autoresizing as the table follows its scroll
+        // view, rewraps its cells: the rows are measured again.
         resizeObserver = NotificationCenter.default.addObserver(forName: NSTableView.columnDidResizeNotification, object: table, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.columnsDidResize() }
         }
@@ -186,16 +199,17 @@ final class _NSTablePrimitive: _ControlPrimitive<NSScrollView> {
         super.detach()
     }
 
-    /// Column autoresizing (the table followed its scroll view) changes widths without a
-    /// notification: once the scroll view has its frame, compare with the widths the
-    /// heights were measured at.
+    /// A backstop for widths that changed without a notification: once the scroll view
+    /// has its frame, compare with the widths the heights were measured at.
     override func didSyncBackingViews(node: _ViewNode) {
         super.didSyncBackingViews(node: node)
-        let measured = bridge.measuredWidths
-        if bridge.measures, !measured.isEmpty, measured != _TableBridge.columnWidths(of: table) { columnsDidResize() }
+        if bridge.measures, !bridge.measuredWidths.isEmpty { columnsDidResize() }
     }
 
+    /// Re-measures the rows unless they were measured at the current widths (autoresizing
+    /// posts one notification per column; the first re-measures at the final widths).
     private func columnsDidResize() {
+        guard bridge.measuredWidths != _TableBridge.columnWidths(of: table) else { return }
         bridge.invalidateHeights()
         noteAllRowHeightsChanged()
     }

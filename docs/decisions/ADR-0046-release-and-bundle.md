@@ -105,8 +105,13 @@ the executable:
   `<exe>-Info.plist`, in `Resources/` first; with none, the version for the archive name
   comes from a plist in the executable target's bundle. The walk does go above the target's
   own directory, since a vendored app keeps its plist beside its sources
-  (`Examples/MDVault/Resources/Info.plist` above `Sources/MDVault`). `/Info.plist` is
-  git-ignored.
+  (`Examples/MDVault/Resources/Info.plist` above `Sources/MDVault`). When no directory below
+  the root has them, the package root is taken for an executable target only if it holds the
+  app's own plist as `Resources/Info.plist`, `Resources/<exe>-Info.plist` or
+  `<exe>-Info.plist` (an application's, as above), and then that plist, that `Resources/` and
+  the icons beside the plist are the app's and its `CFBundleShortVersionString` names the
+  archive (Sibyl's layout, whose first PC bundle had none of them); a bare root `Info.plist`
+  never counts. `/Info.plist` is git-ignored.
 - **PDB (Windows)**: SwiftPM's release configuration writes no PDB, so a crash report could
   only give module offsets. The plugin adds `-g -debug-info-format=codeview` and
   `-Xlinker -debug` to a Windows release build (`--no-debug-info` opts out) and copies
