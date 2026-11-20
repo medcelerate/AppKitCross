@@ -887,6 +887,13 @@ import CoreText
         _platform?.setNeedsDisplay(r)
     }
 
+    /// A view needs layout: a frame is requested with the smallest dirty area, so the
+    /// paint runs layout (`platformWindowDraw`), and the views layout moves or updates
+    /// invalidate themselves for the frame after. Nothing is repainted wholesale.
+    internal func _viewNeedsLayout() {
+        _platform?.setNeedsDisplay(NSRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
     /// Feeds the event to the gesture recognizers of the target view and its ancestors
     /// (AppKit routes to every recognizer up the hit view's chain). Returns true when a
     /// tracking recognizer asked for the view not to see this event.

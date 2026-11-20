@@ -1587,9 +1587,17 @@ import CoreText
         set { if newValue { setNeedsDisplay(bounds) } else { _needsDisplay = false } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needslayout
+    /// Setting it asks the window for a frame: layout runs at the start of the next paint,
+    /// and what it moves or redraws marks itself from there. Without the request nothing
+    /// would paint (a model change that touches no view's frame marks only `needsLayout`;
+    /// the Sibyl run on Windows saw its status bar stay stale until a rebuild).
     @MainActor open var needsLayout: Bool {
         get { _needsLayout }
-        set { _needsLayout = newValue }
+        set {
+            let request = newValue && !_needsLayout
+            _needsLayout = newValue
+            if request { _window?._viewNeedsLayout() }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/needspaneltobecomekey
     @MainActor open var needsPanelToBecomeKey: Bool { false }
