@@ -214,7 +214,7 @@ final class _NSToolbarItemButton: NSButton {
         guard let item else { return }
         let r = bounds
         let highlighted = pressed && isEnabled
-        if isEnabled, _MaterialBackground.draw(.toolbarItem(highlighted: highlighted), in: r.insetBy(dx: 1, dy: 1), of: self) {
+        if isEnabled, _MaterialBackground.draw(.toolbarItem(highlighted: highlighted, hovered: hovered), in: r.insetBy(dx: 1, dy: 1), of: self) {
             // Liquid Glass: every item sits on a glass capsule (ADR-0052).
         } else if isBordered {
             let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)

@@ -1,13 +1,15 @@
 // NSGlassEffectView (hand-written; seeded from the generated stub, see tools/apigen)
 // Liquid Glass (ADR-0052): a lens over the content beneath it. With the Liquid Glass
 // switch on, the view samples what the window drew under its rectangle at a quarter of
-// the backing scale, blurs it through the backend's material pass, and draws the result
-// tinted with the rim highlight and shadow macOS 26 gives glass; the sample is cached and
-// taken again only when a view beneath dirties the glass rectangle. With the switch off
-// the view draws the translucent tint an `NSVisualEffectView` within the window draws
-// today, so an app written against the macOS 26 SDK keeps a sensible look on every port.
-// The port's own types carry no `@available(macOS 26.0, *)`: the macOS host build runs on
-// macOS 15, where a 26-gated type could never be exercised by the tests.
+// the backing scale, the backend's material pass blurs and saturates it, and the lens
+// stage shades the shape at the backing scale: the backdrop bent toward the rim, the veil
+// (light or dark by the backdrop's own luminance), the tint, the rim line and specular
+// sheen under a fixed light, the soft shadow. The sample is cached and taken again only
+// when a view beneath dirties the glass rectangle. With the switch off the view draws the
+// translucent tint an `NSVisualEffectView` within the window draws today, so an app
+// written against the macOS 26 SDK keeps a sensible look on every port. The port's own
+// types carry no `@available(macOS 26.0, *)`: the macOS host build runs on macOS 15, where
+// a 26-gated type could never be exercised by the tests.
 
 import Foundation
 import QuartzCore
@@ -21,8 +23,24 @@ import QuartzCore
     /// A shape other than the rounded rectangle (SwiftUI's `glassEffect(in:)`), in bounds
     /// coordinates.
     public var _shapePath: ((NSRect) -> NSBezierPath)? { didSet { needsDisplay = true } }
+    /// SwiftUI's `Glass.interactive`: the surface brightens under the pointer and grows a
+    /// little while pressed.
+    public var _isInteractive = false {
+        didSet {
+            guard _isInteractive != oldValue else { return }
+            if !_isInteractive { _isHovered = false; _isPressed = false }
+            needsDisplay = true
+            window?._trackingAreasDidChange()
+        }
+    }
+    /// SwiftUI's `glassEffectUnion`: surfaces in one container sharing an identifier
+    /// always draw as one shape.
+    public var _unionID: AnyHashable? { didSet { _enclosingGlassContainer?.needsLayout = true } }
     /// A glass view in a container's merge group draws no surface of its own.
     internal var _surfaceDrawnByContainer = false { didSet { if _surfaceDrawnByContainer != oldValue { needsDisplay = true } } }
+    internal var _isHovered = false { didSet { if _isHovered != oldValue { needsDisplay = true } } }
+    internal var _isPressed = false { didSet { if _isPressed != oldValue { needsDisplay = true } } }
+    private var _hoverArea: NSTrackingArea?
 
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsglasseffectview/contentview
     @MainActor open var contentView: NSView? {
@@ -57,17 +75,65 @@ import QuartzCore
 
     open override var isOpaque: Bool { false }
 
+    /// The rectangle the surface fills: the bounds, less a point on every side for an
+    /// interactive surface at rest (it grows back to the bounds while pressed).
+    internal var _surfaceRect: NSRect {
+        _isInteractive && !_isPressed ? bounds.insetBy(dx: 1, dy: 1) : bounds
+    }
+
     /// The glass outline in bounds coordinates: the custom shape, else the rounded
     /// rectangle (a radius of half the height makes a capsule).
     internal var _glassPath: NSBezierPath {
-        if let p = _shapePath { return p(bounds) }
-        let r = min(_cornerRadius, bounds.width / 2, bounds.height / 2)
-        return r > 0 ? NSBezierPath(roundedRect: bounds, xRadius: r, yRadius: r) : NSBezierPath(rect: bounds)
+        let r = _surfaceRect
+        if let p = _shapePath { return p(r) }
+        let radius = _effectiveCornerRadius(in: r)
+        return radius > 0 ? NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius) : NSBezierPath(rect: r)
+    }
+    internal func _effectiveCornerRadius(in r: NSRect) -> CGFloat { min(_cornerRadius, r.width / 2, r.height / 2) }
+
+    /// The container whose merge groups this view may join.
+    internal var _enclosingGlassContainer: NSGlassEffectContainerView? {
+        var v = superview
+        while let s = v { if let c = s as? NSGlassEffectContainerView { return c }; v = s.superview }
+        return nil
     }
 
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         _GlassRegistry.observeKeyChanges(of: self)
+    }
+    open override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        _enclosingGlassContainer?.needsLayout = true
+    }
+    open override func setFrameOrigin(_ newOrigin: NSPoint) {
+        super.setFrameOrigin(newOrigin)
+        _enclosingGlassContainer?.needsLayout = true
+    }
+    open override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        _enclosingGlassContainer?.needsLayout = true
+    }
+
+    open override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let a = _hoverArea { removeTrackingArea(a); _hoverArea = nil }
+        guard _isInteractive else { return }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        _hoverArea = area
+    }
+    open override func mouseEntered(with event: NSEvent) {
+        if _isInteractive { _isHovered = true } else { super.mouseEntered(with: event) }
+    }
+    open override func mouseExited(with event: NSEvent) {
+        if _isInteractive { _isHovered = false; _isPressed = false } else { super.mouseExited(with: event) }
+    }
+    open override func mouseDown(with event: NSEvent) {
+        if _isInteractive { _isPressed = true } else { super.mouseDown(with: event) }
+    }
+    open override func mouseUp(with event: NSEvent) {
+        if _isInteractive { _isPressed = false } else { super.mouseUp(with: event) }
     }
 
     open override func draw(_ dirtyRect: NSRect) {
@@ -75,7 +141,10 @@ import QuartzCore
         if _LiquidGlass.isEnabled {
             var spec = _GlassSpec.lens(clear: _style == .clear, in: self)
             spec.tint = _tintColor
-            _GlassRenderer.draw(spec, path: _glassPath, in: bounds, of: self)
+            if _isInteractive { spec.brighten = _isPressed ? 0.2 : (_isHovered ? 0.1 : 0) }
+            let r = _surfaceRect
+            let outline: _GlassOutline = _shapePath == nil ? .roundedRect(_effectiveCornerRadius(in: r)) : .path
+            _GlassRenderer.draw(spec, path: _glassPath, outline: outline, in: r, of: self)
         } else {
             // Today's look: the within-window tint of an effect view.
             let active = window?.isKeyWindow ?? true
@@ -97,63 +166,105 @@ extension NSGlassEffectView {
 
 // MARK: - The glass pass
 
+/// The outline handed to the lens stage: a rounded rectangle (analytic distance field) or
+/// any path (rasterised to a coverage mask).
+internal enum _GlassOutline {
+    case roundedRect(CGFloat)
+    case path
+}
+
 /// What a glass surface looks like: how far the content beneath is blurred, the veil
-/// laid over it, and whether it is a lens (rim and shadow) or a flat material (a toolbar
-/// band, a sidebar column).
+/// laid over it, and whether it is a lens (bevel, rim and shadow) or a flat material (a
+/// toolbar band, a sidebar column).
 @MainActor
 internal struct _GlassSpec {
-    /// Blur of the content beneath, in points.
+    /// The light or dark variant, or whichever the backdrop's luminance calls for.
+    enum Variant { case light, dark, adaptive }
+    var variant: Variant = .adaptive
+    /// Blur of the content beneath, in points, and the saturation lift of the blurred backdrop.
     var blurRadius: CGFloat = 16
-    /// The veil over the blurred content: the colour and how much of it.
-    var veil: NSColor = .white
-    var veilAlpha: CGFloat = 0.4
+    var saturation: CGFloat = 1.3
+    /// The veil over the blurred content in each variant: how much of white, how much of
+    /// the dark grey.
+    var lightVeilAlpha: CGFloat = 0.42
+    var darkVeilAlpha: CGFloat = 0.4
+    var darkVeil = NSColor(red: 0.16, green: 0.16, blue: 0.18, alpha: 1)
     /// A tint laid over the veil (`tintColor`, a prominent button's accent).
     var tint: NSColor?
     var tintAlpha: CGFloat = 0.55
-    /// The rim: a highlight along the top edge and a shadow along the bottom, and the
-    /// soft shadow a floating lens casts.
-    var rim = true
-    var shadow = true
-    /// The edge's highlight strength (the inactive window halves it).
+    /// The lens: the bevel bending the backdrop at the edge, the rim line, the sheen, the
+    /// soft shadow a floating lens casts. A flat material has none of them.
+    var lens = true
+    var edgeWidth: CGFloat = 6
+    var refraction: CGFloat = 3
     var rimAlpha: CGFloat = 0.55
+    var specular: CGFloat = 0.35
+    var shadow = true
+    /// A lift toward white (interactive hover and press).
+    var brighten: CGFloat = 0
+    /// The scroll-edge effect: when nothing but the window background lies beneath the
+    /// surface, the content just beyond this window edge is mirrored into the sample so
+    /// the material carries the colours of the content it borders (a toolbar band over a
+    /// document that does not run under it). Only `.minY` (the strip below) is drawn.
+    var extendsFrom: NSRectEdge?
+    var active = true
 
     /// Whether `view`'s window is key (a view outside any window counts as active).
     static func isActive(_ view: NSView) -> Bool { view.window?.isKeyWindow ?? true }
 
     /// A lens (`NSGlassEffectView`, a glass button): regular or clear, for the view's
-    /// appearance and window state. Inactive windows show a flatter, more opaque glass
-    /// with a fainter rim, as macOS does.
+    /// appearance and window state. Dark appearance forces the dark variant; light
+    /// appearance lets the backdrop decide. Inactive windows show a flatter, more opaque
+    /// glass with a fainter rim and no shadow, as macOS does.
     static func lens(clear: Bool, in view: NSView) -> _GlassSpec {
         let dark = view.effectiveAppearance.isDark
         let active = isActive(view)
         var s = _GlassSpec()
-        switch (clear, dark) {
-        case (false, false): s.veil = .white; s.veilAlpha = active ? 0.42 : 0.6
-        case (false, true): s.veil = NSColor(red: 0.16, green: 0.16, blue: 0.18, alpha: 1); s.veilAlpha = active ? 0.4 : 0.6
-        case (true, false): s.veil = .white; s.veilAlpha = active ? 0.16 : 0.3
-        case (true, true): s.veil = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1); s.veilAlpha = active ? 0.18 : 0.32
+        s.active = active
+        s.variant = dark ? .dark : .adaptive
+        if clear {
+            s.lightVeilAlpha = active ? 0.16 : 0.3
+            s.darkVeilAlpha = active ? 0.18 : 0.32
+            s.darkVeil = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1)
+            s.blurRadius = 10; s.tintAlpha = 0.35; s.saturation = 1.15
+        } else {
+            s.lightVeilAlpha = active ? 0.42 : 0.6
+            s.darkVeilAlpha = active ? 0.4 : 0.6
         }
-        if clear { s.blurRadius = 10; s.tintAlpha = 0.35 }
-        s.rimAlpha = (dark ? 0.3 : 0.55) * (active ? 1 : 0.5)
-        if !active { s.shadow = false }
+        if !active { s.rimAlpha *= 0.5; s.specular *= 0.4; s.shadow = false }
         return s
     }
 
-    /// A flat material (no rim): the band behind a toolbar, a sidebar column, an effect
+    /// A flat material (no bevel): the band behind a toolbar, a sidebar column, an effect
     /// view's material within the window.
     static func material(in view: NSView, alpha: CGFloat? = nil) -> _GlassSpec {
         let dark = view.effectiveAppearance.isDark
         let active = isActive(view)
         var s = _GlassSpec()
-        s.rim = false; s.shadow = false
-        s.blurRadius = 20
-        s.veil = dark ? NSColor(red: 0.14, green: 0.14, blue: 0.16, alpha: 1) : .white
-        s.veilAlpha = alpha ?? (active ? 0.5 : 0.68)
+        s.active = active
+        s.variant = dark ? .dark : .adaptive
+        s.lens = false; s.edgeWidth = 0; s.refraction = 0; s.rimAlpha = 0; s.specular = 0; s.shadow = false
+        s.blurRadius = 24
+        s.saturation = 1.35
+        s.darkVeil = NSColor(red: 0.14, green: 0.14, blue: 0.16, alpha: 1)
+        s.lightVeilAlpha = alpha ?? (active ? 0.5 : 0.68)
+        s.darkVeilAlpha = alpha ?? (active ? 0.5 : 0.68)
         return s
+    }
+
+    /// The variant for a backdrop of mean luminance `luminance` (the regular glass turns
+    /// dark over dark content, as Apple's does).
+    func resolvesDark(luminance: CGFloat?) -> Bool {
+        switch variant {
+        case .light: return false
+        case .dark: return true
+        case .adaptive: return (luminance ?? 1) < 0.35
+        }
     }
 }
 
-/// Draws glass: the blurred sample of the content beneath, the veil and tint, the rim.
+/// Draws glass: the blurred sample of the content beneath through the lens stage, the
+/// soft shadow around a lens.
 @MainActor
 internal enum _GlassRenderer {
     /// The sample is taken at this fraction of the backing scale; the blur hides the
@@ -161,60 +272,112 @@ internal enum _GlassRenderer {
     static let sampleScaleDivisor: CGFloat = 4
 
     /// Draws `spec` inside `path` (bounds coordinates of `view`), `rect` being the
-    /// surface's bounds the sample covers.
-    static func draw(_ spec: _GlassSpec, path: NSBezierPath, in rect: NSRect, of view: NSView) {
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let margin = spec.blurRadius
+    /// surface's rectangle the sample covers; `slot` distinguishes several surfaces one
+    /// view draws (a container's merge groups).
+    static func draw(_ spec: _GlassSpec, path: NSBezierPath, outline: _GlassOutline, in rect: NSRect, of view: NSView, slot: Int = 0) {
+        guard let ctx = NSGraphicsContext.current?.cgContext, rect.width > 0, rect.height > 0 else { return }
+        let margin = spec.blurRadius + spec.refraction
         if spec.shadow { drawShadow(path: path, in: ctx, dark: view.effectiveAppearance.isDark) }
         ctx.saveGState()
         path.addClip()
-        if let sample = _GlassRegistry.sample(for: view).image(rect: rect.insetBy(dx: -margin, dy: -margin), blur: spec.blurRadius, view: view) {
-            ctx.interpolationQuality = .default
-            ctx.draw(sample.image, in: sample.rect)
+        let sample = _GlassRegistry.sample(for: view, slot: slot)
+        if let backdrop = sample.backdrop(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view) {
+            let scale = view.window?.backingScaleFactor ?? 1
+            let dark = spec.resolvesDark(luminance: backdrop.luminance)
+            var p = PlatformGlassParameters(width: max(1, Int((rect.width * scale).rounded(.up))), height: max(1, Int((rect.height * scale).rounded(.up))))
+            if dark {
+                let c = spec.darkVeil.usingColorSpace(.sRGB) ?? spec.darkVeil
+                p.veil = .init(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent)
+                p.veilAlpha = spec.darkVeilAlpha
+                p.rimAlpha = spec.rimAlpha * 0.55
+                p.specular = spec.specular * 0.7
+            } else {
+                p.veil = .white
+                p.veilAlpha = spec.lightVeilAlpha
+                p.rimAlpha = spec.rimAlpha
+                p.specular = spec.specular
+            }
+            if let tint = spec.tint, let c = tint.usingColorSpace(.sRGB) {
+                p.tint = .init(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent, alpha: c.alphaComponent)
+                p.tintAlpha = spec.tintAlpha
+            }
+            p.edgeWidth = spec.edgeWidth * scale
+            p.refraction = spec.refraction * scale
+            p.rimWidth = spec.lens ? max(1, 1 * scale) : 0
+            p.brighten = spec.brighten
+            // The backdrop image in output pixels: the margin lies outside the output.
+            let backdropRect = CGRect(x: -margin * scale, y: -margin * scale, width: backdrop.rect.width * scale, height: backdrop.rect.height * scale)
+            let shape = outlineShape(outline, path: path, in: rect, pixels: (p.width, p.height), scale: scale, flipped: view.isFlipped)
+            let shadeKey = shapeKey(outline, path: path, parameters: p, flipped: view.isFlipped)
+            if let shape, let shaded = sample.shaded(key: shadeKey, make: { Platform.backend.material.shade(backdrop.image, in: backdropRect, shape: shape, parameters: p) }) {
+                drawImage(shaded, in: rect, context: ctx, flipped: view.isFlipped)
+            } else {
+                // The lens stage failed: the blurred backdrop under the veil, as a flat material.
+                drawImage(backdrop.image, in: backdrop.rect, context: ctx, flipped: view.isFlipped)
+                (dark ? spec.darkVeil : NSColor.white).withAlphaComponent(dark ? spec.darkVeilAlpha : spec.lightVeilAlpha).setFill()
+                ctx.fill(rect)
+            }
         } else {
             // Nothing to sample (no window, no backing surface): the veil over the window colour.
             NSColor.windowBackgroundColor.setFill()
             ctx.fill(rect)
-        }
-        spec.veil.withAlphaComponent(spec.veilAlpha).setFill()
-        ctx.fill(rect)
-        if let tint = spec.tint {
-            tint.withAlphaComponent(spec.tintAlpha * tint.alphaComponent).setFill()
+            let dark = spec.resolvesDark(luminance: nil)
+            (dark ? spec.darkVeil : NSColor.white).withAlphaComponent(dark ? spec.darkVeilAlpha : spec.lightVeilAlpha).setFill()
             ctx.fill(rect)
         }
         ctx.restoreGState()
-        if spec.rim { drawRim(path: path, in: rect, context: ctx, alpha: spec.rimAlpha, flipped: view.isFlipped) }
     }
 
-    /// The rim: a one-point stroke inside the outline, white along the top fading to a
-    /// faint dark line along the bottom, as the light catches a lens edge.
-    private static func drawRim(path: NSBezierPath, in rect: NSRect, context ctx: CGContext, alpha: CGFloat, flipped: Bool) {
-        let highlight = NSColor.white.withAlphaComponent(alpha)
-        let mid = NSColor.white.withAlphaComponent(alpha * 0.35)
-        let shade = NSColor.black.withAlphaComponent(min(0.18, alpha * 0.3))
-        let stops: [(NSColor, CGFloat)] = flipped ? [(highlight, 0), (mid, 0.55), (shade, 1)] : [(shade, 0), (mid, 0.45), (highlight, 1)]
-        let gradient = NSGradient(colorsAndLocations: stops[0], stops[1], stops[2])
-        ctx.saveGState()
-        // The ring between the outline and the outline inset by a point.
-        let ring = NSBezierPath()
-        ring.append(path)
-        ring.append(inset(path, in: rect, by: 1))
-        ring.windingRule = .evenOdd
-        ring.addClip()
-        gradient?.draw(in: rect, angle: 90)
-        ctx.restoreGState()
+    /// The lens stage's shape for `outline`: the rounded rectangle in output pixels, or the
+    /// path rasterised into a coverage mask whose top row is the view's top.
+    private static func outlineShape(_ outline: _GlassOutline, path: NSBezierPath, in rect: NSRect, pixels: (Int, Int), scale: CGFloat, flipped: Bool) -> PlatformGlassShape? {
+        switch outline {
+        case .roundedRect(let radius):
+            return .roundedRect(CGRect(x: 0, y: 0, width: CGFloat(pixels.0), height: CGFloat(pixels.1)), cornerRadius: radius * scale)
+        case .path:
+            guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale) else { return nil }
+            let c = surface.context
+            if flipped {
+                c.translateBy(x: -rect.minX, y: rect.height + rect.minY); c.scaleBy(x: 1, y: -1)
+            } else {
+                c.translateBy(x: -rect.minX, y: -rect.minY)
+            }
+            c.setFillColor(CGColor(gray: 1, alpha: 1))
+            c.addPath(path.cgPath)
+            c.fillPath()
+            guard let mask = surface.makeImage(), mask.width == pixels.0, mask.height == pixels.1 else { return nil }
+            return .coverage(mask)
+        }
     }
 
-    /// The outline inset by `d` points: a rounded rectangle keeps its corner radius less `d`.
-    private static func inset(_ path: NSBezierPath, in rect: NSRect, by d: CGFloat) -> NSBezierPath {
-        let inner = rect.insetBy(dx: d, dy: d)
-        guard inner.width > 0, inner.height > 0 else { return NSBezierPath() }
-        var t = AffineTransform(translationByX: rect.midX, byY: rect.midY)
-        t.scale(x: inner.width / rect.width, y: inner.height / rect.height)
-        t.translate(x: -rect.midX, y: -rect.midY)
-        let copy = path.copy() as! NSBezierPath
-        copy.transform(using: t)
-        return copy
+    /// The cache key of a shaded image: the parameters and the outline (its bounds and
+    /// element count stand for a path).
+    private static func shapeKey(_ outline: _GlassOutline, path: NSBezierPath, parameters: PlatformGlassParameters, flipped: Bool) -> Int {
+        var h = Hasher()
+        h.combine(parameters)
+        h.combine(flipped)
+        switch outline {
+        case .roundedRect(let r): h.combine(0); h.combine(r)
+        case .path:
+            h.combine(1); h.combine(path.elementCount)
+            let b = path.bounds
+            h.combine(b.origin.x); h.combine(b.origin.y); h.combine(b.width); h.combine(b.height)
+        }
+        return h.finalize()
+    }
+
+    /// Draws an image whose top row is the view's top into `rect`, in a flipped view too.
+    private static func drawImage(_ image: CGImage, in rect: NSRect, context ctx: CGContext, flipped: Bool) {
+        ctx.interpolationQuality = .default
+        if flipped {
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: rect.minY + rect.maxY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(image, in: rect)
+            ctx.restoreGState()
+        } else {
+            ctx.draw(image, in: rect)
+        }
     }
 
     /// The soft shadow under a floating lens: three rings of falling opacity outside the outline.
@@ -232,38 +395,63 @@ internal enum _GlassRenderer {
     }
 }
 
-/// The cached sample of the content beneath one glass surface.
+/// The cached sample of the content beneath one glass surface: the blurred backdrop, and
+/// the shaded image last drawn from it.
 @MainActor
 internal final class _GlassSample {
     weak var owner: NSView?
+    /// The blurred, saturated backdrop.
     private(set) var image: CGImage?
+    /// Its mean luminance (the adaptive variant reads it).
+    private(set) var luminance: CGFloat?
+    /// Whether the sample was the mirrored strip beyond the edge (nothing but the window
+    /// background lay beneath the surface).
+    private(set) var extended = false
     /// The sampled rectangle in the owner's bounds and in the window.
     private(set) var rect = NSRect.null
     private(set) var windowRect = NSRect.null
     private var scale: CGFloat = 0
     private var blur: CGFloat = 0
+    private var saturation: CGFloat = 0
+    private var extendsFrom: NSRectEdge?
     private var appearanceIsDark = false
+    private var generation = 0
+    private var shadeKey: Int?
+    private var shadeGeneration = -1
+    private(set) var shadedImage: CGImage?
     var dirty = true
     init(owner: NSView) { self.owner = owner }
 
     /// The blurred content beneath `rect` (bounds coordinates), sampled afresh when the
     /// cache is dirty or the surface moved, scaled or re-themed.
-    func image(rect: NSRect, blur: CGFloat, view: NSView) -> (image: CGImage, rect: NSRect)? {
+    func backdrop(rect: NSRect, spec: _GlassSpec, view: NSView) -> (image: CGImage, rect: NSRect, luminance: CGFloat?)? {
         let backing = view.window?.backingScaleFactor ?? 1
         let dark = view.effectiveAppearance.isDark
         let inWindow = view.convert(rect, to: nil)
-        if dirty || image == nil || rect != self.rect || inWindow != windowRect || backing != scale || blur != self.blur || dark != appearanceIsDark {
-            self.rect = rect; windowRect = inWindow; scale = backing; self.blur = blur; appearanceIsDark = dark
+        if dirty || image == nil || rect != self.rect || inWindow != windowRect || backing != scale || spec.blurRadius != blur || spec.saturation != saturation || spec.extendsFrom != extendsFrom || dark != appearanceIsDark {
+            self.rect = rect; windowRect = inWindow; scale = backing; blur = spec.blurRadius; saturation = spec.saturation; extendsFrom = spec.extendsFrom; appearanceIsDark = dark
             dirty = false
+            generation += 1
             let sampleScale = max(0.25, backing / _GlassRenderer.sampleScaleDivisor)
-            image = nil
-            if let raw = _GlassRegistry.render(beneath: view, rect: rect, scale: sampleScale) {
-                let radius = Int((blur * sampleScale).rounded())
-                image = Platform.backend.material.blur(raw, radius: radius) ?? raw
+            image = nil; luminance = nil; extended = false
+            if let raw = _GlassRegistry.render(beneath: view, rect: rect, scale: sampleScale, extendsFrom: spec.extendsFrom, margin: spec.blurRadius + spec.refraction) {
+                extended = raw.extended
+                let radius = Int((spec.blurRadius * sampleScale).rounded())
+                let blurred = Platform.backend.material.blur(raw.image, radius: radius, saturation: spec.saturation) ?? raw.image
+                image = blurred
+                luminance = Platform.backend.material.averageLuminance(blurred)
             }
         }
         guard let image else { return nil }
-        return (image, rect)
+        return (image, rect, luminance)
+    }
+
+    /// The shaded image for `key` over the current backdrop, made when either changed.
+    func shaded(key: Int, make: () -> CGImage?) -> CGImage? {
+        if shadeKey == key, shadeGeneration == generation, let shadedImage { return shadedImage }
+        shadedImage = make()
+        shadeKey = key; shadeGeneration = generation
+        return shadedImage
     }
 }
 
@@ -271,14 +459,15 @@ internal final class _GlassSample {
 /// stale (and the surface for redisplay), and a window's key change redraws them all.
 @MainActor
 internal enum _GlassRegistry {
-    private static var samples: [ObjectIdentifier: _GlassSample] = [:]
+    private struct Key: Hashable { let view: ObjectIdentifier; let slot: Int }
+    private static var samples: [Key: _GlassSample] = [:]
     private static var keyObserverInstalled = false
 
-    static func sample(for view: NSView) -> _GlassSample {
-        let id = ObjectIdentifier(view)
-        if let s = samples[id], s.owner === view { return s }
+    static func sample(for view: NSView, slot: Int = 0) -> _GlassSample {
+        let key = Key(view: ObjectIdentifier(view), slot: slot)
+        if let s = samples[key], s.owner === view { return s }
         let s = _GlassSample(owner: view)
-        samples[id] = s
+        samples[key] = s
         observeKeyChanges(of: view)
         return s
     }
@@ -288,11 +477,14 @@ internal enum _GlassRegistry {
     /// dirtying its rectangle invalidates the sample.
     static func noteInvalidation(in window: NSWindow, from view: NSView?, rect: NSRect?) {
         guard !samples.isEmpty else { return }
-        for (id, s) in samples {
-            guard let owner = s.owner else { samples[id] = nil; continue }
+        for (key, s) in samples {
+            guard let owner = s.owner else { samples[key] = nil; continue }
             guard owner.window === window, !s.dirty else { continue }
             if let view, view === owner || view.isDescendant(of: owner) { continue }
-            if let rect, !s.windowRect.isNull, !s.windowRect.intersects(rect) { continue }
+            if let rect, !s.windowRect.isNull, !s.windowRect.intersects(rect) {
+                // An extended sample also watches the strip it mirrored.
+                guard s.extended, s.windowRect.offsetBy(dx: 0, dy: -s.windowRect.height).intersects(rect) else { continue }
+            }
             s.dirty = true
             owner.needsDisplay = true
         }
@@ -314,9 +506,37 @@ internal enum _GlassRegistry {
 
     /// What the window drew beneath `view` in `rect` (bounds coordinates of `view`), at
     /// `scale` pixels per point, as premultiplied pixels: the window's background and
-    /// every view drawn before `view` in the paint order, stopping at `view` itself.
-    static func render(beneath view: NSView, rect: NSRect, scale: CGFloat) -> CGImage? {
+    /// every view drawn before `view` in the paint order, stopping at `view` itself. With
+    /// `extendsFrom` set and nothing but the window background beneath the surface (the
+    /// part of `rect` inside the `margin`), the content beyond that edge is mirrored in.
+    static func render(beneath view: NSView, rect: NSRect, scale: CGFloat, extendsFrom: NSRectEdge? = nil, margin: CGFloat = 0) -> (image: CGImage, extended: Bool)? {
         guard rect.width > 0, rect.height > 0, rect.width.isFinite, rect.height.isFinite else { return nil }
+        let inWindow = view.convert(rect, to: nil)
+        guard let image = renderWindow(beneath: view, rect: rect, windowRect: inWindow, scale: scale) else { return nil }
+        guard extendsFrom == .minY, let window = view.window, let pixels = _MaterialPixels(image) else { return (image, false) }
+        // The window background in straight sRGB; the surface's rows of the sample (the
+        // sample's top row is the window's top).
+        guard let bg = window._backgroundColor.usingColorSpace(.sRGB) else { return (image, false) }
+        let background = PlatformGlassParameters.Color(red: bg.redComponent, green: bg.greenComponent, blue: bg.blueComponent)
+        let surfaceHeight = inWindow.height - 2 * margin
+        guard surfaceHeight > 0, let surfaceRows = pixels.rows(from: Int((margin * scale).rounded()), count: Int((surfaceHeight * scale).rounded())), surfaceRows.mostly(background) else { return (image, false) }
+        // The strip below the surface's bottom edge, as tall as the surface and the margin
+        // above it, mirrored about that edge into the rows above it: the sample's bottom
+        // margin keeps the real content, and the mirror joins it without a seam.
+        let mirroredHeight = inWindow.height - margin
+        let bottomEdge = inWindow.minY + margin
+        let stripRect = NSRect(x: inWindow.minX, y: bottomEdge - mirroredHeight, width: inWindow.width, height: mirroredHeight)
+        guard let strip = renderWindow(beneath: view, rect: NSRect(origin: rect.origin, size: stripRect.size), windowRect: stripRect, scale: scale),
+              let stripPixels = _MaterialPixels(strip) else { return (image, false) }
+        var merged = pixels
+        merged.replaceTopRows(with: stripPixels.flippedVertically())
+        guard let result = merged.makeImage() else { return (image, false) }
+        return (result, true)
+    }
+
+    /// The window beneath `view` for `windowRect` (window coordinates; `rect` is the same
+    /// rectangle in the view's bounds, used when the view has no window).
+    private static func renderWindow(beneath view: NSView, rect: NSRect, windowRect: NSRect, scale: CGFloat) -> CGImage? {
         guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale) else { return nil }
         let ctx = surface.context
         let previousStop = NSView._glassStop, previousStopped = CALayer._composeStopped, previousStopLayer = CALayer._composeStopLayer
@@ -336,10 +556,9 @@ internal enum _GlassRegistry {
         ctx.saveGState()
         if let window = view.window {
             // The surface's origin at the sampled rectangle's origin in window space.
-            let inWindow = view.convert(rect, to: nil)
-            ctx.translateBy(x: -inWindow.minX, y: -inWindow.minY)
+            ctx.translateBy(x: -windowRect.minX, y: -windowRect.minY)
             NSAppearance.current = window.effectiveAppearance
-            window._drawBeneathGlass(into: ctx, rect: inWindow)
+            window._drawBeneathGlass(into: ctx, rect: windowRect)
         } else if let root = view._glassRootView, root !== view {
             let inRoot = view.convert(rect, to: root)
             ctx.translateBy(x: -inRoot.minX, y: -inRoot.minY)
@@ -358,6 +577,20 @@ extension _GlassRegistry {
     /// Stands in for the stop layer of a glass view without one, so the layer compositor
     /// still honours a stop the view paint has set.
     static let placeholderStopLayer = CALayer()
+}
+
+extension _MaterialPixels {
+    /// Rows `start` to `start + count` as their own pixels.
+    func rows(from start: Int, count: Int) -> _MaterialPixels? {
+        guard count > 0, start >= 0, start + count <= height else { return nil }
+        return _MaterialPixels(bytes: Array(bytes[(start * stride)..<((start + count) * stride)]), width: width, height: count, stride: stride, template: template)
+    }
+    /// Replaces the top rows with `other`'s (same width and stride).
+    mutating func replaceTopRows(with other: _MaterialPixels) {
+        guard other.stride == stride else { return }
+        let n = min(other.height, height) * stride
+        bytes.replaceSubrange(0..<n, with: other.bytes[0..<n])
+    }
 }
 
 extension NSView {

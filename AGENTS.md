@@ -269,7 +269,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_FILE_DIALOG=package` | the package-drawn open/save panel instead of the system one (screenshots, tests) |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
 | `APPKITWIN_METAL_REFERENCE=1` | the CPU Metal device instead of Direct3D 12 or Vulkan |
-| `APPKITWIN_LIQUID_GLASS=1` | macOS 26's Liquid Glass for toolbars, sidebars, `glassEffect` and the glass button styles (ADR-0052); or the `AppKitCrossLiquidGlass` Info.plist key. Off, the pre-26 look |
+| `APPKITWIN_LIQUID_GLASS=1` | macOS 26's Liquid Glass for toolbars, sidebars, `glassEffect` and the glass button styles (ADR-0052): the blurred backdrop through a lens (refraction, rim, sheen, light/dark by the content beneath); or the `AppKitCrossLiquidGlass` Info.plist key. Off, the pre-26 look. `Examples/Glass` shows it |
 
 ## 5. Porting recipe
 

@@ -40,12 +40,14 @@ public enum _LiquidGlass {
 }
 
 /// The surfaces the port draws with glass when the switch is on: the band behind a
-/// toolbar, one toolbar item's capsule, a sidebar column and a glass control.
+/// toolbar, one toolbar item's capsule, a sidebar column and a glass control. The
+/// pointer states brighten a lens and let a pressed one grow a little (Apple's
+/// interactive glass).
 public enum _MaterialKind {
     case toolbarBand
-    case toolbarItem(highlighted: Bool)
+    case toolbarItem(highlighted: Bool, hovered: Bool)
     case sidebar
-    case control(prominent: Bool, highlighted: Bool)
+    case control(prominent: Bool, highlighted: Bool, hovered: Bool)
 }
 
 /// The hook a toolbar band, a sidebar column or a control calls before its own fill:
@@ -58,22 +60,29 @@ public enum _MaterialBackground {
         guard _LiquidGlass.isEnabled, rect.width > 0, rect.height > 0 else { return false }
         switch kind {
         case .toolbarBand:
-            _GlassRenderer.draw(_GlassSpec.material(in: view), path: NSBezierPath(rect: rect), in: rect, of: view)
+            // The band borders the document below it: the scroll-edge effect mirrors that
+            // content into the material when nothing runs under the band.
+            var spec = _GlassSpec.material(in: view)
+            spec.extendsFrom = .minY
+            _GlassRenderer.draw(spec, path: NSBezierPath(rect: rect), outline: .roundedRect(0), in: rect, of: view)
         case .sidebar:
-            _GlassRenderer.draw(_GlassSpec.material(in: view), path: NSBezierPath(rect: rect), in: rect, of: view)
-        case .toolbarItem(let highlighted):
+            _GlassRenderer.draw(_GlassSpec.material(in: view), path: NSBezierPath(rect: rect), outline: .roundedRect(0), in: rect, of: view)
+        case .toolbarItem(let highlighted, let hovered):
             var spec = _GlassSpec.lens(clear: false, in: view)
-            if highlighted { spec.tint = .labelColor; spec.tintAlpha = 0.14 }
-            let r = min(rect.height, rect.width) / 2
-            _GlassRenderer.draw(spec, path: NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r), in: rect, of: view)
-        case .control(let prominent, let highlighted):
+            spec.brighten = highlighted ? 0.18 : (hovered ? 0.1 : 0)
+            drawCapsule(spec, in: highlighted ? rect.insetBy(dx: -0.75, dy: -0.75) : rect, of: view)
+        case .control(let prominent, let highlighted, let hovered):
             var spec = _GlassSpec.lens(clear: false, in: view)
-            if prominent { spec.tint = .controlAccentColor; spec.tintAlpha = highlighted ? 0.95 : 0.85 }
-            else if highlighted { spec.tint = .labelColor; spec.tintAlpha = 0.14 }
-            let r = min(rect.height, rect.width) / 2
-            _GlassRenderer.draw(spec, path: NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r), in: rect, of: view)
+            if prominent { spec.tint = .controlAccentColor; spec.tintAlpha = highlighted ? 0.95 : 0.85; spec.variant = .light }
+            spec.brighten = highlighted ? 0.18 : (hovered ? 0.1 : 0)
+            drawCapsule(spec, in: highlighted ? rect.insetBy(dx: -0.75, dy: -0.75) : rect, of: view)
         }
         return true
+    }
+
+    private static func drawCapsule(_ spec: _GlassSpec, in rect: NSRect, of view: NSView) {
+        let r = min(rect.height, rect.width) / 2
+        _GlassRenderer.draw(spec, path: NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r), outline: .roundedRect(r), in: rect, of: view)
     }
 }
 
@@ -171,13 +180,14 @@ public enum _MaterialBackground {
             // materials keep their dark veil; a selection its colour.
             var spec = _GlassSpec.material(in: self)
             switch _material {
-            case .hudWindow, .dark, .ultraDark: spec.veil = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1); spec.veilAlpha = active ? 0.6 : 0.75
+            case .hudWindow, .dark, .ultraDark:
+                spec.variant = .dark; spec.darkVeil = NSColor(red: 0.12, green: 0.12, blue: 0.14, alpha: 1); spec.darkVeilAlpha = active ? 0.6 : 0.75
             case .selection: spec.tint = _isEmphasized ? .controlAccentColor : .secondarySelectedControlColor; spec.tintAlpha = 0.6
-            default: if !active { spec.veilAlpha = 0.7 }
+            default: if !active { spec.lightVeilAlpha = 0.7; spec.darkVeilAlpha = 0.7 }
             }
-            let radius = (layer?.cornerRadius ?? 0)
+            let radius = min(layer?.cornerRadius ?? 0, bounds.width / 2, bounds.height / 2)
             let path = radius > 0 ? NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius) : NSBezierPath(rect: bounds)
-            _GlassRenderer.draw(spec, path: path, in: bounds, of: self)
+            _GlassRenderer.draw(spec, path: path, outline: .roundedRect(radius), in: bounds, of: self)
             return
         }
         let alpha: CGFloat

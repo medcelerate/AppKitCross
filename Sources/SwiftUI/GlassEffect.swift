@@ -43,14 +43,18 @@ public struct DefaultGlassEffectShape: Shape, Sendable {
 extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/glasseffect(_:in:isenabled:)
     public func glassEffect<S: Shape>(_ glass: Glass = .regular, in shape: S = DefaultGlassEffectShape(), isEnabled: Bool = true) -> some View {
-        _GlassEffectModified(content: self, glass: glass, shape: AnyShape(shape), isEnabled: isEnabled)
+        _GlassEffectModified(content: self, glass: glass, shape: AnyShape(shape), isCapsule: shape is DefaultGlassEffectShape || shape is Capsule, isEnabled: isEnabled)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/glasseffectid(_:in:)
     /// The morphing transition between glass shapes that share an identifier is not drawn;
     /// the identifier is accepted so view code written for macOS 26 compiles and lays out.
     public func glassEffectID<ID: Hashable & Sendable>(_ id: ID, in namespace: Namespace.ID) -> some View { self }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/glasseffectunion(id:namespace:)
-    public func glassEffectUnion<ID: Hashable & Sendable>(id: ID, namespace: Namespace.ID) -> some View { self }
+    /// Glass effects in one `GlassEffectContainer` sharing `id` draw as one shape whatever
+    /// their distance.
+    public func glassEffectUnion<ID: Hashable & Sendable>(id: ID, namespace: Namespace.ID) -> some View {
+        environment(\._glassUnionID, AnyHashable(_GlassUnionKey(id: AnyHashable(id), namespace: namespace)))
+    }
 }
 
 /// The content over an `NSGlassEffectView` with Liquid Glass on and the effect enabled;
@@ -59,10 +63,13 @@ struct _GlassEffectModified<Content: View>: View {
     let content: Content
     let glass: Glass
     let shape: AnyShape
+    /// The default shape (a capsule), which the glass view draws analytically.
+    let isCapsule: Bool
     let isEnabled: Bool
+    @Environment(\._glassUnionID) private var unionID
     @ViewBuilder var body: some View {
         if isEnabled, glass.variant != .identity, _LiquidGlass.isEnabled {
-            content.background(_GlassSurface(glass: glass, shape: shape))
+            content.background(_GlassSurface(glass: glass, shape: shape, isCapsule: isCapsule, unionID: unionID))
         } else {
             content
         }
@@ -75,17 +82,27 @@ struct _GlassSurface: View, _PrimitiveView {
     typealias Body = Never
     let glass: Glass
     let shape: AnyShape
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _GlassSurfacePrimitive(glass: glass, shape: shape) }
+    let isCapsule: Bool
+    var unionID: AnyHashable? = nil
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _GlassSurfacePrimitive(glass: glass, shape: shape, isCapsule: isCapsule, unionID: unionID) }
+}
+
+/// `glassEffectUnion`'s identifier within its namespace.
+struct _GlassUnionKey: Hashable {
+    let id: AnyHashable
+    let namespace: Namespace.ID
 }
 
 @MainActor
 final class _GlassSurfacePrimitive: _Primitive {
     var glass: Glass
     var shape: AnyShape
+    var isCapsule: Bool
+    var unionID: AnyHashable?
     let view = NSGlassEffectView(frame: .zero)
 
-    init(glass: Glass, shape: AnyShape) {
-        self.glass = glass; self.shape = shape
+    init(glass: Glass, shape: AnyShape, isCapsule: Bool, unionID: AnyHashable?) {
+        self.glass = glass; self.shape = shape; self.isCapsule = isCapsule; self.unionID = unionID
         super.init()
         install()
     }
@@ -93,7 +110,7 @@ final class _GlassSurfacePrimitive: _Primitive {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _GlassSurfacePrimitive else { return }
-        glass = o.glass; shape = o.shape
+        glass = o.glass; shape = o.shape; isCapsule = o.isCapsule; unionID = o.unionID
         install()
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); install() }
@@ -101,7 +118,12 @@ final class _GlassSurfacePrimitive: _Primitive {
         let shape = shape
         view.style = glass.style
         view.tintColor = glass.tint?.nsColor
-        view._shapePath = { rect in NSBezierPath(cgPath: shape.path(in: rect).cgPath) }
+        view._isInteractive = glass.isInteractive
+        if view._unionID != unionID { view._unionID = unionID }
+        // The default shape is the capsule the view draws itself (an analytic outline);
+        // any other shape is rasterised.
+        view.cornerRadius = 10_000
+        view._shapePath = isCapsule ? nil : { rect in NSBezierPath(cgPath: shape.path(in: rect).cgPath) }
         view.needsDisplay = true
     }
     /// A background takes the size proposed (the content's), like a shape.
@@ -115,8 +137,8 @@ final class _GlassSurfacePrimitive: _Primitive {
 // MARK: GlassEffectContainer
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/glasseffectcontainer
-/// Groups glass effects; `spacing` is the distance within which macOS merges neighbouring
-/// shapes. The port lays the content out as is and draws each glass shape on its own.
+/// Groups glass effects: an `NSGlassEffectContainerView` around the content, so glass
+/// shapes closer than `spacing` (macOS's default is 40 points) merge into one surface.
 public struct GlassEffectContainer<Content: View>: View {
     let spacing: CGFloat?
     let content: Content
@@ -124,7 +146,33 @@ public struct GlassEffectContainer<Content: View>: View {
         self.spacing = spacing
         self.content = content()
     }
-    public var body: some View { content.environment(\._glassContainerSpacing, spacing) }
+    public var body: some View {
+        _GlassContainer(spacing: spacing ?? 40, box: _ViewBox(content.environment(\._glassContainerSpacing, spacing)))
+    }
+}
+
+/// The container view behind `GlassEffectContainer`, holding the content's views.
+struct _GlassContainer: View, _PrimitiveView {
+    typealias Body = Never
+    let spacing: CGFloat
+    let box: _AnyViewBox
+    func _makePrimitive(node: _ViewNode) -> _Primitive { _GlassContainerPrimitive(spacing: spacing, content: box) }
+}
+
+@MainActor
+final class _GlassContainerPrimitive: _Primitive {
+    let view = NSGlassEffectContainerView(frame: .zero)
+    init(spacing: CGFloat, content: _AnyViewBox) {
+        super.init()
+        children = [content]
+        view.spacing = spacing
+    }
+    override var nsView: NSView? { view }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        if let o = other as? _GlassContainerPrimitive, view.spacing != o.view.spacing { view.spacing = o.view.spacing }
+    }
+    override func didLayout(node: _ViewNode) { view.needsLayout = true }
 }
 
 extension EnvironmentValues {
@@ -133,6 +181,12 @@ extension EnvironmentValues {
     var _glassContainerSpacing: CGFloat? {
         get { self[GlassContainerSpacingKey.self] }
         set { self[GlassContainerSpacingKey.self] = newValue }
+    }
+    private struct GlassUnionIDKey: EnvironmentKey { static let defaultValue: AnyHashable? = nil }
+    /// `glassEffectUnion`'s identifier for the glass effects inside it.
+    var _glassUnionID: AnyHashable? {
+        get { self[GlassUnionIDKey.self] }
+        set { self[GlassUnionIDKey.self] = newValue }
     }
 }
 
@@ -187,12 +241,31 @@ extension PrimitiveButtonStyle where Self == GlassProminentButtonStyle {
 final class _GlassButton: NSButton {
     /// The glass this button draws (nil: the cell's bezel, as today).
     var glassProminent: Bool? {
-        didSet { if glassProminent != oldValue { needsDisplay = true } }
+        didSet {
+            guard glassProminent != oldValue else { return }
+            needsDisplay = true
+            if (glassProminent == nil) != (oldValue == nil) { hovered = false; updateTrackingAreas() }
+        }
     }
+    /// The pointer is over the button (a glass button brightens under it).
+    private(set) var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let a = hoverArea { removeTrackingArea(a); hoverArea = nil }
+        guard glassProminent != nil, _LiquidGlass.isEnabled else { return }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+    override func mouseEntered(with event: NSEvent) { if hoverArea != nil { hovered = true } else { super.mouseEntered(with: event) } }
+    override func mouseExited(with event: NSEvent) { if hoverArea != nil { hovered = false } else { super.mouseExited(with: event) } }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let prominent = glassProminent, _LiquidGlass.isEnabled, isBordered else { super.draw(dirtyRect); return }
         let r = bounds.insetBy(dx: 1, dy: 1)
-        _MaterialBackground.draw(.control(prominent: prominent, highlighted: isHighlighted), in: r, of: self)
+        _MaterialBackground.draw(.control(prominent: prominent, highlighted: isHighlighted, hovered: hovered), in: r, of: self)
         cell?.drawInterior(withFrame: bounds, in: self)
     }
 }

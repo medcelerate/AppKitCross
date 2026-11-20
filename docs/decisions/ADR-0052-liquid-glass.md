@@ -41,33 +41,94 @@ carries the same stop through a layer-backed subtree, which the layer compositor
 instead of `_displayHierarchy`, and stops the layer being drawn from composing itself
 again from inside its own `draw`). The sample is taken at a quarter of the backing scale,
 since the blur hides the resolution and a toolbar band or sidebar column then costs a few
-hundred by a few dozen pixels. The backend's material pass blurs it; the surface draws the
-blurred sample clipped to its outline, lays the veil over it (white at 40 % in light
-appearance, a dark grey in dark; more of it when the window is inactive), the tint if any,
-and for a lens the rim (a one-point ring inside the outline under a vertical gradient from
-white at the top to a faint shadow at the bottom) and a three-ring soft shadow below.
-Materials (a band, a column, an effect view's material) get the blur and veil only.
+hundred by a few dozen pixels. The backend's material pass turns the sample into the
+glass (the pipeline below), and the surface draws the result clipped to its outline, with
+a three-ring soft shadow below a lens.
 
 The sample is cached per surface (`_GlassSample`, kept by `_GlassRegistry`) and taken
 again only when a view that is not the surface or one of its subviews dirties a rectangle
 intersecting the surface, when the surface moves or changes scale, or when the appearance
 changes; every invalidation passes through `NSWindow._viewNeedsDisplay`, which is where the
 registry hears of it, and the surface marks itself for display when its sample goes stale.
-Nothing is invalidated from inside a draw (the Daily To Do lesson): a sample is only ever
-taken during a paint, and a stale one is noted, not repainted, by the invalidation that
-caused it. The per-rect paint path (PR 92) is untouched; a surface clipped to part of a
-dirty rect draws that part from its cache.
+The shaded image is cached with it, keyed by the lens parameters and the outline, so a
+hover or a key-window change re-shades without re-sampling and a plain redraw does
+neither. Nothing is invalidated from inside a draw (the Daily To Do lesson): a sample is
+only ever taken during a paint, and a stale one is noted, not repainted, by the
+invalidation that caused it. The per-rect paint path (PR 92) is untouched; a surface
+clipped to part of a dirty rect draws that part from its cache. Content scrolling under a
+surface dirties it every frame, so the glass follows at frame rate; a surface over static
+content never resamples, and an idle window issues no invalidation.
 
-### Platform
+### The material pipeline
 
-`PlatformMaterialBackend` (`Platform/Material.swift`) is the pixel pass: `blur(_:radius:)`
-over premultiplied 32-bit pixels. `SoftwareMaterialBackend` (three separable box blurs,
-the classic Gaussian approximation) is every backend's default through an extension on
-`PlatformBackend`; Direct2D's Gaussian blur effect or a Vulkan pass can replace it on a
-backend by overriding `material` without Core changing. The offscreen surfaces come from
-the existing `PlatformImageBackend.makeOffscreen`, whose pixels are premultiplied BGRA on
-all three backends (Direct2D bitmaps, cairo image surfaces, the host's bitmap context), so
-the one blur serves them all.
+Apple describes Liquid Glass (WWDC25 "Meet Liquid Glass", the HIG's Materials page) as a
+lens: the content behind it, blurred and made a little more vivid, bent at the edge where
+the glass is thick, lit by a highlight that follows the light and the shape's curvature,
+with a thin rim and a soft shadow, adapting between a light and a dark variant to what is
+behind it, and brightening and swelling under the pointer. The port models each of those
+as a stage of `PlatformMaterialBackend` (`Platform/Material.swift`), so a backend with a
+GPU compositor implements the same stages as shader passes and Core does not change:
+
+1. **Backdrop** (`blur(_:radius:saturation:)`, at the sample scale): a Gaussian
+   approximation (three separable box passes) of radius 16 pt for a lens, 10 pt for clear
+   glass, 24 pt for a toolbar band or sidebar material; then saturation, every colour
+   pulled from its luminance by 1.3 (1.35 for a material, 1.15 for clear).
+2. **Luminance** (`averageLuminance`): the alpha-weighted mean of the blurred backdrop.
+   Regular glass in light appearance is light over a backdrop above 0.35 and dark below
+   it (the dark veil, a fainter rim, a softer sheen); dark appearance is always dark;
+   `Glass.clear` keeps the lighter veil of its variant. A prominent button stays light
+   under its accent tint.
+3. **Lens** (`shade(_:in:shape:parameters:)`, at the backing scale over the shape alone):
+   the outline is a signed distance field, analytic for a rounded rectangle or capsule and
+   a chamfer distance transform of a coverage mask for any other outline (SwiftUI's
+   `glassEffect(in:)` with its own shape), with the outward normal from its gradient. Per
+   output pixel, with `d` the distance (negative inside), `n` the normal and `L` the light
+   direction (above and a little to the left, in the surface's own orientation whether
+   the view is flipped or not):
+
+   ```
+   t     = clamp(1 + d / edgeWidth, 0, 1)            // 1 at the rim, 0 edgeWidth inside
+   p'    = p + n * refraction * t²                   // the lens looks outward through the bevel
+   c     = backdrop(p')                               // bilinear, through the blur margin
+   c     = mix(c, veil, veilAlpha); c = mix(c, tint, tintAlpha)
+   rim   = clamp(1 + d / rimWidth, 0, 1) * rimAlpha
+   c    += (1 - c) * rim * max(n·L, 0)                // light where the edge faces the light
+   c    *= 1 - rim * max(-n·L, 0) * 0.45              // dark where it faces away
+   c    += (1 - c) * (n·L)⁴ * t * specular            // the sheen down the lit bevel
+   c    += (1 - c) * brighten                         // hover 0.1, press 0.2
+   out   = c * coverage(d)                            // antialiased at the outline
+   ```
+
+   A lens has a 6 pt bevel bending the backdrop by 3 pt at the rim, a 1 pt rim at 0.55
+   (0.3 in the dark variant, halved when the window is inactive) and a sheen of 0.35; a
+   material (band, sidebar, within-window effect view) has none of them, only the veil.
+   In the software pass the lens stage over a toolbar band at 1100 by 52 points and 2x
+   is 230 thousand pixels, under two milliseconds; capsules are a few thousand.
+4. **Scroll-edge extension**: a toolbar band in this port sits above the content view
+   (ADR-0018 grows the frame by the band), so nothing but the window background lies
+   beneath it and a faithful sample would be flat grey, which is what the first PC run
+   saw. macOS 26's scroll edge effect carries the document into the bar; the band's
+   material does the same by mirroring the content just below the band's bottom edge into
+   the sample (`_GlassSpec.extendsFrom`), when at least 97 % of the pixels under the band
+   are the window background (a `fullSizeContentView` window whose content runs under the
+   band samples the content itself). The mirror joins the real content in the sample's
+   bottom margin without a seam, and the registry re-samples the band when that strip is
+   dirtied, so scrolling under the band moves the material.
+5. **Interactivity**: `Glass.interactive` (`NSGlassEffectView._isInteractive`), a glass
+   button and a toolbar item brighten under the pointer (a tracking area) and more while
+   pressed, and a pressed surface grows from its one-point inset back to its bounds (the
+   capsule's rect grows by 0.75 pt a side). The container (below) carries the states of its
+   members into the merged shape.
+
+Every backend ships the software pipeline. The offscreen surfaces come from the existing
+`PlatformImageBackend.makeOffscreen`, whose pixels are premultiplied BGRA on all three
+backends (Direct2D bitmaps, cairo image surfaces, the host's bitmap context), so one
+implementation serves them all. A GPU implementation (a Direct2D effect graph or a D3D12
+compute pass on Windows, Vulkan on Linux, Metal on the host) overrides `material` on its
+`PlatformBackend` with the three stages as shaders over the same inputs; the stages are
+split so a backend can take the blur first and leave the lens to software. None is written
+yet: the machine this ADR was written on cannot build the Windows or Linux GPU paths, and
+the software pass meets the frame budget at the sizes glass is used at.
 
 Windows' DWM backdrop is unchanged and still what a behind-window `NSVisualEffectView`
 asks for (Mica/Acrylic over the whole rectangle, per PR 77's rule that a rounded or
@@ -82,9 +143,12 @@ territory.
 `NSGlassEffectContainerView` (`contentView`, `spacing`) are hand-written now
 (`tools/apigen/config.json`). The port's types carry no `@available(macOS 26.0, *)`: the
 macOS host build runs on macOS 15, where a 26-gated type could never be exercised by the
-tests. The container keeps the spacing but draws each glass view on its own: the morphing
-bridge macOS animates between neighbours closer than `spacing` is not drawn. With the
-switch off a glass view draws the translucent window-colour tint a within-window
+tests. The container merges: glass views whose frames, grown by half the `spacing`, touch
+(or that share a `glassEffectUnion` identifier) draw as one capsule around them, drawn by
+the container with one sample, and the members draw no surface of their own; the groups
+are recomputed in the container's `layout` when a member is added, moved or resized. The
+morph macOS animates between the separate and merged shapes is not drawn. With the switch
+off a glass view draws the translucent window-colour tint a within-window
 `NSVisualEffectView` draws. `NSVisualEffectView` within the window takes the glass material
 with the switch on (HUD and dark materials keep their dark veil, a selection its colour);
 behind-window blending is as before.
@@ -96,9 +160,14 @@ behind-window blending is as before.
 `GlassEffectContainer`, `glassEffectID(_:in:)`, `glassEffectUnion(id:namespace:)`,
 `Namespace` (new; `@Namespace` had no port), `GlassButtonStyle`/`.glass` and
 `GlassProminentButtonStyle`/`.glassProminent`. `glassEffect` puts an `NSGlassEffectView`
-clipped to the shape behind the view with the switch on, and is the view itself off (no
-wrapper view: the hierarchy is the one without the modifier). `glassEffectID` and
-`glassEffectUnion` accept their identifiers and draw nothing extra. The glass button styles
+clipped to the shape behind the view with the switch on (the capsule analytic, any other
+shape through the coverage mask; `interactive` sets the view's hover and press states),
+and is the view itself off (no wrapper view: the hierarchy is the one without the
+modifier). `GlassEffectContainer` is an `NSGlassEffectContainerView` around its content,
+spacing 40 by default as on macOS, so neighbouring effects merge. `glassEffectUnion`
+carries its identifier to the surfaces through the environment and the container merges
+those whatever their distance; `glassEffectID` accepts its identifier and draws no
+transition. The glass button styles
 are new `_ButtonStyleKind` cases; `Button` is backed by `_GlassButton`, an `NSButton` that
 with a glass style and the switch on draws its label on the glass capsule
 (`_MaterialBackground.control`) and leaves the bezel to the glass, the cell still sizing it
@@ -119,23 +188,36 @@ column are the glass material over the window.
 
 ## Consequences
 
-- Nine pixel tests (`LiquidGlassPixelTests`): blurred content beneath (red on the left,
-  blue on the right, a blend at the edge that is softened yet present, lifted by the
-  veil), the rim highlight along the top and none along the bottom, the inactive window's
-  flatter and less saturated glass, the dark veil in dark appearance, the sample cache
-  (kept across the surface's own redraw and an invalidation outside it, stale after one
-  beneath it), the switch-off flat tint with no rim, the SwiftUI fallbacks (no extra view
-  from `glassEffect`, a glass button identical in PNG to the bordered one) and the
-  sidebar pane flag, plus the software blur's ramp and alpha. They run on the host and in
-  the Linux container; Windows draws the same Core pass over Direct2D offscreens and is
-  checked on the PC.
+- Nineteen pixel tests (`LiquidGlassPixelTests`): the glass is a blurred function of the
+  backdrop (red on the left, blue on the right, a softened edge; a different backdrop gives
+  different glass; black and white stripes lose over 90 % of their variance through it);
+  the rim highlight along the top and none along the bottom; refraction (the lens stage
+  over a synthetic backdrop shows the colour beyond the edge inside the rim only with
+  refraction on, the centre untouched); the specular sheen and rim following the light
+  (top brighter than the body, bottom darker, left brighter than right); a coverage-mask
+  outline (a diamond) shaded with its lit and unlit edges; the light/dark variant flipping
+  with the backdrop's luminance; the dark veil in dark appearance; the inactive window's
+  flatter glass; hover and press brightening and the pressed surface growing to its
+  bounds; the container merging neighbours within its spacing and not beyond, and on a
+  union identifier; the SwiftUI container and `glassEffectUnion`; the toolbar band carrying
+  the colour of the document below it (host backend) and grey with the switch off; the
+  sample cache (kept across the surface's own redraw and an invalidation outside it, stale
+  after one beneath it, the shaded image kept with it); the switch-off flat tint with no
+  rim and no groups; the SwiftUI fallbacks (no extra view from `glassEffect`, a glass
+  button identical in PNG to the bordered one); the sidebar pane flag; the software blur,
+  saturation and luminance probe. They run on the host and in the Linux container;
+  Windows draws the same Core pass over Direct2D offscreens and is checked on the PC.
+- `Examples/Glass` puts colourful bands and discs under a toolbar, a merged pair of glass
+  buttons, a clear and a tinted lens and the SwiftUI glass API, scrolls them at frame rate
+  from a toolbar item, and writes a screenshot with `--screenshot`.
 - Cost: a glass surface's first draw and every resample paint the window once more, into a
   surface of a sixteenth of the pixels (a quarter of the backing scale in each direction),
-  plus three box-blur passes over it. A view animating beneath a glass
-  surface resamples it every frame, which is what glass means; a toolbar over static
-  content never resamples.
-- Not done: the container's morphing merge and `glassEffectID` transitions; a GPU blur on
-  Windows and Linux; the sidebar lit by the desktop through Mica (needs the non-opaque
-  window); the scroll-edge effect macOS 26 fades in under a toolbar as content scrolls
-  beneath it, which would need the content to extend under the band (ADR-0018 keeps the
-  band outside the content area).
+  three box-blur passes over it, and the lens pass over the shape at the backing scale. A
+  view animating beneath a glass surface resamples it every frame, which is what glass
+  means; a toolbar over static content never resamples; a hover re-shades from the cached
+  backdrop.
+- Not done: the morph animation between a container's separate and merged shapes and
+  `glassEffectID` transitions; the GPU stages on Windows, Linux and the host (the seam is
+  there, software serves all three); the sidebar lit by the desktop through Mica (needs
+  the non-opaque window); the scroll-edge extension for edges other than the strip below
+  a band; reference captures from a macOS 26 machine to tune the constants against.

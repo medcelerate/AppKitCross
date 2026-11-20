@@ -427,6 +427,7 @@ targets += [
     // and main.swift points APPKITWIN_INFO_PLIST at it (ADR-0017).
     .executableTarget(name: "TextEdit", dependencies: ["AppKit"], path: "Examples/TextEdit", exclude: ["README.md"], resources: [.copy("Resources")]),
     .executableTarget(name: "Toolbar", dependencies: ["AppKit"], path: "Examples/Toolbar", exclude: ["README.md"]),
+    .executableTarget(name: "Glass", dependencies: ["AppKit", "SwiftUI"], path: "Examples/Glass", exclude: ["README.md"]),
     .executableTarget(name: "Workspace", dependencies: ["AppKit"] + leafModuleTestDependencies.filter { "\($0)".contains("UniformTypeIdentifiers") }, path: "Examples/Workspace", exclude: ["README.md"]),
     // A real third-party SwiftUI app, vendored unmodified (one `#if canImport(ObjectiveC)`
     // around an `@objc`): Daily To Do (MIT, Examples/DailyTodo/README.md). Its logic module and
