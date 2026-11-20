@@ -122,10 +122,7 @@ final class _NSMenuView: NSView {
         let attrs: [NSAttributedString.Key: Any] = [.font: layout.font]
         NSColor.windowBackgroundColor.setFill()
         NSBezierPath.fill(bounds)
-        let border = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-        NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
-        border.lineWidth = 1
-        border.stroke()
+        // The panel's border is `_NSMenuFrameView`'s, over the scrolled rows.
         // Only the rows in view are drawn: a scrolled menu lists hundreds of rows, and
         // laying every title out on each repaint kept the main thread busy for the whole
         // frame (on Windows the menu froze and the process spun a core while it was open).
@@ -216,15 +213,20 @@ final class _NSMenuClipView: NSView {
         addSubview(menuView)
         addSubview(upArrow)
         addSubview(downArrow)
+        addSubview(frameView)
+        frameView.frame = bounds
         layoutArrows()
     }
     required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
+    /// The panel's border, topmost so it frames whatever is scrolled into view.
+    let frameView = _NSMenuFrameView(frame: .zero)
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         offset = min(offset, maxOffset)
+        frameView.frame = bounds
         layoutArrows()
     }
 
@@ -264,6 +266,40 @@ final class _NSMenuClipView: NSView {
     // Accessibility: the clip is invisible; the window's children are the menu's rows.
     override func isAccessibilityElement() -> Bool { false }
     override func accessibilityChildren() -> [Any]? { menuView.accessibilityChildren() }
+}
+
+/// The menu panel's border: one hairline stroke of the panel's rounded outline, inset by
+/// half the line so it lies inside the window, in the light colour of a macOS menu edge.
+/// On Windows the panel's corners are rounded by the system (`DWMWCP_ROUND`, 8 pt), so the
+/// stroke follows that radius; a rectangular stroke's corners were clipped away there and
+/// its straight runs, in a dark colour, read as "lines on each side that stop short".
+@MainActor
+final class _NSMenuFrameView: NSView {
+    /// The radius the stroke follows: the system's rounding of the panel (0: square).
+    nonisolated(unsafe) static var cornerRadius: CGFloat = {
+        #if os(Windows)
+        return 8
+        #else
+        return 0
+        #endif
+    }()
+    /// The pop-up bezel's border colour (per appearance): a menu edge matches its button.
+    static var borderColor: NSColor { NSPopUpButtonCell._bezelBorderColor }
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { false }
+    override func accessibilityChildren() -> [Any]? { [] }
+    override func draw(_ dirtyRect: NSRect) {
+        let scale = window?.backingScaleFactor ?? 1
+        let line = 1 / max(scale, 1)
+        let rect = bounds.insetBy(dx: line / 2, dy: line / 2)
+        let radius = max(0, Self.cornerRadius - line / 2)
+        let path = radius > 0 ? NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius) : NSBezierPath(rect: rect)
+        path.lineWidth = line
+        Self.borderColor.setStroke()
+        path.stroke()
+    }
 }
 
 /// One scroll arrow band of a long menu.
