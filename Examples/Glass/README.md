@@ -21,7 +21,10 @@ What it demonstrates:
   the draw times and each glass stage's (the shared frame, every sample's crop and blur,
   every lens's shade). `Glass --autoscroll 5` (or `APPKITWIN_GLASS_AUTOSCROLL=5`) scrolls
   for five seconds without a click, painting and timing every frame, prints a line a
-  second (frames, mean and p95 paint time) and a summary, then exits. Measure with a
+  second (frames, mean and p95 paint time, the gap from one frame's start to the next)
+  and a summary, then exits. `--interval <ms>` sets the time between frames (16.7 by
+  default; 0 drives frames back to back, so the gap shows what the paint and the
+  platform's pump allow rather than the timer's cadence). Measure with a
   release build (`swift run -c release Glass --autoscroll 5`): the per-pixel stages are
   many times slower unoptimised.
 

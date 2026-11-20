@@ -141,6 +141,49 @@ Hz on every platform. On Windows the scroll itself dirtied the whole content are
 run; the clip view's scroll blit (PR 92, round 10c) shrinks the dirty rectangle to the
 exposed strip, and with it the number of surfaces a scroll re-samples.
 
+**Measured on the PC** (release, 1x, `Examples/Glass --autoscroll 10`): a scroll frame
+paints in 18 ms with glass and 4 ms without, while the frame rate sat at 29 and 51 fps.
+The rate was the demo's own doing, not the pump's: a repeating 16.7 ms `Timer` whose
+callback paints for longer than the interval misses its next fire and runs at half rate
+(the host shows the same, 33 ms gaps for 14 ms paints), and the Windows timer's 15.6 ms
+granularity rounds the glass-off cadence up too. `--interval 0` drives frames back to
+back and reports the gap between frame starts, which is the number to read for what the
+paint and the pump allow (host 2x release: 79 fps with glass, 237 without).
+
+**The GPU stage on Windows: scope.** At 18 ms a scroll frame with glass cannot hold 60 Hz
+in software on the PC, so the seam is the next step there, not an option. What it takes:
+
+1. The frame beneath the glass rendered into a Direct2D bitmap render target (an
+   `ID2D1BitmapRenderTarget` or a device-context bitmap with `D2D1_BITMAP_OPTIONS_TARGET`)
+   rather than a CPU-readable offscreen, at the sample scale, by the same
+   `_drawBeneathGlass` paint; `PlatformImageBackend.makeOffscreen` on Windows gains a
+   GPU-resident variant, or `PlatformMaterialBackend` gains an entry that takes the
+   backend's own surface handle. The material protocol's images become an opaque
+   `PlatformMaterialImage` (a `CGImage` on the host and Linux, a D2D bitmap on Windows)
+   so no stage reads pixels back; the software backend wraps a `CGImage` as today.
+2. The blur and saturation stages as Direct2D built-in effects (`CLSID_D2D1GaussianBlur`
+   with `D2D1_GAUSSIANBLUR_OPTIMIZATION_SPEED`, `CLSID_D2D1Saturation`), which run on the
+   GPU without any shader of the port's own, so the blur is a few microseconds of GPU
+   time per surface. The luminance probe stays a CPU reduction over the sample-scale
+   bitmap (a few hundred pixels per surface) or becomes a 1x1 downscale effect.
+3. The lens stage as a custom Direct2D effect (`ID2D1EffectImpl` with a pixel shader
+   registered through `ID2D1Factory1::RegisterEffectFromString`) running the per-pixel
+   program above: the blurred backdrop as input 0, the coverage mask as input 1 for
+   path outlines (the rounded rectangle's signed distance is analytic in the shader), the
+   `PlatformGlassParameters` as the constant buffer. The HLSL is compiled once at build
+   time (`fxc` / `dxc` in the Windows job, the blob embedded as bytes) because Direct2D
+   wants a compiled shader; a D3D12 compute pass over the same inputs is the alternative
+   when the D3D12 Metal backend lands and the window composites through it, with one
+   dispatch per surface and a copy into the swap chain.
+4. The output stays a D2D bitmap drawn into the window's render target by the existing
+   draw-image path; `drawImage` takes the opaque image. The shaded bitmap is cached per
+   surface as today, re-shaded when the backdrop or parameters change.
+5. Tests: the pixel tests read the shaded output back (one `CopyFromRenderTarget` per
+   test), so the same twenty tests run against the GPU backend on the Windows job; the
+   budget test is the demo's `--autoscroll` on the PC, a scroll frame with glass under 8 ms
+   at 1x. The Linux (Vulkan) and host (Metal) ports of the stages are the same shape and
+   follow when the Windows one is measured.
+
 Every backend ships the software pipeline. The offscreen surfaces come from the existing
 `PlatformImageBackend.makeOffscreen`, whose pixels are premultiplied BGRA on all three
 backends (Direct2D bitmaps, cairo image surfaces, the host's bitmap context), so one
