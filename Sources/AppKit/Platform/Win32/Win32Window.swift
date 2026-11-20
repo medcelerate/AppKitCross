@@ -556,6 +556,29 @@ final class Win32Window: PlatformWindow {
         }
     }
 
+    /// Scrolling by copy (`NSClipView.copiesOnScroll`): the swap chain's canvas keeps the
+    /// last frame, so the clip view's pixels move inside it (cd2d_target_copy_rect) and the
+    /// destination is invalidated, which makes the next frame present it (`rcPaint` is the
+    /// presented dirty rect). NSWindow accounts the moved area as painted and draws only the
+    /// band the scroll uncovered. Not on the HWND target (no canvas), a fresh canvas, a
+    /// transparent window (repaints whole) or while the layer tree is hosted natively.
+    func scrollBacking(_ rect: NSRect, by delta: NSSize) -> Bool {
+        guard let hwnd, !painting, let rt = renderTarget, cd2d_target_is_swapchain(rt), !cd2d_target_canvas_is_fresh(rt),
+              hostedScene == nil, !(cd2d_target_is_composition(rt) && _chrome.isTransparent) else { return false }
+        // Client pixels are top-down: content moving up (+y in points) moves to smaller rows.
+        let dxPx = delta.width * scale, dyPx = -delta.height * scale
+        guard abs(dxPx - dxPx.rounded()) < 0.001, abs(dyPx - dyPx.rounded()) < 0.001 else { return false }
+        let src = rect.intersection(rect.offsetBy(dx: -delta.width, dy: -delta.height))
+        guard !src.isNull, !src.isEmpty else { return true }       // all of it is uncovered
+        guard let s = clientRect(src) else { return false }
+        let dx = Int32(dxPx.rounded()), dy = Int32(dyPx.rounded())
+        guard cd2d_target_copy_rect(rt, s.left, s.top, s.right - s.left, s.bottom - s.top, s.left + dx, s.top + dy) else { return false }
+        var moved = RECT(left: s.left + dx, top: s.top + dy, right: s.right + dx, bottom: s.bottom + dy)
+        InvalidateRect(hwnd, &moved, false)
+        if NSView._traceInvalidation { NSView._trace("win32 scroll copy \(s.left),\(s.top) \(s.right - s.left)x\(s.bottom - s.top) px by \(dx),\(dy)") }
+        return true
+    }
+
     /// A posted message runs the owner's layout; what layout changes invalidates itself, so
     /// the update region stays what the views asked for. (A dirty pixel at the origin, the
     /// previous request, unioned by Windows with a meter at the top into the whole window.)

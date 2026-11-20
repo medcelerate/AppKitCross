@@ -111,6 +111,12 @@ void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_
 /// True until the first end_draw after the canvas was created or resized: the caller
 /// should paint the whole client area that frame.
 bool cd2d_target_canvas_is_fresh(CD2DTarget *target);
+/// Swap-chain targets: copies the canvas pixels of the `w`x`h` rect at (`srcX`, `srcY`)
+/// to (`dstX`, `dstY`) (client pixels; the rects may overlap), through a temporary
+/// bitmap. Call outside begin_draw/end_draw; the caller marks the destination dirty so
+/// the next frame presents it. False when the target has no canvas yet (fresh, lost) or
+/// a rect leaves it: the caller repaints instead.
+bool cd2d_target_copy_rect(CD2DTarget *target, int32_t srcX, int32_t srcY, int32_t w, int32_t h, int32_t dstX, int32_t dstY);
 /// True when the target is a premultiplied composition swap chain
 /// (cd2d_target_create_composition_swapchain): the caller clears it to transparent
 /// before drawing a frame.
