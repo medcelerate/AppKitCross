@@ -1,5 +1,5 @@
-// A search field is a capsule over whatever is behind it: on macOS the toolbar's grey
-// shows past the rounded ends. Checked in pixels, because a Windows run drew the
+// A search field is a capsule over whatever is behind it (in a toolbar, macOS 11's
+// rounded rectangle): on macOS the toolbar's grey shows past the rounded ends. Checked in pixels, because a Windows run drew the
 // capsule's outline on a white square (the cell filled its background colour over the
 // whole frame before stroking the rounded bezel).
 
@@ -87,7 +87,9 @@ final class SearchFieldBezelPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testSearchableToolbarItemIsACapsuleOverTheToolbar() throws {
+    /// In a toolbar the field is macOS 11's rounded rectangle (radius 6) with no fill of its
+    /// own: the band shows past the rounded corners and inside the outline.
+    func testSearchableToolbarItemIsARoundedRectOverTheToolbar() throws {
         try requireHostBackend()
         MainActor.assumeIsolated {
             struct Screen: View {
@@ -109,20 +111,31 @@ final class SearchFieldBezelPixelTests: XCTestCase, @unchecked Sendable {
             let frame = bandView.convert(field.bounds, from: field)
             XCTAssertGreaterThan(frame.width, 100, "the toolbar's search field has its width: \(frame)")
 
-            // The band's own colour, sampled just left of the field.
-            guard let rep = bandView.bitmapImageRepForCachingDisplay(in: bandView.bounds) else { return XCTFail("no bitmap") }
-            bandView.cacheDisplay(in: bandView.bounds, to: rep)
-            let scale = CGFloat(rep.pixelsWide) / bandView.bounds.width
-            let midY = bandView.isFlipped ? frame.midY : bandView.bounds.height - frame.midY
-            let outside = pixel(rep, Int(((frame.minX - 3) * scale).rounded()), Int((midY * scale).rounded()))
-            XCTAssertLessThan(outside.r, 0.97, "the toolbar band is grey: \(outside)")
-            assertCapsule(frame, in: bandView, outside: outside, "toolbar idle")
+            @MainActor func check(_ what: String) {
+                guard let rep = bandView.bitmapImageRepForCachingDisplay(in: bandView.bounds) else { return XCTFail("no bitmap") }
+                bandView.cacheDisplay(in: bandView.bounds, to: rep)
+                let scale = CGFloat(rep.pixelsWide) / bandView.bounds.width
+                func at(_ x: CGFloat, _ y: CGFloat) -> RGB {
+                    let row = bandView.isFlipped ? y : bandView.bounds.height - y
+                    return pixel(rep, Int((x * scale).rounded()), Int((row * scale).rounded()))
+                }
+                let outside = at(frame.minX - 3, frame.midY)
+                XCTAssertLessThan(outside.r, 0.97, "\(what): the toolbar band is grey: \(outside)")
+                for (x, y) in [(frame.minX + 0.5, frame.minY + 0.5), (frame.maxX - 0.5, frame.minY + 0.5), (frame.minX + 0.5, frame.maxY - 0.5), (frame.maxX - 0.5, frame.maxY - 0.5)] {
+                    XCTAssertTrue(close(at(x, y), outside), "\(what): the corner (\(x), \(y)) is rounded off: \(at(x, y))")
+                }
+                let inside = at(frame.maxX - 40, frame.minY + 3)
+                XCTAssertTrue(close(inside, outside), "\(what): no fill of its own, the band shows inside: \(inside)")
+                XCTAssertFalse(close(at(frame.minX + 0.5, frame.midY), outside, 0.01), "\(what): the left edge's midpoint is the outline")
+            }
+            check("toolbar idle")
 
             XCTAssertTrue(window.makeFirstResponder(field))
             guard let editor = field.currentEditor() as? NSTextView else { return XCTFail("no field editor") }
             editor.insertText("cue", replacementRange: editor.selectedRange())
             (Platform.backend as! HostBackend).drain()
-            assertCapsule(frame, in: bandView, outside: outside, "toolbar focused with text")
+            XCTAssertTrue(frame.insetBy(dx: 4, dy: 0).contains(bandView.convert(editor.bounds, from: editor)), "the editor stays inside the field")
+            check("toolbar focused with text")
         }
     }
 }

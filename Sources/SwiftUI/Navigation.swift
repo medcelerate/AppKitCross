@@ -447,9 +447,9 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
     }
     /// The picker inside its own form row: the row shows the label.
     var _inFormRow = false
-    /// The row is a grouped form's: the pop-up is borderless, its chevrons in a small
-    /// bezel, as macOS's Settings forms and inspectors show it (ADR-0051).
-    var _groupedRow = false
+    /// The row is a grouped form's: the pop-up is borderless, plain text with a chevron
+    /// (macOS's Settings forms; the `_FormRow` nils the form context for its content).
+    var _inGroupedForm = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         let env = node.environment
         let hidden = _inFormRow || env._labelsHidden
@@ -457,11 +457,11 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
         // radio groups and inline lists put it beside their first item (columns) or above
         // their options (grouped).
         if !hidden, env._formContext != nil, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true; inner._groupedRow = env._formContext == .grouped
+            var inner = self; inner._inFormRow = true; inner._inGroupedForm = env._formContext == .grouped
             let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
         }
-        return _PickerPrimitive(label: (label as? Text)?._string ?? "", showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content), groupedRow: _groupedRow)
+        return _PickerPrimitive(label: (label as? Text)?._string ?? _pickerItemFace(_ViewBox(label), environment: env).title, showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content), groupedRow: _inGroupedForm || env._formContext == .grouped)
     }
 }
 
@@ -508,7 +508,7 @@ final class _PickerPrimitive: _Primitive {
     var showsLabel: Bool
     var selection: AnyBinding
     var contentBox: _AnyViewBox
-    /// A grouped form row's pop-up is borderless.
+    /// A grouped form's row: the pop-up is borderless (ADR-0051).
     var groupedRow: Bool
     init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox, groupedRow: Bool = false) {
         self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content; self.groupedRow = groupedRow
@@ -518,15 +518,29 @@ final class _PickerPrimitive: _Primitive {
     override func attach(to node: _ViewNode) { super.attach(to: node); rebuild() }
     override func update(from other: _Primitive) {
         guard let o = other as? _PickerPrimitive else { return }
-        label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox; groupedRow = o.groupedRow
+        groupedRow = o.groupedRow
+        label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox
         rebuild()
     }
     private func rebuild() {
-        let items = _flattenBoxes(contentBox).map { _metadata(of: $0) }
-        let titles = items.map { ($0.content.value as? Text)?._string ?? String(describing: $0.content.viewType) }
-        let tags: [AnyHashable] = items.enumerated().map { i, item in item.meta.tag ?? AnyHashable(i) }
+        let leaves = _flattenBoxes(contentBox)
+        let items = leaves.map { _metadata(of: $0) }
+        // An item shows its view: a Text's string, a Label's title and icon (through the
+        // modifiers and custom views around it), never a type name.
+        let environment = node?.environment ?? EnvironmentValues()
+        let faces = items.map { _pickerItemFace($0.content, environment: environment) }
+        let titles = faces.map(\.title)
         let current = selection.get()
-        let index = tags.firstIndex(of: current) ?? 0
+        // An untagged row of a ForEach is tagged with its id when that is the selection's
+        // type, as in SwiftUI; else with its position.
+        let tags: [AnyHashable] = items.enumerated().map { i, item in
+            if let tag = item.meta.tag { return tag }
+            if let id = leaves[i].id, type(of: id.base) == type(of: current.base) { return id }
+            return AnyHashable(i)
+        }
+        // A selection no item carries (a nil optional) selects nothing: the pop-up's title
+        // is empty, as on macOS.
+        let index = tags.firstIndex(of: current) ?? -1
         let sel = selection
         let style = node?.environment.pickerStyle ?? .automatic
         let labelText = label
@@ -548,10 +562,139 @@ final class _PickerPrimitive: _Primitive {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
                 if !shownLabel.isEmpty { Text(shownLabel) }
-                _PopUp(titles: titles, selected: index, bordered: !groupedRow) { i in sel.set(tags[i]) }._pickerLabel(labelText)
+                _PickerPopUp(titles: titles, images: faces.map(\.image), iconOnly: faces.map(\.iconOnly), selected: index, bordered: !groupedRow) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
+    }
+}
+
+/// What a picker item shows in a menu: its text and its first image, found through the
+/// item's view (a `Text`, a `Label`, modifiers and custom views around them, a stack of an
+/// image and text). Custom views are evaluated outside the tree with the picker's
+/// environment, as the menu has no place for their state.
+@MainActor
+func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = EnvironmentValues()) -> (title: String, image: NSImage?, iconOnly: Bool) {
+    var texts: [String] = []
+    var image: NSImage?
+    var iconOnly = false
+    func walk(_ box: _AnyViewBox, depth: Int, environment: EnvironmentValues) {
+        guard depth < 24, image == nil || texts.isEmpty else { return }
+        let value = box.value
+        if let t = value as? Text { texts.append(t._string); return }
+        if let i = value as? Image { if image == nil { image = i.image }; return }
+        if let l = value as? _LabelParts {
+            // An icon-only label (`.labelStyle(.iconOnly)` around it) shows its icon alone
+            // on the pop-up's face; the menu item keeps the title beside it.
+            if environment._labelStyle is IconOnlyLabelStyle { iconOnly = true }
+            for b in l._labelParts { walk(b, depth: depth + 1, environment: environment) }
+            return
+        }
+        if value is any NSViewRepresentable || value is any NSViewControllerRepresentable { return }
+        if box.isPrimitive {
+            guard let p = box.makePrimitive(node: _ViewNode.placeholder) else { return }
+            var inner = environment
+            p.environmentTransform?(&inner)
+            for c in p.children { walk(c, depth: depth + 1, environment: inner) }
+        } else {
+            let scratch = _ViewNode(box: box, parent: nil, root: nil)
+            scratch.environment = environment
+            if let body = box.body(node: scratch) { walk(body, depth: depth + 1, environment: environment) }
+        }
+    }
+    walk(box, depth: 0, environment: environment)
+    let title = texts.filter { !$0.isEmpty }.joined(separator: " ")
+    return (title, image, iconOnly && image != nil)
+}
+
+/// A `Label`'s title and icon views, for a picker item to show them.
+protocol _LabelParts { var _labelParts: [_AnyViewBox] { get } }
+
+/// The pop-up of a menu-style picker: `_PopUp` with an image per item (a Label's icon) and
+/// no selected item when the selection matches none (`selected` -1). It shrinks to the
+/// width it is offered (its title truncates), so a form row never pushes it out of its
+/// column.
+struct _PickerPopUp: View, _PrimitiveView {
+    typealias Body = Never
+    let titles: [String]
+    let images: [NSImage?]
+    /// Per item: its face is the image alone (an icon-only Label).
+    var iconOnly: [Bool] = []
+    let selected: Int
+    /// False in a grouped form's row: plain text with the chevron, no bezel.
+    var bordered = true
+    let onSelect: (Int) -> Void
+    func _makePrimitive(node: _ViewNode) -> _Primitive {
+        let p = _PickerPopUpPrimitive(titles: titles, images: images, selected: selected, onSelect: onSelect)
+        p.iconOnly = iconOnly
+        p.control.isBordered = bordered
+        return p
+    }
+}
+
+@MainActor
+final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
+    var titles: [String]
+    var images: [NSImage?]
+    var iconOnly: [Bool] = []
+    var selected: Int
+    var onSelect: (Int) -> Void
+    /// The items are built when the primitive attaches (see `_PopUpPrimitive`).
+    init(titles: [String], images: [NSImage?], selected: Int, onSelect: @escaping (Int) -> Void) {
+        self.titles = titles; self.images = images; self.selected = selected; self.onSelect = onSelect
+        let b = NSPopUpButton(frame: .zero, pullsDown: false)
+        super.init(control: b)
+        b.target = b
+        b.action = Selector(("swiftUIPopUpAction:"))
+        b.setActionHandler(for: Selector(("swiftUIPopUpAction:"))) { [weak self] _ in
+            guard let self else { return }
+            self.selected = self.control.indexOfSelectedItem
+            self.applyImagePosition()
+            self.onSelect(self.control.indexOfSelectedItem)
+        }
+    }
+    private func rebuildItems() {
+        control.removeAllItems()
+        control.addItems(withTitles: titles)
+        for (i, image) in images.enumerated() { control.item(at: i)?.image = image }
+        control.selectItem(at: selected)
+        applyImagePosition()
+        control.sizeToFit()
+    }
+    /// The face draws the selected item's image: alone for an icon-only item (Sibyl's
+    /// Icon picker shows the glyph, not the symbol's name), else before its title.
+    func applyImagePosition() {
+        let i = control.indexOfSelectedItem
+        let want: NSControl.ImagePosition = i >= 0 && i < iconOnly.count && iconOnly[i] ? .imageOnly : .imageLeft
+        if control.imagePosition != want { control.imagePosition = want }
+    }
+    override func attach(to node: _ViewNode) {
+        super.attach(to: node)
+        if control.numberOfItems != titles.count { rebuildItems() }
+    }
+    override func update(from other: _Primitive) {
+        super.update(from: other)
+        guard let o = other as? _PickerPopUpPrimitive else { return }
+        onSelect = o.onSelect
+        if control.isBordered != o.control.isBordered { control.isBordered = o.control.isBordered; control.needsDisplay = true }
+        let iconOnlyChanged = o.iconOnly != iconOnly
+        iconOnly = o.iconOnly
+        if iconOnlyChanged { applyImagePosition() }
+        let imagesChanged = o.images.count != images.count || zip(o.images, images).contains { ($0 == nil) != ($1 == nil) || ($0 !== $1 && $0?.name() != $1?.name()) }
+        if o.titles != titles || imagesChanged {
+            titles = o.titles; images = o.images; selected = o.selected
+            rebuildItems()
+        } else if o.selected != selected || control.indexOfSelectedItem != o.selected {
+            selected = o.selected
+            control.selectItem(at: o.selected)
+            applyImagePosition()
+            control.sizeToFit()
+        }
+    }
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let s = intrinsicSize
+        guard let w = proposal.width, w.isFinite else { return s }
+        return CGSize(width: max(min(s.width, w), 44), height: s.height)
     }
 }
 
@@ -1066,11 +1209,15 @@ final class _AlertPrimitive: _Primitive {
         current = ns
         ns.messageText = alert.title._string
         ns.informativeText = alert.message?._string ?? ""
+        // As SwiftUI does on macOS: the cancel role takes Escape, and a destructive role
+        // draws red and is never the default (Return) button.
         for b in alert.buttons {
             let button = ns.addButton(withTitle: b.title)
-            if b.role == .cancel { button.keyEquivalent = "\u{1B}" }
-            // A destructive button: red title, never the default (macOS alerts).
-            if b.role == .destructive { button.hasDestructiveAction = true }
+            switch b.role {
+            case .cancel?: button.keyEquivalent = "\u{1B}"
+            case .destructive?: button.keyEquivalent = ""; button.hasDestructiveAction = true
+            default: break
+            }
         }
         let buttons = alert.buttons
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
@@ -1110,7 +1257,9 @@ extension View {
     }
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/confirmationdialog(_:ispresented:titlevisibility:actions:)
     public func confirmationDialog<A: View>(_ title: String, isPresented: Binding<Bool>, titleVisibility: Visibility = .automatic, @ViewBuilder actions: @escaping () -> A) -> some View {
-        alert(title, isPresented: isPresented, actions: actions)
+        _AlertModified(content: self, isPresented: isPresented) {
+            Alert._fromViews(title: Text(title), actions: AnyView(actions()), message: nil)._confirmationDialog
+        }
     }
 }
 
@@ -1128,6 +1277,12 @@ extension Alert {
         var a = Alert(title: title, message: message)
         a = Alert(title: title, message: message, buttons: buttons)
         return a
+    }
+    /// A confirmation dialog always offers Cancel: SwiftUI adds one (last) when no action
+    /// has the cancel role.
+    var _confirmationDialog: Alert {
+        guard !buttons.contains(where: { $0.role == .cancel }) else { return self }
+        return Alert(title: title, message: message, buttons: buttons + [.cancel()])
     }
     init(title: Text, message: Text?, buttons: [Button]) { self.title = title; self.message = message; self.buttons = buttons }
 }

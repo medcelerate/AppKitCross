@@ -134,9 +134,20 @@ final class _SwiftUISplitView: NSSplitView {
 /// The runtime object behind every split container: its children are panes (keyed by their
 /// box ids), one of which takes up the slack when the container resizes.
 @MainActor
-final class _SplitPrimitive: _Primitive {
+final class _SplitPrimitive: _Primitive, _SidebarColumnToggling {
     /// Side by side (`NSSplitView.isVertical`, a vertical divider) or stacked.
     var sideBySide: Bool
+    /// The sidebar column collapsed by the toolbar's toggle when the navigation split view
+    /// has no `columnVisibility` binding (Sibyl's): the pane keeps its node and its last
+    /// width, is laid out at zero and hidden, and comes back at that width. Kept on this
+    /// primitive, which survives `update(from:)`.
+    private(set) var sidebarCollapsed = false
+    static let sidebarKey = AnyHashable("sidebar")
+    func _toggleSidebarColumn() {
+        sidebarCollapsed.toggle()
+        node?.invalidateMeasurement()
+    }
+    private func isCollapsed(_ key: AnyHashable) -> Bool { sidebarCollapsed && key == _SplitPrimitive.sidebarKey }
     var roles: [AnyHashable: _SplitPaneRole]
     /// The key of the pane that grows and shrinks with the container.
     var flexibleKey: AnyHashable
@@ -200,7 +211,14 @@ final class _SplitPrimitive: _Primitive {
         }
         switch roles[key] ?? .measured {
         case .column(let d): return fromModifier(.navigation, d)
-        case .inspector: return fromModifier(.inspector, (200, 270, 400))
+        case .inspector:
+            // macOS (15) opens an inspector at its minimum width when the modifier gives one
+            // (Sibyl's min 210, ideal 330 opens at 210 in any window width), else at 270:
+            // an ideal alone is not used. The range still bounds a divider drag.
+            let r = fromModifier(.inspector, (200, 270, 400))
+            guard let w = columnWidth(in: pane, kind: .inspector) else { return r }
+            if let lo = w.min { return (r.0, Swift.min(Swift.max(lo, r.0), r.2), r.2) }
+            return (Swift.min(r.0, 270), 270, Swift.max(r.2, 270))
         case .measured:
             let lo = along(pane.sizeThatFits(proposal(along: 0, across: breadth)))
             let ideal = along(pane.sizeThatFits(proposal(along: nil, across: breadth)))
@@ -215,7 +233,7 @@ final class _SplitPrimitive: _Primitive {
     }
 
     override func sizeThatFits(_ p: ProposedViewSize, node: _ViewNode) -> CGSize {
-        let panes = node.children
+        let panes = node.children.filter { !isCollapsed($0.box.id ?? AnyHashable(0)) }
         guard !panes.isEmpty else { return .zero }
         let crossProposal = sideBySide ? p.height : p.width
         let alongProposal = sideBySide ? p.width : p.height
@@ -236,7 +254,16 @@ final class _SplitPrimitive: _Primitive {
     }
 
     override func place(node: _ViewNode, in rect: CGRect) {
-        let panes = node.children
+        var panes = node.children
+        for pane in panes where isCollapsed(pane.box.id ?? AnyHashable(0)) {
+            // Laid out at nothing and hidden; the split view treats a hidden pane as collapsed.
+            pane.place(in: CGRect(x: rect.minX, y: rect.minY, width: sideBySide ? 0 : rect.width, height: sideBySide ? rect.height : 0))
+            pane.backingView?.isHidden = true
+        }
+        panes.removeAll { isCollapsed($0.box.id ?? AnyHashable(0)) }
+        for pane in panes where pane.backingView?.isHidden == true && (pane.box.id ?? AnyHashable(0)) == _SplitPrimitive.sidebarKey {
+            pane.backingView?.isHidden = false
+        }
         guard !panes.isEmpty else { return }
         let keys = panes.map { $0.box.id ?? AnyHashable(0) }
         let breadth = across(rect.size)
@@ -480,9 +507,10 @@ extension View {
 extension View {
     /// - SeeAlso: https://developer.apple.com/documentation/swiftui/view/inspector(ispresented:content:)
     /// A trailing column beside this view while `isPresented` is true, behind a thin
-    /// divider the user drags: 270 points wide unless an `.inspectorColumnWidth` inside the
-    /// content says otherwise (200 to 400 by default). This view takes up the rest; it keeps
-    /// its identity and state when the inspector opens and closes. Not animated.
+    /// divider the user drags: it opens at the minimum an `.inspectorColumnWidth` inside the
+    /// content gives, else 270 points wide, as macOS does (200 to 400 by default). This view
+    /// takes up the rest; it keeps its identity and state when the inspector opens and
+    /// closes. Not animated.
     public func inspector<V: View>(isPresented: Binding<Bool>, @ViewBuilder content: () -> V) -> some View {
         _Inspector(content: self, inspector: content(), isPresented: isPresented)
     }

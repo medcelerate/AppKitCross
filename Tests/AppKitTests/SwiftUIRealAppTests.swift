@@ -71,8 +71,7 @@ final class SwiftUIRealAppTests: XCTestCase, @unchecked Sendable {
             let (w, h) = host(Settings())
             let t = texts(h)
             for s in ["Workday", "Schedule", "Next reminder", "Disabled"] { XCTAssertTrue(t.contains(s), s) }
-            // A grouped form's toggle is a switch row, its title the label (ADR-0051).
-            XCTAssertNotNil(allViews(h).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == "Midday reminder" })
+            XCTAssertNotNil(allViews(h).compactMap { $0 as? _SwiftUISwitchRow }.first { $0.label.stringValue == "Midday reminder" }, "a grouped form's toggle is a switch")
             w.close()
             let (w2, h2) = host(Form { Text("columns") }.formStyle(.columns))
             XCTAssertTrue(texts(h2).contains("columns"))

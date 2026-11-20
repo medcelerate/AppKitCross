@@ -154,24 +154,55 @@ import CoreText
         return r.insetBy(dx: NSSearchFieldCell.buttonWidth, dy: 0)
     }
 
+    /// The field sits in a window's toolbar band (an NSSearchToolbarItem's field, a SwiftUI
+    /// `.searchable` field): macOS 11's toolbar search field, a rounded rectangle (radius 6)
+    /// with no fill of its own and the placeholder leading after the magnifier, not the
+    /// centred capsule of a search field elsewhere.
+    @MainActor internal var _isInToolbar: Bool {
+        var v = _controlView?.superview
+        while let s = v {
+            if s is _NSToolbarView { return true }
+            v = s.superview
+        }
+        return false
+    }
+
+    /// The placeholder is drawn centred (`centersPlaceholder`, never in a toolbar).
+    @MainActor internal var _drawsCenteredPlaceholder: Bool { _centersPlaceholder && !_isInToolbar }
+
     @MainActor open override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
-        super.draw(withFrame: cellFrame, in: controlView)
+        _controlView = controlView
+        if _isInToolbar {
+            _drawToolbarBezel(cellFrame, in: controlView)
+            drawInterior(withFrame: cellFrame, in: controlView)
+        } else {
+            super.draw(withFrame: cellFrame, in: controlView)
+        }
         _drawSearchButton(in: searchButtonRect(forBounds: cellFrame), flipped: controlView.isFlipped)
         if !stringValue.isEmpty || _editorHasText {
             _drawCancelButton(in: cancelButtonRect(forBounds: cellFrame))
         }
     }
 
+    /// The toolbar field's outline: a 1-point hairline at radius 6 (the band shows through),
+    /// the focus colour while the field is being edited.
+    private func _drawToolbarBezel(_ cellFrame: NSRect, in controlView: NSView) {
+        let path = NSBezierPath(roundedRect: cellFrame.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+        let w = controlView.window
+        let focused = (w?.isKeyWindow ?? false) && (w?.firstResponder === controlView || (_searchField?.currentEditor() != nil && _searchField?.currentEditor() === w?.firstResponder))
+        (focused ? NSColor.keyboardFocusIndicatorColor : NSColor.labelColor.withAlphaComponent(0.075)).setStroke()
+        path.lineWidth = focused ? 2 : 1
+        path.stroke()
+    }
+
     private var _editorHasText: Bool { !((_searchField?.currentEditor() as? NSTextView)?.string.isEmpty ?? true) }
 
-    /// Draws the placeholder when nothing is typed and the field is not editing. Since
-    /// macOS 11 the placeholder sits at the leading edge after the search button whatever
-    /// `centersPlaceholder` says (the property is kept, and `false` still means leading);
-    /// the centred placeholder of earlier releases is drawn only under
-    /// `APPKITWIN_SEARCH_PLACEHOLDER=center`.
+    /// Draws the placeholder when nothing is typed (the editor may be up and empty: the
+    /// placeholder shows under it, as on macOS): centred when `centersPlaceholder` asks
+    /// for it outside a toolbar, else at the leading edge after the search button.
     @MainActor open override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         if _hidesText, !(stringValue.isEmpty && !_editorHasText) { return }
-        if stringValue.isEmpty, _centersPlaceholder, NSSearchFieldCell._centersPlaceholderWhenAsked, let p = placeholderString, !p.isEmpty {
+        if stringValue.isEmpty, _drawsCenteredPlaceholder, let p = placeholderString, !p.isEmpty {
             var attrs = _attributes
             attrs[.foregroundColor] = NSColor.placeholderTextColor
             _drawText(p, attributes: attrs, in: _centeredTextRect(forBounds: cellFrame), alignment: .center, flipped: controlView.isFlipped)
@@ -179,8 +210,6 @@ import CoreText
         }
         super.drawInterior(withFrame: cellFrame, in: controlView)
     }
-
-    nonisolated(unsafe) private static let _centersPlaceholderWhenAsked = ProcessInfo.processInfo.environment["APPKITWIN_SEARCH_PLACEHOLDER"] == "center"
 
     private var _glyphColor: NSColor { _isEnabled ? .secondaryLabelColor : .disabledControlTextColor }
 
@@ -302,7 +331,7 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssearchfieldcell/searchbuttonrect(forbounds:)
     @MainActor open func searchButtonRect(forBounds rect: NSRect) -> NSRect {
-        let w = min(rect.width, NSSearchFieldCell.buttonWidth + (_searchMenuTemplate != nil ? 8 : 0))
+        let w = min(rect.width, NSSearchFieldCell.buttonWidth + (_isInToolbar ? 2 : 0) + (_searchMenuTemplate != nil ? 8 : 0))
         let x = _isRightToLeft ? rect.maxX - w : rect.minX
         return NSRect(x: x, y: rect.minY, width: w, height: rect.height)
     }
@@ -317,8 +346,11 @@ import CoreText
         let search = searchButtonRect(forBounds: rect), cancel = cancelButtonRect(forBounds: rect)
         let leading = _isRightToLeft ? cancel.width : search.width
         let trailing = _isRightToLeft ? search.width : cancel.width
-        r.origin.x += leading - 2
-        r.size.width = max(0, r.width - leading - trailing + 4)
+        // In a toolbar the text starts a little further in, as macOS 11 spaces it from the
+        // magnifier (29 points from the field's edge).
+        let gap: CGFloat = _isInToolbar ? 2 : 0
+        r.origin.x += leading - 2 + (_isRightToLeft ? 0 : gap)
+        r.size.width = max(0, r.width - leading - trailing + 4 - gap)
         return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nssearchfieldcell/sendssearchstringimmediately

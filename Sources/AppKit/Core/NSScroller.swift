@@ -57,8 +57,7 @@ import CoreText
     }
 
     @MainActor open override func draw(_ dirtyRect: NSRect) {
-        // An overlay scroller (ADR-0051) is its knob alone over the content: no slot.
-        if _scrollerStyle != .overlay { drawKnobSlot(in: rect(for: .knobSlot), highlight: _isHighlighted) }
+        drawKnobSlot(in: rect(for: .knobSlot), highlight: _isHighlighted)
         if _knobProportion < 1 { drawKnob() }
     }
 
@@ -131,15 +130,20 @@ import CoreText
     @MainActor open func drawArrow(_ whichArrow: NSScroller.Arrow, highlight flag: Bool) { }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/drawknob()
     @MainActor open func drawKnob() {
-        let knob = rect(for: .knob)
+        var knob = rect(for: .knob)
         guard !knob.isEmpty else { return }
         if _scrollerStyle == .overlay {
-            // A translucent pill, 7 points wide, at the trailing edge of its strip.
-            let k = _isHorizontal ? NSRect(x: knob.minX, y: knob.maxY - 9, width: knob.width, height: 7)
-                                  : NSRect(x: knob.maxX - 9, y: knob.minY, width: 7, height: knob.height)
-            let dark = effectiveAppearance.isDark
-            NSColor(white: dark ? 1 : 0, alpha: _isHighlighted ? 0.6 : 0.4).setFill()
-            NSBezierPath(roundedRect: k, xRadius: 3.5, yRadius: 3.5).fill()
+            // An overlay knob: a thin rounded bar along the trailing (or bottom) edge, in a
+            // translucent label colour so it reads on light and dark content alike.
+            let thickness: CGFloat = 7
+            if _isHorizontal {
+                knob = NSRect(x: knob.minX, y: isFlipped ? knob.maxY - thickness : knob.minY, width: knob.width, height: min(thickness, knob.height))
+            } else {
+                knob = NSRect(x: knob.maxX - thickness, y: knob.minY, width: min(thickness, knob.width), height: knob.height)
+            }
+            let r = min(knob.width, knob.height) / 2
+            NSColor.labelColor.withAlphaComponent(_isHighlighted ? 0.6 : 0.45).setFill()
+            NSBezierPath(roundedRect: knob, xRadius: r, yRadius: r).fill()
             return
         }
         let radius = min(knob.width, knob.height) / 2
@@ -148,6 +152,8 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/drawknobslot(in:highlight:)
     @MainActor open func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+        // An overlay scroller floats over the content with no track of its own.
+        if _scrollerStyle == .overlay { return }
         NSColor.scrollBarColor.withAlphaComponent(0.12).setFill()
         NSBezierPath.fill(bounds)
     }
@@ -181,9 +187,7 @@ import CoreText
         set { _knobStyle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/preferredscrollerstyle
-    /// Legacy by default (the port's Windows-flavoured look); overlay under the macOS
-    /// control look (`APPKITWIN_MAC_CONTROLS=1`, ADR-0051).
-    @MainActor class public var preferredScrollerStyle: NSScroller.Style { _NSControlStyle.macControls ? .overlay : .legacy }
+    @MainActor class public var preferredScrollerStyle: NSScroller.Style { NSScroller.Style(rawValue: 1)! }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/preferredscrollerstyledidchangenotification
     static public var preferredScrollerStyleDidChangeNotification: NSNotification.Name { NSNotification.Name(rawValue: "NSPreferredScrollerStyleDidChangeNotification") }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/rect(for:)
@@ -211,7 +215,7 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/scrollerstyle
     @MainActor open var scrollerStyle: NSScroller.Style {
         get { _scrollerStyle }
-        set { _scrollerStyle = newValue; needsDisplay = true }
+        set { guard newValue != _scrollerStyle else { return }; _scrollerStyle = newValue; needsDisplay = true }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/scrollerwidth(for:scrollerstyle:)
     @MainActor public class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat {

@@ -332,6 +332,18 @@ open class CALayer: NSObject, CAMediaTiming {
         }
     }
 
+    /// A structural change (a sublayer added or removed): the hosting tree is marked dirty
+    /// and the root's host repaints `damage`, already in the root's bounds space, when it is
+    /// known (the root's own sublayers included), else everything.
+    func _setNeedsRedraw(rootDamage damage: CGRect?) {
+        guard !isPresentationCopy else { return }
+        var l: CALayer? = self
+        var root = self
+        while let layer = l { layer._treeVersion += 1; root = layer; l = layer.superlayer }
+        guard let d = damage, !CALayer._hostMarksChange else { _invalidateHost(nil); return }
+        if !d.isNull, !d.isEmpty { root.host?.layerNeedsDisplay(root, inRootBounds: d) }
+    }
+
     /// What a layer below the root covers on screen, in the root's bounds space: its
     /// subtree and shadow. Nil when that cannot be bounded by a rect (a projective or
     /// running-animation chain, a shadow or filter above that spreads the change).
@@ -600,7 +612,9 @@ open class CALayer: NSObject, CAMediaTiming {
         layer.superlayer = self
         layer.hasPresentation = layer.hasPresentation || hasPresentation
         _needsLayout = true
-        _setNeedsRedraw()
+        // Only what the new sublayer covers repaints (a transcript row added to a list
+        // repainted the whole hosting root before); unboundable placements repaint all.
+        layer._setNeedsRedraw(rootDamage: layer._rootExtent())
         // Animations added before the layer joined this tree were registered under the
         // layer itself; they now belong to (and are gated by) this tree's root.
         if layer._hasAnimationsInTree { CARuntime.moveAnimating(from: layer, to: root) }
@@ -628,9 +642,11 @@ open class CALayer: NSObject, CAMediaTiming {
 
     open func removeFromSuperlayer() {
         guard let s = superlayer else { return }
+        // What the layer covered, while it is still in the tree.
+        let covered = s._mask === self ? nil : _rootExtent()
         if s._mask === self { s._mask = nil } else { s._sublayers.removeAll { $0 === self } }
         s._needsLayout = true
-        s._setNeedsRedraw()
+        s._setNeedsRedraw(rootDamage: covered)
         superlayer = nil
     }
 

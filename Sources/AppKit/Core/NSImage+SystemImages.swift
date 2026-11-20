@@ -41,12 +41,20 @@ internal enum _NSSystemImages {
             line($0, [(5.5, 6.2), (6, 3.5), (10, 3.5), (10.5, 6.2)])
             line($0, [(6.5, 1.8), (9.5, 1.8)])
         })
-        d["person.wave.2"] = (true, stroke {
-            $0.appendOval(in: NSRect(x: 3.5, y: 8.5, width: 4.5, height: 4.5))
-            $0.appendArc(withCenter: NSPoint(x: 5.75, y: 2.5), radius: 4, startAngle: 20, endAngle: 160, clockwise: false)
-            $0.appendArc(withCenter: NSPoint(x: 10.5, y: 10), radius: 2.5, startAngle: -50, endAngle: 50, clockwise: false)
-            $0.appendArc(withCenter: NSPoint(x: 10.5, y: 10), radius: 4.5, startAngle: -50, endAngle: 50, clockwise: false)
-        })
+        d["person.wave.2"] = (true, stroke({
+            // A bust (head over a domed pair of shoulders) with two sound arcs to its right,
+            // centred on the head. Each part is its own subpath: an arc appended after another
+            // shape joins it with a line from the current point, which drew a tangled blob.
+            $0.appendOval(in: NSRect(x: 4.2, y: 7.6, width: 5, height: 5))
+            $0.move(to: NSPoint(x: 1.5, y: 2)); $0.line(to: NSPoint(x: 11.5, y: 2))
+            $0.curve(to: NSPoint(x: 1.5, y: 2), controlPoint1: NSPoint(x: 11.5, y: 8.1), controlPoint2: NSPoint(x: 1.5, y: 8.1))
+            $0.close()
+            for (r, sweep) in [(CGFloat(5), CGFloat(38)), (8, 30)] {
+                let a = sweep * .pi / 180
+                $0.move(to: NSPoint(x: 6.7 + r * cos(-a), y: 10.1 + r * sin(-a)))
+                $0.appendArc(withCenter: NSPoint(x: 6.7, y: 10.1), radius: r, startAngle: -sweep, endAngle: sweep, clockwise: false)
+            }
+        }, width: 1.4))
         d["person.3"] = (true, stroke {
             for x in [3.0, 8.0, 13.0] {
                 $0.appendOval(in: NSRect(x: x - 1.6, y: 8.5, width: 3.2, height: 3.2))
@@ -305,10 +313,13 @@ internal enum _NSSystemImages {
             $0.appendArc(withCenter: NSPoint(x: 8, y: 9.8), radius: 2, startAngle: 160, endAngle: -60, clockwise: true); line($0, [(9, 8.1), (8, 7.3), (8, 6.3)]); dot($0, 8, 4.3, 0.3)
         }, width: 1.3))
         d["rectangle.expand.vertical"] = (true, stroke({
-            $0.appendRoundedRect(NSRect(x: 1.5, y: 5, width: 13, height: 6), xRadius: 1.5, yRadius: 1.5)
-            line($0, [(8, 11), (8, 14.5)]); line($0, [(6.3, 12.8), (8, 14.5), (9.7, 12.8)])
-            line($0, [(8, 5), (8, 1.5)]); line($0, [(6.3, 3.2), (8, 1.5), (9.7, 3.2)])
-        }, width: 1.2))
+            // SF Symbols' artwork: a wide rectangle open at the middle of its top and bottom
+            // edges, with an arrow leaving through each opening (up and down).
+            line($0, [(5.5, 11.5), (1.5, 11.5), (1.5, 4.5), (5.5, 4.5)])
+            line($0, [(10.5, 11.5), (14.5, 11.5), (14.5, 4.5), (10.5, 4.5)])
+            line($0, [(8, 10.3), (8, 14.5)]); line($0, [(6, 12.5), (8, 14.5), (10, 12.5)])
+            line($0, [(8, 5.7), (8, 1.5)]); line($0, [(6, 3.5), (8, 1.5), (10, 3.5)])
+        }, width: 1.3))
         d["sidebar.trailing"] = (true, stroke({ $0.appendRoundedRect(NSRect(x: 1.5, y: 2.5, width: 13, height: 11), xRadius: 2, yRadius: 2); line($0, [(10, 2.5), (10, 13.5)]) }, width: 1.2))
         d["sidebar.leading"] = (true, stroke({ $0.appendRoundedRect(NSRect(x: 1.5, y: 2.5, width: 13, height: 11), xRadius: 2, yRadius: 2); line($0, [(6, 2.5), (6, 13.5)]) }, width: 1.2))
         d["speaker"] = (true, stroke({ poly($0, [(2, 6), (5, 6), (9, 2.5), (9, 13.5), (5, 10), (2, 10)]) }, width: 1.3))

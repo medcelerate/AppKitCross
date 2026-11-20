@@ -83,7 +83,7 @@ import CoreText
     @MainActor open override var cellSize: NSSize {
         var s = _measure(maxWidth: nil)
         s.width += 4; s.height += 2
-        if _isBezeled || _isBordered || _bezelsWhileEditing { s.width += 6; s.height += 4 }
+        if _isBezeled || _isBordered { s.width += 6; s.height += 4 }
         return s
     }
 

@@ -319,7 +319,7 @@ its timers, so `DispatchQueue.main.async`, hops to `@MainActor` from other threa
 
 | Variable | Effect |
 | --- | --- |
-| `APPKITWIN_MAC_CONTROLS=1` | The macOS control look (ADR-0051): shaded push-button bezels with a shadow, inset text-field bezels with the soft focus ring, tick combs and pill knobs on sliders, overlay scrollers, macOS's narrow centred alert with the icon and stacked buttons over a dimmed window, and accent colours that grey out in an inactive window. Off, the flatter default look. The Info.plist key `AppKitCrossMacControls` = YES ships it with an app; the environment wins. `APPKITWIN_SEARCH_PLACEHOLDER=center` restores the centred search placeholder of macOS 10. |
+| `APPKITWIN_MAC_CONTROLS=1` | The macOS control look (ADR-0051): shaded push-button bezels with a shadow, inset text-field bezels with the soft focus ring, tick combs and pill knobs on sliders, overlay scrollers on every scroll view (not only SwiftUI content), and accent colours that grey out in an inactive window. Off, the flatter default look. The Info.plist key `AppKitCrossMacControls` = YES ships it with an app; the environment wins. |
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Software compositing instead of DirectComposition on Windows. |
 | `APPKITWIN_LEGACY_TEXT=1` | The pre-CoreText text path on Windows. |
 | `APPKITWIN_METAL_REFERENCE=1` | The CPU Metal device instead of Direct3D 12 (Windows) or Vulkan (Linux). |

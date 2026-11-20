@@ -4,6 +4,7 @@
 // at the new scale, tell the view tree, and report the screen it is now on.
 import XCTest
 @testable import AppKit
+@testable import SwiftUI
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
@@ -80,6 +81,54 @@ final class BackingScaleTests: XCTestCase, @unchecked Sendable {
         }
         return maxX < 0 ? nil : (minX, maxX, minY, maxY)
     }
+
+    /// SwiftUI content follows the window's backing scale like any view: a 40 pt shape in
+    /// a hosting view is 80 px wide in a 2x window, and the hosting view's layer renders
+    /// at 2x. (Sibyl on a 175% monitor drew its SwiftUI content at 1 pt = 1 px.)
+    func testHostingViewPixelsFollowTheBackingScale() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Screen: View {
+                var body: some View {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        HStack(spacing: 0) {
+                            Rectangle().fill(Color(red: 1, green: 0, blue: 0)).frame(width: 40, height: 40).padding(10)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+            let w = NSWindow(contentRect: NSRect(x: 50, y: 50, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+            w.backgroundColor = .white
+            let hosting = NSHostingView(rootView: Screen())
+            w.contentView = hosting
+            let platform = host(w)
+            platform.setBackingScaleFactor(2)
+            w.makeKeyAndOrderFront(nil)
+            var frames = 0
+            while platform._needsPaint, frames < 6 { platform.displayIfNeeded(); frames += 1 }
+            XCTAssertEqual(w.backingScaleFactor, 2)
+            XCTAssertEqual(hosting.frame.size, NSSize(width: 100, height: 100), "the hosting view keeps its point size")
+            XCTAssertEqual(hosting.convertToBacking(hosting.bounds).size, NSSize(width: 200, height: 200))
+            if let layer = hosting.layer { XCTAssertEqual(layer.contentsScale, 2, "the hosting view's layer renders at the backing scale") }
+            for v in _allSubviews(hosting) { if let l = v.layer { XCTAssertEqual(l.contentsScale, 2, "\(type(of: v)) layer renders at the backing scale") } }
+            guard let image = platform.lastImage else { return XCTFail("no image") }
+            XCTAssertEqual(image.width, 200); XCTAssertEqual(image.height, 200)
+            XCTAssertEqual(redExtent(image, row: 60), 80, "a 40 pt SwiftUI rectangle is 80 px wide at 2x")
+            XCTAssertEqual(redExtent(image, row: 10), 0, "the 10 pt padding is 20 px: row 10 is below the shape")
+
+            // Back to 1x: the same content at 1 pt = 1 px.
+            platform.setBackingScaleFactor(1)
+            frames = 0
+            while platform._needsPaint, frames < 6 { platform.displayIfNeeded(); frames += 1 }
+            guard let one = platform.lastImage else { return XCTFail("no image") }
+            XCTAssertEqual(one.width, 100)
+            XCTAssertEqual(redExtent(one, row: 30), 40)
+            w.close()
+        }
+    }
+    @MainActor private func _allSubviews(_ v: NSView) -> [NSView] { v.subviews + v.subviews.flatMap(_allSubviews) }
 
     func testMoveToDoubleScaleKeepsPointSizeAndDoublesPixels() throws {
         try requireHostBackend()

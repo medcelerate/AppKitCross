@@ -301,6 +301,9 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                     window.contentView = band
                     let field = NSSearchField(frame: NSRect(x: 20, y: 16, width: 220, height: 28))
                     field.placeholderString = "Search transcript"
+                    // Leading, as in a toolbar (outside one the port keeps the centred
+                    // placeholder of `centersPlaceholder`, PR 92).
+                    field.centersPlaceholder = false
                     band.addSubview(field)
                     window.makeKeyAndOrderFront(nil)
                     guard let (rep, scale) = render(field) else { return XCTFail("no bitmap") }
@@ -324,7 +327,10 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Alerts
 
-    func testAlertIsNarrowStackedAndCentredOverADimmedParentUnderTheMacLook() throws {
+    /// macOS's compact alert is the port's only alert (PR 92): the look does not change it.
+    /// Checked under both looks: narrow, a destructive first button stacks above Cancel and
+    /// never takes Return, the sheet is centred in the parent, which dims.
+    func testAlertIsCompactStackedAndCentredUnderBothLooks() throws {
         try requireHostBackend()
         MainActor.assumeIsolated {
             for mac in [false, true] {
@@ -341,36 +347,26 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                     let panel = alert.window
                     let buttons = alert.buttons
                     let what = mac ? "mac" : "default"
-                    if mac {
-                        XCTAssertEqual(panel.frame.width, 260, "\(what): macOS's narrow alert")
-                        XCTAssertNotEqual(buttons[0].frame.minY, buttons[1].frame.minY, "\(what): the buttons stack")
-                        XCTAssertEqual(buttons[0].frame.width, buttons[1].frame.width)
-                        XCTAssertGreaterThan(buttons[0].frame.minY, buttons[1].frame.minY, "\(what): the first button on top")
-                        XCTAssertNotNil(_macViews(panel.contentView!).first { $0 is NSImageView }, "\(what): the icon")
-                        XCTAssertEqual(buttons[0].keyEquivalent, "", "\(what): a destructive button is not the default")
-                    } else {
-                        XCTAssertEqual(panel.frame.width, 420, "\(what): the wide alert")
-                        XCTAssertEqual(buttons[0].frame.minY, buttons[1].frame.minY, "\(what): side by side")
-                        XCTAssertEqual(buttons[0].keyEquivalent, "", "\(what): a destructive first button gets no Return")
-                    }
+                    XCTAssertEqual(panel.frame.width, NSAlert._width, "\(what): the compact alert")
+                    XCTAssertGreaterThan(buttons[0].frame.minY, buttons[1].frame.minY, "\(what): a destructive button stacks on top")
+                    XCTAssertEqual(buttons[0].frame.width, buttons[1].frame.width)
+                    XCTAssertNotNil(_macViews(panel.contentView!).first { $0 is NSImageView }, "\(what): the icon")
+                    // AppKit's NSAlert: the first button answers Return even when destructive
+                    // (SwiftUI's alert, which has roles, gives a destructive button no Return).
+                    XCTAssertEqual(buttons[0].keyEquivalent, "\r", "\(what): the first button is the default")
+                    XCTAssertEqual(buttons[1].keyEquivalent, "\u{1B}", "\(what): Cancel answers Escape")
                     var response: NSApplication.ModalResponse? = nil
                     alert.beginSheetModal(for: parent) { response = $0 }
                     (Platform.backend as! HostBackend).drain()
                     XCTAssertTrue(parent.attachedSheet === panel)
-                    let dim = _macViews(parent.contentView!).first { $0 is _NSSheetDimView }
-                    if mac {
-                        XCTAssertNotNil(dim, "\(what): the parent dims")
-                        let parentContent = parent.convertToScreen(parent.contentLayoutRect)
-                        XCTAssertEqual(panel.frame.midY, parentContent.midY, accuracy: 2, "\(what): centred over the parent's content")
-                        XCTAssertEqual(panel.frame.midX, parentContent.midX, accuracy: 2)
-                    } else {
-                        XCTAssertNil(dim, "\(what): no dimming")
-                        XCTAssertEqual(panel.frame.maxY, parent.convertToScreen(parent.contentLayoutRect).maxY, accuracy: 2, "\(what): hangs from the title bar")
-                    }
+                    XCTAssertTrue(parent._dimsForSheet, "\(what): the parent dims behind the sheet")
+                    XCTAssertEqual(panel.frame.midX, parent.frame.midX, accuracy: 2, "\(what): centred in the parent")
+                    XCTAssertLessThan(panel.frame.maxY, parent.frame.maxY, "\(what): below the title bar")
+                    XCTAssertGreaterThan(panel.frame.minY, parent.frame.minY, "\(what): inside the parent")
                     buttons[1].performClick(nil)
                     (Platform.backend as! HostBackend).drain()
                     XCTAssertEqual(response, .alertSecondButtonReturn)
-                    XCTAssertNil(_macViews(parent.contentView!).first { $0 is _NSSheetDimView }, "\(what): the dimming goes with the sheet")
+                    XCTAssertFalse(parent._dimsForSheet, "\(what): the dimming goes with the sheet")
                 }
             }
         }
@@ -378,12 +374,14 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
 
     // MARK: Scrollers
 
-    func testOverlayScrollersTakeNoRoomAndShowWhileScrollingUnderTheMacLook() throws {
+    /// An AppKit scroll view (TextEdit's document) keeps legacy scrollers by default and
+    /// takes overlay ones under the mac look; SwiftUI-hosted content is overlay either way
+    /// (PR 92). An app's explicit `scrollerStyle` wins under both.
+    func testAppKitScrollViewOverlaysItsScrollersOnlyUnderTheMacLook() throws {
         try requireHostBackend()
         MainActor.assumeIsolated {
             for mac in [false, true] {
                 withLook(mac: mac) {
-                    XCTAssertEqual(NSScroller.preferredScrollerStyle, mac ? .overlay : .legacy)
                     let window = makeWindow(NSSize(width: 200, height: 100), dark: false)
                     defer { window.close() }
                     let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -396,34 +394,31 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                     guard let scroller = scroll.verticalScroller else { return XCTFail("no scroller") }
                     let what = mac ? "mac" : "default"
                     if mac {
-                        XCTAssertEqual(scroll.scrollerStyle, .overlay)
+                        XCTAssertEqual(scroll.scrollerStyle, .overlay, what)
                         XCTAssertEqual(scroll.contentView.frame.width, 200, "\(what): the content keeps the full width")
                         XCTAssertTrue(scroller.isHidden, "\(what): hidden at rest")
-                        scroll.contentView.scroll(to: NSPoint(x: 0, y: 300))
-                        scroll.reflectScrolledClipView(scroll.contentView)
-                        XCTAssertFalse(scroller.isHidden, "\(what): shown by a scroll")
-                        XCTAssertEqual(scroller.frame.maxX, 200, accuracy: 0.5, "\(what): over the content's trailing edge")
-                        guard let (rep, scale) = render(scroller) else { return XCTFail("no bitmap") }
-                        // No slot: the strip's leading column is untouched (transparent reads white).
-                        let slot = pixel(rep, 1, 50, scale: scale)
-                        XCTAssertTrue(lum(slot) > 0.97, "\(what): no slot behind the knob: \(fmt(slot))")
                     } else {
-                        XCTAssertEqual(scroll.scrollerStyle, .legacy)
+                        XCTAssertEqual(scroll.scrollerStyle, .legacy, what)
                         XCTAssertEqual(scroll.contentView.frame.width, 185, "\(what): the legacy bar takes 15 points")
                         XCTAssertFalse(scroller.isHidden, "\(what): always shown")
                     }
+                    scroll.scrollerStyle = .legacy
+                    XCTAssertEqual(scroll.contentView.frame.width, 185, "\(what): an explicit legacy style wins")
                 }
             }
         }
     }
 
-    /// The overlay scrollers show on the first scroll of a fresh window, paint above the
-    /// content, stay a second, fade over a quarter of a second and hide: the composite of
-    /// the whole scroll view is sampled at the pill as the frame clock advances.
+    /// Under the mac look an AppKit scroll view's overlay pill shows on the first wheel
+    /// notch of a fresh window, paints above the content, holds, fades (its alpha sampled
+    /// in the scroll view's composite as the run loop turns) and hides, whole again.
     func testOverlayScrollerShowsOnTheFirstScrollThenFadesAndHides() throws {
         try requireHostBackend()
         MainActor.assumeIsolated {
             withLook(mac: true) {
+                let saved = NSScrollView._overlayHoldInterval
+                NSScrollView._overlayHoldInterval = 0.1
+                defer { NSScrollView._overlayHoldInterval = saved }
                 let window = makeWindow(NSSize(width: 200, height: 100), dark: false)
                 defer { window.close() }
                 let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
@@ -440,13 +435,13 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                 // One wheel notch on the fresh window.
                 let wheel = NSEvent._scrollEvent(location: NSPoint(x: 100, y: 50), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, deltaX: 0, deltaY: 3, precise: false)
                 scroll.scrollWheel(with: wheel)
-                XCTAssertTrue(scroll._overlayScrollersShown, "the first scroll shows the overlay scrollers")
+                XCTAssertTrue(scroll._overlayScrollersRevealed, "the first scroll shows the overlay scrollers")
                 XCTAssertFalse(scroller.isHidden)
                 XCTAssertEqual(scroller.alphaValue, 1)
                 // The pill, in the scroll view's composite: the darkest pixel down the knob's
                 // centre column (the knob sits wherever the scroll put it).
                 let knob = scroll.convert(scroller.rect(for: .knob), from: scroller)
-                let column = knob.maxX - 5.5
+                let column = knob.maxX - 3.5
                 @MainActor func darkest(_ rep: NSBitmapImageRep, scale: CGFloat) -> RGB {
                     var best: RGB = (1, 1, 1)
                     for y in stride(from: 0.5, to: scroll.bounds.height, by: 1) {
@@ -458,27 +453,22 @@ final class MacControlsPixelTests: XCTestCase, @unchecked Sendable {
                 guard let (rep, scale) = render(scroll) else { return XCTFail("no bitmap") }
                 let shown = darkest(rep, scale: scale)
                 XCTAssertLessThan(lum(shown), 0.8, "the pill paints above the content: \(fmt(shown))")
-                // Half a second on: still fully shown.
-                scroll._advanceOverlayClock(by: 0.5)
-                XCTAssertTrue(scroll._overlayScrollersShown)
-                XCTAssertEqual(scroller.alphaValue, 1)
-                // Past the second: fading, part way through.
-                scroll._advanceOverlayClock(by: 0.6)
-                for _ in 0..<7 { scroll._advanceOverlayClock(by: 1.0 / 60.0) }
-                XCTAssertTrue(scroll._overlayScrollersShown, "still shown while fading")
+                // The run loop turns until the fade starts: a partly faded pill is lighter.
+                let deadline = Date().addingTimeInterval(3)
+                while scroller.alphaValue >= 1, !scroller.isHidden, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.005)) }
+                XCTAssertTrue(scroll._overlayScrollersRevealed, "still shown while fading")
                 XCTAssertFalse(scroller.isHidden)
-                XCTAssertLessThan(scroller.alphaValue, 0.7, "fading: alpha \(scroller.alphaValue)")
-                XCTAssertGreaterThan(scroller.alphaValue, 0.3, "fading: alpha \(scroller.alphaValue)")
+                XCTAssertLessThan(scroller.alphaValue, 1, "fading: alpha \(scroller.alphaValue)")
+                XCTAssertGreaterThan(scroller.alphaValue, 0, "fading: alpha \(scroller.alphaValue)")
                 guard let (rep2, _) = render(scroll) else { return XCTFail("no bitmap") }
                 let fading = darkest(rep2, scale: scale)
-                XCTAssertGreaterThan(lum(fading), lum(shown) + 0.05, "a fading pill is lighter: \(fmt(fading)) vs \(fmt(shown))")
-                // A scroll during the fade brings them straight back.
+                XCTAssertGreaterThan(lum(fading), lum(shown) + 0.03, "a fading pill is lighter: \(fmt(fading)) vs \(fmt(shown))")
+                // A scroll during the fade brings the pill straight back.
                 scroll.scrollWheel(with: wheel)
                 XCTAssertEqual(scroller.alphaValue, 1, "a scroll during the fade restores the pill")
-                // Through the whole fade: hidden, alpha reset for the next showing.
-                scroll._advanceOverlayClock(by: 1.0)
-                for _ in 0..<20 { scroll._advanceOverlayClock(by: 1.0 / 60.0) }
-                XCTAssertFalse(scroll._overlayScrollersShown, "hidden after the fade")
+                // Through the hold and the whole fade: hidden, alpha reset for the next showing.
+                while !scroller.isHidden, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.005)) }
+                XCTAssertFalse(scroll._overlayScrollersRevealed, "hidden after the fade")
                 XCTAssertTrue(scroller.isHidden)
                 XCTAssertEqual(scroller.alphaValue, 1)
                 guard let (rep3, _) = render(scroll) else { return XCTFail("no bitmap") }

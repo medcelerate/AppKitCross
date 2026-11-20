@@ -388,7 +388,9 @@ import CoreText
         if _titleOnAccent { attrs[.foregroundColor] = NSColor.white }
         else if _hasDestructiveAction, _isEnabled { attrs[.foregroundColor] = NSColor.systemRed }
         let text = (_isHighlighted && _highlightsBy.contains(.contentsCellMask) && !_alternateTitle.isEmpty) ? _alternateTitle : title.string
-        _drawText(text, attributes: attrs, in: frame, alignment: _alignment, flipped: controlView.isFlipped)
+        // A title wider than the button is tail-truncated, as macOS draws it.
+        let inset: CGFloat = _isBordered && !_isSwitchLike ? 6 : 0
+        _drawTruncatingText(text, attributes: attrs, in: frame.insetBy(dx: min(inset, frame.width / 4), dy: 0), alignment: _alignment, flipped: controlView.isFlipped)
         let size = text.size(withAttributes: attrs)
         return NSRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height)
     }

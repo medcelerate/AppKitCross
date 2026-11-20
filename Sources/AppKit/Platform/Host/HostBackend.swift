@@ -178,7 +178,7 @@ final class HostWindow: PlatformWindow {
     var maxSize = NSSize(width: 100_000, height: 100_000)
     private var dirty: NSRect? = nil
     /// Whether a paint is pending (tests check that a paint does not invalidate itself).
-    var _needsPaint: Bool { dirty != nil }
+    var _needsPaint: Bool { dirty != nil || needsLayoutPass }
     private var _frame: NSRect
     /// Title bar height used by this fake window manager.
     static let titleBarHeight: CGFloat = 28
@@ -194,6 +194,8 @@ final class HostWindow: PlatformWindow {
     var clientSideTitleBar = false
     var hasClientSideTitleBar: Bool { clientSideTitleBar }
     private(set) var paintCount = 0
+    /// The area (content points) the last paint covered, for tests of what a change repaints.
+    private(set) var lastPaintRect: NSRect?
     /// Accessibility changes the core reported (ADR-0013), oldest first.
     private(set) var accessibilityChanges: [PlatformAccessibilityChange] = []
     func accessibilityDidChange(_ change: PlatformAccessibilityChange) { accessibilityChanges.append(change) }
@@ -300,14 +302,18 @@ final class HostWindow: PlatformWindow {
     }
 
     func displayIfNeeded() {
+        if needsLayoutPass { needsLayoutPass = false; owner?.platformWindowLayout() }
         if dirty != nil { display() }
     }
+    private var needsLayoutPass = false
+    func requestLayout() { needsLayoutPass = true }
 
     func display() {
         let content = contentRect(forFrameRect: _frame)
         let rect = dirty ?? NSRect(origin: .zero, size: content.size)
         dirty = nil
         paintCount += 1
+        lastPaintRect = rect
         #if canImport(CoreGraphics)
         let scale = backingScaleFactor
         let w = max(1, Int(content.width * scale)), h = max(1, Int(content.height * scale))

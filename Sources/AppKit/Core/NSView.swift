@@ -73,7 +73,8 @@ import CoreText
     private var _postsFrameChangedNotifications = false
     private var _postsBoundsChangedNotifications = false
     private var _focusRingType: NSFocusRingType = .default
-    private var _layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy = .never
+    /// AppKit's default for a layer-backed view: its content redraws when it is resized.
+    private var _layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy = .duringViewResize
     private var _userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection?   // nil: inherited
     private var _frameRotation: CGFloat = 0
     private var _boundsRotation: CGFloat = 0
@@ -2066,7 +2067,16 @@ import CoreText
         _syncLayerGeometry()
         _setNeedsUpdateTrackingAreas()
         if animate { _animateLayer("position", from: old.origin, to: newOrigin) }
-        _superview?.setNeedsDisplay(old.union(_frame))
+        // Where it was and where it is: one area when they overlap, else each on its own
+        // (a new list row placed from the origin to the end of a list marked the strip between).
+        if let sup = _superview {
+            if old.intersects(_frame) || _frameRotation != 0 || _layer.map({ !$0.transform.isIdentity || $0.shadowOpacity > 0 }) == true {
+                sup.setNeedsDisplay(old.union(_frame))
+            } else {
+                sup.setNeedsDisplay(old)
+                sup.setNeedsDisplay(_frame)
+            }
+        }
         if _postsFrameChangedNotifications {
             NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
         }
@@ -2092,11 +2102,43 @@ import CoreText
         if animate { _animateLayer("bounds", from: oldBounds, to: bounds) }
         if _autoresizesSubviews { resizeSubviews(withOldSize: old.size) }
         if !_applyingLayout { _needsLayout = true; _setNeedsConstraintLayout(force: false) }
-        _superview?.setNeedsDisplay(old.union(_frame))
-        setNeedsDisplay(bounds)
+        // As a layer-backed view in AppKit: content redraws on a resize unless the redraw
+        // policy says it redraws only when asked (`.onSetNeedsDisplay`, `.never`).
+        let redraws: Bool
+        switch layerContentsRedrawPolicy {
+        case .never, .onSetNeedsDisplay: redraws = false
+        default: redraws = true
+        }
+        if let sup = _superview {
+            // The superview repaints where the view's coverage changed: what it uncovered,
+            // and what it newly covers unless the view redraws that itself. Inside both
+            // frames the content is the view's to mark. A list's document growing by one
+            // row repainted the whole document (Sibyl's transcript: 1100x1349 a line), and a
+            // growing meter marked its row. A rotated, transformed or shadowed view covers
+            // more than its frame, so it keeps the union.
+            if _frameRotation != 0 || _layer.map({ !$0.transform.isIdentity || $0.shadowOpacity > 0 }) == true || old.width <= 0 || old.height <= 0 {
+                sup.setNeedsDisplay(old.union(_frame))
+            } else {
+                for r in NSView._difference(old, _frame) { sup.setNeedsDisplay(r) }
+                if !redraws { for r in NSView._difference(_frame, old) { sup.setNeedsDisplay(r) } }
+            }
+        }
+        if redraws { setNeedsDisplay(bounds) }
         if _postsFrameChangedNotifications {
             NotificationCenter.default.post(name: NSView.frameDidChangeNotification, object: self)
         }
+    }
+    /// `a` minus `b`: up to four rects (bands above and below, then the sides between).
+    internal static func _difference(_ a: NSRect, _ b: NSRect) -> [NSRect] {
+        guard !a.isEmpty else { return [] }
+        let i = a.intersection(b)
+        guard !i.isNull, !i.isEmpty else { return [a] }
+        var out: [NSRect] = []
+        if i.minY > a.minY { out.append(NSRect(x: a.minX, y: a.minY, width: a.width, height: i.minY - a.minY)) }
+        if a.maxY > i.maxY { out.append(NSRect(x: a.minX, y: i.maxY, width: a.width, height: a.maxY - i.maxY)) }
+        if i.minX > a.minX { out.append(NSRect(x: a.minX, y: i.minY, width: i.minX - a.minX, height: i.height)) }
+        if a.maxX > i.maxX { out.append(NSRect(x: i.maxX, y: i.minY, width: a.maxX - i.maxX, height: i.height)) }
+        return out
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setkeyboardfocusringneedsdisplay(_:)
     /// Marks `rect` plus the focus ring's outset for display.
