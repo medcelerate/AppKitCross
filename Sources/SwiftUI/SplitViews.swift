@@ -222,12 +222,14 @@ final class _SplitPrimitive: _Primitive, _SidebarColumnToggling {
         case .measured:
             let lo = along(pane.sizeThatFits(proposal(along: 0, across: breadth)))
             let ideal = along(pane.sizeThatFits(proposal(along: nil, across: breadth)))
-            let hi = along(pane.sizeThatFits(proposal(along: .infinity, across: breadth)))
             let mn = lo.isFinite ? Swift.max(0, lo) : 0
             let id = ideal.isFinite ? Swift.max(ideal, mn) : mn
             // The pane that takes up the slack grows past its content (which then sits
-            // centred in it), as a split view's last pane or a detail column does.
+            // centred in it), as a split view's last pane or a detail column does. It is
+            // not probed for a maximum: an infinite proposal there only measured (a third
+            // time, per pass) a detail column's spacers and scroll views at infinity.
             if key == flexibleKey { return (mn, id, .infinity) }
+            let hi = along(pane.sizeThatFits(proposal(along: .infinity, across: breadth)))
             return (mn, id, hi.isFinite ? Swift.max(hi, id) : .infinity)
         }
     }

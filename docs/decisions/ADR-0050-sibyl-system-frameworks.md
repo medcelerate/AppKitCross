@@ -269,7 +269,9 @@ The later runs found the costs that only a real workload shows:
   with no Info.plist has no `CFBundleName`, so only the bundled build shows it. An earlier
   guess here blamed the preferences store; `UserDefaults` writes a flat
   `<identifier>.plist` under `%LOCALAPPDATA%` and creates no folder. The consumer fix is
-  a lazy session (AGENTS.md, section 1).
+  a lazy session with `urlCache`, `httpCookieStorage` and `urlCredentialStorage` set to nil
+  (AGENTS.md, section 1): an `.ephemeral` configuration alone still created the URLCache
+  folder the moment Sibyl's model download started.
 
 ## Consequences
 
