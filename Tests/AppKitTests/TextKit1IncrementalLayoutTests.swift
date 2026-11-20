@@ -443,6 +443,27 @@ final class TextKit1IncrementalLayoutTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The PC's TextEdit case: a plain CR LF file (font only, no paragraph style) in a
+    /// container where only each paragraph's last word overflows. Every paragraph breaks
+    /// before that word; the newline does not keep it on the line.
+    func testLastWordOverflowingBeforeCRLFWraps() {
+        MainActor.assumeIsolated {
+            let font = NSFont.userFont(ofSize: 13)!
+            let line = "Line 0001: the quick brown fox jumps over the lazy dog."
+            let text = Array(repeating: line, count: 200).joined(separator: "\r\n") + "\r\n"
+            let (ts, lm, cs) = textKit1(NSAttributedString(string: text, attributes: [.font: font]), width: 10_000)
+            XCTAssertNil(ts.attribute(.paragraphStyle, at: 0, effectiveRange: nil))
+            let padding = cs[0].lineFragmentPadding
+            let full = lm._lineFragments[0].usedRect.width
+            let withoutLastWord = NSAttributedString(string: "Line 0001: the quick brown fox jumps over the lazy", attributes: [.font: font]).size().width
+            cs[0].size = NSSize(width: (full + withoutLastWord) / 2 + 2 * padding, height: .greatestFiniteMagnitude)
+            XCTAssertEqual(lm._lineFragments.count, 400, "every paragraph broke before \"dog.\"")
+            XCTAssertLessThanOrEqual(lm._lineFragments.map(\.usedRect.maxX).max() ?? 0, cs[0].size.width - padding + 0.5, "no line is wider than the container")
+            assertMatchesFullLayout(lm, "last word overflowing")
+            withExtendedLifetime(ts) {}
+        }
+    }
+
     // MARK: Random edits
 
     /// A small deterministic generator (SplitMix64).
