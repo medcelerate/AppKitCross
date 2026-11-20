@@ -177,14 +177,62 @@ struct _FormRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            // The label and content are laid out first (a flexible control takes the rest
-            // of the row, a fixed one leaves it to the spacer and sits at the trailing edge).
-            HStack(alignment: alignment, spacing: 0) {
-                label.layoutPriority(1)
-                Spacer(minLength: 0)
-                content.environment(\._formContext, nil).padding(.leading, 8).layoutPriority(1)
+            // The label leads and the control sits at the trailing edge, a flexible control
+            // taking the rest of the row. When the two do not fit side by side the label
+            // wraps (down to its widest word) before the control gives up width, as macOS's
+            // grouped forms do ("Hardware" / "Channel" beside a whole "1 — Input 1").
+            _FormRowLayout(alignment: alignment) {
+                label
+                content.environment(\._formContext, nil)
             }
         }
+    }
+}
+
+/// The grouped row's two-column layout: see `_FormRow`.
+struct _FormRowLayout: Layout {
+    var alignment: VerticalAlignment = .center
+    static let gap: CGFloat = 8
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let (label, content) = widths(proposal, subviews)
+        let lh = subviews.first?.sizeThatFits(ProposedViewSize(width: label, height: nil)).height ?? 0
+        let ch = subviews.count > 1 ? subviews[1].sizeThatFits(ProposedViewSize(width: content, height: nil)).height : 0
+        let natural = label + (subviews.count > 1 ? Self.gap + content : 0)
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? natural
+        return CGSize(width: width, height: max(lh, ch))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (label, content) = widths(ProposedViewSize(width: bounds.width, height: bounds.height), subviews)
+        let rtl = subviews.layoutDirection == .rightToLeft
+        func y(_ h: CGFloat) -> CGFloat { alignment == .top ? bounds.minY : alignment == .bottom ? bounds.maxY - h : bounds.midY - h / 2 }
+        if let l = subviews.first {
+            let p = ProposedViewSize(width: label, height: nil)
+            l.place(at: CGPoint(x: rtl ? bounds.maxX - label : bounds.minX, y: y(l.sizeThatFits(p).height)), proposal: p)
+        }
+        if subviews.count > 1 {
+            let p = ProposedViewSize(width: content, height: nil)
+            subviews[1].place(at: CGPoint(x: rtl ? bounds.minX : bounds.maxX - content, y: y(subviews[1].sizeThatFits(p).height)), proposal: p)
+        }
+    }
+    /// The label's and the control's widths for a proposal.
+    private func widths(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (CGFloat, CGFloat) {
+        guard let l = subviews.first else { return (0, 0) }
+        let labelIdeal = l.sizeThatFits(.unspecified).width
+        guard subviews.count > 1 else { return (labelIdeal, 0) }
+        let c = subviews[1]
+        let contentIdeal = c.sizeThatFits(.unspecified).width
+        guard let w = proposal.width, w.isFinite else { return (labelIdeal, contentIdeal) }
+        if labelIdeal + Self.gap + contentIdeal <= w {
+            // Room for both: the control may stretch into the rest (a text field does, a
+            // pop-up or switch keeps its size).
+            let content = min(max(contentIdeal, c.sizeThatFits(ProposedViewSize(width: w - labelIdeal - Self.gap, height: nil)).width), w - labelIdeal - Self.gap)
+            return (labelIdeal, content)
+        }
+        // The label's narrowest: wrapped at every word (a zero proposal).
+        let labelMin = min(labelIdeal, l.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width)
+        let content = min(c.sizeThatFits(ProposedViewSize(width: max(0, min(contentIdeal, w - labelMin - Self.gap)), height: nil)).width, max(0, w - labelMin - Self.gap))
+        let label = max(0, min(labelIdeal, w - content - Self.gap))
+        return (label, content)
     }
 }
 

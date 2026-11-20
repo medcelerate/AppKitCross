@@ -19,6 +19,8 @@ import CoreText
     // MARK: Storage
     internal var _objectValue: Any? = nil
     internal var _image: NSImage? = nil
+    /// The text a title drawing last put on screen (`_drawTruncatingText`), for tests.
+    internal var _lastDrawnTitle: String? = nil
     internal var _state: NSControl.StateValue = .off
     internal var _isEnabled = true
     internal var _isHighlighted = false
@@ -259,25 +261,36 @@ import CoreText
         text.draw(at: origin, withAttributes: attributes)
         NSGraphicsContext.restoreGraphicsState()
     }
-    /// Draws one line of `text` vertically centred in `rect`, leading-aligned (`alignment`
-    /// as `_drawText`), tail-truncated with an ellipsis when it is wider than the rect, as
-    /// AppKit's button and pop-up titles are.
+    /// The text a title drawing last put on screen (`_drawTruncatingText`), for tests.
+    /// Draws one line of `text` vertically centred in `rect` (`alignment` as `_drawText`),
+    /// tail-truncated with an ellipsis when it is wider than the rect, as AppKit's button and
+    /// pop-up titles are. The cut is made here, by measuring, rather than by a truncating
+    /// paragraph style: the port's string drawing wraps inside a rect and ignores the line
+    /// break mode, so the clipped second line took the tail with no "…" (Windows showed
+    /// "Clear This Channel's" in a narrowed button).
     @MainActor internal func _drawTruncatingText(_ text: String, attributes: [NSAttributedString.Key: Any], in rect: NSRect, alignment: NSTextAlignment = .left, flipped: Bool) {
-        let size = text.size(withAttributes: attributes)
-        guard size.width > rect.width + 0.5 else {
-            _drawText(text, attributes: attributes, in: rect, alignment: alignment, flipped: flipped)
-            return
+        let shown = NSCell._truncatedTail(text, attributes: attributes, width: rect.width)
+        _lastDrawnTitle = shown
+        _drawText(shown, attributes: attributes, in: rect, alignment: shown == text ? alignment : .left, flipped: flipped)
+    }
+    /// `text` cut at a character so that it and a trailing "…" fit `width` (trailing spaces
+    /// before the ellipsis dropped); the text itself when it fits.
+    @MainActor internal static func _truncatedTail(_ text: String, attributes: [NSAttributedString.Key: Any], width: CGFloat) -> String {
+        guard text.size(withAttributes: attributes).width > width + 0.5 else { return text }
+        let ellipsis = "\u{2026}"
+        let chars = Array(text)
+        func candidate(_ n: Int) -> String {
+            var head = String(chars[0..<n])
+            while head.last?.isWhitespace == true { head.removeLast() }
+            return head + ellipsis
         }
-        let ps = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
-        ps.lineBreakMode = .byTruncatingTail
-        ps.alignment = .left
-        var attrs = attributes
-        attrs[.paragraphStyle] = ps
-        let line = NSRect(x: rect.minX, y: rect.midY - size.height / 2, width: rect.width, height: size.height)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current?.cgContext.clip(to: rect)
-        NSAttributedString(string: text, attributes: attrs).draw(in: line)
-        NSGraphicsContext.restoreGraphicsState()
+        // The longest prefix whose truncated form fits (widths grow with the prefix).
+        var lo = 0, hi = chars.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if candidate(mid).size(withAttributes: attributes).width <= width + 0.5 { lo = mid } else { hi = mid - 1 }
+        }
+        return lo == 0 ? (ellipsis.size(withAttributes: attributes).width <= width + 0.5 ? ellipsis : "") : candidate(lo)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/drawingrect(forbounds:)
     @MainActor open func drawingRect(forBounds rect: NSRect) -> NSRect { (_isBordered || _isBezeled) ? rect.insetBy(dx: 2, dy: 2) : rect }
@@ -648,3 +661,4 @@ import CoreText
     // Requirement of NSAccessibilityElementProtocol
     open func accessibilityIdentifier() -> String { "" }
 }
+

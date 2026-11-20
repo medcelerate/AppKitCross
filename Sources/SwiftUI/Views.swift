@@ -925,6 +925,10 @@ final class _ShapeViewPrimitive: _Primitive {
                 s._stroke(ctx, path: path, in: bounds, style: strokeStyle, environment: env)
             }
         }
+        // A plain colour rectangle (a `.background(Color)`) lets a scroll over it copy pixels.
+        let probe = CGRect(x: 0, y: 0, width: 64, height: 32)
+        let solid = fill.map { (($0 as? AnyShapeStyle)?.style ?? $0) is Color } ?? false
+        view._drawsUniformFill = solid && stroke == nil && !fillStyle.isEOFilled && shape.path(in: probe) == Path(probe)
         if marks { view.needsDisplay = true }
     }
     /// Shapes and colours take whatever is proposed; unspecified dimensions use 10 points.

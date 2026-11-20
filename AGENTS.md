@@ -36,9 +36,13 @@ name draws nothing, as on macOS, so check the names an app uses against
 `Sources/AppKit/Core/NSImage+SystemImages.swift`. Two things a Windows run of a real app
 taught (ADR-0050): on Windows and Linux the dispatch pool is Swift concurrency's executor,
 so blocking work (a model decode, a capture pump) belongs on a `Thread` of its own, never
-on a `DispatchQueue` or a detached `Task`; and `UserDefaults` creates
-`%LOCALAPPDATA%\<CFBundleName>` on its first read, which is corelibs' preferences store,
-not the app's data folder.
+on a `DispatchQueue` or a detached `Task`; and a `URLSessionConfiguration` made at launch
+(an eager `URLSession` stored property) touches corelibs' `HTTPCookieStorage.shared`,
+which creates `%LOCALAPPDATA%\<CFBundleName>` (and `URLCache.shared` creates
+`%LOCALAPPDATA%\Temp\org.swift.foundation.URLCache\<bundle id>`) on Windows the moment
+the configuration exists, so make sessions lazily on the first request if a launch must
+write nothing outside the app's own folder. (`UserDefaults` itself writes a flat
+`<identifier>.plist` under `%LOCALAPPDATA%` and creates no folder.)
 
 Three kinds of "missing", and how each shows up:
 

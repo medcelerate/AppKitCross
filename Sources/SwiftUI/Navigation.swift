@@ -459,9 +459,60 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
         if !hidden, env._formContext != nil, _formHasLabel(label) {
             var inner = self; inner._inFormRow = true; inner._inGroupedForm = env._formContext == .grouped
             let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
+            if env._formContext == .grouped, !stacked {
+                // A grouped row: the pop-up keeps the width its title needs and the label
+                // wraps beside it; only when the label is down to its widest word does the
+                // pop-up shrink and its title truncate (macOS 15's grouped forms).
+                return _GroupPrimitive(children: [_ViewBox(_PickerFormRowLayout() {
+                    label
+                    inner.environment(\._formContext, nil).padding(.leading, 8)
+                })])
+            }
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
         }
         return _PickerPrimitive(label: (label as? Text)?._string ?? _pickerItemFace(_ViewBox(label), environment: env).title, showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content), groupedRow: _inGroupedForm || env._formContext == .grouped)
+    }
+}
+
+/// A grouped form's picker row: the label leading, the pop-up trailing. The pop-up is
+/// given its ideal width while the label can still wrap to fit what is left (down to its
+/// widest word); past that the pop-up takes the rest and truncates its title. Both are
+/// centred vertically; the row is as tall as the wrapped label or the control.
+struct _PickerFormRowLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let (label, content) = widths(proposal, subviews)
+        let lh = subviews.first?.sizeThatFits(ProposedViewSize(width: label, height: nil)).height ?? 0
+        let ch = subviews.count > 1 ? subviews[1].sizeThatFits(ProposedViewSize(width: content, height: nil)).height : 0
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? (label + content)
+        return CGSize(width: width, height: max(lh, ch))
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (label, content) = widths(ProposedViewSize(width: bounds.width, height: bounds.height), subviews)
+        let rtl = subviews.layoutDirection == .rightToLeft
+        if let l = subviews.first {
+            let p = ProposedViewSize(width: label, height: nil)
+            let h = l.sizeThatFits(p).height
+            l.place(at: CGPoint(x: rtl ? bounds.maxX - label : bounds.minX, y: bounds.midY - h / 2), proposal: p)
+        }
+        if subviews.count > 1 {
+            let p = ProposedViewSize(width: content, height: nil)
+            let h = subviews[1].sizeThatFits(p).height
+            subviews[1].place(at: CGPoint(x: rtl ? bounds.minX : bounds.maxX - content, y: bounds.midY - h / 2), proposal: p)
+        }
+    }
+    /// The label's and the control's widths for a proposal.
+    private func widths(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (CGFloat, CGFloat) {
+        guard let l = subviews.first else { return (0, 0) }
+        let labelIdeal = l.sizeThatFits(.unspecified).width
+        guard subviews.count > 1 else { return (labelIdeal, 0) }
+        let c = subviews[1]
+        let contentIdeal = c.sizeThatFits(.unspecified).width
+        guard let w = proposal.width, w.isFinite, labelIdeal + contentIdeal > w else { return (labelIdeal, contentIdeal) }
+        // The label's narrowest: wrapped at every word (a zero proposal).
+        let labelMin = min(labelIdeal, l.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width)
+        let content = c.sizeThatFits(ProposedViewSize(width: max(0, min(contentIdeal, w - labelMin)), height: nil)).width
+        let label = max(0, min(labelIdeal, w - content))
+        return (label, content)
     }
 }
 
@@ -582,7 +633,10 @@ func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = Enviro
         guard depth < 24, image == nil || texts.isEmpty else { return }
         let value = box.value
         if let t = value as? Text { texts.append(t._string); return }
-        if let i = value as? Image { if image == nil { image = i.image }; return }
+        if let i = value as? Image { if image == nil { image = _pickerItemImage(i, environment: environment) }; return }
+        // A shape (a colour swatch, `Circle().fill(color)`) is rendered to a colour image:
+        // it draws in its own colours, never as a template tinted with the row's text.
+        if let shape = value as? _ShapeView { if image == nil { image = _pickerShapeImage(shape, environment: environment) }; return }
         if let l = value as? _LabelParts {
             // An icon-only label (`.labelStyle(.iconOnly)` around it) shows its icon alone
             // on the pop-up's face; the menu item keeps the title beside it.
@@ -605,6 +659,65 @@ func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = Enviro
     walk(box, depth: 0, environment: environment)
     let title = texts.filter { !$0.isEmpty }.joined(separator: " ")
     return (title, image, iconOnly && image != nil)
+}
+
+/// A picker item's image from an `Image` view. A symbol stays a template (the menu draws it
+/// in the row's text colour, white when highlighted) unless the item gave it its own colour
+/// (`.foregroundStyle(.red)` around it, Sibyl's tint swatches): then it is a colour image in
+/// that colour, as the Mac's menu shows it. Primary and secondary are the text's colours, so
+/// they keep the template.
+@MainActor
+func _pickerItemImage(_ view: Image, environment: EnvironmentValues) -> NSImage? {
+    guard let image = view.image else { return nil }
+    guard image.isTemplate, let color = environment.foregroundColor, color != .primary, color != .secondary else { return image }
+    let ns = color.nsColor
+    let rgb = ns.usingColorSpace(.sRGB) ?? ns
+    let key = "\(view.name)|\(ObjectIdentifier(image).hashValue)|\(rgb.redComponent),\(rgb.greenComponent),\(rgb.blueComponent),\(rgb.alphaComponent)"
+    if let cached = _PickerItemImages.tinted[key] { return cached }
+    let size = image.size
+    let tinted = NSImage(size: size, flipped: false) { rect in
+        // AppKit tints a template image in a button cell (`contentTintColor`).
+        let tinter = NSButton(frame: rect)
+        tinter.isBordered = false
+        tinter.contentTintColor = ns
+        (tinter.cell as? NSButtonCell)?.drawImage(image, withFrame: rect, in: tinter)
+        return true
+    }
+    tinted.isTemplate = false
+    if _PickerItemImages.tinted.count > 128 { _PickerItemImages.tinted.removeAll() }
+    _PickerItemImages.tinted[key] = tinted
+    return tinted
+}
+
+/// A shape view drawn into a 16-point colour image (a 12-point swatch centred in it, the
+/// size a Label's icon has beside 13-point text).
+@MainActor
+func _pickerShapeImage(_ view: _ShapeView, environment: EnvironmentValues) -> NSImage? {
+    let side: CGFloat = 16
+    let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+        let bounds = rect.insetBy(dx: 2, dy: 2)
+        let path = view.shape.path(in: bounds).cgPath
+        if let f = view.fill {
+            ctx.saveGState()
+            if view.fillStyle.isEOFilled { ctx.addPath(path); ctx.clip(using: .evenOdd) }
+            f._fill(ctx, path: path, in: bounds, environment: environment)
+            ctx.restoreGState()
+        }
+        if let s = view.stroke, view.strokeStyle.lineWidth > 0 {
+            s._stroke(ctx, path: path, in: bounds, style: view.strokeStyle, environment: environment)
+        }
+        return true
+    }
+    image.isTemplate = false
+    return image
+}
+
+@MainActor
+enum _PickerItemImages {
+    /// Coloured copies of symbols by symbol, image and colour, so a re-rendered picker hands
+    /// the pop-up the same images and does not rebuild its menu.
+    static var tinted: [String: NSImage] = [:]
 }
 
 /// A `Label`'s title and icon views, for a picker item to show them.

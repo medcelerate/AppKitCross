@@ -261,8 +261,15 @@ The later runs found the costs that only a real workload shows:
   (`SwiftUIFramePumpTests` drives frames with no explicit layout call). The host tests had
   hidden this by calling `layoutSubtreeIfNeeded` themselves.
 - **Not the port's**: the empty `%LOCALAPPDATA%\<CFBundleName>` a bundled app creates at
-  launch is corelibs Foundation's preferences store, made on the first `UserDefaults`
-  read; a bare executable with no Info.plist files its preferences elsewhere.
+  launch is corelibs Foundation's `HTTPCookieStorage.shared`, which the first
+  `URLSessionConfiguration` touches (found with cdb on `KERNELBASE!CreateDirectoryW`:
+  `FileManager.createDirectory` ← `HTTPCookieStorage.sync` ← `URLSessionConfiguration.init`
+  ← Sibyl's eager `URLSession`); `URLCache.shared` likewise creates
+  `%LOCALAPPDATA%\Temp\org.swift.foundation.URLCache\<bundle id>`. A bare executable
+  with no Info.plist has no `CFBundleName`, so only the bundled build shows it. An earlier
+  guess here blamed the preferences store; `UserDefaults` writes a flat
+  `<identifier>.plist` under `%LOCALAPPDATA%` and creates no folder. The consumer fix is
+  a lazy session (AGENTS.md, section 1).
 
 ## Consequences
 

@@ -593,6 +593,10 @@ import CoreText
     /// Sees every `draw(_:)` the display runs, directly or through the backing layer (tests
     /// count which views a frame re-renders).
     nonisolated(unsafe) public static var _drawObserver: ((NSView) -> Void)?
+    /// The view draws one solid colour over its whole bounds (a SwiftUI colour background):
+    /// a transparent clip view scrolling by copy over it may move its pixels, which are the
+    /// same everywhere (`NSWindow._scrollBacking`).
+    public var _drawsUniformFill = false
     private func _invalidate(_ rect: NSRect) {
         NSView._invalidationCount &+= 1
         NSView._invalidationObserver?(self, rect)
@@ -2031,12 +2035,16 @@ import CoreText
         return true
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsview/setboundsorigin(_:)
-    @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) {
+    @MainActor open func setBoundsOrigin(_ newOrigin: NSPoint) { _setBoundsOrigin(newOrigin, display: nil) }
+    /// The bounds origin change. `display`, when given, replaces marking the whole bounds
+    /// and runs before the bounds notification (a clip view that moved its pixels in the
+    /// backing store marks only the band the scroll uncovered).
+    internal func _setBoundsOrigin(_ newOrigin: NSPoint, display: (() -> Void)?) {
         guard newOrigin != _boundsOrigin else { return }
         _boundsOrigin = newOrigin
         _syncLayerGeometry()
         _setNeedsUpdateTrackingAreas()
-        setNeedsDisplay(bounds)
+        if let display { display() } else { setNeedsDisplay(bounds) }
         if _postsBoundsChangedNotifications {
             NotificationCenter.default.post(name: NSView.boundsDidChangeNotification, object: self)
         }
