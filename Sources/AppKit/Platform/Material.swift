@@ -138,50 +138,67 @@ public final class SoftwareMaterialBackend: PlatformMaterialBackend {
         let lx = Float(p.lightX / lightLength), ly = Float(p.lightY / lightLength)
         let sx = Float(source.width) / Float(max(1e-6, backdropRect.width)), sy = Float(source.height) / Float(max(1e-6, backdropRect.height))
         let ox = Float(backdropRect.minX), oy = Float(backdropRect.minY)
-        let veil = p.veil, veilA = Float(p.veilAlpha)
-        let tint = p.tint, tintA = Float(p.tintAlpha) * Float(p.tint?.alpha ?? 0)
+        let veilR = Float(p.veil.red), veilG = Float(p.veil.green), veilB = Float(p.veil.blue), veilA = Float(p.veilAlpha)
+        let tintA = Float(p.tintAlpha) * Float(p.tint?.alpha ?? 0)
+        let tintR = Float(p.tint?.red ?? 0), tintG = Float(p.tint?.green ?? 0), tintB = Float(p.tint?.blue ?? 0)
+        let hasTint = p.tint != nil && tintA > 0
         let edge = Float(max(0.001, p.edgeWidth)), refraction = Float(p.refraction)
+        let bevelled = p.edgeWidth > 0
         let rimW = Float(max(0.001, p.rimWidth)), rimA = Float(p.rimAlpha), spec = Float(p.specular), lift = Float(p.brighten)
+        // Deeper than this inside the outline nothing but the veil applies: no bend, no rim,
+        // no sheen, full coverage, so the interior takes the short path.
+        let interior = -(max(bevelled ? 2 * edge : 0, rimA > 0 ? rimW : 0) + 1)
+        let sw = source.width, sh = source.height, sStride = source.stride, oStride = out.stride
         source.bytes.withUnsafeBufferPointer { src in
             out.bytes.withUnsafeMutableBufferPointer { dst in
                 for y in 0..<p.height {
+                    let py0 = Float(y) + 0.5
                     for x in 0..<p.width {
                         let (d, nx, ny) = field.sample(x, y)
-                        // Antialiased coverage of the shape at this pixel: 1 inside, 0 outside.
-                        let cover = min(1, max(0, 0.5 - d))
-                        let o = y * out.stride + x * 4
-                        if cover <= 0 { dst[o] = 0; dst[o + 1] = 0; dst[o + 2] = 0; dst[o + 3] = 0; continue }
-                        // The bevel: t is 1 at the rim, 0 edgeWidth inside; the lens looks
-                        // outward through it, so content beyond the edge bends into the rim.
-                        let t = p.edgeWidth > 0 ? min(1, max(0, 1 + d / edge)) : 0
-                        let bend = refraction * t * t
-                        let px = Float(x) + 0.5 + nx * bend, py = Float(y) + 0.5 + ny * bend
-                        var (b, g, r, a) = _MaterialPixels.bilinear(src, width: source.width, height: source.height, stride: source.stride, x: (px - ox) * sx - 0.5, y: (py - oy) * sy - 0.5)
-                        if a > 0.001 { b /= a; g /= a; r /= a }
+                        let o = y * oStride + x * 4
+                        if d >= 0.5 { dst[o] = 0; dst[o + 1] = 0; dst[o + 2] = 0; dst[o + 3] = 0; continue }
+                        var px = Float(x) + 0.5, py = py0
+                        var cover: Float = 1, t: Float = 0, facing: Float = 0
+                        let deep = d < interior
+                        if !deep {
+                            // Antialiased coverage of the shape at this pixel: 1 inside, 0 outside.
+                            cover = min(1, 0.5 - d)
+                            // The bevel: t is 1 at the rim, 0 edgeWidth inside; the lens looks
+                            // outward through it, so content beyond the edge bends into the rim.
+                            t = bevelled ? min(1, max(0, 1 + d / edge)) : 0
+                            let bend = refraction * t * t
+                            px += nx * bend; py += ny * bend
+                            facing = nx * lx + ny * ly
+                        }
+                        var (b, g, r, a) = _MaterialPixels.bilinear(src, width: sw, height: sh, stride: sStride, x: (px - ox) * sx - 0.5, y: (py - oy) * sy - 0.5)
+                        if a > 0.001 { let inv = 1 / a; b *= inv; g *= inv; r *= inv }
                         // Veil, then tint, over the backdrop.
-                        r += (Float(veil.red) - r) * veilA; g += (Float(veil.green) - g) * veilA; b += (Float(veil.blue) - b) * veilA
+                        r += (veilR - r) * veilA; g += (veilG - g) * veilA; b += (veilB - b) * veilA
                         a += (1 - a) * veilA
-                        if let tint, tintA > 0 {
-                            r += (Float(tint.red) - r) * tintA; g += (Float(tint.green) - g) * tintA; b += (Float(tint.blue) - b) * tintA
+                        if hasTint {
+                            r += (tintR - r) * tintA; g += (tintG - g) * tintA; b += (tintB - b) * tintA
                             a += (1 - a) * tintA
                         }
-                        // Lighting on the bevel: the rim line and the specular sheen.
-                        let facing = nx * lx + ny * ly
-                        if rimA > 0 {
-                            let rim = min(1, max(0, 1 + d / rimW)) * rimA
-                            if facing > 0 {
-                                let k = rim * facing
-                                r += (1 - r) * k; g += (1 - g) * k; b += (1 - b) * k
-                            } else {
-                                let k = rim * -facing * 0.45
-                                r *= 1 - k; g *= 1 - k; b *= 1 - k
+                        if !deep {
+                            // Lighting on the bevel: the rim line and the specular sheen.
+                            if rimA > 0 {
+                                let rim = min(1, max(0, 1 + d / rimW)) * rimA
+                                if facing > 0 {
+                                    let k = rim * facing
+                                    r += (1 - r) * k; g += (1 - g) * k; b += (1 - b) * k
+                                } else {
+                                    let k = rim * -facing * 0.45
+                                    r *= 1 - k; g *= 1 - k; b *= 1 - k
+                                }
+                                a += (1 - a) * rim
                             }
-                            a += (1 - a) * rim
-                        }
-                        if spec > 0, facing > 0, t > 0 {
-                            let f2 = facing * facing
-                            let k = f2 * f2 * t * spec
-                            r += (1 - r) * k; g += (1 - g) * k; b += (1 - b) * k
+                            if spec > 0, facing > 0, bevelled {
+                                // The sheen reaches twice as deep as the bevel and falls off
+                                // with the square of the facing, a soft band rather than a line.
+                                let reach = min(1, max(0, 1 + d / (2 * edge)))
+                                let k = facing * facing * reach * reach * spec
+                                r += (1 - r) * k; g += (1 - g) * k; b += (1 - b) * k
+                            }
                         }
                         if lift > 0 { r += (1 - r) * lift; g += (1 - g) * lift; b += (1 - b) * lift }
                         let outA = min(1, a) * cover
@@ -217,7 +234,7 @@ struct _GlassField {
     }
 
     /// Distance and normal at the centre of pixel (x, y).
-    @inline(__always)
+    @_transparent
     func sample(_ x: Int, _ y: Int) -> (Float, Float, Float) {
         if let rect {
             let cx = Float(rect.midX), cy = Float(rect.midY), hx = Float(rect.width) / 2 - radius, hy = Float(rect.height) / 2 - radius
@@ -351,39 +368,41 @@ struct _MaterialPixels {
         #endif
     }
 
-    @inline(__always) static func byte(_ v: Float) -> UInt8 { UInt8(min(255, max(0, (v * 255).rounded()))) }
+    @_transparent static func byte(_ v: Float) -> UInt8 { UInt8(min(255, max(0, (v * 255).rounded()))) }
 
     /// The premultiplied (b, g, r, a) in 0...1 at a fractional pixel position, bilinear,
     /// clamped to the border.
-    @inline(__always)
+    @_transparent
     static func bilinear(_ s: UnsafeBufferPointer<UInt8>, width: Int, height: Int, stride: Int, x: Float, y: Float) -> (Float, Float, Float, Float) {
         let cx = min(Float(width - 1), max(0, x)), cy = min(Float(height - 1), max(0, y))
         let x0 = Int(cx), y0 = Int(cy)
         let x1 = min(width - 1, x0 + 1), y1 = min(height - 1, y0 + 1)
         let fx = cx - Float(x0), fy = cy - Float(y0)
-        @inline(__always) func at(_ xx: Int, _ yy: Int, _ c: Int) -> Float { Float(s[yy * stride + xx * 4 + c]) / 255 }
-        var out: (Float, Float, Float, Float) = (0, 0, 0, 0)
-        for c in 0..<4 {
-            let top = at(x0, y0, c) + (at(x1, y0, c) - at(x0, y0, c)) * fx
-            let bottom = at(x0, y1, c) + (at(x1, y1, c) - at(x0, y1, c)) * fx
-            let v = top + (bottom - top) * fy
-            switch c { case 0: out.0 = v; case 1: out.1 = v; case 2: out.2 = v; default: out.3 = v }
-        }
-        return out
+        let o00 = y0 * stride + x0 * 4, o10 = y0 * stride + x1 * 4, o01 = y1 * stride + x0 * 4, o11 = y1 * stride + x1 * 4
+        let w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy
+        let k: Float = 1 / 255
+        let b = (Float(s[o00]) * w00 + Float(s[o10]) * w10 + Float(s[o01]) * w01 + Float(s[o11]) * w11) * k
+        let g = (Float(s[o00 + 1]) * w00 + Float(s[o10 + 1]) * w10 + Float(s[o01 + 1]) * w01 + Float(s[o11 + 1]) * w11) * k
+        let r = (Float(s[o00 + 2]) * w00 + Float(s[o10 + 2]) * w10 + Float(s[o01 + 2]) * w01 + Float(s[o11 + 2]) * w11) * k
+        let a = (Float(s[o00 + 3]) * w00 + Float(s[o10 + 3]) * w10 + Float(s[o01 + 3]) * w01 + Float(s[o11 + 3]) * w11) * k
+        return (b, g, r, a)
     }
 
     /// Saturation: every colour pulled away from (above 1) or toward (below 1) its luminance.
     mutating func saturate(by s: CGFloat) {
-        let k = Float(s)
-        for y in 0..<height {
-            for x in 0..<width {
-                let o = y * stride + x * 4
-                let b = Float(bytes[o]), g = Float(bytes[o + 1]), r = Float(bytes[o + 2]), a = Float(bytes[o + 3])
-                let l = 0.0722 * b + 0.7152 * g + 0.2126 * r
-                // Premultiplied values stay within 0...alpha.
-                bytes[o] = UInt8(min(a, max(0, (l + (b - l) * k).rounded())))
-                bytes[o + 1] = UInt8(min(a, max(0, (l + (g - l) * k).rounded())))
-                bytes[o + 2] = UInt8(min(a, max(0, (l + (r - l) * k).rounded())))
+        let k = Float(s), w = width, h = height, st = stride
+        bytes.withUnsafeMutableBufferPointer { px in
+            for y in 0..<h {
+                var o = y * st
+                for _ in 0..<w {
+                    let b = Float(px[o]), g = Float(px[o + 1]), r = Float(px[o + 2]), a = Float(px[o + 3])
+                    let l = 0.0722 * b + 0.7152 * g + 0.2126 * r
+                    // Premultiplied values stay within 0...alpha.
+                    px[o] = UInt8(min(a, max(0, (l + (b - l) * k).rounded())))
+                    px[o + 1] = UInt8(min(a, max(0, (l + (g - l) * k).rounded())))
+                    px[o + 2] = UInt8(min(a, max(0, (l + (r - l) * k).rounded())))
+                    o += 4
+                }
             }
         }
     }
@@ -391,14 +410,19 @@ struct _MaterialPixels {
     /// The alpha-weighted mean luminance of the straight colours, nil for no coverage.
     func averageLuminance() -> CGFloat? {
         var sum: Double = 0, weight: Double = 0
-        for y in 0..<height {
-            for x in 0..<width {
-                let o = y * stride + x * 4
-                let a = Double(bytes[o + 3])
-                guard a > 0 else { continue }
-                // Premultiplied: luma / alpha is the straight luma; the weight is alpha.
-                sum += 0.0722 * Double(bytes[o]) + 0.7152 * Double(bytes[o + 1]) + 0.2126 * Double(bytes[o + 2])
-                weight += a
+        let w = width, h = height, st = stride
+        bytes.withUnsafeBufferPointer { px in
+            for y in 0..<h {
+                var o = y * st
+                for _ in 0..<w {
+                    let a = Double(px[o + 3])
+                    if a > 0 {
+                        // Premultiplied: luma / alpha is the straight luma; the weight is alpha.
+                        sum += 0.0722 * Double(px[o]) + 0.7152 * Double(px[o + 1]) + 0.2126 * Double(px[o + 2])
+                        weight += a
+                    }
+                    o += 4
+                }
             }
         }
         return weight > 0 ? CGFloat(sum / weight) : nil
@@ -409,12 +433,15 @@ struct _MaterialPixels {
     func mostly(_ color: PlatformGlassParameters.Color, tolerance: Int = 6, fraction: Double = 0.97) -> Bool {
         let cb = Int(color.blue * 255), cg = Int(color.green * 255), cr = Int(color.red * 255)
         var hits = 0
-        for y in 0..<height {
-            for x in 0..<width {
-                let o = y * stride + x * 4
-                let a = Int(bytes[o + 3])
-                guard a > 0 else { continue }
-                if abs(Int(bytes[o]) * 255 / a - cb) <= tolerance, abs(Int(bytes[o + 1]) * 255 / a - cg) <= tolerance, abs(Int(bytes[o + 2]) * 255 / a - cr) <= tolerance { hits += 1 }
+        let w = width, h = height, st = stride
+        bytes.withUnsafeBufferPointer { px in
+            for y in 0..<h {
+                var o = y * st
+                for _ in 0..<w {
+                    let a = Int(px[o + 3])
+                    if a > 0, abs(Int(px[o]) * 255 / a - cb) <= tolerance, abs(Int(px[o + 1]) * 255 / a - cg) <= tolerance, abs(Int(px[o + 2]) * 255 / a - cr) <= tolerance { hits += 1 }
+                    o += 4
+                }
             }
         }
         return Double(hits) >= fraction * Double(width * height)
@@ -431,31 +458,47 @@ struct _MaterialPixels {
     }
 
     /// One box-blur pass of `radius` along rows (`horizontal`) or columns, every byte of
-    /// each pixel averaged over `2 * radius + 1` samples with the border clamped.
+    /// each pixel averaged over `2 * radius + 1` samples with the border clamped. The four
+    /// channels run in one sweep with running sums (wrapping arithmetic: a sum of bytes
+    /// over a window never overflows), so a debug build of the package keeps up too.
     static func box(_ src: [UInt8], into dst: inout [UInt8], width: Int, height: Int, stride: Int, radius: Int, horizontal: Bool) {
         let length = horizontal ? width : height
         let lines = horizontal ? height : width
         let stepIn = horizontal ? 4 : stride
         let lineIn = horizontal ? stride : 4
         let window = 2 * radius + 1
+        let last = length - 1
         src.withUnsafeBufferPointer { s in
             dst.withUnsafeMutableBufferPointer { d in
+                guard let sp = s.baseAddress, let dp = d.baseAddress else { return }
                 for line in 0..<lines {
                     let base = line * lineIn
-                    for c in 0..<4 {
-                        // The running sum starts with the first pixel repeated `radius`
-                        // times plus the first `radius + 1` pixels.
-                        var sum = 0
-                        let first = Int(s[base + c])
-                        sum += first * radius
-                        for i in 0...min(radius, length - 1) { sum += Int(s[base + i * stepIn + c]) }
-                        if length - 1 < radius { sum += Int(s[base + (length - 1) * stepIn + c]) * (radius - (length - 1)) }
-                        for i in 0..<length {
-                            d[base + i * stepIn + c] = UInt8(sum / window)
-                            let leaving = max(0, i - radius)
-                            let entering = min(length - 1, i + radius + 1)
-                            sum += Int(s[base + entering * stepIn + c]) - Int(s[base + leaving * stepIn + c])
-                        }
+                    // The running sums start with the first pixel repeated `radius` times
+                    // plus the first `radius + 1` pixels.
+                    var s0 = Int32(sp[base]) &* Int32(radius), s1 = Int32(sp[base + 1]) &* Int32(radius)
+                    var s2 = Int32(sp[base + 2]) &* Int32(radius), s3 = Int32(sp[base + 3]) &* Int32(radius)
+                    var i = 0
+                    while i <= min(radius, last) {
+                        let o = base + i * stepIn
+                        s0 &+= Int32(sp[o]); s1 &+= Int32(sp[o + 1]); s2 &+= Int32(sp[o + 2]); s3 &+= Int32(sp[o + 3])
+                        i &+= 1
+                    }
+                    if last < radius {
+                        let o = base + last * stepIn, n = Int32(radius - last)
+                        s0 &+= Int32(sp[o]) &* n; s1 &+= Int32(sp[o + 1]) &* n; s2 &+= Int32(sp[o + 2]) &* n; s3 &+= Int32(sp[o + 3]) &* n
+                    }
+                    let w = Int32(window)
+                    var o = base
+                    var leaving = base, entering = base + min(last, radius + 1) * stepIn
+                    i = 0
+                    while i < length {
+                        dp[o] = UInt8(truncatingIfNeeded: s0 / w); dp[o + 1] = UInt8(truncatingIfNeeded: s1 / w)
+                        dp[o + 2] = UInt8(truncatingIfNeeded: s2 / w); dp[o + 3] = UInt8(truncatingIfNeeded: s3 / w)
+                        s0 &+= Int32(sp[entering]) &- Int32(sp[leaving]); s1 &+= Int32(sp[entering + 1]) &- Int32(sp[leaving + 1])
+                        s2 &+= Int32(sp[entering + 2]) &- Int32(sp[leaving + 2]); s3 &+= Int32(sp[entering + 3]) &- Int32(sp[leaving + 3])
+                        if i >= radius { leaving &+= stepIn }
+                        if i + radius + 1 < last { entering &+= stepIn }
+                        o &+= stepIn; i &+= 1
                     }
                 }
             }

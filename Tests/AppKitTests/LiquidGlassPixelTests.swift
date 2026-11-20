@@ -197,6 +197,40 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// One paint renders the content beneath the glass once for every surface in the
+    /// window, and content dirtied under one lens re-samples that lens alone.
+    func testSharedFrameRendersOncePerPaint() {
+        MainActor.assumeIsolated {
+            let w = window(width: 300, height: 100)
+            let halves = _HalvesView(frame: w.contentView!.bounds)
+            w.contentView!.addSubview(halves)
+            let lenses = (0..<3).map { i in NSGlassEffectView(frame: NSRect(x: 10 + i * 100, y: 20, width: 80, height: 60)) }
+            lenses.forEach { w.contentView!.addSubview($0) }
+            let before = _GlassRegistry.frameRenders
+            let first = render(w.contentView!)
+            XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "three lenses share one frame of the content beneath them")
+            let samples = lenses.map { _GlassRegistry.sample(for: $0) }
+            XCTAssertTrue(samples.allSatisfy { !$0.dirty && $0.image != nil })
+            // Content under the middle lens changes: that lens re-samples, the others keep theirs.
+            halves.setNeedsDisplay(NSRect(x: 120, y: 30, width: 40, height: 20))
+            XCTAssertFalse(samples[0].dirty); XCTAssertTrue(samples[1].dirty); XCTAssertFalse(samples[2].dirty)
+            XCTAssertTrue(lenses[1].needsDisplay); XCTAssertFalse(lenses[0].needsDisplay)
+            let rendersBeforeSecond = _GlassRegistry.frameRenders
+            let second = render(w.contentView!)
+            XCTAssertEqual(_GlassRegistry.frameRenders - rendersBeforeSecond, 1, "the frame is rendered again after the content changed, once")
+            XCTAssertFalse(samples[1].dirty)
+            // The frame's crop lines up with the lens: its pixels match the first paint's.
+            for x in [20, 50, 80, 220, 250] {
+                let a = pixel(first, x, 50), b = pixel(second, x, 50)
+                XCTAssertEqual(a.r, b.r, accuracy: 0.03, "x \(x)"); XCTAssertEqual(a.b, b.b, accuracy: 0.03, "x \(x)")
+            }
+            // Nothing changed: a third paint renders no frame and samples nothing.
+            let rendersBeforeThird = _GlassRegistry.frameRenders
+            _ = render(w.contentView!)
+            XCTAssertEqual(_GlassRegistry.frameRenders, rendersBeforeThird, "an unchanged window is not sampled again")
+        }
+    }
+
     // MARK: Lens
 
     /// The rim: the top row inside the glass is lighter than the body below it, the bottom
@@ -250,6 +284,12 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             let top = shaded(img, 40, 0), bevel = shaded(img, 40, 3), body = shaded(img, 40, 15), bottom = shaded(img, 40, 29)
             XCTAssertGreaterThan(luma(top), luma(body) + 0.15, "the rim catches the light: \(top) vs \(body)")
             XCTAssertGreaterThan(luma(bevel), luma(body) + 0.03, "the sheen spreads down the bevel: \(bevel) vs \(body)")
+            // The sheen is a soft band, not a line: still well above the body two pixels in,
+            // fading by six pixels, gone at the centre.
+            let band = shaded(img, 40, 2), deeper = shaded(img, 40, 6)
+            XCTAssertGreaterThan(luma(band), luma(body) + 0.12, "the highlight band is pronounced: \(band) vs \(body)")
+            XCTAssertGreaterThan(luma(band), luma(deeper) + 0.03, "and falls off with depth")
+            XCTAssertGreaterThan(luma(deeper), luma(body) + 0.04, "reaching twice the bevel's depth")
             XCTAssertLessThan(luma(bottom), luma(body) - 0.03, "the bottom rim is in shadow: \(bottom) vs \(body)")
             // Top left faces the light more than top right.
             XCTAssertGreaterThan(luma(shaded(img, 10, 4)), luma(shaded(img, 70, 4)), "the highlight leans left")

@@ -122,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         // A clear lens and a tinted one, apart.
         let clear = NSGlassEffectView(frame: NSRect(x: 320, y: 30, width: 150, height: 44))
         clear.style = .clear; clear.cornerRadius = 22
+        clear._isInteractive = true    // brightens under the pointer and while pressed
         clear.contentView = label("Clear glass")
         clear.autoresizingMask = [.maxXMargin, .maxYMargin]
         content.addSubview(clear)

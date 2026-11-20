@@ -94,16 +94,17 @@ GPU compositor implements the same stages as shader passes and Core does not cha
    rim   = clamp(1 + d / rimWidth, 0, 1) * rimAlpha
    c    += (1 - c) * rim * max(n·L, 0)                // light where the edge faces the light
    c    *= 1 - rim * max(-n·L, 0) * 0.45              // dark where it faces away
-   c    += (1 - c) * (n·L)⁴ * t * specular            // the sheen down the lit bevel
+   s     = clamp(1 + d / (2 * edgeWidth), 0, 1)       // the sheen reaches twice the bevel's depth
+   c    += (1 - c) * (n·L)² * s² * specular           // a soft band down the lit bevel, not a line
    c    += (1 - c) * brighten                         // hover 0.1, press 0.2
    out   = c * coverage(d)                            // antialiased at the outline
    ```
 
    A lens has a 6 pt bevel bending the backdrop by 3 pt at the rim, a 1 pt rim at 0.55
-   (0.3 in the dark variant, halved when the window is inactive) and a sheen of 0.35; a
-   material (band, sidebar, within-window effect view) has none of them, only the veil.
-   In the software pass the lens stage over a toolbar band at 1100 by 52 points and 2x
-   is 230 thousand pixels, under two milliseconds; capsules are a few thousand.
+   (0.3 in the dark variant, halved when the window is inactive) and a sheen of 0.5 (0.35
+   in the dark variant); a material (band, sidebar, within-window effect view) has none of
+   them, only the veil, so it never runs the lens stage: the graphics backend draws its
+   blurred backdrop up to size and the veil, tint and lift are fills over it.
 4. **Scroll-edge extension**: a toolbar band in this port sits above the content view
    (ADR-0018 grows the frame by the band), so nothing but the window background lies
    beneath it and a faithful sample would be flat grey, which is what the first PC run
@@ -119,6 +120,26 @@ GPU compositor implements the same stages as shader passes and Core does not cha
    pressed, and a pressed surface grows from its one-point inset back to its bounds (the
    capsule's rect grows by 0.75 pt a side). The container (below) carries the states of its
    members into the merged shape.
+
+**One frame per paint.** The second PC run scrolled at seven frames a second: every glass
+surface painted the window beneath itself again, at full resolution, every frame. The
+registry now renders the content beneath the glass once per paint into a shared frame
+(`_GlassFrame`: the window's content, band and accessory area at the sample scale, a
+quarter of the backing scale for lenses and an eighth for materials, stopping at the first
+glass surface in the paint order), and each surface crops its rectangle plus the blur
+margin from it; the band's mirrored strip is a crop of the same frame rather than a second
+render. The frame lives until a view outside the glass dirties the window, so a paint that
+touches no content beneath glass renders nothing; and a dirty rectangle marks only the
+surfaces it reaches (the band when content scrolls under it, a lens when something under
+the lens changes), the others keep their blurred sample and shaded image. On the host at
+2x (`Examples/Glass`, 900 by 600 points, the band and nine lenses) a whole-window paint in
+a release build takes 4 ms without glass and about 12 ms with it; the same paint in a
+debug build takes 77 ms, because the per-pixel loops run unoptimised (they were 250 ms
+before the shared frame and the material short path). Performance is measured on release
+builds; the per-pixel stages are the ones a GPU backend replaces, which is the path to 60
+Hz on every platform. On Windows the scroll itself dirtied the whole content area in that
+run; the clip view's scroll blit (PR 92, round 10c) shrinks the dirty rectangle to the
+exposed strip, and with it the number of surfaces a scroll re-samples.
 
 Every backend ships the software pipeline. The offscreen surfaces come from the existing
 `PlatformImageBackend.makeOffscreen`, whose pixels are premultiplied BGRA on all three
@@ -188,13 +209,14 @@ column are the glass material over the window.
 
 ## Consequences
 
-- Nineteen pixel tests (`LiquidGlassPixelTests`): the glass is a blurred function of the
+- Twenty pixel tests (`LiquidGlassPixelTests`): the glass is a blurred function of the
   backdrop (red on the left, blue on the right, a softened edge; a different backdrop gives
   different glass; black and white stripes lose over 90 % of their variance through it);
   the rim highlight along the top and none along the bottom; refraction (the lens stage
   over a synthetic backdrop shows the colour beyond the edge inside the rim only with
   refraction on, the centre untouched); the specular sheen and rim following the light
-  (top brighter than the body, bottom darker, left brighter than right); a coverage-mask
+  (top brighter than the body, bottom darker, left brighter than right, the sheen a band
+  that is still pronounced two pixels in and fades by six); a coverage-mask
   outline (a diamond) shaded with its lit and unlit edges; the light/dark variant flipping
   with the backdrop's luminance; the dark veil in dark appearance; the inactive window's
   flatter glass; hover and press brightening and the pressed surface growing to its
@@ -202,7 +224,9 @@ column are the glass material over the window.
   union identifier; the SwiftUI container and `glassEffectUnion`; the toolbar band carrying
   the colour of the document below it (host backend) and grey with the switch off; the
   sample cache (kept across the surface's own redraw and an invalidation outside it, stale
-  after one beneath it, the shaded image kept with it); the switch-off flat tint with no
+  after one beneath it, the shaded image kept with it); the shared frame (three lenses
+  sample one render of the window, content dirtied under one lens re-samples that lens
+  alone, an unchanged window samples nothing); the switch-off flat tint with no
   rim and no groups; the SwiftUI fallbacks (no extra view from `glassEffect`, a glass
   button identical in PNG to the bordered one); the sidebar pane flag; the software blur,
   saturation and luminance probe. They run on the host and in the Linux container;
@@ -210,12 +234,13 @@ column are the glass material over the window.
 - `Examples/Glass` puts colourful bands and discs under a toolbar, a merged pair of glass
   buttons, a clear and a tinted lens and the SwiftUI glass API, scrolls them at frame rate
   from a toolbar item, and writes a screenshot with `--screenshot`.
-- Cost: a glass surface's first draw and every resample paint the window once more, into a
-  surface of a sixteenth of the pixels (a quarter of the backing scale in each direction),
-  three box-blur passes over it, and the lens pass over the shape at the backing scale. A
-  view animating beneath a glass surface resamples it every frame, which is what glass
-  means; a toolbar over static content never resamples; a hover re-shades from the cached
-  backdrop.
+- Cost: a paint that dirtied content beneath glass renders the window beneath the glass
+  once more, into a frame of a sixteenth of the pixels (a sixty-fourth for materials),
+  then per stale surface a crop, three box-blur passes over it and, for a lens, the lens
+  pass over the shape at the backing scale. A view animating beneath a glass surface
+  resamples it every frame, which is what glass means; a toolbar over static content never
+  resamples; a hover re-shades from the cached backdrop. `APPKITWIN_TRACE_FRAMES=1` prints
+  each stage's time next to the paint's.
 - Not done: the morph animation between a container's separate and merged shapes and
   `glassEffectID` transitions; the GPU stages on Windows, Linux and the host (the seam is
   there, software serves all three); the sidebar lit by the desktop through Mica (needs

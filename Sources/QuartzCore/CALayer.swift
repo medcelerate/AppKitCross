@@ -1163,6 +1163,9 @@ open class CALayer: NSObject, CAMediaTiming {
     /// the tree halts on reaching it, so the sample holds only what lies beneath the glass,
     /// and the layer being drawn is never composed again from inside its own drawing.
     public static var _composeStopLayer: CALayer?
+    /// Further layers the pass stops at (every glass surface of the window, when one
+    /// frame serves them all).
+    public static var _composeStopLayers = Set<ObjectIdentifier>()
     public static var _composeStopped = false
 
     /// Composites this layer into `ctx`, whose coordinate space is the superlayer's bounds
@@ -1170,7 +1173,7 @@ open class CALayer: NSObject, CAMediaTiming {
     public func _compose(into ctx: CGContext, parentFlipped: Bool, alpha: CGFloat, time: CFTimeInterval, dirty: CGRect?) {
         if CALayer._composeStopLayer != nil {
             if CALayer._composeStopped { return }
-            if self === CALayer._composeStopLayer { CALayer._composeStopped = true; return }
+            if self === CALayer._composeStopLayer || CALayer._composeStopLayers.contains(ObjectIdentifier(self)) { CALayer._composeStopped = true; return }
         }
         hasPresentation = true
         let p = animations.isEmpty ? self : _presentation(at: time)

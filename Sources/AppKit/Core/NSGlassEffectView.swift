@@ -198,7 +198,7 @@ internal struct _GlassSpec {
     var edgeWidth: CGFloat = 6
     var refraction: CGFloat = 3
     var rimAlpha: CGFloat = 0.55
-    var specular: CGFloat = 0.35
+    var specular: CGFloat = 0.5
     var shadow = true
     /// A lift toward white (interactive hover and press).
     var brighten: CGFloat = 0
@@ -267,9 +267,11 @@ internal struct _GlassSpec {
 /// soft shadow around a lens.
 @MainActor
 internal enum _GlassRenderer {
-    /// The sample is taken at this fraction of the backing scale; the blur hides the
+    /// The sample is taken at this fraction of the backing scale (a quarter for a lens,
+    /// an eighth for a material whose wider blur hides the resolution): the blur hides the
     /// resolution and the pass stays cheap.
     static let sampleScaleDivisor: CGFloat = 4
+    static let materialSampleScaleDivisor: CGFloat = 8
 
     /// Draws `spec` inside `path` (bounds coordinates of `view`), `rect` being the
     /// surface's rectangle the sample covers; `slot` distinguishes several surfaces one
@@ -305,17 +307,37 @@ internal enum _GlassRenderer {
             p.refraction = spec.refraction * scale
             p.rimWidth = spec.lens ? max(1, 1 * scale) : 0
             p.brighten = spec.brighten
-            // The backdrop image in output pixels: the margin lies outside the output.
-            let backdropRect = CGRect(x: -margin * scale, y: -margin * scale, width: backdrop.rect.width * scale, height: backdrop.rect.height * scale)
-            let shape = outlineShape(outline, path: path, in: rect, pixels: (p.width, p.height), scale: scale, flipped: view.isFlipped)
-            let shadeKey = shapeKey(outline, path: path, parameters: p, flipped: view.isFlipped)
-            if let shape, let shaded = sample.shaded(key: shadeKey, make: { Platform.backend.material.shade(backdrop.image, in: backdropRect, shape: shape, parameters: p) }) {
+            // The backdrop image in output pixels (the output's top row is the surface's
+            // visual top): the margin lies outside the output, and a shared frame's crop
+            // sits on its pixel grid, so the offsets come from the window rectangles.
+            let backdropRect: CGRect
+            if let imageRect = backdrop.imageRect {
+                let inWindow = view.convert(rect, to: nil)
+                backdropRect = CGRect(x: (imageRect.minX - inWindow.minX) * scale, y: (inWindow.maxY - imageRect.maxY) * scale, width: imageRect.width * scale, height: imageRect.height * scale)
+            } else {
+                backdropRect = CGRect(x: -margin * scale, y: -margin * scale, width: (rect.width + 2 * margin) * scale, height: (rect.height + 2 * margin) * scale)
+            }
+            let shape = spec.lens ? outlineShape(outline, path: path, in: rect, pixels: (p.width, p.height), scale: scale, flipped: view.isFlipped) : nil
+            let shadeKey = spec.lens ? shapeKey(outline, path: path, parameters: p, flipped: view.isFlipped) : 0
+            if spec.lens, let shape, let shaded = sample.shaded(key: shadeKey, make: { Platform.backend.material.shade(backdrop.image, in: backdropRect, shape: shape, parameters: p) }) {
                 drawImage(shaded, in: rect, context: ctx, flipped: view.isFlipped)
             } else {
-                // The lens stage failed: the blurred backdrop under the veil, as a flat material.
-                drawImage(backdrop.image, in: backdrop.rect, context: ctx, flipped: view.isFlipped)
+                // A flat material (no bevel, rim or sheen), or a lens whose shade stage
+                // failed: the blurred backdrop drawn up to size by the graphics backend,
+                // the veil, tint and lift as fills over it. No pixel loop runs, so a toolbar
+                // band costs its blur alone.
+                let imageRect = backdrop.imageRect.map { view.convert($0, from: nil) } ?? rect.insetBy(dx: -margin, dy: -margin)
+                drawImage(backdrop.image, in: imageRect, context: ctx, flipped: view.isFlipped)
                 (dark ? spec.darkVeil : NSColor.white).withAlphaComponent(dark ? spec.darkVeilAlpha : spec.lightVeilAlpha).setFill()
                 ctx.fill(rect)
+                if let tint = spec.tint {
+                    tint.withAlphaComponent(tint.alphaComponent * spec.tintAlpha).setFill()
+                    ctx.fill(rect)
+                }
+                if spec.brighten > 0 {
+                    NSColor.white.withAlphaComponent(spec.brighten).setFill()
+                    ctx.fill(rect)
+                }
             }
         } else {
             // Nothing to sample (no window, no backing surface): the veil over the window colour.
@@ -395,6 +417,7 @@ internal enum _GlassRenderer {
     }
 }
 
+
 /// The cached sample of the content beneath one glass surface: the blurred backdrop, and
 /// the shaded image last drawn from it.
 @MainActor
@@ -407,9 +430,11 @@ internal final class _GlassSample {
     /// Whether the sample was the mirrored strip beyond the edge (nothing but the window
     /// background lay beneath the surface).
     private(set) var extended = false
-    /// The sampled rectangle in the owner's bounds and in the window.
+    /// The rectangle asked for, in the owner's bounds and in the window, and the rectangle
+    /// the image covers (the request snapped to the sample's pixel grid), in the window.
     private(set) var rect = NSRect.null
     private(set) var windowRect = NSRect.null
+    private(set) var imageWindowRect = NSRect.null
     private var scale: CGFloat = 0
     private var blur: CGFloat = 0
     private var saturation: CGFloat = 0
@@ -423,8 +448,9 @@ internal final class _GlassSample {
     init(owner: NSView) { self.owner = owner }
 
     /// The blurred content beneath `rect` (bounds coordinates), sampled afresh when the
-    /// cache is dirty or the surface moved, scaled or re-themed.
-    func backdrop(rect: NSRect, spec: _GlassSpec, view: NSView) -> (image: CGImage, rect: NSRect, luminance: CGFloat?)? {
+    /// cache is dirty or the surface moved, scaled or re-themed. `imageRect` is the
+    /// rectangle the image covers, in window coordinates (nil without a window).
+    func backdrop(rect: NSRect, spec: _GlassSpec, view: NSView) -> (image: CGImage, imageRect: NSRect?, luminance: CGFloat?)? {
         let backing = view.window?.backingScaleFactor ?? 1
         let dark = view.effectiveAppearance.isDark
         let inWindow = view.convert(rect, to: nil)
@@ -432,26 +458,92 @@ internal final class _GlassSample {
             self.rect = rect; windowRect = inWindow; scale = backing; blur = spec.blurRadius; saturation = spec.saturation; extendsFrom = spec.extendsFrom; appearanceIsDark = dark
             dirty = false
             generation += 1
-            let sampleScale = max(0.25, backing / _GlassRenderer.sampleScaleDivisor)
-            image = nil; luminance = nil; extended = false
+            let sampleScale = max(0.125, backing / (spec.lens ? _GlassRenderer.sampleScaleDivisor : _GlassRenderer.materialSampleScaleDivisor))
+            image = nil; luminance = nil; extended = false; imageWindowRect = .null
+            let t0 = NSView._traceFrames ? NSView._traceClock() : 0
             if let raw = _GlassRegistry.render(beneath: view, rect: rect, scale: sampleScale, extendsFrom: spec.extendsFrom, margin: spec.blurRadius + spec.refraction) {
                 extended = raw.extended
+                imageWindowRect = raw.windowRect ?? .null
                 let radius = Int((spec.blurRadius * sampleScale).rounded())
+                let t1 = NSView._traceFrames ? NSView._traceClock() : 0
                 let blurred = Platform.backend.material.blur(raw.image, radius: radius, saturation: spec.saturation) ?? raw.image
+                let t2 = NSView._traceFrames ? NSView._traceClock() : 0
                 image = blurred
                 luminance = Platform.backend.material.averageLuminance(blurred)
+                if NSView._traceFrames { NSView._trace(String(format: "glass sample stages: crop %.2f blur %.2f luminance %.2f ms", t1 - t0, t2 - t1, NSView._traceClock() - t2)) }
+            }
+            if NSView._traceFrames, let image {
+                NSView._trace(String(format: "glass sample %@ %dx%d px, blur %.0f: %.2f ms%@", String(describing: type(of: view)), image.width, image.height, spec.blurRadius * sampleScale, NSView._traceClock() - t0, extended ? " (mirrored strip)" : ""))
             }
         }
         guard let image else { return nil }
-        return (image, rect, luminance)
+        return (image, imageWindowRect.isNull ? nil : imageWindowRect, luminance)
     }
 
     /// The shaded image for `key` over the current backdrop, made when either changed.
     func shaded(key: Int, make: () -> CGImage?) -> CGImage? {
         if shadeKey == key, shadeGeneration == generation, let shadedImage { return shadedImage }
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         shadedImage = make()
         shadeKey = key; shadeGeneration = generation
+        if NSView._traceFrames, let shadedImage {
+            NSView._trace(String(format: "glass shade %dx%d px: %.2f ms", shadedImage.width, shadedImage.height, NSView._traceClock() - t0))
+        }
         return shadedImage
+    }
+}
+
+/// What one paint of a window drew beneath its glass, at the sample scale: everything up
+/// to the first glass surface in the paint order, rendered once per paint however many
+/// surfaces the window has, each cropping its own rectangle (ADR-0052). The frame lives
+/// until a view outside the glass dirties the window.
+@MainActor
+internal final class _GlassFrame {
+    /// The window rectangle the pixels cover; the top row is its top edge.
+    let rect: NSRect
+    let scale: CGFloat
+    let pixels: _MaterialPixels
+    let invalidation: Int
+    init(rect: NSRect, scale: CGFloat, pixels: _MaterialPixels, invalidation: Int) {
+        self.rect = rect; self.scale = scale; self.pixels = pixels; self.invalidation = invalidation
+    }
+
+    /// The pixel rows and columns covering `windowRect`, clamped to the frame.
+    func cells(for windowRect: NSRect) -> (columns: Range<Int>, rows: Range<Int>)? {
+        let c0 = max(0, Int(((windowRect.minX - rect.minX) * scale).rounded(.down)))
+        let c1 = min(pixels.width, Int(((windowRect.maxX - rect.minX) * scale).rounded(.up)))
+        let r0 = max(0, Int(((rect.maxY - windowRect.maxY) * scale).rounded(.down)))
+        let r1 = min(pixels.height, Int(((rect.maxY - windowRect.minY) * scale).rounded(.up)))
+        guard c1 > c0, r1 > r0 else { return nil }
+        return (c0..<c1, r0..<r1)
+    }
+
+    /// The window rectangle the cells cover.
+    func windowRect(columns: Range<Int>, rows: Range<Int>) -> NSRect {
+        NSRect(x: rect.minX + CGFloat(columns.lowerBound) / scale, y: rect.maxY - CGFloat(rows.upperBound) / scale,
+               width: CGFloat(columns.count) / scale, height: CGFloat(rows.count) / scale)
+    }
+
+    /// The pixels of the cells; `mirrorBelow` (a row index within `rows`) takes the rows
+    /// above it from the rows below it in reverse, a strip beyond an edge mirrored in.
+    func crop(columns: Range<Int>, rows: Range<Int>, mirrorBelow edge: Int? = nil) -> _MaterialPixels {
+        let w = columns.count, h = rows.count, outStride = w * 4
+        var out = [UInt8](repeating: 0, count: outStride * h)
+        let inStride = pixels.stride, x0 = columns.lowerBound * 4
+        pixels.bytes.withUnsafeBufferPointer { src in
+            out.withUnsafeMutableBufferPointer { dst in
+                for r in 0..<h {
+                    var source = rows.lowerBound + r
+                    if let edge, r < edge {
+                        // Row k above the edge mirrors row k below it.
+                        source = min(pixels.height - 1, rows.lowerBound + edge + (edge - 1 - r))
+                    }
+                    let s = source * inStride + x0, d = r * outStride
+                    for i in 0..<outStride { dst[d + i] = src[s + i] }
+                }
+            }
+        }
+        return _MaterialPixels(bytes: out, width: w, height: h, stride: outStride, template: pixels.template)
     }
 }
 
@@ -462,6 +554,12 @@ internal enum _GlassRegistry {
     private struct Key: Hashable { let view: ObjectIdentifier; let slot: Int }
     private static var samples: [Key: _GlassSample] = [:]
     private static var keyObserverInstalled = false
+    /// The shared frame per window and the count of invalidations it has seen, which a
+    /// frame records so a stale one is never cropped.
+    private static var frames: [ObjectIdentifier: [CGFloat: _GlassFrame]] = [:]
+    private static var invalidations: [ObjectIdentifier: Int] = [:]
+    /// Frames rendered, for the tests of the per-paint sharing.
+    internal static var frameRenders = 0
 
     static func sample(for view: NSView, slot: Int = 0) -> _GlassSample {
         let key = Key(view: ObjectIdentifier(view), slot: slot)
@@ -472,21 +570,36 @@ internal enum _GlassRegistry {
         return s
     }
 
+    /// Whether `view` draws a glass surface this registry knows.
+    static func isOwner(_ view: NSView) -> Bool {
+        samples.contains { $0.key.view == ObjectIdentifier(view) && $0.value.owner === view }
+    }
+
     /// Called by the window for every invalidation: a view outside the glass surface (not
     /// the surface itself nor one of its subviews, whose pixels lie over the glass)
-    /// dirtying its rectangle invalidates the sample.
+    /// dirtying its rectangle invalidates the sample. Only the samples the rectangle
+    /// reaches go stale: content scrolling under the toolbar band re-samples the band and
+    /// leaves the lenses elsewhere alone, and the other way round.
     static func noteInvalidation(in window: NSWindow, from view: NSView?, rect: NSRect?) {
         guard !samples.isEmpty else { return }
+        var outsideGlass = false
         for (key, s) in samples {
             guard let owner = s.owner else { samples[key] = nil; continue }
-            guard owner.window === window, !s.dirty else { continue }
+            guard owner.window === window else { continue }
             if let view, view === owner || view.isDescendant(of: owner) { continue }
+            outsideGlass = true
+            guard !s.dirty else { continue }
             if let rect, !s.windowRect.isNull, !s.windowRect.intersects(rect) {
                 // An extended sample also watches the strip it mirrored.
                 guard s.extended, s.windowRect.offsetBy(dx: 0, dy: -s.windowRect.height).intersects(rect) else { continue }
             }
             s.dirty = true
             owner.needsDisplay = true
+        }
+        if outsideGlass || view == nil {
+            let id = ObjectIdentifier(window)
+            invalidations[id, default: 0] += 1
+            frames[id] = nil
         }
     }
 
@@ -506,68 +619,116 @@ internal enum _GlassRegistry {
 
     /// What the window drew beneath `view` in `rect` (bounds coordinates of `view`), at
     /// `scale` pixels per point, as premultiplied pixels: the window's background and
-    /// every view drawn before `view` in the paint order, stopping at `view` itself. With
-    /// `extendsFrom` set and nothing but the window background beneath the surface (the
-    /// part of `rect` inside the `margin`), the content beyond that edge is mirrored in.
-    static func render(beneath view: NSView, rect: NSRect, scale: CGFloat, extendsFrom: NSRectEdge? = nil, margin: CGFloat = 0) -> (image: CGImage, extended: Bool)? {
+    /// every view drawn before the glass in the paint order. With `extendsFrom` set and
+    /// nothing but the window background beneath the surface (the part of `rect` inside
+    /// the `margin`), the content beyond that edge is mirrored in. `windowRect` is the
+    /// rectangle the image covers (the request snapped to the sample's pixels); it is nil
+    /// for a view without a window, whose image covers `rect` exactly.
+    static func render(beneath view: NSView, rect: NSRect, scale: CGFloat, extendsFrom: NSRectEdge? = nil, margin: CGFloat = 0) -> (image: CGImage, extended: Bool, windowRect: NSRect?)? {
         guard rect.width > 0, rect.height > 0, rect.width.isFinite, rect.height.isFinite else { return nil }
+        guard let window = view.window else {
+            guard let image = renderStandalone(beneath: view, rect: rect, scale: scale) else { return nil }
+            return (image, false, nil)
+        }
+        guard let frame = frame(of: window, beneath: view, scale: scale) else { return nil }
         let inWindow = view.convert(rect, to: nil)
-        guard let image = renderWindow(beneath: view, rect: rect, windowRect: inWindow, scale: scale) else { return nil }
-        guard extendsFrom == .minY, let window = view.window, let pixels = _MaterialPixels(image) else { return (image, false) }
-        // The window background in straight sRGB; the surface's rows of the sample (the
-        // sample's top row is the window's top).
-        guard let bg = window._backgroundColor.usingColorSpace(.sRGB) else { return (image, false) }
-        let background = PlatformGlassParameters.Color(red: bg.redComponent, green: bg.greenComponent, blue: bg.blueComponent)
-        let surfaceHeight = inWindow.height - 2 * margin
-        guard surfaceHeight > 0, let surfaceRows = pixels.rows(from: Int((margin * scale).rounded()), count: Int((surfaceHeight * scale).rounded())), surfaceRows.mostly(background) else { return (image, false) }
-        // The strip below the surface's bottom edge, as tall as the surface and the margin
-        // above it, mirrored about that edge into the rows above it: the sample's bottom
-        // margin keeps the real content, and the mirror joins it without a seam.
-        let mirroredHeight = inWindow.height - margin
-        let bottomEdge = inWindow.minY + margin
-        let stripRect = NSRect(x: inWindow.minX, y: bottomEdge - mirroredHeight, width: inWindow.width, height: mirroredHeight)
-        guard let strip = renderWindow(beneath: view, rect: NSRect(origin: rect.origin, size: stripRect.size), windowRect: stripRect, scale: scale),
-              let stripPixels = _MaterialPixels(strip) else { return (image, false) }
-        var merged = pixels
-        merged.replaceTopRows(with: stripPixels.flippedVertically())
-        guard let result = merged.makeImage() else { return (image, false) }
-        return (result, true)
+        guard let cells = frame.cells(for: inWindow) else { return nil }
+        let covered = frame.windowRect(columns: cells.columns, rows: cells.rows)
+        var mirrorBelow: Int?
+        if extendsFrom == .minY, let bg = window._backgroundColor.usingColorSpace(.sRGB) {
+            // The surface's rows within the crop: the request less its margins. When they
+            // hold nothing but the window background, the rows below the surface's bottom
+            // edge (as many as lie above it) are mirrored about that edge; the margin
+            // below the edge keeps the real content, so the mirror joins it without a seam.
+            let background = PlatformGlassParameters.Color(red: bg.redComponent, green: bg.greenComponent, blue: bg.blueComponent)
+            let top = Int(((covered.maxY - (inWindow.maxY - margin)) * scale).rounded())
+            let bottom = Int(((covered.maxY - (inWindow.minY + margin)) * scale).rounded())
+            if bottom > top, top >= 0, bottom <= cells.rows.count {
+                let surface = frame.crop(columns: cells.columns, rows: (cells.rows.lowerBound + top)..<(cells.rows.lowerBound + bottom))
+                if surface.mostly(background) { mirrorBelow = bottom }
+            }
+        }
+        let pixels = frame.crop(columns: cells.columns, rows: cells.rows, mirrorBelow: mirrorBelow)
+        guard let image = pixels.makeImage() else { return nil }
+        return (image, mirrorBelow != nil, covered)
     }
 
-    /// The window beneath `view` for `windowRect` (window coordinates; `rect` is the same
-    /// rectangle in the view's bounds, used when the view has no window).
-    private static func renderWindow(beneath view: NSView, rect: NSRect, windowRect: NSRect, scale: CGFloat) -> CGImage? {
-        guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale) else { return nil }
+    /// The window's shared frame, rendered now unless the one from this paint is current.
+    private static func frame(of window: NSWindow, beneath view: NSView, scale: CGFloat) -> _GlassFrame? {
+        let id = ObjectIdentifier(window)
+        let invalidation = invalidations[id, default: 0]
+        if let f = frames[id]?[scale], f.invalidation == invalidation { return f }
+        // The area the window paints: the content, the toolbar band above it, accessories.
+        var area = window._contentView?.frame ?? .zero
+        if let t = window._toolbarView, !t.isHidden { area = area.union(t.frame) }
+        if let a = window._accessoryHost, !a.isHidden { area = area.union(a.frame) }
+        guard area.width > 0, area.height > 0, area.width.isFinite, area.height.isFinite else { return nil }
+        area = NSRect(x: area.minX, y: area.minY, width: (area.width * scale).rounded(.up) / scale, height: (area.height * scale).rounded(.up) / scale)
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        guard let surface = Platform.backend.image.makeOffscreen(size: area.size, scale: scale) else { return nil }
         let ctx = surface.context
-        let previousStop = NSView._glassStop, previousStopped = CALayer._composeStopped, previousStopLayer = CALayer._composeStopLayer
+        // Every glass surface stops the paint: the frame holds what lies beneath the first
+        // of them in the paint order (the content under a lens, never the lens itself).
+        var stops = Set<ObjectIdentifier>(), stopLayers = Set<ObjectIdentifier>()
+        for s in samples.values {
+            guard let o = s.owner, o.window === window else { continue }
+            stops.insert(ObjectIdentifier(o))
+            if let l = o.layer { stopLayers.insert(ObjectIdentifier(l)) }
+        }
+        stops.insert(ObjectIdentifier(view))
+        if let l = view.layer { stopLayers.insert(ObjectIdentifier(l)) }
+        let previousStop = NSView._glassStop, previousStops = NSView._glassStops, previousStopped = CALayer._composeStopped
+        let previousStopLayer = CALayer._composeStopLayer, previousStopLayers = CALayer._composeStopLayers
         let previousCaching = NSView._cachingDisplay
         let previousContext = NSGraphicsContext.current
         let previousAppearance = NSAppearance.current
-        NSView._glassStop = view; CALayer._composeStopped = false
-        // A layer-backed glass view stops the layer compositor as well as the view paint.
-        CALayer._composeStopLayer = view.layer ?? _GlassRegistry.placeholderStopLayer
+        NSView._glassStop = view; NSView._glassStops = stops; CALayer._composeStopped = false
+        CALayer._composeStopLayer = view.layer ?? placeholderStopLayer; CALayer._composeStopLayers = stopLayers
         NSView._cachingDisplay = true
         defer {
-            NSView._glassStop = previousStop; CALayer._composeStopped = previousStopped; CALayer._composeStopLayer = previousStopLayer
+            NSView._glassStop = previousStop; NSView._glassStops = previousStops; CALayer._composeStopped = previousStopped
+            CALayer._composeStopLayer = previousStopLayer; CALayer._composeStopLayers = previousStopLayers
             NSView._cachingDisplay = previousCaching
             NSGraphicsContext.current = previousContext
             NSAppearance.current = previousAppearance
         }
         ctx.saveGState()
-        if let window = view.window {
-            // The surface's origin at the sampled rectangle's origin in window space.
-            ctx.translateBy(x: -windowRect.minX, y: -windowRect.minY)
-            NSAppearance.current = window.effectiveAppearance
-            window._drawBeneathGlass(into: ctx, rect: windowRect)
-        } else if let root = view._glassRootView, root !== view {
-            let inRoot = view.convert(rect, to: root)
-            ctx.translateBy(x: -inRoot.minX, y: -inRoot.minY)
-            if root.isFlipped { ctx.translateBy(x: 0, y: root.bounds.height); ctx.scaleBy(x: 1, y: -1) }
-            root._displayHierarchy(in: ctx, dirtyRect: root.frame)
-        } else {
-            ctx.restoreGState()
-            return nil
+        ctx.translateBy(x: -area.minX, y: -area.minY)
+        NSAppearance.current = window.effectiveAppearance
+        window._drawBeneathGlass(into: ctx, rect: area)
+        ctx.restoreGState()
+        guard let image = surface.makeImage(), let pixels = _MaterialPixels(image) else { return nil }
+        let f = _GlassFrame(rect: area, scale: scale, pixels: pixels, invalidation: invalidation)
+        frames[id, default: [:]][scale] = f
+        frameRenders += 1
+        if NSView._traceFrames {
+            NSView._trace(String(format: "glass frame %dx%d px at %.2fx: %.2f ms", pixels.width, pixels.height, scale, NSView._traceClock() - t0))
         }
+        return f
+    }
+
+    /// The view tree beneath `view` for `rect` (bounds coordinates) when it has no window:
+    /// a detached hierarchy drawn into an offscreen image.
+    private static func renderStandalone(beneath view: NSView, rect: NSRect, scale: CGFloat) -> CGImage? {
+        guard let root = view._glassRootView, root !== view else { return nil }
+        guard let surface = Platform.backend.image.makeOffscreen(size: rect.size, scale: scale) else { return nil }
+        let ctx = surface.context
+        let previousStop = NSView._glassStop, previousStopped = CALayer._composeStopped, previousStopLayer = CALayer._composeStopLayer
+        let previousCaching = NSView._cachingDisplay
+        let previousContext = NSGraphicsContext.current
+        NSView._glassStop = view; CALayer._composeStopped = false
+        CALayer._composeStopLayer = view.layer ?? placeholderStopLayer
+        NSView._cachingDisplay = true
+        defer {
+            NSView._glassStop = previousStop; CALayer._composeStopped = previousStopped; CALayer._composeStopLayer = previousStopLayer
+            NSView._cachingDisplay = previousCaching
+            NSGraphicsContext.current = previousContext
+        }
+        ctx.saveGState()
+        let inRoot = view.convert(rect, to: root)
+        ctx.translateBy(x: -inRoot.minX, y: -inRoot.minY)
+        if root.isFlipped { ctx.translateBy(x: 0, y: root.bounds.height); ctx.scaleBy(x: 1, y: -1) }
+        root._displayHierarchy(in: ctx, dirtyRect: root.frame)
         ctx.restoreGState()
         return surface.makeImage()
     }
@@ -579,25 +740,19 @@ extension _GlassRegistry {
     static let placeholderStopLayer = CALayer()
 }
 
-extension _MaterialPixels {
-    /// Rows `start` to `start + count` as their own pixels.
-    func rows(from start: Int, count: Int) -> _MaterialPixels? {
-        guard count > 0, start >= 0, start + count <= height else { return nil }
-        return _MaterialPixels(bytes: Array(bytes[(start * stride)..<((start + count) * stride)]), width: width, height: count, stride: stride, template: template)
-    }
-    /// Replaces the top rows with `other`'s (same width and stride).
-    mutating func replaceTopRows(with other: _MaterialPixels) {
-        guard other.stride == stride else { return }
-        let n = min(other.height, height) * stride
-        bytes.replaceSubrange(0..<n, with: other.bytes[0..<n])
-    }
-}
-
 extension NSView {
     /// The view the glass pass is sampling beneath: `_displayHierarchy` stops when it
     /// reaches it (`CALayer._composeStopped` carries the state the layer compositor
-    /// shares), so the sample holds only what lies under the glass.
+    /// shares), so the sample holds only what lies under the glass. `_glassStops` are the
+    /// other glass surfaces of the window, which stop a shared frame too.
     @MainActor internal static var _glassStop: NSView?
+    @MainActor internal static var _glassStops = Set<ObjectIdentifier>()
+
+    /// Whether a glass sample in progress stops at this view.
+    @MainActor internal var _stopsGlassSample: Bool {
+        guard let stop = NSView._glassStop else { return false }
+        return stop === self || NSView._glassStops.contains(ObjectIdentifier(self))
+    }
 
     @MainActor internal var _glassRootView: NSView? {
         var v: NSView = self
@@ -608,7 +763,7 @@ extension NSView {
 
 extension NSWindow {
     /// Draws the window as `platformWindowDraw` does (background, content, toolbar band,
-    /// accessories, in that order) until the paint reaches `NSView._glassStop`.
+    /// accessories, in that order) until the paint reaches a glass surface.
     internal func _drawBeneathGlass(into ctx: CGContext, rect: NSRect) {
         if _isOpaque {
             ctx.setFillColor(_backgroundColor.cgColor)
