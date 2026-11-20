@@ -147,8 +147,19 @@ final class _NSMenuView: NSView {
                 _drawStateMark(item.state, in: NSRect(x: f.minX + 7, y: f.midY - 5, width: 10, height: 10), color: textColor)
             }
             if let image = item.image {
-                image.draw(in: NSRect(x: x, y: f.midY - _NSMenuLayout.imageSize / 2, width: _NSMenuLayout.imageSize, height: _NSMenuLayout.imageSize))
-                x += _NSMenuLayout.imageSize + 6
+                // Fitted into the 16-point slot (a wide symbol is not squashed), a template
+                // (an SF Symbol) in the row's text colour, as macOS's menus draw it.
+                let side = _NSMenuLayout.imageSize
+                let n = image.size
+                let k = n.width > 0 && n.height > 0 ? min(side / n.width, side / n.height) : 1
+                let sz = NSSize(width: (n.width * k).rounded(), height: (n.height * k).rounded())
+                let r = NSRect(x: x + (side - sz.width) / 2, y: (f.midY - sz.height / 2).rounded(), width: sz.width, height: sz.height)
+                if image.isTemplate, let tinted = image._tintedForTemplate(textColor, size: r.size) {
+                    tinted.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                } else {
+                    image.draw(in: r, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                }
+                x += side + 6
             }
             var textAttrs = attrs
             textAttrs[.foregroundColor] = textColor

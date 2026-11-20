@@ -259,6 +259,26 @@ import CoreText
         text.draw(at: origin, withAttributes: attributes)
         NSGraphicsContext.restoreGraphicsState()
     }
+    /// Draws one line of `text` vertically centred in `rect`, leading-aligned (`alignment`
+    /// as `_drawText`), tail-truncated with an ellipsis when it is wider than the rect, as
+    /// AppKit's button and pop-up titles are.
+    @MainActor internal func _drawTruncatingText(_ text: String, attributes: [NSAttributedString.Key: Any], in rect: NSRect, alignment: NSTextAlignment = .left, flipped: Bool) {
+        let size = text.size(withAttributes: attributes)
+        guard size.width > rect.width + 0.5 else {
+            _drawText(text, attributes: attributes, in: rect, alignment: alignment, flipped: flipped)
+            return
+        }
+        let ps = ((attributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+        ps.lineBreakMode = .byTruncatingTail
+        ps.alignment = .left
+        var attrs = attributes
+        attrs[.paragraphStyle] = ps
+        let line = NSRect(x: rect.minX, y: rect.midY - size.height / 2, width: rect.width, height: size.height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.cgContext.clip(to: rect)
+        NSAttributedString(string: text, attributes: attrs).draw(in: line)
+        NSGraphicsContext.restoreGraphicsState()
+    }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/drawingrect(forbounds:)
     @MainActor open func drawingRect(forBounds rect: NSRect) -> NSRect { (_isBordered || _isBezeled) ? rect.insetBy(dx: 2, dy: 2) : rect }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nscell/edit(withframe:in:editor:delegate:event:)

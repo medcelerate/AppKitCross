@@ -747,8 +747,11 @@ final class Win32Window: PlatformWindow {
             cd2d_target_set_dirty(rt, ps.rcPaint.left, ps.rcPaint.top, ps.rcPaint.right, ps.rcPaint.bottom)
         }
         // A transparent window starts every frame fully transparent in the painted area so
-        // unpainted pixels show the backdrop; an opaque window fills its background in NSWindow.
-        if cd2d_target_is_composition(rt) {
+        // unpainted pixels show the backdrop; an opaque window fills its background in NSWindow
+        // and keeps the canvas elsewhere. (An opaque window hosting its layers is on the same
+        // chain; clearing its update rect when NSWindow then paints only the rects views asked
+        // for left the rest black until the next whole paint: the sidebar flashing black.)
+        if cd2d_target_is_composition(rt), _chrome.isTransparent {
             if whole {
                 cd2d_target_clear(rt, 0, 0, 0, 0)
             } else {
@@ -1368,8 +1371,22 @@ final class Win32Window: PlatformWindow {
                     let m = frameRect(forContentRect: NSRect(origin: .zero, size: maxSize))
                     info.pointee.ptMaxTrackSize = POINT(x: Int32(m.width * scale), y: Int32(m.height * scale))
                 }
+                if NSView._traceInvalidation {
+                    let i = info.pointee
+                    NSView._trace("win32 minmax '\(_title)' minTrack \(i.ptMinTrackSize.x)x\(i.ptMinTrackSize.y) maxTrack \(i.ptMaxTrackSize.x)x\(i.ptMaxTrackSize.y) maxSize \(i.ptMaxSize.x)x\(i.ptMaxSize.y) px")
+                }
             }
             return 0
+        case WM_WINDOWPOSCHANGING, WM_WINDOWPOSCHANGED:
+            // Every size or move request, the port's or another process's, passes here:
+            // traced so a frame the port never asked for (a client height snapping to the
+            // maximum track size) shows what was requested and what Windows made of it.
+            if NSView._traceInvalidation, let pos = UnsafePointer<WINDOWPOS>(bitPattern: Int(lParam)) {
+                let p = pos.pointee
+                let stage = Int32(msg) == WM_WINDOWPOSCHANGING ? "changing" : "changed"
+                NSView._trace("win32 windowpos \(stage) '\(_title)' x \(p.x) y \(p.y) cx \(p.cx) cy \(p.cy) flags 0x\(String(p.flags, radix: 16))\(p.flags & UINT(SWP_NOSIZE) != 0 ? " (nosize)" : "")\(p.flags & UINT(SWP_NOMOVE) != 0 ? " (nomove)" : "")")
+            }
+            return nil
         case WM_NCCALCSIZE:
             // Custom frame: the client area is the whole window, so no caption or border
             // is drawn (the DWM shadow and corners survive through the extended frame).

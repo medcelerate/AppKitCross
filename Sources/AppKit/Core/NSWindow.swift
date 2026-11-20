@@ -883,7 +883,16 @@ import CoreText
 
     /// Called by views when a region in their coordinates needs repainting.
     internal func _viewNeedsDisplay(_ view: NSView, rect: NSRect) {
-        let r = view._dirtyRectInWindow(rect)
+        var r = view._dirtyRectInWindow(rect)
+        // What a scroll view's clip hides is not drawn: a row appended below the visible
+        // rows marks nothing on screen. An empty area marks nothing either (a view added
+        // with a zero frame grew the platform's dirty rectangle to its origin).
+        var ancestor = view.superview
+        while let v = ancestor, !r.isNull, !r.isEmpty {
+            if v is NSClipView { r = r.intersection(v._dirtyRectInWindow(v.bounds)) }
+            ancestor = v.superview
+        }
+        guard !r.isNull, !r.isEmpty, r.width.isFinite, r.height.isFinite else { return }
         _noteDirty(r)
         _platform?.setNeedsDisplay(r)
     }

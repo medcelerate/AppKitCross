@@ -556,7 +556,7 @@ final class _PickerPrimitive: _Primitive {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
                 if !shownLabel.isEmpty { Text(shownLabel) }
-                _PickerPopUp(titles: titles, images: faces.map(\.image), selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
+                _PickerPopUp(titles: titles, images: faces.map(\.image), iconOnly: faces.map(\.iconOnly), selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
@@ -568,30 +568,37 @@ final class _PickerPrimitive: _Primitive {
 /// image and text). Custom views are evaluated outside the tree with the picker's
 /// environment, as the menu has no place for their state.
 @MainActor
-func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = EnvironmentValues()) -> (title: String, image: NSImage?) {
+func _pickerItemFace(_ box: _AnyViewBox, environment: EnvironmentValues = EnvironmentValues()) -> (title: String, image: NSImage?, iconOnly: Bool) {
     var texts: [String] = []
     var image: NSImage?
-    func walk(_ box: _AnyViewBox, depth: Int) {
+    var iconOnly = false
+    func walk(_ box: _AnyViewBox, depth: Int, environment: EnvironmentValues) {
         guard depth < 24, image == nil || texts.isEmpty else { return }
         let value = box.value
         if let t = value as? Text { texts.append(t._string); return }
         if let i = value as? Image { if image == nil { image = i.image }; return }
         if let l = value as? _LabelParts {
-            for b in l._labelParts { walk(b, depth: depth + 1) }
+            // An icon-only label (`.labelStyle(.iconOnly)` around it) shows its icon alone
+            // on the pop-up's face; the menu item keeps the title beside it.
+            if environment._labelStyle is IconOnlyLabelStyle { iconOnly = true }
+            for b in l._labelParts { walk(b, depth: depth + 1, environment: environment) }
             return
         }
         if value is any NSViewRepresentable || value is any NSViewControllerRepresentable { return }
         if box.isPrimitive {
             guard let p = box.makePrimitive(node: _ViewNode.placeholder) else { return }
-            for c in p.children { walk(c, depth: depth + 1) }
+            var inner = environment
+            p.environmentTransform?(&inner)
+            for c in p.children { walk(c, depth: depth + 1, environment: inner) }
         } else {
             let scratch = _ViewNode(box: box, parent: nil, root: nil)
             scratch.environment = environment
-            if let body = box.body(node: scratch) { walk(body, depth: depth + 1) }
+            if let body = box.body(node: scratch) { walk(body, depth: depth + 1, environment: environment) }
         }
     }
-    walk(box, depth: 0)
-    return (texts.filter { !$0.isEmpty }.joined(separator: " "), image)
+    walk(box, depth: 0, environment: environment)
+    let title = texts.filter { !$0.isEmpty }.joined(separator: " ")
+    return (title, image, iconOnly && image != nil)
 }
 
 /// A `Label`'s title and icon views, for a picker item to show them.
@@ -605,15 +612,22 @@ struct _PickerPopUp: View, _PrimitiveView {
     typealias Body = Never
     let titles: [String]
     let images: [NSImage?]
+    /// Per item: its face is the image alone (an icon-only Label).
+    var iconOnly: [Bool] = []
     let selected: Int
     let onSelect: (Int) -> Void
-    func _makePrimitive(node: _ViewNode) -> _Primitive { _PickerPopUpPrimitive(titles: titles, images: images, selected: selected, onSelect: onSelect) }
+    func _makePrimitive(node: _ViewNode) -> _Primitive {
+        let p = _PickerPopUpPrimitive(titles: titles, images: images, selected: selected, onSelect: onSelect)
+        p.iconOnly = iconOnly
+        return p
+    }
 }
 
 @MainActor
 final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
     var titles: [String]
     var images: [NSImage?]
+    var iconOnly: [Bool] = []
     var selected: Int
     var onSelect: (Int) -> Void
     /// The items are built when the primitive attaches (see `_PopUpPrimitive`).
@@ -626,6 +640,7 @@ final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         b.setActionHandler(for: Selector(("swiftUIPopUpAction:"))) { [weak self] _ in
             guard let self else { return }
             self.selected = self.control.indexOfSelectedItem
+            self.applyImagePosition()
             self.onSelect(self.control.indexOfSelectedItem)
         }
     }
@@ -634,7 +649,15 @@ final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         control.addItems(withTitles: titles)
         for (i, image) in images.enumerated() { control.item(at: i)?.image = image }
         control.selectItem(at: selected)
+        applyImagePosition()
         control.sizeToFit()
+    }
+    /// The face draws the selected item's image: alone for an icon-only item (Sibyl's
+    /// Icon picker shows the glyph, not the symbol's name), else before its title.
+    func applyImagePosition() {
+        let i = control.indexOfSelectedItem
+        let want: NSControl.ImagePosition = i >= 0 && i < iconOnly.count && iconOnly[i] ? .imageOnly : .imageLeft
+        if control.imagePosition != want { control.imagePosition = want }
     }
     override func attach(to node: _ViewNode) {
         super.attach(to: node)
@@ -644,6 +667,9 @@ final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         super.update(from: other)
         guard let o = other as? _PickerPopUpPrimitive else { return }
         onSelect = o.onSelect
+        let iconOnlyChanged = o.iconOnly != iconOnly
+        iconOnly = o.iconOnly
+        if iconOnlyChanged { applyImagePosition() }
         let imagesChanged = o.images.count != images.count || zip(o.images, images).contains { ($0 == nil) != ($1 == nil) || ($0 !== $1 && $0?.name() != $1?.name()) }
         if o.titles != titles || imagesChanged {
             titles = o.titles; images = o.images; selected = o.selected
@@ -651,6 +677,7 @@ final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         } else if o.selected != selected || control.indexOfSelectedItem != o.selected {
             selected = o.selected
             control.selectItem(at: o.selected)
+            applyImagePosition()
             control.sizeToFit()
         }
     }

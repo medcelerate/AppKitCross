@@ -162,6 +162,45 @@ final class _ListView: NSView, NSSelectorHandling {
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { onClick != nil }
+    /// The rows' separators and selection repaint where rows moved (`place` marks them);
+    /// a list growing by a row does not repaint every row.
+    override var layerContentsRedrawPolicy: NSView.LayerContentsRedrawPolicy {
+        get { .onSetNeedsDisplay }
+        set { super.layerContentsRedrawPolicy = newValue }
+    }
+    /// Marks the rows whose frames differ between `old` and `rowFrames`, or whose separators
+    /// were hidden or shown (`oldHidden*`, by index), with the separator lines on their edges.
+    func setNeedsDisplay(changedFrom old: [CGRect], hiddenAbove oldAbove: Set<Int>, hiddenBelow oldBelow: Set<Int>) {
+        var dirty: [NSRect] = []
+        /// The separator line under row `i` (drawn at its bottom edge), old and new.
+        func separator(below i: Int) {
+            for frames in [old, rowFrames] where frames.indices.contains(i) {
+                let f = frames[i]
+                dirty.append(NSRect(x: f.minX, y: f.maxY - 1, width: f.width, height: 3))
+            }
+        }
+        for i in 0..<max(old.count, rowFrames.count) {
+            let a = old.indices.contains(i) ? old[i] : .null
+            let b = rowFrames.indices.contains(i) ? rowFrames[i] : .null
+            guard a != b else { continue }
+            for r in [a, b] where !r.isNull { dirty.append(r.insetBy(dx: 0, dy: -1)) }
+            // The row above gains or loses its separator when this one appears or goes.
+            separator(below: i - 1)
+        }
+        // A separator hidden from below (row i) or above (row i + 1) lies between the two.
+        for i in oldBelow.symmetricDifference(hiddenSeparatorsBelow) { separator(below: i) }
+        for i in oldAbove.symmetricDifference(hiddenSeparatorsAbove) { separator(below: i - 1) }
+        let visible = bounds.insetBy(dx: 0, dy: -1)
+        var merged = NSRect.null
+        for r in dirty { merged = merged.union(r) }
+        // One mark for a contiguous band (the usual case), each on its own otherwise.
+        if !merged.isNull, dirty.reduce(0, { $0 + $1.width * $1.height }) * 2 >= merged.width * merged.height {
+            setNeedsDisplay(merged.intersection(visible))
+        } else {
+            for r in dirty { setNeedsDisplay(r.intersection(visible)) }
+        }
+    }
+
 
     override func draw(_ dirtyRect: NSRect) {
         for i in selectedRows where rowFrames.indices.contains(i) {
@@ -436,10 +475,14 @@ final class _ListRowsPrimitive: _Primitive {
         }
         // The rows' separators and selection repaint only when they moved or changed.
         if view.rowFrames != frames || view.hiddenSeparatorsAbove != hiddenAbove || view.hiddenSeparatorsBelow != hiddenBelow {
+            // Only the rows that moved, changed size or gained or lost a separator: a line
+            // appended to a transcript repaints that line (and the sentinel row after it,
+            // whose hidden separator moved down one index), an insertion the rows it shifts.
+            let old = view.rowFrames, oldAbove = view.hiddenSeparatorsAbove, oldBelow = view.hiddenSeparatorsBelow
             view.rowFrames = frames
             view.hiddenSeparatorsAbove = hiddenAbove
             view.hiddenSeparatorsBelow = hiddenBelow
-            view.needsDisplay = true
+            view.setNeedsDisplay(changedFrom: old, hiddenAbove: oldAbove, hiddenBelow: oldBelow)
         }
         refreshHighlight()
     }

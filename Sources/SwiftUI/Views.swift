@@ -489,7 +489,8 @@ final class _TextPrimitive: _Primitive {
         return view.baselines
     }
     override func place(node: _ViewNode, in rect: CGRect) {}
-    override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+    // A resize redraws the shape through its frame setter; a layout pass that leaves the
+    // frame alone leaves the drawing alone.
 }
 
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/text
@@ -865,7 +866,9 @@ final class _ShapeViewPrimitive: _Primitive {
     var stroke: (any ShapeStyle)?
     var strokeStyle: StrokeStyle
     let isColorFill: Bool
-    let view = _ShapeDrawingView(frame: .zero)
+    /// Made on first use: an update makes a fresh primitive only to read its values from
+    /// (a meter's capsules at every tick), and that one never needs a view.
+    private(set) lazy var view = _ShapeDrawingView(frame: .zero)
 
     init(shape: AnyShape, fill: (any ShapeStyle)?, fillStyle: FillStyle = FillStyle(), stroke: (any ShapeStyle)? = nil, strokeStyle: StrokeStyle = StrokeStyle(), isColorFill: Bool = false) {
         self.shape = shape; self.fill = fill; self.fillStyle = fillStyle; self.stroke = stroke; self.strokeStyle = strokeStyle; self.isColorFill = isColorFill
@@ -875,11 +878,39 @@ final class _ShapeViewPrimitive: _Primitive {
     override func update(from other: _Primitive) {
         super.update(from: other)
         guard let o = other as? _ShapeViewPrimitive else { return }
+        // An update that draws the same thing marks nothing: a meter's background capsule
+        // re-rendered with its level, and a list's background with every row that landed.
+        let same = fillStyle == o.fillStyle && strokeStyle == o.strokeStyle
+            && Self.sameStyle(fill, o.fill) && Self.sameStyle(stroke, o.stroke)
+            && shape.path(in: view.bounds) == o.shape.path(in: view.bounds)
         shape = o.shape; fill = o.fill; fillStyle = o.fillStyle; stroke = o.stroke; strokeStyle = o.strokeStyle
-        install()
+        let key = environmentKey
+        install(marks: !same || key == nil || drawnEnvironment != key)
     }
     override func attach(to node: _ViewNode) { super.attach(to: node); install() }
-    private func install() {
+    /// Styles compare by value when they are hashable (colours, gradients); any other
+    /// style counts as changed.
+    private static func sameStyle(_ a: (any ShapeStyle)?, _ b: (any ShapeStyle)?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (x?, y?):
+            let x = (x as? AnyShapeStyle)?.style ?? x, y = (y as? AnyShapeStyle)?.style ?? y
+            guard let hx = x as? AnyHashable, let hy = y as? AnyHashable else { return false }
+            return hx == hy
+        default: return false
+        }
+    }
+    /// What the drawing reads from the environment; nil when that cannot be compared.
+    private struct _EnvironmentKey: Equatable { var foreground: Color?; var tint: AnyHashable?; var scheme: ColorScheme }
+    private var drawnEnvironment: _EnvironmentKey?
+    private var environmentKey: _EnvironmentKey? {
+        let env = node?.environment ?? EnvironmentValues()
+        var tint: AnyHashable? = nil
+        if let t = env._tint { guard let h = t.style as? AnyHashable else { return nil }; tint = h }
+        return _EnvironmentKey(foreground: env.foregroundColor, tint: tint, scheme: env.colorScheme)
+    }
+    private func install(marks: Bool = true) {
+        drawnEnvironment = environmentKey
         let fill = fill, fillStyle = fillStyle, stroke = stroke, strokeStyle = strokeStyle, shape = shape
         let env = node?.environment ?? EnvironmentValues()
         view.draw = { ctx, bounds in
@@ -894,14 +925,15 @@ final class _ShapeViewPrimitive: _Primitive {
                 s._stroke(ctx, path: path, in: bounds, style: strokeStyle, environment: env)
             }
         }
-        view.needsDisplay = true
+        if marks { view.needsDisplay = true }
     }
     /// Shapes and colours take whatever is proposed; unspecified dimensions use 10 points.
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         CGSize(width: proposal.width.map { $0.isFinite ? $0 : 10 } ?? 10, height: proposal.height.map { $0.isFinite ? $0 : 10 } ?? 10)
     }
     override func place(node: _ViewNode, in rect: CGRect) {}
-    override func didLayout(node: _ViewNode) { view.needsDisplay = true }
+    // A resize redraws the shape through its frame setter; a layout pass that leaves the
+    // frame alone leaves the drawing alone.
 }
 
 struct _ShapeView: View, _PrimitiveView {
@@ -1029,6 +1061,18 @@ final class _ButtonPrimitive: _ControlPrimitive<NSButton> {
         control.sizeToFit()
     }
     override var intrinsicSize: CGSize { let s = super.intrinsicSize; return CGSize(width: max(s.width, 20), height: max(s.height, 20)) }
+    /// Its natural size, narrower when offered less: the title tail-truncates (down to its
+    /// bezel and an ellipsis), so a long title in a narrow form or inspector column fits
+    /// the column rather than pushing the column's content wider, as SwiftUI's button does.
+    override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
+        let s = intrinsicSize
+        guard let w = proposal.width, w.isFinite, w < s.width else { return s }
+        let font = control.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let titleWidth = control.title.size(withAttributes: [.font: font]).width
+        let ellipsis = "\u{2026}".size(withAttributes: [.font: font]).width
+        let minimum = min(s.width, max(20, (s.width - titleWidth + ellipsis).rounded(.up)))
+        return CGSize(width: max(w.rounded(.down), minimum), height: s.height)
+    }
 }
 
 /// A button with custom content: a tap-handling container around the label.

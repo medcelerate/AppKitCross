@@ -302,4 +302,187 @@ final class SwiftUIInspectorFidelityTests: XCTestCase, @unchecked Sendable {
             }
         }
     }
+    /// Sibyl's channel inspector (a grouped Form in a 210-point `.inspector` column of an
+    /// 1100×700 window): every row fits the column, as on the Mac. Labels truncate, pop-ups,
+    /// switches, fields and buttons shrink to what is left, and each card sits inside the
+    /// column by the form's inset, with nothing drawn past it.
+    func testInspectorFormFitsItsColumn() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                @State var name = "Production"
+                @State var tint = Tint.blue
+                @State var product = "Product: Shure ULX-D Receiver"
+                @State var hardware = "1 — Shure ULX-D Receiver Channel One Left"
+                @State var muted = false
+                @State var speakers = true
+                @State var notes = "Crew names, venue names and cue labels are the ones worth adding to this list."
+                var body: some View {
+                    NavigationSplitView {
+                        List { Text("Production") }.navigationSplitViewColumnWidth(min: 140, ideal: 250, max: 420)
+                    } detail: {
+                        Text("Detail")
+                            .inspector(isPresented: .constant(true)) {
+                                Form {
+                                    Section("Channel") {
+                                        TextField("Name", text: $name)
+                                        Picker("Colour", selection: $tint) { ForEach(Tint.allCases) { TintLabel(tint: $0).tag($0) } }
+                                        Picker("Product Configuration", selection: $product) {
+                                            Text("Product: Shure ULX-D Receiver").tag("Product: Shure ULX-D Receiver")
+                                            Text("Product: Sennheiser EW-DX Receiver").tag("Product: Sennheiser EW-DX Receiver")
+                                        }
+                                    }
+                                    Section("Input") {
+                                        Picker("Hardware Channel", selection: $hardware) {
+                                            Text("1 — Shure ULX-D Receiver Channel One Left").tag("1 — Shure ULX-D Receiver Channel One Left")
+                                        }
+                                        Toggle("Mute transcription while the channel is idle", isOn: $muted)
+                                        Toggle("Label speakers on this channel", isOn: $speakers)
+                                        LabeledContent("Model Status") {
+                                            HStack(spacing: 6) { Image(systemName: "checkmark.circle.fill"); Text("Installed") }
+                                        }
+                                        LabeledContent("Status", value: "Ready")
+                                    }
+                                    Section("Channel Vocabulary") {
+                                        HStack {
+                                            TextField("", text: $notes, prompt: Text("Add a name, cue label or piece of jargon"), axis: .vertical)
+                                                .textFieldStyle(.roundedBorder).labelsHidden()
+                                            Button("Add") {}
+                                        }
+                                        TextField("Notes", text: $notes, axis: .vertical)
+                                    }
+                                    Section {
+                                        Button("Clear This Channel's Transcript", role: .destructive) {}
+                                        Button("Delete Channel", role: .destructive) {}
+                                    }
+                                }
+                                .formStyle(.grouped)
+                                .inspectorColumnWidth(min: 210, ideal: 330, max: 520)
+                            }
+                    }
+                }
+            }
+            let (w, h) = host(Probe(), width: 1100, height: 700)
+            h.layoutSubtreeIfNeeded()
+            let splits = allViews(h).compactMap { $0 as? NSSplitView }
+            guard splits.count == 2, let pane = splits[1].subviews.filter({ !$0.isHidden }).last else { return XCTFail("no inspector column") }
+            let column = pane.convert(pane.bounds, to: nil)
+            XCTAssertEqual(column.width, 210, accuracy: 0.5)
+            // No view of the inspector extends right of its column.
+            for v in allViews(pane) where !v.isHiddenOrHasHiddenAncestor && v.frame.width > 0 {
+                let f = v.convert(v.bounds, to: nil)
+                XCTAssertLessThanOrEqual(f.maxX, column.maxX + 0.5, "\(type(of: v)) \(f) extends right of the inspector column \(column)")
+            }
+            // Each control and label also sits inside its card: right of the card's 16-point
+            // inset from the column, and the cards themselves end at the inset.
+            let inset: CGFloat = 16
+            for v in allViews(pane) where (v is NSControl || v is _TextView) && !v.isHiddenOrHasHiddenAncestor && v.frame.width > 0 {
+                let f = v.convert(v.bounds, to: nil)
+                XCTAssertLessThanOrEqual(f.maxX, column.maxX - inset + 0.5, "\(type(of: v)) \(f) overflows its card in \(column)")
+            }
+            // The switches show whole (not half cut by the card's edge).
+            let switches = allViews(pane).compactMap { $0 as? NSSwitch }
+            XCTAssertEqual(switches.count, 2)
+            for s in switches { XCTAssertGreaterThanOrEqual(s.frame.width, s.intrinsicContentSize.width - 0.5, "a switch keeps its size") }
+            // Pixels: the strip between the cards' right edge and the column's edge is the page
+            // (window background) only; the card's border sits at the inset.
+            guard let rep = h.bitmapImageRepForCachingDisplay(in: h.bounds) else { return XCTFail("no bitmap") }
+            h.cacheDisplay(in: h.bounds, to: rep)
+            let scale = CGFloat(rep.pixelsWide) / h.bounds.width
+            let colInHost = h.convert(pane.bounds, from: pane)
+            func px(_ x: CGFloat, _ y: CGFloat) -> NSColor {
+                let c = rep.colorAt(x: Int(x * scale), y: Int(y * scale)) ?? .black
+                return c.usingColorSpace(.deviceRGB) ?? c
+            }
+            let page = px(colInHost.maxX - 3, colInHost.minY + 8)
+            var cardEdge = 0
+            for yPt in stride(from: colInHost.minY + 30, to: colInHost.maxY - 4, by: 4) {
+                for xPt in stride(from: colInHost.maxX - inset + 2, to: colInHost.maxX - 1, by: 1) {
+                    let c = px(xPt, yPt)
+                    let d = abs(c.redComponent - page.redComponent) + abs(c.greenComponent - page.greenComponent) + abs(c.blueComponent - page.blueComponent)
+                    XCTAssertLessThan(d, 0.06, "something is drawn in the inset right of the cards at (\(xPt), \(yPt)): \(c) vs page \(page)")
+                    if d >= 0.06 { return w.close() }
+                }
+                let border = px(colInHost.maxX - inset, yPt), inside = px(colInHost.maxX - inset - 3, yPt)
+                if abs(inside.redComponent - page.redComponent) > 0.02 || abs(border.redComponent - page.redComponent) > 0.02 { cardEdge += 1 }
+            }
+            XCTAssertGreaterThan(cardEdge, 10, "the cards reach the column's inset")
+            w.close()
+        }
+    }
+    /// Sibyl's Icon picker: icon-only Label items. The closed pop-up draws the selected
+    /// item's glyph (template, label colour), not the symbol's name; an image-and-title
+    /// item (the Colour picker's swatch and name) draws both; a `Label("", systemImage:)`
+    /// draws the image alone. The menu items keep their titles and images.
+    func testPickerFaceDrawsTheSelectedItemsImage() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            struct Probe: View {
+                @State var symbol = "headphones"
+                @State var bare = "star"
+                @State var tint = Tint.blue
+                var body: some View {
+                    Form {
+                        Picker("Icon", selection: $symbol) {
+                            ForEach(["star", "headphones"], id: \.self) { s in
+                                Label(s, systemImage: s).labelStyle(.iconOnly).tag(s)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Picker("Bare", selection: $bare) {
+                            ForEach(["star", "mic"], id: \.self) { s in Label("", systemImage: s).tag(s) }
+                        }
+                        Picker("Colour", selection: $tint) {
+                            ForEach(Tint.allCases) { TintLabel(tint: $0).tag($0) }
+                        }
+                    }
+                    .formStyle(.grouped)
+                }
+            }
+            let (w, h) = host(Probe(), width: 320, height: 300)
+            let popUps = allViews(h).compactMap { $0 as? NSPopUpButton }
+            XCTAssertEqual(popUps.count, 3)
+            guard popUps.count == 3 else { return w.close() }
+            let (icon, bare, colour) = (popUps[0], popUps[1], popUps[2])
+            XCTAssertEqual(icon.itemTitles, ["star", "headphones"], "the menu items keep their titles")
+            XCTAssertNotNil(icon.selectedItem?.image)
+            XCTAssertEqual(icon.imagePosition, .imageOnly, "an icon-only label's face is its image alone")
+            XCTAssertEqual(colour.imagePosition, .imageLeft)
+            XCTAssertNotNil(colour.selectedItem?.image, "the swatch is the Colour item's image")
+            // The face is sized for the glyph, not the symbol's name.
+            let chrome = NSPopUpButtonCell.titleInset + NSPopUpButtonCell.arrowAreaWidth
+            XCTAssertEqual(icon.cell!.cellSize.width, (16 + chrome).rounded(.up), accuracy: 0.5)
+            XCTAssertEqual(bare.cell!.cellSize.width, (16 + chrome).rounded(.up), accuracy: 0.5)
+            let blueWidth = "Blue".size(withAttributes: [.font: colour.font ?? NSFont.systemFont(ofSize: 13)]).width
+            XCTAssertGreaterThanOrEqual(colour.cell!.cellSize.width, (16 + 4 + blueWidth + chrome).rounded(.down), "image, gap and title")
+
+            // Pixels: ink (dark against the white bezel) per point column of the face.
+            @MainActor func inkColumns(_ b: NSPopUpButton) -> [Int] {
+                guard let rep = b.bitmapImageRepForCachingDisplay(in: b.bounds) else { return [] }
+                b.cacheDisplay(in: b.bounds, to: rep)
+                let scale = CGFloat(rep.pixelsWide) / b.bounds.width
+                var columns: [Int] = []
+                let faceEnd = b.bounds.width - NSPopUpButtonCell.arrowAreaWidth
+                for x in stride(from: CGFloat(3), to: faceEnd, by: 1) {
+                    var ink = 0
+                    for y in stride(from: CGFloat(3), to: b.bounds.height - 3, by: 1) {
+                        guard let c = rep.colorAt(x: Int(x * scale), y: Int(y * scale))?.usingColorSpace(.deviceRGB) else { continue }
+                        if (c.redComponent + c.greenComponent + c.blueComponent) / 3 < 0.6 && c.alphaComponent > 0.5 { ink += 1 }
+                    }
+                    if ink > 0 { columns.append(Int(x)) }
+                }
+                return columns
+            }
+            let inset = Int(NSPopUpButtonCell.titleInset)
+            for (name, b) in [("icon", icon), ("bare", bare)] {
+                let ink = inkColumns(b)
+                XCTAssertFalse(ink.isEmpty, "\(name): the glyph is drawn")
+                XCTAssertTrue(ink.allSatisfy { $0 >= inset - 1 && $0 <= inset + 16 }, "\(name): only the 16-point glyph is drawn, no symbol name: \(ink)")
+            }
+            let colourInk = inkColumns(colour)
+            XCTAssertTrue(colourInk.contains { $0 >= inset && $0 < inset + 16 }, "the swatch is drawn: \(colourInk)")
+            XCTAssertTrue(colourInk.contains { $0 >= inset + 20 }, "the title follows the swatch: \(colourInk)")
+            w.close()
+        }
+    }
 }
