@@ -41,6 +41,8 @@ import CoreText
     internal var _contentTintColor: NSColor? = nil
     internal var _imageHugsTitle = false
     internal var _hidesText = false, _hidesImage = false
+    /// NSButton's `hasDestructiveAction`: a red title, never the accent bezel.
+    internal var _hasDestructiveAction = false
 
     @MainActor internal override func _copyCellState(from other: NSCell) {
         super._copyCellState(from: other)
@@ -53,6 +55,13 @@ import CoreText
         _sound = o._sound; _periodicDelay = o._periodicDelay; _periodicInterval = o._periodicInterval
         _attributedAlternateTitle = o._attributedAlternateTitle; _gradientType = o._gradientType; _keyEquivalentFont = o._keyEquivalentFont
         _contentTintColor = o._contentTintColor; _imageHugsTitle = o._imageHugsTitle; _hidesText = o._hidesText; _hidesImage = o._hidesImage
+        _hasDestructiveAction = o._hasDestructiveAction
+    }
+
+    /// The accent colour for an "on" state or a default bezel: grey in an inactive window
+    /// under the macOS control look (ADR-0051), the accent otherwise.
+    internal var _stateAccentColor: NSColor {
+        _NSControlStyle.isActive(_controlView) ? NSColor.controlAccentColor : _NSControlStyle.inactiveAccent
     }
 
     /// True for checkbox and radio buttons: a state indicator with the title beside it.
@@ -67,7 +76,7 @@ import CoreText
         let enabled = _isEnabled
         if _buttonType == .radio {
             let circle = NSBezierPath(ovalIn: rect)
-            ((on || mixed) && enabled ? NSColor.controlAccentColor : NSColor.controlBackgroundColor).setFill()
+            ((on || mixed) && enabled ? _stateAccentColor : NSColor.controlBackgroundColor).setFill()
             circle.fill()
             (enabled ? NSColor.separatorColor.withAlphaComponent(0.5) : NSColor.separatorColor).setStroke()
             circle.lineWidth = 1
@@ -78,7 +87,7 @@ import CoreText
             }
         } else {
             let box = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-            ((on || mixed) && enabled ? NSColor.controlAccentColor : NSColor.controlBackgroundColor).setFill()
+            ((on || mixed) && enabled ? _stateAccentColor : NSColor.controlBackgroundColor).setFill()
             box.fill()
             (enabled ? NSColor.separatorColor.withAlphaComponent(0.5) : NSColor.separatorColor).setStroke()
             box.lineWidth = 1
@@ -226,7 +235,7 @@ import CoreText
     /// (white on an accent bezel), dimmed when disabled.
     private var _templateColor: NSColor {
         let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
-        var c: NSColor = _contentTintColor ?? (((pressed || _isDefaultButton) && _isBordered) ? .white : .controlTextColor)
+        var c: NSColor = _contentTintColor ?? (((pressed || _isAccentBezel) && _isBordered) ? .white : .controlTextColor)
         if !_isEnabled && _imageDimsWhenDisabled { c = NSColor.disabledControlTextColor }
         return c
     }
@@ -287,21 +296,80 @@ import CoreText
     private var _isDefaultButton: Bool {
         _isEnabled && _keyEquivalent == "\r" && (_bezelStyle == .rounded || _bezelStyle == .push || _bezelStyle == .automatic || _bezelStyle == .flexiblePush)
     }
+    /// The default button draws the accent bezel, unless it is destructive (macOS keeps a
+    /// destructive default plain, its title red) or, under the macOS control look, its
+    /// window is not key (the accent greys out with the window).
+    private var _isAccentBezel: Bool { _isDefaultButton && !_hasDestructiveAction }
     @MainActor open func drawBezel(withFrame frame: NSRect, in controlView: NSView) {
         guard _isBordered, !_isTransparent else { return }
+        if _NSControlStyle.macControls { return _drawMacBezel(withFrame: frame, in: controlView) }
         let r = frame.insetBy(dx: 0.5, dy: 0.5)
         let path = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6)
         let pressed = _isHighlighted && _highlightsBy.contains(.pushInCellMask)
         let stateOn = _state != .off && _showsStateBy.contains(.changeBackgroundCellMask)
         var fill: NSColor = _backgroundColor ?? .controlColor
         if !_isEnabled { fill = NSColor.controlColor.withAlphaComponent(0.6) }
-        else if pressed || stateOn || _isDefaultButton { fill = NSColor.controlAccentColor }
+        else if pressed || stateOn || _isAccentBezel { fill = NSColor.controlAccentColor }
         else if _isHighlighted && _highlightsBy.contains(.changeBackgroundCellMask) { fill = NSColor.selectedControlColor }
         fill.setFill()
         path.fill()
         (_isEnabled ? NSColor.separatorColor.withAlphaComponent(0.6) : NSColor.separatorColor.withAlphaComponent(0.3)).setStroke()
         path.lineWidth = 1
         path.stroke()
+    }
+    /// The macOS push button (ADR-0051): a bezel shaded from white at the top to a light
+    /// grey at the bottom (dark: a grey a shade lighter at the top), a hairline, and a
+    /// one-point shadow under it. Pressed and "on" bezels are a darker shading; the
+    /// default button is the accent, shaded the same way, grey in an inactive window.
+    @MainActor private func _drawMacBezel(withFrame frame: NSRect, in controlView: NSView) {
+        let flipped = controlView.isFlipped
+        let radius: CGFloat = 6
+        // The shadow: the bezel's shape one point towards the bottom of the screen.
+        let shadowRect = frame.insetBy(dx: 0.5, dy: 0.5).offsetBy(dx: 0, dy: flipped ? 1 : -1)
+        let dark = NSAppearance.currentIsDark
+        NSColor(white: 0, alpha: dark ? 0.25 : 0.1).setFill()
+        NSBezierPath(roundedRect: shadowRect, xRadius: radius, yRadius: radius).fill()
+        let r = frame.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius)
+        let pressed = _isHighlighted && _highlightsBy.contains(.pushInCellMask)
+        let stateOn = _state != .off && _showsStateBy.contains(.changeBackgroundCellMask)
+        let top: NSColor, bottom: NSColor
+        if !_isEnabled {
+            top = dark ? NSColor(white: 0.32, alpha: 1) : NSColor(white: 0.98, alpha: 1)
+            bottom = dark ? NSColor(white: 0.3, alpha: 1) : NSColor(white: 0.96, alpha: 1)
+        } else if pressed || stateOn || _isAccentBezel {
+            let accent = _isAccentBezel && !pressed && !stateOn ? _stateAccentColor : NSColor.controlAccentColor
+            let base = accent.usingColorSpace(.deviceRGB) ?? accent
+            let k: CGFloat = pressed && (stateOn || _isAccentBezel) ? 0.8 : 1
+            top = NSColor(srgbRed: min(1, base.redComponent * k + 0.08), green: min(1, base.greenComponent * k + 0.08), blue: min(1, base.blueComponent * k + 0.08), alpha: 1)
+            bottom = NSColor(srgbRed: base.redComponent * k, green: base.greenComponent * k, blue: base.blueComponent * k, alpha: 1)
+            if !(stateOn || _isAccentBezel) {
+                // A plain button pressed: a darker grey, not the accent (macOS 11+).
+                let g = NSGradient(starting: dark ? NSColor(white: 0.5, alpha: 1) : NSColor(white: 0.86, alpha: 1), ending: dark ? NSColor(white: 0.44, alpha: 1) : NSColor(white: 0.8, alpha: 1))
+                g?.draw(in: path, angle: flipped ? 90 : -90)
+                _strokeMacBezelHairline(path, dark: dark)
+                return
+            }
+        } else if _backgroundColor != nil {
+            top = _backgroundColor!; bottom = _backgroundColor!
+        } else {
+            top = dark ? NSColor(white: 0.42, alpha: 1) : NSColor.white
+            bottom = dark ? NSColor(white: 0.36, alpha: 1) : NSColor(white: 0.94, alpha: 1)
+        }
+        // Angle: the start colour at the top of the screen (a flipped view's minY).
+        NSGradient(starting: top, ending: bottom)?.draw(in: path, angle: flipped ? 90 : -90)
+        _strokeMacBezelHairline(path, dark: dark)
+    }
+    private func _strokeMacBezelHairline(_ path: NSBezierPath, dark: Bool) {
+        (dark ? NSColor(white: 1, alpha: 0.12) : NSColor(white: 0, alpha: _isEnabled ? 0.16 : 0.08)).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+    /// Whether the mac bezel's title is white (over an accent or pressed fill).
+    private var _titleOnAccent: Bool {
+        let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
+        if _NSControlStyle.macControls, pressed, !(_state != .off && _showsStateBy.contains(.changeBackgroundCellMask)), !_isAccentBezel { return false }
+        return (pressed || (_isAccentBezel && _isEnabled)) && _isBordered
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/drawimage(_:withframe:in:)
     /// Draws the image into `frame`; a template image is tinted (`_templateColor`), and a
@@ -316,9 +384,9 @@ import CoreText
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsbuttoncell/drawtitle(_:withframe:in:)
     @MainActor open func drawTitle(_ title: NSAttributedString, withFrame frame: NSRect, in controlView: NSView) -> NSRect {
-        let pressed = (_isHighlighted && _highlightsBy.contains(.pushInCellMask)) || (_state != .off && _showsStateBy.contains(.changeBackgroundCellMask))
         var attrs = _textAttributes
-        if (pressed || (_isDefaultButton && _isEnabled)) && _isBordered { attrs[.foregroundColor] = NSColor.white }
+        if _titleOnAccent { attrs[.foregroundColor] = NSColor.white }
+        else if _hasDestructiveAction, _isEnabled { attrs[.foregroundColor] = NSColor.systemRed }
         let text = (_isHighlighted && _highlightsBy.contains(.contentsCellMask) && !_alternateTitle.isEmpty) ? _alternateTitle : title.string
         // A title wider than the button is tail-truncated, as macOS draws it.
         let inset: CGFloat = _isBordered && !_isSwitchLike ? 6 : 0
