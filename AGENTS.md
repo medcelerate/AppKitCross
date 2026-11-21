@@ -41,7 +41,10 @@ on a `DispatchQueue` or a detached `Task`; and a `URLSessionConfiguration` made 
 which creates `%LOCALAPPDATA%\<CFBundleName>` (and `URLCache.shared` creates
 `%LOCALAPPDATA%\Temp\org.swift.foundation.URLCache\<bundle id>`) on Windows the moment
 the configuration exists, so make sessions lazily on the first request if a launch must
-write nothing outside the app's own folder. (`UserDefaults` itself writes a flat
+write nothing outside the app's own folder, and give every configuration `urlCache = nil`,
+`httpCookieStorage = nil` and `urlCredentialStorage = nil` (an `.ephemeral` one still
+reaches the shared stores on the first request: a model download created the URLCache
+folder the moment it began). (`UserDefaults` itself writes a flat
 `<identifier>.plist` under `%LOCALAPPDATA%` and creates no folder.)
 
 Three kinds of "missing", and how each shows up:

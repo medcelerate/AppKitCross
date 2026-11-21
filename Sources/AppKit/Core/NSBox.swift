@@ -268,7 +268,9 @@ import CoreGraphics
         defer {
             if straddles { NSGraphicsContext.restoreGraphicsState() }
             if _titlePosition != .noTitle && _boxType != .separator {
-                _titleCell.textColor = .labelColor
+                // Set only when it differs: the cell's setter marks the box, and a mark from
+                // inside `draw` repaints the box again next frame, for ever.
+                if _titleCell.textColor != NSColor.labelColor { _titleCell.textColor = .labelColor }
                 _titleCell.draw(withFrame: titleRect, in: self)
             }
         }

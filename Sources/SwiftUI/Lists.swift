@@ -423,16 +423,20 @@ final class _ListRowsPrimitive: _Primitive {
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
         var height: CGFloat = 0
         var width: CGFloat = 0
+        // Rows get the list's width. Under an infinite (or no) width the list takes its
+        // rows' ideal width, as SwiftUI's does: a row with a Spacer offered infinity would
+        // answer infinity and make the list infinitely wide.
+        let rowWidth = proposal.width.flatMap { $0.isFinite ? $0 : nil }
         for (i, r) in rows(node).enumerated() {
             if _ListRowDecorationPrimitive.traits(of: r) != nil {
                 // A decorated row (listRowInsets/Background/Separator) insets itself.
-                let s = r.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+                let s = r.sizeThatFits(ProposedViewSize(width: rowWidth, height: nil))
                 height += s.height + 1
                 width = max(width, s.width)
                 continue
             }
             let m = metrics(of: r, index: i)
-            let s = r.sizeThatFits(ProposedViewSize(width: proposal.width.map { max(0, $0 - m.leading - m.trailing) }, height: nil))
+            let s = r.sizeThatFits(ProposedViewSize(width: rowWidth.map { max(0, $0 - m.leading - m.trailing) }, height: nil))
             height += s.height + m.top + m.bottom + m.gap
             width = max(width, s.width + m.leading + m.trailing)
         }

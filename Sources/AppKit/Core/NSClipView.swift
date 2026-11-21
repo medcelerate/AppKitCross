@@ -123,6 +123,12 @@ import CoreText
         } else {
             r.origin.y = min(max(r.minY, doc.minY), doc.maxY - r.height)
         }
+        // On device pixels, as AppKit's clip view scrolls: text stays sharp, and a scroll
+        // by a whole number of pixels can move the pixels already drawn instead of
+        // repainting them (a list growing by an animated row scrolled by fractions).
+        let scale = max(1, window?.backingScaleFactor ?? 1)
+        r.origin.x = (r.origin.x * scale).rounded() / scale
+        r.origin.y = (r.origin.y * scale).rounded() / scale
         return r
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsclipview/constrainscroll(_:)

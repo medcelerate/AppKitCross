@@ -177,6 +177,19 @@ import CoreText
     @MainActor open override func accessibilityMaxValue() -> Any? { _a11y.maxValue ?? 1.0 }
     @MainActor override func _accessibilityIsFocusable() -> Bool { false }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsscroller/knobproportion
+    /// A new value moves the knob: the slot where it was and where it is repaint, not the
+    /// whole track (a scrolling list reflected its clip view into a 600 pt strip a frame).
+    @MainActor open override var doubleValue: Double {
+        get { super.doubleValue }
+        set {
+            guard newValue != super.doubleValue else { return }
+            let before = rect(for: .knob)
+            _cell?._objectValue = newValue      // not the cell's setter, which marks the whole control
+            let after = rect(for: .knob)
+            setNeedsDisplay(before.isEmpty ? after : after.isEmpty ? before : before.union(after))
+            _accessibilityValueChanged()
+        }
+    }
     @MainActor open var knobProportion: CGFloat {
         get { _knobProportion }
         set { guard newValue != _knobProportion else { return }; _knobProportion = newValue; needsDisplay = true }

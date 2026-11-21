@@ -579,9 +579,16 @@ import CoreText
 
     /// `APPKITWIN_TRACE=1` logs every view invalidation (view class and rect), for finding
     /// what keeps a window repainting on a platform without usable backtraces.
-    nonisolated(unsafe) public static let _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
+    /// A variable so a test can turn tracing on around one update and read `_traceSink`.
+    nonisolated(unsafe) public static var _traceInvalidation = ProcessInfo.processInfo.environment["APPKITWIN_TRACE"] != nil
     /// Unbuffered, so a killed process keeps the tail of the trace.
-    public static func _trace(_ message: String) { fputs("[trace] \(message)\n", stderr) }
+    public static func _trace(_ message: String) {
+        if let sink = _traceSink { sink(message) }
+        fputs("[trace] \(message)\n", stderr)
+    }
+    /// Tests collect trace lines here (with `_traceInvalidation` set true around the update);
+    /// the test that set it clears it.
+    nonisolated(unsafe) public static var _traceSink: ((String) -> Void)?
     /// `APPKITWIN_TRACE_FRAMES=1` logs what each frame costs (the constraint solve, the
     /// layout and draw of each window, the frame tick), for finding what holds the frame
     /// clock up on a platform without a profiler to hand. One line per pass, in ms.

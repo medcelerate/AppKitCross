@@ -456,7 +456,10 @@ public final class _ViewNode {
         _ViewNode._measureObserver?(self, proposal)
         if let p = primitive, !p.isLayoutTransparent {
             let s = p.sizeThatFits(proposal, node: self)
-            if NSView._traceInvalidation, !s.width.isFinite || !s.height.isFinite {
+            // A non-finite answer to a finite (or absent) proposal is a bug; infinity for an
+            // infinite proposal is a Spacer or a flexible frame answering as SwiftUI's do.
+            if NSView._traceInvalidation,
+               (!s.width.isFinite && proposal.width?.isFinite ?? true) || (!s.height.isFinite && proposal.height?.isFinite ?? true) {
                 NSView._trace("swiftui non-finite size \(s) from \(type(of: p)) for \(viewType) proposal \(proposal.width.map { "\($0)" } ?? "nil")x\(proposal.height.map { "\($0)" } ?? "nil")")
             }
             return s
@@ -916,20 +919,32 @@ public final class _ViewRoot: NSHostingRoot {
         displayLink = link
     }
 
-    /// One animation frame: advances every running animation and redraws.
+    /// One animation frame: advances every running animation and redraws what moved.
+    ///
+    /// A frame animation repaints through the backing views' frame setters (where a view
+    /// was and where it is); a property the view draws itself (opacity, offset, scale,
+    /// rotation, a transition, a gradient's stops) marks that view. The whole hosting view
+    /// was marked every frame before, which painted the whole transcript for each line
+    /// that landed animated. `APPKITWIN_FULL_LAYOUT=1` keeps the whole-view mark.
     public func advanceAnimations() {
         let now = CARuntime.now()
         var still = false
+        var drawn: [NSView] = []
         func visit(_ n: _ViewNode) {
-            if n.advanceAnimations(now: now) { still = true }
+            if !n.runningAnimations.isEmpty {
+                let drawsItself = n.runningAnimations.contains { $0.property != .frame }
+                if n.advanceAnimations(now: now) { still = true }
+                if drawsItself || _ViewNode._noSkipDebug, let v = n.primitive?.nsView { drawn.append(v) }
+            }
             for c in n.children { visit(c) }
             for e in n.exiting { visit(e) }
             for x in n.primitive?.extraNodes ?? [] { visit(x) }
         }
         if let r = rootNode { visit(r) }
         if let r = rootNode, let host { r.syncBackingViews(in: host.hostView, containerFrame: .zero) }
-        host?.setNeedsDisplay(in: nil)
-        if NSView._traceInvalidation { NSView._trace("advanceAnimations at \(now): still animating \(still)") }
+        if _ViewNode._noSkipDebug { host?.setNeedsDisplay(in: nil) }
+        for v in drawn { v.needsDisplay = true }
+        if NSView._traceInvalidation { NSView._trace("advanceAnimations at \(now): still animating \(still), \(drawn.count) views drawn") }
         if !still {
             displayLink?.invalidate()
             displayLink = nil
