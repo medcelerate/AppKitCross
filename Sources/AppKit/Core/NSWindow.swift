@@ -442,7 +442,7 @@ import CoreText
             _setNeedsDisplayWhole()
         }
     }
-    private var _contentView: NSView?
+    private(set) var _contentView: NSView?
     private var _accessibilityID = 0
     private var _a11yOverrides = _NSAccessibilityOverrides()
     private var _styleMask: NSWindow.StyleMask
@@ -454,14 +454,14 @@ import CoreText
     private var _isClosing = false
     private var _windowNumber = 0
     private var _level: NSWindow.Level = .normal
-    private var _backgroundColor: NSColor = .windowBackgroundColor
+    private(set) var _backgroundColor: NSColor = .windowBackgroundColor
     private var _isReleasedWhenClosed = true
     private weak var _firstResponder: NSResponder?
     private weak var _initialFirstResponder: NSView?
     private weak var _mouseDownView: NSView?
     private var _acceptsMouseMovedEvents = false
     private var _alphaValue: CGFloat = 1
-    private var _isOpaque = true
+    private(set) var _isOpaque = true
     private var _hasShadow = true
     private var _collectionBehavior: NSWindow.CollectionBehavior = []
     private var _identifier: NSUserInterfaceItemIdentifier? = nil
@@ -893,6 +893,7 @@ import CoreText
             ancestor = v.superview
         }
         guard !r.isNull, !r.isEmpty, r.width.isFinite, r.height.isFinite else { return }
+        _GlassRegistry.noteInvalidation(in: self, from: view, rect: r)
         _noteDirty(r)
         _platform?.setNeedsDisplay(r)
     }
@@ -907,6 +908,7 @@ import CoreText
     /// The window repaints as a whole (a new appearance, background, scale or layer host).
     internal func _setNeedsDisplayWhole() {
         _pendingDirtyRects = nil
+        _GlassRegistry.noteInvalidation(in: self, from: nil, rect: nil)
         _scrolledAreas = []
         _platform?.setNeedsDisplay(nil)
     }
@@ -1066,6 +1068,9 @@ import CoreText
         for e in exposed where !e.isEmpty { clip.setNeedsDisplay(clip.convert(e, from: nil)) }
         for (s, r) in overlays { s.setNeedsDisplay(s.convert(r, from: nil)) }
         for r in chrome where !r.isNull && !r.isEmpty { _noteDirty(r); platform.setNeedsDisplay(r) }
+        // The content beneath any glass over the area (or mirrored from it) moved with the
+        // copy: those samples go stale and their surfaces redraw (ADR-0052).
+        _GlassRegistry.noteInvalidation(in: self, from: nil, rect: visible)
         return true
     }
 

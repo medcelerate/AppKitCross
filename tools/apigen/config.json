@@ -66,6 +66,8 @@
     "NSForm",
     "NSFormCell",
     "NSGestureRecognizer",
+    "NSGlassEffectContainerView",
+    "NSGlassEffectView",
     "NSGradient",
     "NSGraphicsContext",
     "NSGridCell",

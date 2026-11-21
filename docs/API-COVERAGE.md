@@ -9,8 +9,8 @@ Source SDK: see `api-inventory/SDK-VERSION.txt`.
 | Metric | Count |
 | --- | ---: |
 | Top-level types in SDK | 541 |
-| Types handwritten | 219 |
-| Types generated | 287 |
+| Types handwritten | 221 |
+| Types generated | 285 |
 | Types apple-only | 33 |
 | Types pending | 2 |
 | Types skipped | 0 |
@@ -32,9 +32,9 @@ not plan to implement (ADR-0044, `appleOnly` in `tools/apigen/config.json`).
 
 | Tree | Still to do (`unimplemented`) | Apple-only (`appleOnlyUnavailable`) |
 | --- | ---: | ---: |
-| `Sources/AppKit/Generated` | 672 | 341 |
+| `Sources/AppKit/Generated` | 660 | 341 |
 | `Sources/AppKit/Core` | 83 | 30 |
-| Total | 755 | 371 |
+| Total | 743 | 371 |
 
 Status meanings: **handwritten** lives in `Sources/AppKit/Core` and is the real
 implementation (the `unimplemented-calls` column counts members still stubbed);
@@ -259,8 +259,8 @@ build (see reason); **blocked** members reference a type not yet available on Wi
 | NSFormCell | class | handwritten | 13 | 0 | 0 | 0 |  |
 | NSGestureRecognizer | class | handwritten | 52 | 0 | 1 | 1 |  |
 | NSGestureRecognizerDelegate | protocol | generated | 6 | 0 | 0 |  |  |
-| NSGlassEffectContainerView | class | generated | 2 | 0 | 0 |  |  |
-| NSGlassEffectView | class | generated | 6 | 0 | 1 |  |  |
+| NSGlassEffectContainerView | class | handwritten | 2 | 0 | 0 | 0 |  |
+| NSGlassEffectView | class | handwritten | 6 | 0 | 1 | 0 |  |
 | NSGlyph | typealias | generated | 1 | 0 | 0 |  |  |
 | NSGlyphGenerator | class | generated | 2 | 0 | 0 |  |  |
 | NSGlyphInfo | class | generated | 7 | 2 | 0 |  |  |
