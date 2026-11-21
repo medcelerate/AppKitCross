@@ -56,9 +56,20 @@ import CoreText
         _controlView = controlView
         _trackRect = cellFrame.insetBy(dx: _isVertical ? 0 : 2, dy: _isVertical ? 2 : 0)
         let flipped = controlView.isFlipped
-        drawBar(inside: barRect(flipped: flipped), flipped: flipped)
-        drawTickMarks()
+        if _NSControlStyle.macControls && _numberOfTickMarks > 1 {
+            // macOS (ADR-0051): the tick marks are a comb behind the track, drawn first.
+            drawTickMarks()
+            drawBar(inside: barRect(flipped: flipped), flipped: flipped)
+        } else {
+            drawBar(inside: barRect(flipped: flipped), flipped: flipped)
+            drawTickMarks()
+        }
         drawKnob(knobRect(flipped: flipped))
+    }
+
+    /// The accent of the filled track: grey in an inactive window under the macOS look.
+    private var _fillAccent: NSColor {
+        _NSControlStyle.isActive(_controlView) ? NSColor.controlAccentColor : _NSControlStyle.inactiveAccent
     }
 
     @MainActor open override var cellSize: NSSize { _isVertical ? NSSize(width: _knobThickness + 6, height: 100) : NSSize(width: 100, height: _knobThickness + 6) }
@@ -97,7 +108,7 @@ import CoreText
         } else {
             filled.size.width = max(0, knob.midX - rect.minX)
         }
-        (_isEnabled ? NSColor.controlAccentColor : NSColor.controlAccentColor.withAlphaComponent(0.4)).setFill()
+        (_isEnabled ? _fillAccent : _fillAccent.withAlphaComponent(0.4)).setFill()
         NSBezierPath(roundedRect: filled, xRadius: r, yRadius: r).fill()
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/drawknob()
@@ -105,7 +116,32 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nsslidercell/drawknob(_:)
     @MainActor open func drawKnob(_ knobRect: NSRect) {
         let r = knobRect.insetBy(dx: 1, dy: 1)
-        let path = NSBezierPath(ovalIn: r)
+        let path: NSBezierPath
+        if _NSControlStyle.macControls {
+            // macOS (ADR-0051): a tick-marked slider's knob is a pill across the track, a
+            // plain slider's a disc; both white with a soft shadow line under them.
+            if _numberOfTickMarks > 1 {
+                let pill = _isVertical ? NSRect(x: r.minX, y: r.midY - 4, width: r.width, height: 8)
+                                       : NSRect(x: r.midX - 4, y: r.minY, width: 8, height: r.height)
+                path = NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4)
+            } else {
+                path = NSBezierPath(ovalIn: r)
+            }
+            let flipped = _controlView?.isFlipped ?? false
+            NSColor(white: 0, alpha: 0.12).setFill()
+            if let shadow = path.copy() as? NSBezierPath {
+                shadow.transform(using: AffineTransform(translationByX: 0, byY: flipped ? 1 : -1))
+                shadow.fill()
+            }
+            let dark = NSAppearance.currentIsDark
+            ((_isEnabled ? (dark ? NSColor(white: 0.75, alpha: 1) : NSColor.white) : NSColor(white: dark ? 0.5 : 0.95, alpha: 1))).setFill()
+            path.fill()
+            (dark ? NSColor(white: 0, alpha: 0.3) : NSColor(white: 0, alpha: 0.15)).setStroke()
+            path.lineWidth = 1
+            path.stroke()
+            return
+        }
+        path = NSBezierPath(ovalIn: r)
         (_isEnabled ? NSColor.controlColor : NSColor.controlColor.withAlphaComponent(0.6)).setFill()
         path.fill()
         (_isHighlighted ? NSColor.controlAccentColor : NSColor.separatorColor.withAlphaComponent(0.8)).setStroke()
@@ -169,6 +205,10 @@ import CoreText
             return NSRect(x: x, y: y - 0.5, width: 4, height: 1)
         }
         let x = bar.minX + k / 2 + (bar.width - k) * t
+        if _NSControlStyle.macControls {
+            // The comb through the track: each tick spans the knob's height (ADR-0051).
+            return NSRect(x: x - 0.5, y: bar.midY - k / 2 + 2, width: 1, height: k - 4)
+        }
         let flipped = _controlView?.isFlipped ?? false
         let below = _tickMarkPosition == .below
         let y = (below != flipped) ? bar.minY - 8 : bar.maxY + 4

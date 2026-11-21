@@ -447,6 +447,9 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
     }
     /// The picker inside its own form row: the row shows the label.
     var _inFormRow = false
+    /// The row is a grouped form's: the pop-up is borderless, plain text with a chevron
+    /// (macOS's Settings forms; the `_FormRow` nils the form context for its content).
+    var _inGroupedForm = false
     public func _makePrimitive(node: _ViewNode) -> _Primitive {
         let env = node.environment
         let hidden = _inFormRow || env._labelsHidden
@@ -454,7 +457,7 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
         // radio groups and inline lists put it beside their first item (columns) or above
         // their options (grouped).
         if !hidden, env._formContext != nil, _formHasLabel(label) {
-            var inner = self; inner._inFormRow = true
+            var inner = self; inner._inFormRow = true; inner._inGroupedForm = env._formContext == .grouped
             let stacked = env.pickerStyle == .radioGroup || env.pickerStyle == .inline
             if env._formContext == .grouped, !stacked {
                 // A grouped row: the pop-up keeps the width its title needs and the label
@@ -467,7 +470,7 @@ public struct Picker<Label: View, SelectionValue: Hashable, Content: View>: View
             }
             return _GroupPrimitive(children: [_ViewBox(_FormRow(label: AnyView(label), content: AnyView(inner), alignment: stacked ? .top : .center, stacked: stacked))])
         }
-        return _PickerPrimitive(label: (label as? Text)?._string ?? _pickerItemFace(_ViewBox(label), environment: env).title, showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content))
+        return _PickerPrimitive(label: (label as? Text)?._string ?? _pickerItemFace(_ViewBox(label), environment: env).title, showsLabel: !hidden, selection: AnyBinding(selection), content: _ViewBox(content), groupedRow: _inGroupedForm || env._formContext == .grouped)
     }
 }
 
@@ -556,14 +559,17 @@ final class _PickerPrimitive: _Primitive {
     var showsLabel: Bool
     var selection: AnyBinding
     var contentBox: _AnyViewBox
-    init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox) {
-        self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content
+    /// A grouped form's row: the pop-up is borderless (ADR-0051).
+    var groupedRow: Bool
+    init(label: String, showsLabel: Bool = true, selection: AnyBinding, content: _AnyViewBox, groupedRow: Bool = false) {
+        self.label = label; self.showsLabel = showsLabel; self.selection = selection; contentBox = content; self.groupedRow = groupedRow
         super.init()
     }
     override var isLayoutTransparent: Bool { true }
     override func attach(to node: _ViewNode) { super.attach(to: node); rebuild() }
     override func update(from other: _Primitive) {
         guard let o = other as? _PickerPrimitive else { return }
+        groupedRow = o.groupedRow
         label = o.label; showsLabel = o.showsLabel; selection = o.selection; contentBox = o.contentBox
         rebuild()
     }
@@ -607,7 +613,7 @@ final class _PickerPrimitive: _Primitive {
             // Menu and automatic styles: a pop-up button, as on macOS.
             body = AnyView(HStack(spacing: 8) {
                 if !shownLabel.isEmpty { Text(shownLabel) }
-                _PickerPopUp(titles: titles, images: faces.map(\.image), iconOnly: faces.map(\.iconOnly), selected: index) { i in sel.set(tags[i]) }._pickerLabel(labelText)
+                _PickerPopUp(titles: titles, images: faces.map(\.image), iconOnly: faces.map(\.iconOnly), selected: index, bordered: !groupedRow) { i in sel.set(tags[i]) }._pickerLabel(labelText)
             })
         }
         children = [_ViewBox(body, id: AnyHashable("picker"))]
@@ -728,10 +734,13 @@ struct _PickerPopUp: View, _PrimitiveView {
     /// Per item: its face is the image alone (an icon-only Label).
     var iconOnly: [Bool] = []
     let selected: Int
+    /// False in a grouped form's row: plain text with the chevron, no bezel.
+    var bordered = true
     let onSelect: (Int) -> Void
     func _makePrimitive(node: _ViewNode) -> _Primitive {
         let p = _PickerPopUpPrimitive(titles: titles, images: images, selected: selected, onSelect: onSelect)
         p.iconOnly = iconOnly
+        p.control.isBordered = bordered
         return p
     }
 }
@@ -780,6 +789,7 @@ final class _PickerPopUpPrimitive: _ControlPrimitive<NSPopUpButton> {
         super.update(from: other)
         guard let o = other as? _PickerPopUpPrimitive else { return }
         onSelect = o.onSelect
+        if control.isBordered != o.control.isBordered { control.isBordered = o.control.isBordered; control.needsDisplay = true }
         let iconOnlyChanged = o.iconOnly != iconOnly
         iconOnly = o.iconOnly
         if iconOnlyChanged { applyImagePosition() }

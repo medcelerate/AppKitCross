@@ -1613,6 +1613,7 @@ import CoreText
         }
         _toolbar?.validateVisibleItems()
         _updateTextInputContext()
+        _redisplayControlsForKeyChange()
         post(NSWindow.didBecomeKeyNotification)
         delegate?.windowDidBecomeKey(Notification(name: NSWindow.didBecomeKeyNotification, object: self))
         _trackingActivityDidChange()
@@ -2601,9 +2602,17 @@ import CoreText
         let app = NSApplication.shared
         if app.keyWindow === self { app._keyWindow = nil }
         if let current = NSTextInputContext.current, (current._liveClient as? NSView)?.window === self { current.deactivate() }
+        _redisplayControlsForKeyChange()
         post(NSWindow.didResignKeyNotification)
         _trackingActivityDidChange()
         delegate?.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: self))
+    }
+    /// Under the macOS control look (ADR-0051) the accent colours grey out with the window,
+    /// so every view repaints when the window gains or loses the keyboard.
+    private func _redisplayControlsForKeyChange() {
+        guard _NSControlStyle.macControls, let root = _contentView else { return }
+        func mark(_ v: NSView) { v.needsDisplay = true; for s in v.subviews { mark(s) } }
+        mark(root)
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/resignmain()
     @MainActor open func resignMain() {

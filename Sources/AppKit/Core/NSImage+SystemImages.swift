@@ -325,8 +325,11 @@ internal enum _NSSystemImages {
         d["speaker"] = (true, stroke({ poly($0, [(2, 6), (5, 6), (9, 2.5), (9, 13.5), (5, 10), (2, 10)]) }, width: 1.3))
         d["speaker.wave.2"] = (true, stroke({ poly($0, [(1.5, 6), (4.5, 6), (8, 2.5), (8, 13.5), (4.5, 10), (1.5, 10)]); arc($0, 8, 8, 3, -45, 45); arc($0, 8, 8, 5.5, -45, 45) }, width: 1.3))
         d["square.grid.3x3"] = (true, stroke({ for x in [1.8, 6.4, 11.0] { for y in [1.8, 6.4, 11.0] { $0.appendRect(NSRect(x: x, y: y, width: 3.2, height: 3.2)) } } }, width: 1))
-        d["textformat.size.larger"] = (true, stroke({ letterA($0, x: 1.5, width: 4.5, height: 5.5); letterA($0, x: 6.5, width: 8, height: 11) }, width: 1.2))
-        d["textformat.size.smaller"] = (true, stroke({ letterA($0, x: 1.5, width: 8, height: 11); letterA($0, x: 10, width: 4.5, height: 5.5) }, width: 1.2))
+        // One "A" each, large and small (the pair "aA" is `textformat.size`); Sibyl's font
+        // size slider sits between them on the Mac as a small and a large A.
+        d["textformat.size"] = (true, stroke({ letterA($0, x: 1.5, width: 4.5, height: 5.5); letterA($0, x: 6.5, width: 8, height: 11) }, width: 1.2))
+        d["textformat.size.larger"] = (true, stroke({ letterA($0, x: 3.5, width: 9, height: 11) }, width: 1.3))
+        d["textformat.size.smaller"] = (true, stroke({ letterA($0, x: 5, width: 6, height: 7) }, width: 1.2))
         d["tv"] = (true, stroke({ $0.appendRoundedRect(NSRect(x: 1.5, y: 4, width: 13, height: 9), xRadius: 1.5, yRadius: 1.5); line($0, [(5, 2), (11, 2)]) }, width: 1.3))
         d["tv.badge.wifi"] = (true, stroke({
             $0.appendRoundedRect(NSRect(x: 1.5, y: 4, width: 13, height: 9), xRadius: 1.5, yRadius: 1.5); line($0, [(5, 2), (11, 2)])
