@@ -104,6 +104,14 @@ public protocol PlatformBackend: AnyObject {
     /// covers the title bar, client-side decorations): macOS traffic lights at the left, or
     /// the platform's caption buttons at the right (ADR-0022). Default: traffic lights.
     var windowButtonStyle: PlatformWindowButtonStyle { get }
+    /// Whether a window with `styleMask` and `chrome` draws its unified title bar as the
+    /// caption, with the application menu in a row under it (ADR-0053). False everywhere
+    /// but Win32, where the standard macOS recipe (`fullSizeContentView` plus
+    /// `titlebarAppearsTransparent`) opts a window in unless `APPKITWIN_UNIFIED_CAPTION=0`.
+    func usesUnifiedCaption(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome) -> Bool
+    /// Whether SwiftUI scene windows take that recipe (`APPKITWIN_UNIFIED_CAPTION=1` or the
+    /// `AppKitCrossUnifiedCaption` Info.plist key, on a backend that draws the caption).
+    var mapsSwiftUIWindowsToUnifiedCaption: Bool { get }
 
     /// The characters the key with this event key code types under the current keyboard
     /// layout with `modifierFlags` (only .shift, .option, .control and .capsLock are passed)
@@ -305,6 +313,8 @@ extension PlatformBackend {
     public func setGlobalEventMonitoring(mask: NSEvent.EventTypeMask, handler: (@MainActor (NSEvent) -> Void)?) { }
     public func runNested(until stop: @escaping @MainActor () -> Bool) { runModal(for: nil, until: stop) }
     public var windowButtonStyle: PlatformWindowButtonStyle { .trafficLights }
+    public func usesUnifiedCaption(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome) -> Bool { false }
+    public var mapsSwiftUIWindowsToUnifiedCaption: Bool { false }
 }
 
 extension PlatformWindow {
@@ -422,7 +432,37 @@ public struct PlatformWindowChrome: Equatable, Sendable {
     /// drags the window: the backend asks the owner's hit test for client points.
     public var hasDraggableBand = false
     public var roundedCorners = true
+    /// The unified title bar is the window's caption (ADR-0053): the package draws the
+    /// title, the toolbar, the caption buttons and a menu bar row under them in the content
+    /// area; the platform shows no caption and no native menu bar of its own. Decided by
+    /// the backend (`PlatformBackend.usesUnifiedCaption`), recorded here for its window.
+    public var unifiedCaption = false
     public init() {}
+}
+
+/// A three-state runtime switch read from the environment, else the Info.plist: unset
+/// leaves the default, on and off force it (`APPKITWIN_UNIFIED_CAPTION`, ADR-0053).
+public enum PlatformFeatureSwitch: Equatable, Sendable {
+    case unset, on, off
+
+    /// `"1"`, `"yes"`, `"true"` (any case) are on, `"0"`, `"no"`, `"false"` off, anything
+    /// else (and nil) unset. Booleans and numbers from a plist answer by their truth.
+    public static func parse(_ value: Any?) -> PlatformFeatureSwitch {
+        switch value {
+        case let b as Bool: return b ? .on : .off
+        case let n as NSNumber: return n.boolValue ? .on : .off
+        case let s as String:
+            switch s.lowercased() { case "1", "yes", "true": return .on; case "0", "no", "false": return .off; default: return .unset }
+        default: return .unset
+        }
+    }
+
+    /// The environment variable first, then the Info.plist key.
+    public static func read(environment: [String: String], infoDictionary: [String: Any], environmentKey: String, plistKey: String) -> PlatformFeatureSwitch {
+        let env = parse(environment[environmentKey])
+        if env != .unset { return env }
+        return parse(infoDictionary[plistKey])
+    }
 }
 
 /// What a point of the content area is to the window system: content, the draggable

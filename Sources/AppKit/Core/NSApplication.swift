@@ -426,6 +426,7 @@ import CoreText
         NSDocumentController._shared?._mainMenuDidChange()
         guard !_menuRebuildSuppressed else { return }
         Platform.backend.setMainMenu(_mainMenu?._platformMenu(), host: self)
+        for w in windows { w._applicationMenuDidChange() }
     }
 
     /// Runs `body` without rebuilding the native menu bar for item changes it makes
@@ -735,6 +736,9 @@ import CoreText
         NSPopover._noteEvent(event)
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.
         if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
+        // The menu bar row of a unified caption (ADR-0053): Alt+letter, F10, an Alt tap and
+        // the keys of its keyboard mode.
+        if _NSMenuBarRowView._handleApplicationEvent(event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
             keyWindow?.sendEvent(event)
         }

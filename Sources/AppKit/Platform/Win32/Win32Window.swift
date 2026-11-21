@@ -139,6 +139,7 @@ final class Win32Window: PlatformWindow {
         }
         guard let hwnd else { return }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
+        Win32DarkMenu.allowDarkMode(for: hwnd)
         dpi = GetDpiForWindow(hwnd)
         if CGFloat(dpi) / 96 != scale {
             // The window opened on a monitor whose DPI is not the system's: per-monitor-v2
@@ -445,6 +446,10 @@ final class Win32Window: PlatformWindow {
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+    /// The system app theme at the last check (WM_SETTINGCHANGE refreshes it): a dark theme
+    /// owner-draws the HMENU bar (Win32DarkMenu.swift), which user32 would paint light.
+    private var systemThemeIsDark = Win32Window.systemAppThemeIsDark()
+    private var drawsMenuBarItself: Bool { Win32WindowPolicy.drawsMenuBarItself(systemAppThemeIsDark: systemThemeIsDark, hasNativeMenuBar: hasMenuBar) }
     /// Whether a system key message (Alt held, or F10) is the menu bar's: the window carries
     /// the native menu bar and Ctrl is not down.
     private var ownsMenuKeyboard: Bool { hasMenuBar && GetKeyState(VK_CONTROL) >= 0 }
@@ -1531,6 +1536,28 @@ final class Win32Window: PlatformWindow {
                 return 1
             }
             return nil
+        case Win32DarkMenu.WM_UAHDRAWMENU:
+            guard let hwnd, drawsMenuBarItself else { return nil }
+            return Win32DarkMenu.drawMenuBar(hwnd, lParam, theme: Win32WindowPolicy.darkMenuBarTheme)
+        case Win32DarkMenu.WM_UAHDRAWMENUITEM:
+            guard drawsMenuBarItself else { return nil }
+            return Win32DarkMenu.drawMenuBarItem(lParam, theme: Win32WindowPolicy.darkMenuBarTheme)
+        case WM_NCPAINT, WM_NCACTIVATE:
+            // DefWindowProc paints the frame; the dark bar's underline goes over it.
+            guard let hwnd, drawsMenuBarItself else { return nil }
+            let result = DefWindowProcW(hwnd, msg, wParam, lParam)
+            Win32DarkMenu.paintUnderline(hwnd, theme: Win32WindowPolicy.darkMenuBarTheme)
+            return result
+        case WM_SETTINGCHANGE:
+            // "ImmersiveColorSet": the app theme flipped. The caption's dark-mode attribute,
+            // the menu themes and the owner-drawn bar follow at once.
+            let dark = Win32Window.systemAppThemeIsDark()
+            if dark != systemThemeIsDark, let hwnd {
+                systemThemeIsDark = dark
+                setDwmAttribute(Win32Window.dwmwaUseImmersiveDarkMode, dark ? 1 : 0)
+                Win32DarkMenu.themeChanged(hwnd)
+            }
+            return nil
         case WM_INITMENUPOPUP:
             if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
             return 0
@@ -1717,6 +1744,13 @@ final class Win32Window: PlatformWindow {
             // AppKit for its modifier flags.
             if Int32(msg) == WM_SYSKEYDOWN, ownsMenuKeyboard {
                 if Int32(truncatingIfNeeded: wParam) == VK_MENU { key(.keyDown, wParam, lParam) }
+                return nil
+            }
+            // No native menu bar (a custom frame, a unified caption, ADR-0053): Alt+Space
+            // still opens the system menu and Alt+F4 still closes, through DefWindowProc (the
+            // WM_SYSCHAR TranslateMessage posted stays queued for it); the other Alt
+            // combinations are AppKit's (the menu row's mnemonics).
+            if Int32(msg) == WM_SYSKEYDOWN, Win32WindowPolicy.passesSystemKeyToDefWindowProc(virtualKey: Int32(truncatingIfNeeded: wParam), hasNativeMenuBar: false) {
                 return nil
             }
             key(.keyDown, wParam, lParam)

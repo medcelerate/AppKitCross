@@ -69,6 +69,114 @@ public enum Win32WindowPolicy {
         return chrome.isTransparent && (styleMask.contains(.fullSizeContentView) || chrome.extendsContentIntoTitleBar)
     }
 
+    // MARK: The unified caption (ADR-0053)
+
+    /// What a titled window's caption is on Windows.
+    public enum CaptionMode: Equatable, Sendable {
+        /// The system caption and Windows' own caption buttons, the HMENU menu bar under it,
+        /// the toolbar as a band of the content below (the default).
+        case classic
+        /// The package-drawn unified title bar is the caption: title and subtitle, toolbar
+        /// items and title bar accessories in the band, Windows caption buttons at its right,
+        /// the application menu as a package-drawn row directly under it.
+        case unified
+    }
+
+    /// The caption of a window with `styleMask` and `chrome`. A window opts in with the
+    /// standard macOS recipe for a custom unified title bar: `fullSizeContentView` and
+    /// `titlebarAppearsTransparent`. `APPKITWIN_UNIFIED_CAPTION=0` forces classic for every
+    /// window (comparison runs); `=1` changes nothing here (it maps SwiftUI windows onto the
+    /// recipe, `mapsSwiftUIWindows`). Everything else keeps the classic caption, so an
+    /// application sees no change unless it opts in.
+    public static func captionMode(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome, switch value: PlatformFeatureSwitch) -> CaptionMode {
+        guard value != .off else { return .classic }
+        guard styleMask.contains(.titled), styleMask.contains(.fullSizeContentView), chrome.transparentTitleBar else { return .classic }
+        return .unified
+    }
+
+    /// Whether SwiftUI's scene windows take the recipe (`.fullSizeContentView`, a transparent
+    /// title bar) so their unified toolbar becomes the caption: only when the switch is on.
+    public static func mapsSwiftUIWindows(switch value: PlatformFeatureSwitch) -> Bool { value == .on }
+
+    public static let unifiedCaptionEnvironmentKey = "APPKITWIN_UNIFIED_CAPTION"
+    public static let unifiedCaptionPlistKey = "AppKitCrossUnifiedCaption"
+
+    /// The height (points) of the menu bar row the package draws under a unified caption.
+    /// Windows' own bar is 20 px at 100 % for a 9 pt Segoe UI; the row holds the port's
+    /// 13 pt menu font with the same proportions.
+    public static let menuBarRowHeight: CGFloat = 24
+
+    public static let VK_SPACE: Int32 = 0x20
+    public static let VK_F4: Int32 = 0x73
+
+    /// Whether a `WM_SYSKEYDOWN` (Alt held) for `virtualKey` goes to `DefWindowProc` rather
+    /// than becoming an AppKit key event. With the HMENU bar every system key is
+    /// DefWindowProc's (it runs the menu loop). Without one, Alt+Space must still open the
+    /// system menu and Alt+F4 still close the window, as on every Windows window; the
+    /// other Alt combinations are the package's (the menu row's mnemonics under a unified
+    /// caption, AppKit's Option key events elsewhere).
+    public static func passesSystemKeyToDefWindowProc(virtualKey: Int32, hasNativeMenuBar: Bool) -> Bool {
+        if hasNativeMenuBar { return true }
+        return virtualKey == VK_SPACE || virtualKey == VK_F4
+    }
+
+    // MARK: The classic menu bar (HMENU)
+
+    /// Whether a new main-menu description changes anything the menu bar itself shows: the
+    /// top-level titles, their order, visibility and enabled state. When it does not (an
+    /// item inside a menu was enabled, retitled or checked: Undo after a keystroke), the
+    /// bar is kept and only its pop-ups are refilled, so nothing repaints. Swapping the bar
+    /// (`SetMenu` + `DrawMenuBar`) on every such change repainted it from a blank surface,
+    /// which Evan saw as the bar flashing white while typing in TextEdit.
+    public static func menuBarChanged(from old: PlatformMenu?, to new: PlatformMenu?) -> Bool {
+        guard let old, let new else { return (old == nil) != (new == nil) }
+        let a = old.items.filter { !$0.isHidden }, b = new.items.filter { !$0.isHidden }
+        guard a.count == b.count else { return true }
+        for (x, y) in zip(a, b) {
+            if x.id != y.id || x.title != y.title || x.isSeparator != y.isSeparator || x.isEnabled != y.isEnabled
+                || (x.submenu == nil) != (y.submenu == nil) || x.submenu?.id != y.submenu?.id { return true }
+        }
+        return false
+    }
+
+    /// The colours of an owner-drawn menu bar in the system's dark theme (user32 draws the
+    /// bar white whatever the app theme; Windows 11's own dark bars, e.g. Notepad's before
+    /// its redesign, use these). `0xRRGGBB`.
+    public struct MenuBarTheme: Equatable, Sendable {
+        public var background: UInt32
+        public var text: UInt32
+        public var disabledText: UInt32
+        public var hotBackground: UInt32
+        public var selectedBackground: UInt32
+        /// The one-pixel line user32 leaves under the bar, repainted in `background`'s colour.
+        public var underline: UInt32 { background }
+    }
+    public static let darkMenuBarTheme = MenuBarTheme(background: 0x20_20_20, text: 0xFF_FF_FF, disabledText: 0x80_80_80,
+                                                      hotBackground: 0x3A_3A_3A, selectedBackground: 0x45_45_45)
+
+    /// Whether the bar is owner-drawn: only in the dark app theme (light bars are user32's,
+    /// unchanged), and only on a window that carries the HMENU bar.
+    public static func drawsMenuBarItself(systemAppThemeIsDark: Bool, hasNativeMenuBar: Bool) -> Bool {
+        systemAppThemeIsDark && hasNativeMenuBar
+    }
+
+    public static let ODS_SELECTED: UInt32 = 0x0001
+    public static let ODS_GRAYED: UInt32 = 0x0002
+    public static let ODS_DISABLED: UInt32 = 0x0004
+    public static let ODS_HOTLIGHT: UInt32 = 0x0040
+    public static let ODS_INACTIVE: UInt32 = 0x0080
+    public static let ODS_NOACCEL: UInt32 = 0x0100
+
+    /// The fill and text colours of one bar item for its `DRAWITEMSTRUCT.itemState`.
+    public static func menuBarItemColors(itemState: UInt32, theme: MenuBarTheme = darkMenuBarTheme) -> (fill: UInt32, text: UInt32) {
+        let disabled = itemState & (ODS_GRAYED | ODS_DISABLED) != 0
+        let fill: UInt32
+        if itemState & ODS_SELECTED != 0 { fill = theme.selectedBackground }
+        else if itemState & ODS_HOTLIGHT != 0, !disabled { fill = theme.hotBackground }
+        else { fill = theme.background }
+        return (fill, disabled || itemState & ODS_INACTIVE != 0 ? theme.disabledText : theme.text)
+    }
+
     // MARK: Non-client hit codes (WM_NCHITTEST)
 
     public static let HTCLIENT: Int32 = 1

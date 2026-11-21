@@ -241,6 +241,24 @@ final class _NSWindowButtonsView: NSView {
             needsDisplay = true
         }
     }
+    /// The window title the row draws centred in the band, for a unified caption without
+    /// a toolbar to show it (ADR-0053); nil draws none.
+    var titleText: String? { didSet { if titleText != oldValue { needsDisplay = true } } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let title = titleText, !title.isEmpty else { return }
+        let key = window?.isKeyWindow ?? true
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.titleBarFont(ofSize: 13), .foregroundColor: key ? NSColor.labelColor : NSColor.secondaryLabelColor]
+        let size = title.size(withAttributes: attrs)
+        let left = max(leadingInset, 8), right = max(trailingInset, 8)
+        let x = max(left, (bounds.midX - size.width / 2).rounded())
+        let width = min(size.width, bounds.width - right - x)
+        guard width > 0 else { return }
+        NSGraphicsContext.current?.cgContext.saveGState()
+        NSGraphicsContext.current?.cgContext.clip(to: NSRect(x: x, y: 0, width: width, height: bounds.height))
+        title.draw(at: NSPoint(x: x, y: ((bounds.height - size.height) / 2).rounded()), withAttributes: attrs)
+        NSGraphicsContext.current?.cgContext.restoreGState()
+    }
 
     init(style: PlatformWindowButtonStyle = .trafficLights) {
         self.style = style
