@@ -664,11 +664,21 @@ final class AudioFollowupTests: XCTestCase, @unchecked Sendable {
             player.delegate = delegate
             let started = Date()
             XCTAssertTrue(player.play())
-            waitUntil { player.currentTime > 0.1 }
-            XCTAssertGreaterThan(player.currentTime, 0.1)
-            wait(for: [delegate.finished], timeout: 5)
+            // Progress, not an absolute: a saturated Windows runner advanced the null
+            // backend's clock 0.084 s in 3 s. Wait up to 10 s for 0.1 s of playback; failing
+            // that, the time must at least move on between two samples half a second apart.
+            waitUntil(10) { player.currentTime > 0.1 }
+            let first = player.currentTime
+            if first <= 0.1 {
+                Thread.sleep(forTimeInterval: 0.5)
+                let second = player.currentTime
+                XCTAssertGreaterThan(second, first, "playback advances (currentTime \(first) then \(second) after 0.5 s; \(Date().timeIntervalSince(started)) s since play)")
+            }
+            // 4 s of audio at rate 2 is 2 s of playback; the bound covers a runner whose
+            // clock barely moves.
+            wait(for: [delegate.finished], timeout: 30)
             let elapsed = Date().timeIntervalSince(started)
-            print("4 s at rate 2 finished after \(elapsed) s")
+            print("4 s at rate 2 finished after \(elapsed) s (currentTime after the first wait: \(first))")
             XCTAssertFalse(player.isPlaying)
             XCTAssertEqual(player.currentDevice, "null", "the player reports the device it plays on")
         }
