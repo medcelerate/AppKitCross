@@ -12,6 +12,15 @@ public enum Platform {
     static var windowButtonStyleOverride: PlatformWindowButtonStyle?
     static var windowButtonStyle: PlatformWindowButtonStyle { windowButtonStyleOverride ?? backend.windowButtonStyle }
 
+    /// `APPKITWIN_UNIFIED_CAPTION` / `AppKitCrossUnifiedCaption` (ADR-0053): off forces the
+    /// classic Windows caption on every window, on maps SwiftUI windows onto the unified
+    /// caption recipe. Tests pin a value through `unifiedCaptionSwitchOverride`.
+    static var unifiedCaptionSwitchOverride: PlatformFeatureSwitch?
+    static var unifiedCaptionSwitch: PlatformFeatureSwitch { unifiedCaptionSwitchOverride ?? unifiedCaptionSwitchFromProcess }
+    private static let unifiedCaptionSwitchFromProcess: PlatformFeatureSwitch = PlatformFeatureSwitch.read(
+        environment: ProcessInfo.processInfo.environment, infoDictionary: NSDocumentController._infoDictionary(),
+        environmentKey: Win32WindowPolicy.unifiedCaptionEnvironmentKey, plistKey: Win32WindowPolicy.unifiedCaptionPlistKey)
+
     private static func makeBackend() -> any PlatformBackend {
         #if os(Windows)
         // APPKITWIN_HOST_BACKEND=1 runs the headless host backend (unit tests), as on Linux.

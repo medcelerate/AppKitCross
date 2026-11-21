@@ -47,6 +47,14 @@ final class Win32Backend: PlatformBackend {
     /// Windows caption buttons at the top-right of custom-frame windows (ADR-0022).
     var windowButtonStyle: PlatformWindowButtonStyle { .caption }
 
+    /// The unified caption (ADR-0053): the recipe window draws its title bar as the caption
+    /// and the application menu in a row under it; `APPKITWIN_UNIFIED_CAPTION=0` forces the
+    /// classic caption, `=1` (or the Info.plist key) maps SwiftUI windows onto the recipe.
+    func usesUnifiedCaption(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome) -> Bool {
+        Win32WindowPolicy.captionMode(styleMask: styleMask, chrome: chrome, switch: Platform.unifiedCaptionSwitch) == .unified
+    }
+    var mapsSwiftUIWindowsToUnifiedCaption: Bool { Win32WindowPolicy.mapsSwiftUIWindows(switch: Platform.unifiedCaptionSwitch) }
+
     func setMainMenu(_ menu: PlatformMenu?, host: PlatformMenuHost?) {
         menuBar.install(menu, host: host, on: windows.compactMap { $0.wantsMenuBar ? $0.hwnd : nil })
     }
@@ -65,6 +73,8 @@ final class Win32Backend: PlatformBackend {
         // Per-monitor v2 DPI awareness; the manifest can set this too, in which case the
         // call simply fails and we keep the manifest's choice.
         _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        // Menus (the HMENU bar's pop-ups, the system menu) follow the system's dark theme.
+        Win32DarkMenu.enableAppDarkMode()
         d2dFactory = cd2d_factory_create()
         registerClasses()
         createMessageWindow()
