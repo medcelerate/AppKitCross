@@ -452,6 +452,8 @@ import CoreText
     /// The style in force: the app's, else overlay for SwiftUI-hosted content.
     @MainActor internal var _effectiveScrollerStyle: NSScroller.Style {
         if _scrollerStyleIsSet { return _scrollerStyle }
+        // The macOS control look (ADR-0051): every scroll view's scrollers overlay the content.
+        if _NSControlStyle.macControls { return .overlay }
         var v = superview
         while let s = v {
             if s is NSHostingRootHost { return NSScroller.preferredScrollerStyle }
@@ -466,12 +468,27 @@ import CoreText
     private static let _overlayFadeSteps = 6
     private static let _overlayFadeStepInterval: TimeInterval = 1.0 / 30
 
+    /// `APPKITWIN_TRACE_SCROLLERS=1` logs each overlay step (a pill that never shows, or
+    /// never goes, on a platform without a debugger to hand).
+    nonisolated(unsafe) private static let _traceScrollers: Bool = {
+        guard let v = ProcessInfo.processInfo.environment["APPKITWIN_TRACE_SCROLLERS"], !v.isEmpty, v != "0" else { return false }
+        return true
+    }()
+    @MainActor private func _traceOverlay(_ what: String) {
+        guard NSScrollView._traceScrollers else { return }
+        let doc = _contentView.documentView.map { String(describing: type(of: $0)) } ?? "no document"
+        let v = _verticalScroller.map { "v \($0.isHidden ? "hidden" : "shown") alpha \(String(format: "%.2f", $0.alphaValue)) \($0.frame)" } ?? "no v"
+        let h = _horizontalScroller.map { "h \($0.isHidden ? "hidden" : "shown") alpha \(String(format: "%.2f", $0.alphaValue)) \($0.frame)" } ?? "no h"
+        fputs("[scrollers] overlay \(what) \(doc) origin \(_contentView.bounds.origin) \(v) \(h)\n", stderr)
+    }
+
     /// Shows the overlay scrollers the content needs and starts their fade-out clock again.
     @MainActor private func _revealOverlayScrollers() {
         guard _effectiveScrollerStyle == .overlay else { return }
         _overlayRevealed = true
         _overlayFadeGeneration += 1
         _applyOverlayVisibility(alpha: 1)
+        _traceOverlay("shown")
         let generation = _overlayFadeGeneration
         Timer.scheduledTimer(withTimeInterval: NSScrollView._overlayHoldInterval, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?._fadeOverlayScrollers(generation: generation, step: 1) }
@@ -491,9 +508,11 @@ import CoreText
         if step >= steps {
             _overlayRevealed = false
             _applyOverlayVisibility(alpha: 1)
+            _traceOverlay("hidden")
             return
         }
         _applyOverlayVisibility(alpha: 1 - CGFloat(step) / CGFloat(steps))
+        if step == 1 { _traceOverlay("fading") }
         Timer.scheduledTimer(withTimeInterval: NSScrollView._overlayFadeStepInterval, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?._fadeOverlayScrollers(generation: generation, step: step + 1) }
         }

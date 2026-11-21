@@ -1303,6 +1303,10 @@ class _TextFieldPrimitive: _ControlPrimitive<NSTextField> {
         case .automatic where inGroupedForm: control.isBezeled = false; control.drawsBackground = false
         default: control.isBezeled = true; control.drawsBackground = true
         }
+        // A grouped form's value is plain text at rest and a bezeled field while it is
+        // edited, as in macOS's Settings (ADR-0051).
+        let bezelsWhileEditing = style == .automatic && inGroupedForm
+        if let cell = control.cell as? NSTextFieldCell, cell._bezelsWhileEditing != bezelsWhileEditing { cell._bezelsWhileEditing = bezelsWhileEditing }
         if style == .automatic, inGroupedForm, control.alignment != .right { control.alignment = .right }
     }
     override func sizeThatFits(_ proposal: ProposedViewSize, node: _ViewNode) -> CGSize {
