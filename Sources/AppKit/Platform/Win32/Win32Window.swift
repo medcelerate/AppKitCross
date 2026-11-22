@@ -1057,6 +1057,22 @@ final class Win32Window: PlatformWindow {
         owner?.platformWindowDispatch(e)
     }
 
+    /// Shows the window's system menu at a screen point with the states Windows gives its
+    /// own (`Win32WindowPolicy.systemMenuState`); the chosen command is posted as
+    /// WM_SYSCOMMAND, which DefWindowProc carries out (TrackPopupMenu of a system menu would
+    /// otherwise report it as WM_COMMAND).
+    private func showSystemMenu(_ hwnd: HWND, screenX x: Int32, screenY y: Int32) {
+        guard let menu = GetSystemMenu(hwnd, false) else { return }
+        let state = Win32WindowPolicy.systemMenuState(styleMask: _styleMask, zoomed: IsZoomed(hwnd))
+        for (id, enabled) in [(SC_RESTORE, state.restore), (SC_MOVE, state.move), (SC_SIZE, state.size), (SC_MINIMIZE, state.minimize), (SC_MAXIMIZE, state.maximize), (SC_CLOSE, state.close)] {
+            EnableMenuItem(menu, UINT(id), UINT(MF_BYCOMMAND) | UINT(enabled ? MF_ENABLED : MF_GRAYED))
+        }
+        SetMenuDefaultItem(menu, UINT(SC_CLOSE), 0)
+        var chosen = TrackPopupMenu(menu, UINT(TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, 0, hwnd, nil)
+        let command = withUnsafeBytes(of: &chosen) { $0.load(as: Int32.self) }      // TPM_RETURNCMD: the id in the BOOL
+        if command != 0 { PostMessageW(hwnd, UINT(WM_SYSCOMMAND), WPARAM(UInt32(bitPattern: command)), 0) }
+    }
+
     /// The pointer left the window (or moved into non-client area that is not a button):
     /// a move far outside, as the Wayland backend reports it, ends hover states.
     private func pointerLeft() {
@@ -1513,6 +1529,13 @@ final class Win32Window: PlatformWindow {
             if pressedButtons == 0 { ReleaseCapture() }
             nonClientMouse(.leftMouseUp, lParam, clickCount: 1)
             return 0
+        case WM_NCRBUTTONUP:
+            // The system menu on a right-click over the band (ADR-0053): DefWindowProc would
+            // re-hit-test the point as client on a custom frame and show nothing.
+            guard let hwnd, Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
+            let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF)), y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
+            showSystemMenu(hwnd, screenX: x, screenY: y)
+            return 0
         case WM_NCMOUSELEAVE:
             trackingNonClientLeave = false
             tracedNonClientHover = false
@@ -1556,6 +1579,9 @@ final class Win32Window: PlatformWindow {
                 systemThemeIsDark = dark
                 setDwmAttribute(Win32Window.dwmwaUseImmersiveDarkMode, dark ? 1 : 0)
                 Win32DarkMenu.themeChanged(hwnd)
+                // Every window's views re-resolve their dynamic colours and repaint (once per
+                // flip: the application ignores the repeats from its other windows).
+                NSApplication._shared?._systemAppearanceDidChange()
             }
             return nil
         case WM_INITMENUPOPUP:

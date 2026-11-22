@@ -966,6 +966,24 @@ import CoreText
     private static let _maxPendingDirtyRects = 12
 
     /// The window repaints as a whole (a new appearance, background, scale or layer host).
+    /// The system appearance flipped (NSApplication): the views of this window and of its
+    /// overlays hear it and every one repaints (layer-hosted views keep their rasterised
+    /// contents until marked, so the whole tree is marked).
+    internal func _systemAppearanceDidChange() {
+        guard _appearance == nil else { return }
+        func mark(_ v: NSView) {
+            v.needsDisplay = true
+            for s in v.subviews { mark(s) }
+        }
+        for root in [_contentView, _toolbarView, _accessoryHost, _menuBarRow, _windowButtons] as [NSView?] {
+            guard let root else { continue }
+            root._effectiveAppearanceDidChange()
+            mark(root)
+        }
+        _ensureWindowButtons()
+        _setNeedsDisplayWhole()
+    }
+
     internal func _setNeedsDisplayWhole() {
         _pendingDirtyRects = nil
         _GlassRegistry.noteInvalidation(in: self, from: nil, rect: nil)

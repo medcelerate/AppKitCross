@@ -586,6 +586,79 @@ final class UnifiedCaptionTests: XCTestCase, @unchecked Sendable {
             }
         }
     }
+
+    /// The system theme flips while running (PC round 2): the menu row, the band's title and
+    /// SwiftUI content re-resolve their colours and repaint; the hosted tree's colour scheme
+    /// follows. Switching back works the same way.
+    func testLiveAppearanceChangeReachesTheRowAndHostedContent() throws {
+        try MainActor.assumeIsolated {
+            try onWindows { host in
+                final class Box { var schemes: [ColorScheme] = [] }
+                struct Probe: View {
+                    @Environment(\.colorScheme) var scheme
+                    let box: Box
+                    var body: some View { box.schemes.append(scheme); return Color.clear.frame(minWidth: 100, minHeight: 50) }
+                }
+                let box = Box()
+                let (w, _) = recipeWindow()
+                defer { w.close(); host.systemAppearanceIsDark = false; NSApplication.shared._systemAppearanceDidChange() }
+                let hosting = NSHostingView(rootView: Probe(box: box))
+                hosting.frame = NSRect(x: 0, y: 0, width: 600, height: 300)
+                hosting.autoresizingMask = [.width, .height]
+                w.contentView = hosting
+                w.display()
+                let row = w._menuBarRow!
+                let scale = w.backingScaleFactor
+                @MainActor func rowPixel() throws -> [UInt8] {
+                    let img = try XCTUnwrap(w._captureContent())
+                    // The row's right end, clear of the titles: its background.
+                    let fromTop = CGFloat(img.height) / scale - row.frame.maxY + row.frame.height / 2
+                    let px = Int((row.frame.maxX - 20) * scale), py = Int(fromTop * scale)
+                    let d = _pixels(img); let i = py * img.bytesPerRow + px * 4
+                    return [d[i], d[i + 1], d[i + 2]]
+                }
+                let light = try rowPixel()
+                XCTAssertGreaterThan(Int(light[1]), 200, "a light window background behind the titles: \(light)")
+                XCTAssertEqual(box.schemes.last, .light)
+                XCTAssertFalse(hosting.effectiveAppearance.isDark)
+
+                host.systemAppearanceIsDark = true
+                NSApplication.shared._systemAppearanceDidChange()
+                XCTAssertTrue(w.effectiveAppearance.isDark)
+                XCTAssertTrue(hosting.effectiveAppearance.isDark)
+                w.display()
+                let dark = try rowPixel()
+                XCTAssertLessThan(Int(dark[1]), 90, "the row repainted dark: \(dark)")
+                XCTAssertEqual(box.schemes.last, .dark, "the hosted tree re-rendered for the dark scheme")
+
+                host.systemAppearanceIsDark = false
+                NSApplication.shared._systemAppearanceDidChange()
+                w.display()
+                XCTAssertGreaterThan(Int(try rowPixel()[1]), 200, "and back to light")
+                XCTAssertEqual(box.schemes.last, .light)
+                // A repeat with nothing changed is ignored (every window reports the same flip).
+                let before = box.schemes.count
+                NSApplication.shared._systemAppearanceDidChange()
+                XCTAssertEqual(box.schemes.count, before)
+            }
+        }
+    }
+
+    /// Right-click over the band shows the system menu with Windows' states (DefWindowProc
+    /// cannot, on a custom frame); nothing on a system frame or over the content.
+    func testSystemMenuOnRightClick() {
+        XCTAssertTrue(Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Win32WindowPolicy.HTCAPTION, customFrame: true))
+        XCTAssertTrue(Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Win32WindowPolicy.HTSYSMENU, customFrame: true))
+        XCTAssertFalse(Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Win32WindowPolicy.HTCLIENT, customFrame: true))
+        XCTAssertFalse(Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Win32WindowPolicy.HTMAXBUTTON, customFrame: true))
+        XCTAssertFalse(Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Win32WindowPolicy.HTCAPTION, customFrame: false), "a system frame's caption is DefWindowProc's")
+        let normal = Win32WindowPolicy.systemMenuState(styleMask: app.union(.fullSizeContentView), zoomed: false)
+        XCTAssertEqual(normal, .init(restore: false, move: true, size: true, minimize: true, maximize: true, close: true))
+        let zoomed = Win32WindowPolicy.systemMenuState(styleMask: app.union(.fullSizeContentView), zoomed: true)
+        XCTAssertEqual(zoomed, .init(restore: true, move: false, size: false, minimize: true, maximize: false, close: true))
+        let fixed = Win32WindowPolicy.systemMenuState(styleMask: [.titled, .closable, .fullSizeContentView], zoomed: false)
+        XCTAssertEqual(fixed, .init(restore: false, move: true, size: false, minimize: false, maximize: false, close: true))
+    }
 }
 
 private struct _CaptionedApp: App {
@@ -599,6 +672,8 @@ private struct _CaptionedApp: App {
         Settings { Text("Settings").frame(minWidth: 200, maxWidth: .infinity, minHeight: 80, maxHeight: .infinity) }
     }
 }
+
+
 
 /// The classic HMENU bar, two PC findings fixed alongside ADR-0053: a rebuild that repainted
 /// the bar on every item state change (a white flash while typing), and the bar staying

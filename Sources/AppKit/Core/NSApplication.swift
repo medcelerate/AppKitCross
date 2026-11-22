@@ -421,6 +421,23 @@ import CoreText
 
     private var _menuRebuildSuppressed = false
 
+    /// The system theme the views last drew for; nil before the first change.
+    private var _knownSystemAppearanceIsDark: Bool?
+
+    /// The system switched between light and dark while running (Windows:
+    /// WM_SETTINGCHANGE "ImmersiveColorSet"). `effectiveAppearance` reads the system
+    /// live, but the views resolve their dynamic colours only when they draw, and SwiftUI
+    /// only re-renders what it was told changed: every window without an appearance of its
+    /// own tells its views (`viewDidChangeEffectiveAppearance`, the hosting views' colour
+    /// scheme) and repaints whole.
+    @MainActor internal func _systemAppearanceDidChange() {
+        let dark = Platform.backend.systemAppearanceIsDark
+        guard dark != _knownSystemAppearanceIsDark else { return }
+        _knownSystemAppearanceIsDark = dark
+        guard _appearance == nil else { return }
+        for w in _windows { w._systemAppearanceDidChange() }
+    }
+
     /// Rebuilds the platform menu bar from the main menu tree.
     @MainActor internal func _mainMenuDidChange() {
         NSDocumentController._shared?._mainMenuDidChange()

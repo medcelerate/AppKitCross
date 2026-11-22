@@ -183,7 +183,7 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
         env.layoutDirection = userInterfaceLayoutDirection
         env.isKeyWindow = window?.isKeyWindow ?? false
         env.controlActiveState = env.isKeyWindow ? .key : (window != nil ? .active : .inactive)
-        env.isDarkAppearance = false
+        env.isDarkAppearance = effectiveAppearance.isDark      // the colour scheme the tree renders for
         _environment = env
         _root?.environmentDidChange(env)
     }
@@ -238,6 +238,16 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
     open override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         _refreshEnvironment()
+    }
+
+    /// Light or dark changed (the system theme, or an appearance set on an ancestor): the
+    /// tree re-renders for the new colour scheme.
+    open override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        _refreshEnvironment()
+        _root?.contentDidChange()
+        needsLayout = true
+        needsDisplay = true
     }
 
     // MARK: Events

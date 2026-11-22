@@ -216,6 +216,32 @@ public enum Win32WindowPolicy {
         customFrame && isCaptionButton(hitCode: hitCode)
     }
 
+    // MARK: The system menu on a custom frame
+
+    public static let HTSYSMENU: Int32 = 3
+
+    /// Whether a right-button release in the non-client area shows the window's system
+    /// menu. `DefWindowProc` does this for `HTCAPTION` on a system frame, but it hit-tests
+    /// the point again with its own geometry, which on a custom frame (the client area is
+    /// the whole window) is `HTCLIENT`: nothing appeared on a right-click over the band
+    /// (Alt+Space, which goes through the keyboard path, worked). So the window shows the
+    /// menu itself (`TrackPopupMenu` of `GetSystemMenu`) for the codes the band answers.
+    public static func showsSystemMenuOnRightClick(hitCode: Int32, customFrame: Bool) -> Bool {
+        customFrame && (hitCode == HTCAPTION || hitCode == HTSYSMENU)
+    }
+
+    /// Which system menu commands are enabled, as Windows sets them for its own frames:
+    /// Restore only when maximised; Move, Size and Maximize only when not; Size and
+    /// Maximize only on resizable windows, Minimize on miniaturizable ones.
+    public struct SystemMenuState: Equatable, Sendable {
+        public var restore: Bool, move: Bool, size: Bool, minimize: Bool, maximize: Bool, close: Bool
+    }
+    public static func systemMenuState(styleMask: NSWindow.StyleMask, zoomed: Bool) -> SystemMenuState {
+        let resizable = styleMask.contains(.resizable)
+        return SystemMenuState(restore: zoomed, move: !zoomed, size: !zoomed && resizable, minimize: styleMask.contains(.miniaturizable),
+                               maximize: !zoomed && resizable, close: styleMask.contains(.closable))
+    }
+
     // MARK: Showing (orderFront)
 
     public static let SW_SHOWNA: Int32 = 8

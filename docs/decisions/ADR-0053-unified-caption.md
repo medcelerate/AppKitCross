@@ -106,6 +106,30 @@ It behaves as Windows' bar does, and keyboard access is identical in effect:
 The row is not an accessibility element: the application's AXMenuBar (ADR-0013) already
 stands for the main menu, and UI Automation reaches the menus through it.
 
+### From the first PC round: the system menu and the live theme flip
+
+- **Right-click on the band.** `DefWindowProc` shows the system menu for `HTCAPTION` on a
+  right-button release, but it hit-tests the point again with its own geometry, which on
+  a custom frame (the client area is the whole window) is `HTCLIENT`: nothing appeared.
+  The window handles `WM_NCRBUTTONUP` for the codes the band answers
+  (`Win32WindowPolicy.showsSystemMenuOnRightClick`): `TrackPopupMenu` of `GetSystemMenu`
+  at the pointer with the states Windows gives its own frames (`systemMenuState`: Restore
+  only when maximised, Move/Size/Maximize only when not and only on resizable windows,
+  Minimize on miniaturizable ones), the chosen command posted as `WM_SYSCOMMAND`.
+- **The theme flipping while running.** `NSApplication.effectiveAppearance` reads the
+  system live and the views resolve their dynamic colours when they draw, but nothing told
+  them to draw again: after a flip only what Windows happened to repaint (the band, through
+  the frame redraw) changed, and the menu row, the band's title and every SwiftUI tree kept
+  their old colours (the hosting environment also pinned the colour scheme to light). Now
+  the Win32 window's `WM_SETTINGCHANGE` calls `NSApplication._systemAppearanceDidChange()`
+  (once per flip, whichever window reports first): every window without an appearance of
+  its own runs `viewDidChangeEffectiveAppearance` down its content and overlay trees,
+  marks every view for display (layer-hosted views keep their rasterised contents until
+  marked) and repaints whole; `NSHostingView` answers it by refreshing its environment
+  (`isDarkAppearance` now follows `effectiveAppearance`, so `@Environment(\.colorScheme)`
+  is right on a dark system from the start) and re-rendering its tree. This fixes the
+  classic windows' SwiftUI content too (Sibyl's Settings).
+
 ### The classic bar: dark theme and the flash while typing
 
 Two findings from the Windows PC about the classic (default) caption, fixed here because
@@ -147,7 +171,9 @@ window still draws to the top edge, as on macOS.
 ## Consequences
 
 - `ClassicMenuBarTests` (2): what counts as a change of the bar, and the dark theme's
-  colours per item state. `UnifiedCaptionTests` (16): the policy matrix (default classic, the recipe alone opts in,
+  colours per item state. `UnifiedCaptionTests` (18): the system menu policy and states, a
+  live light/dark/light flip repainting the row and re-rendering a hosted tree's colour
+  scheme, the policy matrix (default classic, the recipe alone opts in,
   `0` overrides, `1` maps SwiftUI), the switch reading, the system keys, the band layout
   with the row (frame growth, `contentLayoutRect`, button positions, toolbar insets), the
   hit regions and their `WM_NCHITTEST` codes, opting in and out at run time, the row
@@ -164,3 +190,11 @@ window still draws to the top edge, as on macOS.
 - Not done: the Windows underline-access-keys setting (the row underlines in keyboard
   mode only), menu bar accessibility of its own, a Linux in-window menu bar (X11 has no
   menu bar at all today; the row could serve there, a decision of its own).
+- Follow-ups from the PC, not this ADR's: the classic `HMENU` bar has no keyboard access
+  (Alt+F, F10 do nothing, also on main): the window procedure already hands every
+  `WM_SYSKEYDOWN`/`WM_SYSKEYUP` to `DefWindowProc` when it carries the bar, so the suspects
+  are the input method's `preTranslate` taking the keys before dispatch (ADR-0047) and the
+  `WM_SYSCHAR` drain in `key()`; it needs the PC to settle. Sibyl's brand accessory shows
+  its mark at 150 % but not at 100 %: on the host the accessory's layout is identical at
+  1x and 2x (hosting view and mark 24 × 24 at the same place), so the difference is in
+  drawing the template image at 1x on Windows, to be traced on the PC with the image path.
