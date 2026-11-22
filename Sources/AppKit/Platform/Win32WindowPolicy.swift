@@ -236,6 +236,13 @@ public enum Win32WindowPolicy {
     public struct SystemMenuState: Equatable, Sendable {
         public var restore: Bool, move: Bool, size: Bool, minimize: Bool, maximize: Bool, close: Bool
     }
+    /// Whether a `WM_COMMAND` id is a system command (`SC_SIZE` 0xF000 … `SC_RESTORE`
+    /// 0xF120, the range Windows reserves). `TrackPopupMenu` of the system menu reports the
+    /// chosen item as `WM_COMMAND`, not `WM_SYSCOMMAND`; the window forwards it. (The
+    /// `TPM_RETURNCMD` route is closed on the Swift WinSDK overlay: `BOOL` returns import as
+    /// a one-byte `Bool`, which loses the id and trapped when read as four bytes.)
+    public static func isSystemCommand(_ id: Int) -> Bool { id >= 0xF000 && id <= 0xF1FF }
+
     public static func systemMenuState(styleMask: NSWindow.StyleMask, zoomed: Bool) -> SystemMenuState {
         let resizable = styleMask.contains(.resizable)
         return SystemMenuState(restore: zoomed, move: !zoomed, size: !zoomed && resizable, minimize: styleMask.contains(.miniaturizable),

@@ -658,6 +658,12 @@ final class UnifiedCaptionTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(zoomed, .init(restore: true, move: false, size: false, minimize: true, maximize: false, close: true))
         let fixed = Win32WindowPolicy.systemMenuState(styleMask: [.titled, .closable, .fullSizeContentView], zoomed: false)
         XCTAssertEqual(fixed, .init(restore: false, move: true, size: false, minimize: false, maximize: false, close: true))
+        // The tracked system menu reports its choice as WM_COMMAND with the SC_ id; the port's
+        // own menu item ids are small and never in that range.
+        for sc in [0xF000, 0xF010, 0xF020, 0xF030, 0xF060, 0xF120] { XCTAssertTrue(Win32WindowPolicy.isSystemCommand(sc), String(sc, radix: 16)) }
+        XCTAssertFalse(Win32WindowPolicy.isSystemCommand(1))
+        XCTAssertFalse(Win32WindowPolicy.isSystemCommand(0xEFFF))
+        XCTAssertFalse(Win32WindowPolicy.isSystemCommand(0xF200))
     }
 }
 

@@ -115,7 +115,11 @@ stands for the main menu, and UI Automation reaches the menus through it.
   (`Win32WindowPolicy.showsSystemMenuOnRightClick`): `TrackPopupMenu` of `GetSystemMenu`
   at the pointer with the states Windows gives its own frames (`systemMenuState`: Restore
   only when maximised, Move/Size/Maximize only when not and only on resizable windows,
-  Minimize on miniaturizable ones), the chosen command posted as `WM_SYSCOMMAND`.
+  Minimize on miniaturizable ones). The chosen item arrives as `WM_COMMAND` during the
+  call (a system menu tracked this way never sends `WM_SYSCOMMAND`), and the window
+  forwards it as `WM_SYSCOMMAND` (`isSystemCommand`). `TPM_RETURNCMD` is not an option on
+  the Swift WinSDK overlay: `BOOL` returns import as a one-byte `Bool`, which loses the id
+  (and reading four bytes from it crashed on the PC's first round 2).
 - **The theme flipping while running.** `NSApplication.effectiveAppearance` reads the
   system live and the views resolve their dynamic colours when they draw, but nothing told
   them to draw again: after a flip only what Windows happened to repaint (the band, through

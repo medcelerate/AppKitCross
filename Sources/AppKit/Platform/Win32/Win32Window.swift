@@ -1058,9 +1058,11 @@ final class Win32Window: PlatformWindow {
     }
 
     /// Shows the window's system menu at a screen point with the states Windows gives its
-    /// own (`Win32WindowPolicy.systemMenuState`); the chosen command is posted as
-    /// WM_SYSCOMMAND, which DefWindowProc carries out (TrackPopupMenu of a system menu would
-    /// otherwise report it as WM_COMMAND).
+    /// own (`Win32WindowPolicy.systemMenuState`). TrackPopupMenu of a system menu reports the
+    /// chosen item as WM_COMMAND during the call; `WM_COMMAND` below forwards it as
+    /// WM_SYSCOMMAND for DefWindowProc to carry out. (TPM_RETURNCMD cannot be used: the
+    /// Swift WinSDK overlay imports the BOOL return as a one-byte Bool, so the id is lost.)
+    private var trackingSystemMenu = false
     private func showSystemMenu(_ hwnd: HWND, screenX x: Int32, screenY y: Int32) {
         guard let menu = GetSystemMenu(hwnd, false) else { return }
         let state = Win32WindowPolicy.systemMenuState(styleMask: _styleMask, zoomed: IsZoomed(hwnd))
@@ -1068,9 +1070,9 @@ final class Win32Window: PlatformWindow {
             EnableMenuItem(menu, UINT(id), UINT(MF_BYCOMMAND) | UINT(enabled ? MF_ENABLED : MF_GRAYED))
         }
         SetMenuDefaultItem(menu, UINT(SC_CLOSE), 0)
-        var chosen = TrackPopupMenu(menu, UINT(TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, 0, hwnd, nil)
-        let command = withUnsafeBytes(of: &chosen) { $0.load(as: Int32.self) }      // TPM_RETURNCMD: the id in the BOOL
-        if command != 0 { PostMessageW(hwnd, UINT(WM_SYSCOMMAND), WPARAM(UInt32(bitPattern: command)), 0) }
+        trackingSystemMenu = true
+        _ = TrackPopupMenu(menu, UINT(TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, 0, hwnd, nil)
+        trackingSystemMenu = false
     }
 
     /// The pointer left the window (or moved into non-client area that is not a button):
@@ -1588,6 +1590,12 @@ final class Win32Window: PlatformWindow {
             if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
             return 0
         case WM_COMMAND:
+            // A system menu the window tracks itself (the band's right-click) reports its
+            // choice here: on to DefWindowProc as the system command it is.
+            if trackingSystemMenu, lParam == 0, Win32WindowPolicy.isSystemCommand(Int(wParam & 0xFFFF)), let hwnd {
+                PostMessageW(hwnd, UINT(WM_SYSCOMMAND), wParam & 0xFFFF, 0)
+                return 0
+            }
             if (wParam >> 16) & 0xFFFF == 0, lParam == 0, backend.menuBar.command(Int(wParam & 0xFFFF)) { return 0 }
             return nil
         case WM_GETOBJECT:
