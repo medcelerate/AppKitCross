@@ -115,11 +115,14 @@ stands for the main menu, and UI Automation reaches the menus through it.
   (`Win32WindowPolicy.showsSystemMenuOnRightClick`): `TrackPopupMenu` of `GetSystemMenu`
   at the pointer with the states Windows gives its own frames (`systemMenuState`: Restore
   only when maximised, Move/Size/Maximize only when not and only on resizable windows,
-  Minimize on miniaturizable ones). The chosen item arrives as `WM_COMMAND` during the
-  call (a system menu tracked this way never sends `WM_SYSCOMMAND`), and the window
-  forwards it as `WM_SYSCOMMAND` (`isSystemCommand`). `TPM_RETURNCMD` is not an option on
-  the Swift WinSDK overlay: `BOOL` returns import as a one-byte `Bool`, which loses the id
-  (and reading four bytes from it crashed on the PC's first round 2).
+  Minimize on miniaturizable ones), the chosen command posted as `WM_SYSCOMMAND`.
+  `TrackPopupMenu` runs through a one-line C shim (`cd2d_track_popup_menu_command`,
+  `TPM_RETURNCMD`), because the Swift WinSDK overlay imports its `BOOL` return as a
+  one-byte `Bool`: the id was lost, and reading four bytes from it crashed (PC round 2).
+  Without `TPM_RETURNCMD` the menu posts a `WM_COMMAND` with the SC_ id after the call has
+  returned (PC round 3, through the run loop's `DispatchMessageWorker`), so a flag around
+  the call cannot catch it; `WM_COMMAND` still forwards any id in the system range
+  (`isSystemCommand`) as `WM_SYSCOMMAND`, since the port's menu ids never reach it.
 - **The theme flipping while running.** `NSApplication.effectiveAppearance` reads the
   system live and the views resolve their dynamic colours when they draw, but nothing told
   them to draw again: after a flip only what Windows happened to repaint (the band, through

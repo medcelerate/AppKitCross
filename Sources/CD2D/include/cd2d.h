@@ -427,6 +427,11 @@ void cd2d_text_layout_release(CD2DTextLayout *layout);
 /// Draws with the layout's top-left at (x, y) in the target's current transform.
 void cd2d_target_draw_text_layout(CD2DTarget *target, CD2DTextLayout *layout, float x, float y, CD2DBrush *brush);
 
+/// TrackPopupMenu with TPM_RETURNCMD: the chosen command id, 0 when dismissed (ADR-0053,
+/// the band's system menu). Here in C because the Swift WinSDK overlay imports the BOOL
+/// return as a one-byte Bool and loses the id. `menu` and `hwnd` are HMENU / HWND as void*.
+int cd2d_track_popup_menu_command(void *menu, unsigned int flags, int x, int y, void *hwnd);
+
 #ifdef __cplusplus
 }
 #endif

@@ -395,4 +395,8 @@ int32_t cd2d_shell_process_architecture(uint32_t pid) {
 
 void cd2d_shell_free(void *buffer) { free(buffer); }
 
+int cd2d_track_popup_menu_command(void *menu, unsigned int flags, int x, int y, void *hwnd) {
+    return (int)TrackPopupMenu((HMENU)menu, flags | TPM_RETURNCMD, x, y, 0, (HWND)hwnd, nullptr);
+}
+
 } // extern "C"

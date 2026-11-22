@@ -1058,11 +1058,11 @@ final class Win32Window: PlatformWindow {
     }
 
     /// Shows the window's system menu at a screen point with the states Windows gives its
-    /// own (`Win32WindowPolicy.systemMenuState`). TrackPopupMenu of a system menu reports the
-    /// chosen item as WM_COMMAND during the call; `WM_COMMAND` below forwards it as
-    /// WM_SYSCOMMAND for DefWindowProc to carry out. (TPM_RETURNCMD cannot be used: the
-    /// Swift WinSDK overlay imports the BOOL return as a one-byte Bool, so the id is lost.)
-    private var trackingSystemMenu = false
+    /// own (`Win32WindowPolicy.systemMenuState`); the chosen command is posted as
+    /// WM_SYSCOMMAND, which DefWindowProc carries out. TrackPopupMenu runs through the C shim
+    /// (`cd2d_track_popup_menu_command`, TPM_RETURNCMD): the Swift WinSDK overlay imports its
+    /// BOOL return as a one-byte Bool, which lost the id; and without TPM_RETURNCMD the menu
+    /// posts its WM_COMMAND after the call returns, where no flag can tell it apart.
     private func showSystemMenu(_ hwnd: HWND, screenX x: Int32, screenY y: Int32) {
         guard let menu = GetSystemMenu(hwnd, false) else { return }
         let state = Win32WindowPolicy.systemMenuState(styleMask: _styleMask, zoomed: IsZoomed(hwnd))
@@ -1070,9 +1070,9 @@ final class Win32Window: PlatformWindow {
             EnableMenuItem(menu, UINT(id), UINT(MF_BYCOMMAND) | UINT(enabled ? MF_ENABLED : MF_GRAYED))
         }
         SetMenuDefaultItem(menu, UINT(SC_CLOSE), 0)
-        trackingSystemMenu = true
-        _ = TrackPopupMenu(menu, UINT(TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, 0, hwnd, nil)
-        trackingSystemMenu = false
+        let command = cd2d_track_popup_menu_command(UnsafeMutableRawPointer(menu), UInt32(TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, UnsafeMutableRawPointer(hwnd))
+        if NSView._traceInvalidation { NSView._trace("win32 system menu '\(_title)' chose 0x\(String(command, radix: 16))") }
+        if command != 0 { PostMessageW(hwnd, UINT(WM_SYSCOMMAND), WPARAM(UInt32(bitPattern: command)), 0) }
     }
 
     /// The pointer left the window (or moved into non-client area that is not a button):
@@ -1590,9 +1590,9 @@ final class Win32Window: PlatformWindow {
             if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
             return 0
         case WM_COMMAND:
-            // A system menu the window tracks itself (the band's right-click) reports its
-            // choice here: on to DefWindowProc as the system command it is.
-            if trackingSystemMenu, lParam == 0, Win32WindowPolicy.isSystemCommand(Int(wParam & 0xFFFF)), let hwnd {
+            // A system command id (a system menu tracked without TPM_RETURNCMD would post one
+            // after the call) is never the HMENU bar's: on to DefWindowProc as WM_SYSCOMMAND.
+            if lParam == 0, Win32WindowPolicy.isSystemCommand(Int(wParam & 0xFFFF)), let hwnd {
                 PostMessageW(hwnd, UINT(WM_SYSCOMMAND), wParam & 0xFFFF, 0)
                 return 0
             }
