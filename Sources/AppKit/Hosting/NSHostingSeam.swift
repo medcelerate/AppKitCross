@@ -123,8 +123,11 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
     public static let standardBounds: NSHostingSizingOptions = [.minSize, .intrinsicContentSize, .maxSize]
 }
 
+/// Where a hosting view lays its tree out (tests reach it without knowing the content type).
+@MainActor public protocol _NSHostingLayoutReporting: AnyObject { var _layoutBounds: NSRect { get } }
+
 /// - SeeAlso: https://developer.apple.com/documentation/swiftui/nshostingview
-@MainActor open class NSHostingView<Content: NSHostingContent>: NSView, NSHostingRootHost {
+@MainActor open class NSHostingView<Content: NSHostingContent>: NSView, NSHostingRootHost, _NSHostingLayoutReporting {
     private var _rootView: Content
     private var _root: (any NSHostingRoot)?
     private var _sizingOptions: NSHostingSizingOptions = .standardBounds
@@ -180,7 +183,7 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
         env.layoutDirection = userInterfaceLayoutDirection
         env.isKeyWindow = window?.isKeyWindow ?? false
         env.controlActiveState = env.isKeyWindow ? .key : (window != nil ? .active : .inactive)
-        env.isDarkAppearance = false
+        env.isDarkAppearance = effectiveAppearance.isDark      // the colour scheme the tree renders for
         _environment = env
         _root?.environmentDidChange(env)
     }
@@ -201,7 +204,16 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
 
     open override func layout() {
         super.layout()
-        _root?.layout(in: bounds)
+        _root?.layout(in: _layoutBounds)
+    }
+
+    /// Where the hosted tree is laid out: the bounds, less the toolbar band and title bar
+    /// accessories over the top of a window whose content covers the title bar (the safe
+    /// area SwiftUI keeps clear of on macOS, `NSWindow.contentLayoutRect`).
+    public var _layoutBounds: NSRect {
+        guard let w = window, w.contentView === self, w.styleMask.contains(.fullSizeContentView) else { return bounds }
+        let r = convert(w.contentLayoutRect, from: nil).intersection(bounds)
+        return r.isNull || r.isEmpty ? bounds : r
     }
 
     open override func draw(_ dirtyRect: NSRect) {
@@ -226,6 +238,16 @@ public struct NSHostingSizingOptions: OptionSet, Sendable {
     open override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         _refreshEnvironment()
+    }
+
+    /// Light or dark changed (the system theme, or an appearance set on an ancestor): the
+    /// tree re-renders for the new colour scheme.
+    open override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        _refreshEnvironment()
+        _root?.contentDidChange()
+        needsLayout = true
+        needsDisplay = true
     }
 
     // MARK: Events

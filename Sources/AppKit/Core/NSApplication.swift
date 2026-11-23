@@ -421,11 +421,29 @@ import CoreText
 
     private var _menuRebuildSuppressed = false
 
+    /// The system theme the views last drew for; nil before the first change.
+    private var _knownSystemAppearanceIsDark: Bool?
+
+    /// The system switched between light and dark while running (Windows:
+    /// WM_SETTINGCHANGE "ImmersiveColorSet"). `effectiveAppearance` reads the system
+    /// live, but the views resolve their dynamic colours only when they draw, and SwiftUI
+    /// only re-renders what it was told changed: every window without an appearance of its
+    /// own tells its views (`viewDidChangeEffectiveAppearance`, the hosting views' colour
+    /// scheme) and repaints whole.
+    @MainActor internal func _systemAppearanceDidChange() {
+        let dark = Platform.backend.systemAppearanceIsDark
+        guard dark != _knownSystemAppearanceIsDark else { return }
+        _knownSystemAppearanceIsDark = dark
+        guard _appearance == nil else { return }
+        for w in _windows { w._systemAppearanceDidChange() }
+    }
+
     /// Rebuilds the platform menu bar from the main menu tree.
     @MainActor internal func _mainMenuDidChange() {
         NSDocumentController._shared?._mainMenuDidChange()
         guard !_menuRebuildSuppressed else { return }
         Platform.backend.setMainMenu(_mainMenu?._platformMenu(), host: self)
+        for w in windows { w._applicationMenuDidChange() }
     }
 
     /// Runs `body` without rebuilding the native menu bar for item changes it makes
@@ -735,6 +753,9 @@ import CoreText
         NSPopover._noteEvent(event)
         // Menu key equivalents take precedence over the key window's handling, as in AppKit.
         if event.type == .keyDown, let menu = _mainMenu, menu.performKeyEquivalent(with: event) { return }
+        // The menu bar row of a unified caption (ADR-0053): Alt+letter, F10, an Alt tap and
+        // the keys of its keyboard mode.
+        if _NSMenuBarRowView._handleApplicationEvent(event) { return }
         if let w = event.window { w.sendEvent(event) } else if event.type == .keyDown || event.type == .keyUp || event.type == .flagsChanged {
             keyWindow?.sendEvent(event)
         }

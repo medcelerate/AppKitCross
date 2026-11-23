@@ -95,6 +95,14 @@ final class HostBackend: PlatformBackend {
     /// Test hook: the style of the standard buttons the package draws (ADR-0022). Windows
     /// answers `.caption`; the host defaults to the traffic lights of macOS and Linux.
     var windowButtonStyle: PlatformWindowButtonStyle = .trafficLights
+    /// Test hook: the host stands in for Win32 and draws the unified caption (ADR-0053) for
+    /// windows the Win32 policy says opt in; off (the default, as on macOS and Linux) no
+    /// window has one.
+    var drawsUnifiedCaption = false
+    func usesUnifiedCaption(styleMask: NSWindow.StyleMask, chrome: PlatformWindowChrome) -> Bool {
+        drawsUnifiedCaption && Win32WindowPolicy.captionMode(styleMask: styleMask, chrome: chrome, switch: Platform.unifiedCaptionSwitch) == .unified
+    }
+    var mapsSwiftUIWindowsToUnifiedCaption: Bool { drawsUnifiedCaption && Win32WindowPolicy.mapsSwiftUIWindows(switch: Platform.unifiedCaptionSwitch) }
 
     /// The host has no native dialog: the panels draw themselves. Tests may install one
     /// (`HostFileDialog` records the options and answers a canned result).

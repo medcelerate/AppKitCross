@@ -380,7 +380,8 @@ public final class _AppRunner {
         guard let make = settingsContent else { return }
         // The content knows it is the Settings scene's (a TabView shows the Settings tab bar).
         let hosting = NSHostingView(rootView: AnyView(make().environment(\._isSettingsScene, true)))
-        var geometry = _windowGeometry(for: hosting, defaultSize: nil, resizability: .contentSize, hidesTitleBar: false)
+        // Settings keeps the classic caption: on Windows it carries no menu bar either.
+        var geometry = _windowGeometry(for: hosting, defaultSize: nil, resizability: .contentSize, hidesTitleBar: false, unifiedCaption: false)
         geometry.style.remove(.miniaturizable)
         let window = _SettingsWindow(contentRect: NSRect(origin: .zero, size: geometry.size), styleMask: geometry.style, backing: .buffered, defer: false)
         window.title = "\(applicationName) Settings"
@@ -440,6 +441,10 @@ public final class _AppRunner {
         }
         observeClose(of: window)
         if hidesTitleBar { window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden }
+        // The unified caption (ADR-0053, `APPKITWIN_UNIFIED_CAPTION=1` or the Info.plist
+        // key on Windows): the scene window takes the recipe of a custom unified title bar,
+        // its title staying visible in the band.
+        else if geometry.unifiedCaption { window.titlebarAppearsTransparent = true }
         window.toolbarStyle = toolbarStyle
         hosting.frame = NSRect(origin: .zero, size: geometry.size)
         hosting.autoresizingMask = [.width, .height]
@@ -454,12 +459,18 @@ public final class _AppRunner {
         var ideal: NSSize
         var contentMin: NSSize
         var contentMax: NSSize?
+        /// The window draws its unified title bar as the caption (ADR-0053).
+        var unifiedCaption = false
     }
 
     /// The opening size, style mask and size range of a window hosting `hosting`, from the
     /// scene modifiers (shared by scene windows and the Settings window).
-    func _windowGeometry(for hosting: NSHostingView<some View>, defaultSize: CGSize?, resizability: WindowResizability, hidesTitleBar: Bool) -> _WindowGeometry {
+    func _windowGeometry(for hosting: NSHostingView<some View>, defaultSize: CGSize?, resizability: WindowResizability, hidesTitleBar: Bool,
+                         unifiedCaption: Bool? = nil) -> _WindowGeometry {
         let pendingDefaultSize = defaultSize, pendingResizability = resizability, pendingHidesTitleBar = hidesTitleBar
+        // Scene windows take the unified caption when the switch is on (ADR-0053); callers
+        // pass false for windows that keep the classic caption whatever the switch (Settings).
+        let unifiedCaption = unifiedCaption ?? Platform.backend.mapsSwiftUIWindowsToUnifiedCaption
         // A content size that is not finite (a List proposing an infinite height to its
         // window) is no size for a window: that component falls back to the default size,
         // or the 300×200 floor, before it can reach a frame or a minimum (Sibyl's main
@@ -486,7 +497,7 @@ public final class _AppRunner {
             size.height = min(size.height, max(200, visible.height - 40))
         }
         var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
-        if pendingHidesTitleBar { style.insert(.fullSizeContentView) }
+        if pendingHidesTitleBar || unifiedCaption { style.insert(.fullSizeContentView) }
         // `.contentSize`: the window's size range is the content's (its minimum and
         // maximum frame sizes), so content with a minimum and no maximum still resizes;
         // only content of one size gives a fixed window with no resize frame and no zoom.
@@ -506,7 +517,7 @@ public final class _AppRunner {
             size = s
             if contentMin == contentMax { style.remove(.resizable) }
         }
-        return _WindowGeometry(size: size, style: style, ideal: ideal, contentMin: contentMin, contentMax: contentMax)
+        return _WindowGeometry(size: size, style: style, ideal: ideal, contentMin: contentMin, contentMax: contentMax, unifiedCaption: unifiedCaption)
     }
 
     private var closeObservers: [any NSObjectProtocol] = []

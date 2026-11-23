@@ -139,6 +139,7 @@ final class Win32Window: PlatformWindow {
         }
         guard let hwnd else { return }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, LONG_PTR(Int(bitPattern: Unmanaged.passUnretained(self).toOpaque())))
+        Win32DarkMenu.allowDarkMode(for: hwnd)
         dpi = GetDpiForWindow(hwnd)
         if CGFloat(dpi) / 96 != scale {
             // The window opened on a monitor whose DPI is not the system's: per-monitor-v2
@@ -445,6 +446,10 @@ final class Win32Window: PlatformWindow {
     }
 
     private var hasMenuBar: Bool { wantsMenuBar && backend.menuBar.spec != nil }
+    /// The system app theme at the last check (WM_SETTINGCHANGE refreshes it): a dark theme
+    /// owner-draws the HMENU bar (Win32DarkMenu.swift), which user32 would paint light.
+    private var systemThemeIsDark = Win32Window.systemAppThemeIsDark()
+    private var drawsMenuBarItself: Bool { Win32WindowPolicy.drawsMenuBarItself(systemAppThemeIsDark: systemThemeIsDark, hasNativeMenuBar: hasMenuBar) }
     /// Whether a system key message (Alt held, or F10) is the menu bar's: the window carries
     /// the native menu bar and Ctrl is not down.
     private var ownsMenuKeyboard: Bool { hasMenuBar && GetKeyState(VK_CONTROL) >= 0 }
@@ -1052,6 +1057,24 @@ final class Win32Window: PlatformWindow {
         owner?.platformWindowDispatch(e)
     }
 
+    /// Shows the window's system menu at a screen point with the states Windows gives its
+    /// own (`Win32WindowPolicy.systemMenuState`); the chosen command is posted as
+    /// WM_SYSCOMMAND, which DefWindowProc carries out. TrackPopupMenu runs through the C shim
+    /// (`cd2d_track_popup_menu_command`, TPM_RETURNCMD): the Swift WinSDK overlay imports its
+    /// BOOL return as a one-byte Bool, which lost the id; and without TPM_RETURNCMD the menu
+    /// posts its WM_COMMAND after the call returns, where no flag can tell it apart.
+    private func showSystemMenu(_ hwnd: HWND, screenX x: Int32, screenY y: Int32) {
+        guard let menu = GetSystemMenu(hwnd, false) else { return }
+        let state = Win32WindowPolicy.systemMenuState(styleMask: _styleMask, zoomed: IsZoomed(hwnd))
+        for (id, enabled) in [(SC_RESTORE, state.restore), (SC_MOVE, state.move), (SC_SIZE, state.size), (SC_MINIMIZE, state.minimize), (SC_MAXIMIZE, state.maximize), (SC_CLOSE, state.close)] {
+            EnableMenuItem(menu, UINT(id), UINT(MF_BYCOMMAND) | UINT(enabled ? MF_ENABLED : MF_GRAYED))
+        }
+        SetMenuDefaultItem(menu, UINT(SC_CLOSE), 0)
+        let command = cd2d_track_popup_menu_command(UnsafeMutableRawPointer(menu), UInt32(TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_TOPALIGN), x, y, UnsafeMutableRawPointer(hwnd))
+        if NSView._traceInvalidation { NSView._trace("win32 system menu '\(_title)' chose 0x\(String(command, radix: 16))") }
+        if command != 0 { PostMessageW(hwnd, UINT(WM_SYSCOMMAND), WPARAM(UInt32(bitPattern: command)), 0) }
+    }
+
     /// The pointer left the window (or moved into non-client area that is not a button):
     /// a move far outside, as the Wayland backend reports it, ends hover states.
     private func pointerLeft() {
@@ -1508,6 +1531,13 @@ final class Win32Window: PlatformWindow {
             if pressedButtons == 0 { ReleaseCapture() }
             nonClientMouse(.leftMouseUp, lParam, clickCount: 1)
             return 0
+        case WM_NCRBUTTONUP:
+            // The system menu on a right-click over the band (ADR-0053): DefWindowProc would
+            // re-hit-test the point as client on a custom frame and show nothing.
+            guard let hwnd, Win32WindowPolicy.showsSystemMenuOnRightClick(hitCode: Int32(truncatingIfNeeded: wParam), customFrame: usesCustomFrame) else { return nil }
+            let x = Int32(Int16(truncatingIfNeeded: lParam & 0xFFFF)), y = Int32(Int16(truncatingIfNeeded: (lParam >> 16) & 0xFFFF))
+            showSystemMenu(hwnd, screenX: x, screenY: y)
+            return 0
         case WM_NCMOUSELEAVE:
             trackingNonClientLeave = false
             tracedNonClientHover = false
@@ -1531,10 +1561,41 @@ final class Win32Window: PlatformWindow {
                 return 1
             }
             return nil
+        case Win32DarkMenu.WM_UAHDRAWMENU:
+            guard let hwnd, drawsMenuBarItself else { return nil }
+            return Win32DarkMenu.drawMenuBar(hwnd, lParam, theme: Win32WindowPolicy.darkMenuBarTheme)
+        case Win32DarkMenu.WM_UAHDRAWMENUITEM:
+            guard drawsMenuBarItself else { return nil }
+            return Win32DarkMenu.drawMenuBarItem(lParam, theme: Win32WindowPolicy.darkMenuBarTheme)
+        case WM_NCPAINT, WM_NCACTIVATE:
+            // DefWindowProc paints the frame; the dark bar's underline goes over it.
+            guard let hwnd, drawsMenuBarItself else { return nil }
+            let result = DefWindowProcW(hwnd, msg, wParam, lParam)
+            Win32DarkMenu.paintUnderline(hwnd, theme: Win32WindowPolicy.darkMenuBarTheme)
+            return result
+        case WM_SETTINGCHANGE:
+            // "ImmersiveColorSet": the app theme flipped. The caption's dark-mode attribute,
+            // the menu themes and the owner-drawn bar follow at once.
+            let dark = Win32Window.systemAppThemeIsDark()
+            if dark != systemThemeIsDark, let hwnd {
+                systemThemeIsDark = dark
+                setDwmAttribute(Win32Window.dwmwaUseImmersiveDarkMode, dark ? 1 : 0)
+                Win32DarkMenu.themeChanged(hwnd)
+                // Every window's views re-resolve their dynamic colours and repaint (once per
+                // flip: the application ignores the repeats from its other windows).
+                NSApplication._shared?._systemAppearanceDidChange()
+            }
+            return nil
         case WM_INITMENUPOPUP:
             if let menu = HMENU(bitPattern: Int(wParam)) { backend.menuBar.willOpen(menu) }
             return 0
         case WM_COMMAND:
+            // A system command id (a system menu tracked without TPM_RETURNCMD would post one
+            // after the call) is never the HMENU bar's: on to DefWindowProc as WM_SYSCOMMAND.
+            if lParam == 0, Win32WindowPolicy.isSystemCommand(Int(wParam & 0xFFFF)), let hwnd {
+                PostMessageW(hwnd, UINT(WM_SYSCOMMAND), wParam & 0xFFFF, 0)
+                return 0
+            }
             if (wParam >> 16) & 0xFFFF == 0, lParam == 0, backend.menuBar.command(Int(wParam & 0xFFFF)) { return 0 }
             return nil
         case WM_GETOBJECT:
@@ -1717,6 +1778,13 @@ final class Win32Window: PlatformWindow {
             // AppKit for its modifier flags.
             if Int32(msg) == WM_SYSKEYDOWN, ownsMenuKeyboard {
                 if Int32(truncatingIfNeeded: wParam) == VK_MENU { key(.keyDown, wParam, lParam) }
+                return nil
+            }
+            // No native menu bar (a custom frame, a unified caption, ADR-0053): Alt+Space
+            // still opens the system menu and Alt+F4 still closes, through DefWindowProc (the
+            // WM_SYSCHAR TranslateMessage posted stays queued for it); the other Alt
+            // combinations are AppKit's (the menu row's mnemonics).
+            if Int32(msg) == WM_SYSKEYDOWN, Win32WindowPolicy.passesSystemKeyToDefWindowProc(virtualKey: Int32(truncatingIfNeeded: wParam), hasNativeMenuBar: false) {
                 return nil
             }
             key(.keyDown, wParam, lParam)

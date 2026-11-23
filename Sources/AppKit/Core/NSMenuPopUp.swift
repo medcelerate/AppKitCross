@@ -438,6 +438,9 @@ final class _NSMenuTracker {
 
     var rootMenu: NSMenu? { levels.first?.menu }
     var highlightedItem: NSMenuItem? { levels.last?.window.menuView.highlightedItem }
+    /// The menu bar row that opened the root menu (ADR-0053): the pointer crossing to
+    /// another of its titles, or Left/Right at the root, switches menus through it.
+    weak var menuBarRow: _NSMenuBarRowView?
 
     /// Opens `menu` and starts tracking. The completion runs after the windows close and
     /// the chosen item's action has been sent.
@@ -689,13 +692,26 @@ final class _NSMenuTracker {
                 }
                 // Levels deeper than the hovered one close only when another item is hovered
                 // (handled by setHighlight); shallower levels keep the parent item highlighted.
+            } else if let bar = menuBarRow, let i = bar.titleIndex(atScreenPoint: p), i != bar.openIndex, bar.pointerMoved(toScreen: p) {
+                // Over another title of the menu bar row, after a real move: its menu opens
+                // instead, as on Windows and macOS alike. (A re-reported position after a
+                // keyboard switch is not a move.)
+                bar.openMenu(at: i, openedWithMouseDown: false)
+                return
             } else if let last = levels.indices.last, levels[last].window.menuView.highlightedRow != nil,
                       !(levels[last].window.menuView.highlightedItem?.hasSubmenu ?? false) {
                 levels[last].window.menuView.highlightedRow = nil
             }
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             let p = screenPoint(of: event)
-            if hit(p) == nil { cancel() }
+            if hit(p) == nil {
+                if let bar = menuBarRow, let i = bar.titleIndex(atScreenPoint: p) {
+                    // A click on the open menu's title closes it; on another title, switches.
+                    if i == bar.openIndex { bar.closeMenu() } else { bar.openMenu(at: i, openedWithMouseDown: true) }
+                    return
+                }
+                cancel()
+            }
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let p = screenPoint(of: event)
             if openedWithMouseDown && !sawFirstMouseUp && !movedSinceOpen {
@@ -742,10 +758,13 @@ final class _NSMenuTracker {
             if levels.count > 1 { closeLevels(from: levels.count - 1) } else { cancel() }
         case 123:                              // left
             if levels.count > 1 { closeLevels(from: levels.count - 1) }
+            else if let bar = menuBarRow { bar.openAdjacentMenu(-1) }
         case 124:                              // right
             if let r = view.highlightedRow, rows[r].item.hasSubmenu {
                 openSubmenu(ofRow: r, in: last)
                 if let deeper = levels.indices.last, deeper != last { keyDown(NSEvent._menuKey(125)) }
+            } else if let bar = menuBarRow {
+                bar.openAdjacentMenu(1)
             }
         case 36, 76, 49:                       // return, enter, space
             if let r = view.highlightedRow {

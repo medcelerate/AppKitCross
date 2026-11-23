@@ -65,6 +65,7 @@ import CoreText
         var overlays: [NSView] = []
         if let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded(); overlays.append(t) }
         if let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded(); overlays.append(a) }
+        if let m = _menuBarRow, !m.isHidden { m.layoutSubtreeIfNeeded(); overlays.append(m) }
         if let buttons = _windowButtons, _showsWindowButtons { overlays.append(buttons) }
         for overlay in overlays {
             guard let layer = overlay.layer else { continue }
@@ -160,6 +161,8 @@ import CoreText
             v.style = _windowButtonStyle
             v.layout(in: top, styleMask: _styleMask, isKey: _isKey)
             v.isHidden = !_showsWindowButtons
+            // A unified caption with no toolbar to show the title shows it in the band.
+            v.titleText = _usesUnifiedCaption && _toolbarMetrics == nil && _titleVisibility == .visible ? _title : nil
         }
         _layoutToolbarView()
         return _windowButtons
@@ -192,7 +195,53 @@ import CoreText
     /// Everything the chrome takes out of the platform's content area: the toolbar band,
     /// the strip the leading and trailing accessories get under a title bar the package
     /// does not own, and the bottom accessories.
-    internal var _chromeBandHeight: CGFloat { _toolbarBandHeight + _accessoryBandHeight }
+    internal var _chromeBandHeight: CGFloat { _toolbarBandHeight + _accessoryBandHeight + _menuBarRowHeight }
+
+    // MARK: The unified caption and its menu bar row (NSMenuBarRow.swift; ADR-0053)
+
+    /// The backend draws no caption of its own for this window: the package's title band
+    /// (or unified toolbar) is the caption, with the caption buttons and the application
+    /// menu in a row under it. Windows only, for `fullSizeContentView` windows with a
+    /// transparent title bar (`Win32WindowPolicy.captionMode`).
+    internal var _usesUnifiedCaption: Bool { _chrome.unifiedCaption }
+    /// The row under the title band listing the main menu, when the window carries the
+    /// application menu (as the HMENU bar would: titled, not a panel) and there is one.
+    internal var _showsMenuBarRow: Bool {
+        _usesUnifiedCaption && platformWantsMenuBar && !_styleMask.contains(.utilityWindow) && !_NSMenuBarRowView.menuItems().isEmpty
+    }
+    internal var _menuBarRowHeight: CGFloat { _showsMenuBarRow ? _NSMenuBarRowView.height : 0 }
+    /// The row's view, an overlay root between the toolbar and the buttons; created when
+    /// first shown and kept (hidden) afterwards.
+    internal private(set) var _menuBarRow: _NSMenuBarRowView?
+
+    private func _layoutMenuBarRow(_ l: _TitlebarLayout) {
+        if let r = l.menuBar {
+            let row: _NSMenuBarRowView
+            if let existing = _menuBarRow { row = existing } else {
+                row = _NSMenuBarRowView(frame: r)
+                row.nextResponder = self
+                row._setWindow(self)
+                _menuBarRow = row
+            }
+            if row.frame != r { row.frame = r }
+            row.isHidden = false
+            row.reload()
+            row.needsDisplay = true
+        } else if let row = _menuBarRow, !row.isHidden {
+            row.closeMenu()
+            row.deactivateKeyboard()
+            row.isHidden = true
+        }
+    }
+
+    /// The application's main menu changed (NSApplication): the row re-reads it, and
+    /// appears or goes when the menu does. Cheap for the item-state rebuilds the native
+    /// bars run on every key press: a relayout only when the row's presence changes.
+    internal func _applicationMenuDidChange() {
+        guard _usesUnifiedCaption else { return }
+        let shown = _menuBarRow.map { !$0.isHidden } ?? false
+        if shown != _showsMenuBarRow { _toolbarGeometryDidChange() } else if shown { _menuBarRow?.reload() }
+    }
 
     /// The title bar accessories (NSTitlebarAccessoryViewController.swift).
     private var _titlebarAccessories: [NSTitlebarAccessoryViewController] = []
@@ -239,6 +288,8 @@ import CoreText
         var contentTop: CGFloat = 0
         /// What the side accessories take out of a toolbar row they share (unified styles).
         var toolbarInsets: (leading: CGFloat, trailing: CGFloat) = (0, 0)
+        /// The menu bar row directly under the title band of a unified caption (ADR-0053).
+        var menuBar: NSRect?
     }
 
     internal func _resolveTitlebarLayout() -> _TitlebarLayout {
@@ -264,6 +315,11 @@ import CoreText
             if sharesRow, let t = l.toolbar { l.titleRow = t }
         } else if fullSize {
             top -= NSWindow._titleBarBandHeight
+        }
+        if _showsMenuBarRow {
+            let h = _NSMenuBarRowView.height
+            l.menuBar = NSRect(x: 0, y: top - h, width: pc.width, height: h)
+            top -= h
         }
         // Leading and trailing accessories stack outward from their edge of the title row;
         // the standard buttons keep their edge whatever the direction (left for the traffic
@@ -321,6 +377,7 @@ import CoreText
             }
         }
         _layoutAccessoryHost(l)
+        _layoutMenuBarRow(l)
     }
 
     private func _layoutAccessoryHost(_ l: _TitlebarLayout) {
@@ -418,9 +475,11 @@ import CoreText
 
     /// The view under a window point: the buttons overlay first, then the content.
     internal func _hitTestForTests(_ point: NSPoint) -> NSView? { _hitTest(point) }
+    internal var _windowButtonsRowForTests: _NSWindowButtonsView? { _windowButtons }
     private func _hitTest(_ point: NSPoint) -> NSView? {
         if _showsWindowButtons, let b = _windowButtons, !b.isHidden, let hit = b.hitTest(point) { return hit }
         if let a = _accessoryHost, !a.isHidden, let hit = a.hitTest(point) { return hit }
+        if let m = _menuBarRow, !m.isHidden, let hit = m.hitTest(point) { return hit }
         if let t = _toolbarView, !t.isHidden, let hit = t.hitTest(point) { return hit }
         return _contentView?.hitTest(point)
     }
@@ -775,6 +834,7 @@ import CoreText
         c.hasShadow = _hasShadow && _sheetSlide == nil
         c.movableByBackground = _isMovableByWindowBackground
         c.hasDraggableBand = _toolbarView.map { !$0.isHidden } ?? false
+        c.unifiedCaption = _styleMask.contains(.titled) && Platform.backend.usesUnifiedCaption(styleMask: _styleMask, chrome: c)
         return c
     }
 
@@ -802,7 +862,7 @@ import CoreText
         var v = hit
         while let view = v {
             if !view.mouseDownCanMoveWindow { return .client }
-            if view === content || view === _toolbarView || view === _accessoryHost { break }
+            if view === content || view === _toolbarView || view === _accessoryHost || view === _menuBarRow { break }
             v = view.superview
         }
         if let t = _toolbarView, !t.isHidden, let v = hit, v === t || v.isDescendant(of: t) { return .caption }
@@ -906,6 +966,24 @@ import CoreText
     private static let _maxPendingDirtyRects = 12
 
     /// The window repaints as a whole (a new appearance, background, scale or layer host).
+    /// The system appearance flipped (NSApplication): the views of this window and of its
+    /// overlays hear it and every one repaints (layer-hosted views keep their rasterised
+    /// contents until marked, so the whole tree is marked).
+    internal func _systemAppearanceDidChange() {
+        guard _appearance == nil else { return }
+        func mark(_ v: NSView) {
+            v.needsDisplay = true
+            for s in v.subviews { mark(s) }
+        }
+        for root in [_contentView, _toolbarView, _accessoryHost, _menuBarRow, _windowButtons] as [NSView?] {
+            guard let root else { continue }
+            root._effectiveAppearanceDidChange()
+            mark(root)
+        }
+        _ensureWindowButtons()
+        _setNeedsDisplayWhole()
+    }
+
     internal func _setNeedsDisplayWhole() {
         _pendingDirtyRects = nil
         _GlassRegistry.noteInvalidation(in: self, from: nil, rect: nil)
@@ -1043,7 +1121,7 @@ import CoreText
         if _showsWindowButtons, let cv = _contentView,
            NSRect(x: 0, y: cv.bounds.height - NSWindow._titleBarBandHeight, width: cv.bounds.width, height: NSWindow._titleBarBandHeight).intersects(visible) { return false }
         var chrome: [NSRect] = []
-        for t in [_toolbarView as NSView?, _accessoryHost as NSView?] {
+        for t in [_toolbarView as NSView?, _accessoryHost as NSView?, _menuBarRow as NSView?] {
             guard let t, !t.isHidden else { continue }
             let r = t.convert(t.bounds, to: nil)
             if r.intersects(visible) { chrome.append(r.intersection(visible)); chrome.append(r.offsetBy(dx: delta.width, dy: delta.height).intersection(visible)) }
@@ -1088,6 +1166,7 @@ import CoreText
         _contentView?.layoutSubtreeIfNeeded()
         if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
         if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let m = _menuBarRow, !m.isHidden { m.layoutSubtreeIfNeeded() }
     }
 
     /// Feeds the event to the gesture recognizers of the target view and its ancestors
@@ -1231,6 +1310,7 @@ import CoreText
         _contentView?.layoutSubtreeIfNeeded()
         if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t.layoutSubtreeIfNeeded() }
         if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
+        if !_hostsLayersNatively, let m = _menuBarRow, !m.isHidden { m.layoutSubtreeIfNeeded() }
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
         for rect in paintRects {
             context.saveGState()
@@ -1242,6 +1322,7 @@ import CoreText
             _contentView?._displayHierarchy(in: context, dirtyRect: rect)
             if !_hostsLayersNatively, let t = _toolbarView, !t.isHidden { t._displayHierarchy(in: context, dirtyRect: rect) }
             if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a._displayHierarchy(in: context, dirtyRect: rect) }
+            if !_hostsLayersNatively, let m = _menuBarRow, !m.isHidden { m._displayHierarchy(in: context, dirtyRect: rect) }
             if _showsWindowButtons, !_hostsLayersNatively, let buttons = _ensureWindowButtons() {
                 buttons._displayHierarchy(in: context, dirtyRect: rect)
             }
@@ -2601,6 +2682,8 @@ import CoreText
         guard _isKey else { return }
         if NSView._traceInvalidation { NSView._trace("resignKey \'\(_title)\'") }
         _isKey = false
+        _menuBarRow?.deactivateKeyboard()
+        _menuBarRow?.needsDisplay = true
         // Losing the keyboard (another window or application activated) dismisses open menus.
         if let t = _NSMenuTracker.current, !t.isMenuWindow(self) { t.cancel() }
         if let p = _NSComboBoxPopUp.current, p.window !== self { p.dismiss() }
@@ -2779,11 +2862,12 @@ import CoreText
             let cursorOwned = _evaluateTrackingAreas(at: _lastMouseLocation, event: event, dragging: false)
             if !cursorOwned { _updateCursor(at: event.locationInWindow) }
             _windowButtons?.updateHover(event.locationInWindow)
+            _menuBarRow?.updateHover(_lastMouseLocation)
             if let p = _lastMouseLocation { _NSToolTipManager.shared.mouseMoved(in: self, at: p) } else { _NSToolTipManager.shared.dismiss() }
             guard _acceptsMouseMovedEvents else { return }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .scrollWheel, .mouseEntered, .mouseExited:
-            if event.type == .mouseExited { _windowButtons?.updateHover(event.locationInWindow) }
+            if event.type == .mouseExited { _windowButtons?.updateHover(event.locationInWindow); _menuBarRow?.updateHover(_pointerLocation(of: event)) }
             _dispatchMouse(event, to: _hitTest(event.locationInWindow) ?? self)
         case .magnify, .rotate, .swipe, .smartMagnify, .beginGesture, .endGesture, .pressure:
             // Gestures go to the view under the pointer, or to the one tracking a press.
@@ -3018,13 +3102,13 @@ import CoreText
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/title
     @MainActor open var title: String {
         get { _title }
-        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)); _toolbarTitleDidChange() }
+        set { _title = newValue; _platform?.title = newValue; _accessibilityNotify(.name(_accessibilityElementID)); _toolbarTitleDidChange(); if _usesUnifiedCaption { _ensureWindowButtons() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlevisibility
     @available(macOS 10.10, *)
     @MainActor open var titleVisibility: NSWindow.TitleVisibility {
         get { _titleVisibility }
-        set { _titleVisibility = newValue; _updateChrome(); _toolbarTitleDidChange() }
+        set { _titleVisibility = newValue; _updateChrome(); _toolbarTitleDidChange(); if _usesUnifiedCaption { _ensureWindowButtons() } }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebaraccessoryviewcontrollers
     @available(macOS 10.10, *)
@@ -3039,7 +3123,12 @@ import CoreText
     @available(macOS 10.10, *)
     @MainActor open var titlebarAppearsTransparent: Bool {
         get { _titlebarAppearsTransparent }
-        set { _titlebarAppearsTransparent = newValue; _updateChrome() }
+        set {
+            let wasUnified = _usesUnifiedCaption
+            _titlebarAppearsTransparent = newValue
+            // Opting in or out of the unified caption (ADR-0053) moves the menu bar row.
+            if _usesUnifiedCaption != wasUnified { _toolbarGeometryDidChange() } else { _updateChrome() }
+        }
     }
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/titlebarseparatorstyle
     @available(macOS 11.0, *)
@@ -3342,7 +3431,7 @@ extension NSWindow: PlatformAccessibilityProvider {
 
     /// The view behind an element id, the window itself for its own id.
     @MainActor internal func _accessibilityView(withID id: Int) -> NSView? {
-        _contentView?._accessibilityView(withID: id) ?? _toolbarView?._accessibilityView(withID: id) ?? _accessoryHost?._accessibilityView(withID: id)
+        _contentView?._accessibilityView(withID: id) ?? _toolbarView?._accessibilityView(withID: id) ?? _accessoryHost?._accessibilityView(withID: id) ?? _menuBarRow?._accessibilityView(withID: id)
     }
 
     public func accessibilityPerform(_ action: PlatformAccessibilityAction, on elementID: Int) -> Bool {

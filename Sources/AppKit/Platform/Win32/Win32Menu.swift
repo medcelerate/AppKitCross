@@ -13,9 +13,43 @@ final class Win32MenuBar {
     private var builtBars: [UInt: HMENU] = [:]          // HWND bits -> HMENU owned by that window
 
     func install(_ spec: PlatformMenu?, host: PlatformMenuHost?, on windows: [HWND]) {
+        let previous = self.spec
         self.spec = spec
         self.host = host
+        // AppKit rebuilds the menu on every item state change (Undo enabling on a key press):
+        // when the bar itself shows nothing new, refill the pop-ups behind the installed bars
+        // and leave the bars alone, so they never repaint (the white flash while typing).
+        if !Win32WindowPolicy.menuBarChanged(from: previous, to: spec), let spec {
+            for hwnd in windows {
+                let key = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(hwnd)))
+                if let bar = builtBars[key] { refill(bar, from: spec) } else { apply(to: hwnd) }
+            }
+            return
+        }
         for hwnd in windows { apply(to: hwnd) }
+    }
+
+    /// Replaces the contents of every pop-up of `bar` from `spec` without touching the bar's
+    /// own items. The pop-ups are not visible unless open, and an open one refreshes itself
+    /// through `willOpen` (AppKit suppresses rebuilds while a menu is open).
+    private func refill(_ bar: HMENU, from spec: PlatformMenu) {
+        let visible = spec.items.filter { !$0.isHidden }
+        let count = Int(GetMenuItemCount(bar))
+        guard count == visible.count else { return }
+        for (i, item) in visible.enumerated() {
+            guard let sub = item.submenu, let popup = GetSubMenu(bar, Int32(i)) else { continue }
+            let n = GetMenuItemCount(popup)
+            if n > 0 {
+                for j in stride(from: n - 1, through: 0, by: -1) {
+                    if let nested = GetSubMenu(popup, j) { forget(nested) }
+                    DeleteMenu(popup, UINT(j), UINT(MF_BYPOSITION))       // destroys a nested pop-up too
+                }
+            }
+            for child in sub.items where !child.isHidden { append(child, to: popup) }
+            let bits = UInt(bitPattern: Int(bitPattern: UnsafeRawPointer(popup)))
+            menusByHandle[bits] = sub.id
+            handlesByMenu[sub.id] = popup
+        }
     }
 
     /// Builds (or rebuilds) the menu bar for one window.
