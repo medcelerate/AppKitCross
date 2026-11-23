@@ -692,9 +692,10 @@ final class _NSMenuTracker {
                 }
                 // Levels deeper than the hovered one close only when another item is hovered
                 // (handled by setHighlight); shallower levels keep the parent item highlighted.
-            } else if let bar = menuBarRow, let i = bar.titleIndex(atScreenPoint: p), i != bar.openIndex {
-                // Over another title of the menu bar row: its menu opens instead, as on
-                // Windows and macOS alike.
+            } else if let bar = menuBarRow, let i = bar.titleIndex(atScreenPoint: p), i != bar.openIndex, bar.pointerMoved(toScreen: p) {
+                // Over another title of the menu bar row, after a real move: its menu opens
+                // instead, as on Windows and macOS alike. (A re-reported position after a
+                // keyboard switch is not a move.)
                 bar.openMenu(at: i, openedWithMouseDown: false)
                 return
             } else if let last = levels.indices.last, levels[last].window.menuView.highlightedRow != nil,

@@ -82,7 +82,11 @@ It behaves as Windows' bar does, and keyboard access is identical in effect:
 
 - A click on a title opens its menu hanging below the title, as the package's pop-up
   (`_NSMenuTracker`, NSMenuPopUp.swift); the pointer moving to another title switches
-  menus; a click on the open title closes it; a click anywhere else closes it and lands.
+  menus, but only once it has really moved since the open menu opened: Windows re-reports
+  the unchanged pointer position when a menu window opens or closes, which after Left or
+  Right had switched menus from the keyboard handed the bar straight back to the title the
+  pointer rested on (PC round 4); native bars let the keyboard win until the mouse moves.
+  A click on the open title closes it; a click anywhere else closes it and lands.
 - Alt+letter opens the menu whose title starts with that letter: the access key Windows
   takes when a title has no `&` marker, which AppKit titles never have. F10, or an Alt tap
   (Alt pressed and released with nothing in between), enters keyboard mode with the first

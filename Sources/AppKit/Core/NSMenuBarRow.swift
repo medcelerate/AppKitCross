@@ -31,6 +31,14 @@ final class _NSMenuBarRowView: NSView {
     /// The title whose menu is open.
     private(set) var openIndex: Int? { didSet { if openIndex != oldValue { needsDisplay = true } } }
     private var openGeneration = 0
+    /// The pointer's last reported screen position, and where it was when the open menu
+    /// opened. The pointer crossing to another title switches menus only once it has
+    /// really moved since: Windows re-reports the unchanged position when a menu window
+    /// opens or closes, which after Left or Right switched menus from the keyboard would
+    /// hand the bar straight back to the title the pointer rests on (native menu bars let
+    /// the keyboard win until the mouse moves).
+    private var lastPointerScreen: NSPoint?
+    private var pointerAtOpen: NSPoint?
     /// Alt went down and no key or click followed yet: releasing it toggles keyboard mode.
     private var altArmed = false
 
@@ -135,6 +143,7 @@ final class _NSMenuBarRowView: NSView {
     /// The window reports every pointer move (and the pointer leaving, as nil).
     func updateHover(_ windowPoint: NSPoint?) {
         guard let p = windowPoint, !isHidden else { hoveredIndex = nil; return }
+        if let w = window { lastPointerScreen = w.convertPoint(toScreen: p) }
         let local = convert(p, from: nil)
         hoveredIndex = bounds.contains(local) ? titleIndex(at: local) : nil
     }
@@ -158,6 +167,7 @@ final class _NSMenuBarRowView: NSView {
         let generation = openGeneration
         keyboardIndex = nil
         openIndex = index
+        pointerAtOpen = lastPointerScreen
         _NSMenuBarRowView.active = self
         let anchor = w.convertToScreen(convert(titles[index].frame, to: nil))
         let tracker = _NSMenuTracker.begin(menu: menu, anchor: anchor, placement: .besideAnchor(edge: .minY), font: _NSMenuBarRowView.font,
@@ -176,6 +186,14 @@ final class _NSMenuBarRowView: NSView {
         openIndex = nil
         if let t = _NSMenuTracker.current, t.menuBarRow === self { t.cancel() }
         if _NSMenuBarRowView.active === self, !isKeyboardActive { _NSMenuBarRowView.active = nil }
+    }
+
+    /// Whether the pointer, now at screen point `p` over a title (the menu tracker asks while
+    /// a menu is open), has moved since the open menu opened; records the position.
+    func pointerMoved(toScreen p: NSPoint) -> Bool {
+        defer { lastPointerScreen = p }
+        guard let o = pointerAtOpen else { return true }
+        return abs(p.x - o.x) > 2 || abs(p.y - o.y) > 2
     }
 
     /// Left or Right while a menu is open: the neighbouring title's menu (wrapping).

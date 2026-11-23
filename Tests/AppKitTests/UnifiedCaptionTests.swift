@@ -373,6 +373,15 @@ final class UnifiedCaptionTests: XCTestCase, @unchecked Sendable {
                 app.sendEvent(mouse(.mouseMoved, w, titleCenter(row, 2)))
                 XCTAssertEqual(row.openIndex, 2)
                 XCTAssertTrue(_NSMenuTracker.current?.rootMenu === app.mainMenu!.items[2].submenu)
+                // Right from the keyboard moves to View while the pointer still rests on Edit; the
+                // position Windows re-reports when the menu windows change is not a move and must
+                // not hand the bar back to Edit. A real move to Edit does.
+                app.sendEvent(key(w, "", code: 124))
+                XCTAssertEqual(row.openIndex, 3, "Right opened View")
+                app.sendEvent(mouse(.mouseMoved, w, titleCenter(row, 2)))
+                XCTAssertEqual(row.openIndex, 3, "the pointer did not move: View stays open")
+                app.sendEvent(mouse(.mouseMoved, w, NSPoint(x: titleCenter(row, 2).x + 6, y: titleCenter(row, 2).y)))
+                XCTAssertEqual(row.openIndex, 2, "a real move onto Edit switches")
                 // A click on the open title closes it.
                 app.sendEvent(mouse(.leftMouseDown, w, titleCenter(row, 2)))
                 app.sendEvent(mouse(.leftMouseUp, w, titleCenter(row, 2)))
