@@ -37,16 +37,18 @@ open class NSImageRep: NSObject, NSCopying, NSCoding {
     /// and Core Image reps are generated stubs).
     nonisolated(unsafe) internal static var _registeredClasses: [NSImageRep.Type] = [NSBitmapImageRep.self]
 
-    /// This rep, or the decoded rep it stands for, as a bitmap (rendering when needed).
-    internal func _renderedBitmap() -> NSBitmapImageRep? {
+    /// This rep, or the decoded rep it stands for, as a bitmap (rendering when needed). A
+    /// rep without pixels of its own (a drawn rep) renders at `scale` device pixels per
+    /// point when given, so it is as sharp as the destination, else at its own pixel size.
+    internal func _renderedBitmap(scale: CGFloat? = nil) -> NSBitmapImageRep? {
         if let b = self as? NSBitmapImageRep { return b }
-        if let p = _proxy { return p._renderedBitmap() }
+        if let p = _proxy { return p._renderedBitmap(scale: scale) }
         return MainActor.assumeIsolated {
             if let image = _cgImage() { let r = NSBitmapImageRep(cgImage: image); r.size = _size; return r }
-            let w = max(1, _pixelsWide > 0 ? _pixelsWide : Int(_size.width)), h = max(1, _pixelsHigh > 0 ? _pixelsHigh : Int(_size.height))
+            let w = max(1, _pixelsWide > 0 ? _pixelsWide : Int(_size.width))
+            let renderScale = scale.map { max(0.01, $0) } ?? CGFloat(w) / max(1, _size.width)
             guard _size.width > 0, _size.height > 0,
-                  let surface = Platform.backend.image.makeOffscreen(size: _size, scale: CGFloat(w) / _size.width) else { return nil }
-            _ = h
+                  let surface = Platform.backend.image.makeOffscreen(size: _size, scale: renderScale) else { return nil }
             let saved = NSGraphicsContext.current
             NSGraphicsContext.current = NSGraphicsContext(cgContext: surface.context, flipped: false)
             _ = draw(in: NSRect(origin: .zero, size: _size))

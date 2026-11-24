@@ -133,6 +133,11 @@ public enum CARuntime {
     /// Installed by the host: draws a CATextLayer's string into a context whose
     /// coordinate space is the layer's bounds. QuartzCore has no text engine of its own.
     public static var textRenderer: ((CATextLayer, CGContext, Bool) -> Void)?
+    /// Resolves layer `contents` that is not a CGImage (an NSImage, set by AppKit) into
+    /// pixels at a contents scale, as Core Animation asks an NSImage for
+    /// `layerContents(forContentsScale:)` at the layer's `contentsScale`: the pixels and
+    /// their size in points.
+    public static var contentsImageProvider: ((Any, CGFloat) -> (image: CGImage, size: CGSize)?)?
 
     static var framePending = false
     static var animatingRoots: [CAWeak<CALayer>] = []

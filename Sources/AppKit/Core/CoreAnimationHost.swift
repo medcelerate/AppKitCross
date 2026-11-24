@@ -26,6 +26,15 @@ enum _CoreAnimationHost {
             }
         }
         CALayer._sceneExtraChildren = { layer in (layer.delegate as? NSView)?._hostedChildLayers ?? [] }
+        // An NSImage as layer contents: its pixels at the layer's contents scale, as
+        // Core Animation resolves one through `layerContents(forContentsScale:)`.
+        CARuntime.contentsImageProvider = { contents, scale in
+            guard let image = contents as? NSImage else { return nil }
+            return MainActor.assumeIsolated {
+                // What `layerContents(forContentsScale:)` returns, typed.
+                image._cgImage(scale: image.recommendedLayerContentsScale(scale)).map { ($0, image.size) }
+            }
+        }
         CARuntime.textRenderer = { layer, ctx, flipped in
             drawText(of: layer, in: ctx, flipped: flipped)
         }

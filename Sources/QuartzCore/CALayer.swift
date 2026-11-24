@@ -1223,7 +1223,9 @@ open class CALayer: NSObject, CAMediaTiming {
     /// applies to the flattened image, as to any offscreen pass.
     private func _composeProjected(into ctx: CGContext, presentation p: CALayer, through plane: _CAHomography, alpha a: CGFloat, time: CFTimeInterval) {
         let extent = _subtreeExtent(presentation: p)
-        let ctm = ctx.ctm
+        // Device pixels per point: the CTM plus the target's backing scale (Windows and
+        // Linux keep a window's scale in the target, not the CTM).
+        let ctm = ctx.userSpaceToDeviceSpaceTransform
         let stretch = plane.stretch(of: p._bounds)
         let scale = (x: max(0.01, hypot(ctm.a, ctm.b)) * stretch, y: max(0.01, hypot(ctm.c, ctm.d)) * stretch)
         let yDown = p._isGeometryFlipped
@@ -1288,7 +1290,9 @@ open class CALayer: NSObject, CAMediaTiming {
         let shadowOn = p._shadowOpacity > 0 && p._shadowColor != nil
         let alphaMask = p._mask != nil && !_maskIsSimpleClip
         let group = p._opacity < 1 && allowsGroupOpacity && !subs.isEmpty
-        let ctm = ctx.ctm
+        // Device pixels per point: the CTM plus the target's backing scale (Windows and
+        // Linux keep a window's scale in the target, not the CTM).
+        let ctm = ctx.userSpaceToDeviceSpaceTransform
         let scale = (x: max(0.01, hypot(ctm.a, ctm.b)), y: max(0.01, hypot(ctm.c, ctm.d)))
 
         // Clips that apply to everything, the shadow included (as Core Animation does).
@@ -1513,9 +1517,14 @@ open class CALayer: NSObject, CAMediaTiming {
 
     /// Draws `contents` (a CGImage) positioned by `contentsGravity`.
     private func _drawContents(in ctx: CGContext, flipped: Bool) {
-        guard let image = CALayer._image(from: _contents) else { return }
+        let image: CGImage, iw: CGFloat, ih: CGFloat
+        if let cg = CALayer._image(from: _contents) {
+            image = cg; iw = CGFloat(cg.width) / _contentsScale; ih = CGFloat(cg.height) / _contentsScale
+        } else if let c = _contents, let resolved = CARuntime.contentsImageProvider?(c, _contentsScale) {
+            // An NSImage: rendered for this contents scale, placed at its point size.
+            image = resolved.image; iw = resolved.size.width; ih = resolved.size.height
+        } else { return }
         let b = _bounds
-        let iw = CGFloat(image.width) / _contentsScale, ih = CGFloat(image.height) / _contentsScale
         var r = b
         switch contentsGravity {
         case .resize: r = b
