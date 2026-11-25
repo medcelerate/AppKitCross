@@ -586,6 +586,31 @@ also cuts the glass frame's tree walk, since it is the same walk. The budget for
 share is the difference glass on minus glass off: 5.4 ms in PC round 1 (16.3 against
 10.9), and round 3 aims below 2 ms.
 
+**PC round 3** (PR 99 at e40b80e; same RTX desktop, release, 1x at 96 DPI,
+`Glass --autoscroll 10 --interval 0`):
+
+| | paint mean | p95 | fps | round 1 paint mean |
+|---|---|---|---|---|
+| glass on, GPU frame (Direct2D) | 11.15 ms | 12.78 ms | 58.6 | 16.33 ms |
+| glass on, software (`APPKITWIN_LIQUID_GLASS_GPU=0`) | 15.50 ms | 17.23 ms | 46.8 | 19.12 ms |
+| glass off | 10.93 ms | 16.36 ms | 60.1 | 10.89 ms |
+
+- **Glass's own share is 0.22 ms of paint** (11.15 against 10.93), down from 5.4 ms in round
+  1, well under the 2 ms aim.
+- Each frame of the trace has one `glass frame 225x160 px at 0.25x (GPU)` line, with a mean
+  of 2.50 ms. That includes the tree walk beneath the glass, recorded on the device.
+- There are eleven `from the GPU frame` surface draws, totalling 0.80 ms. No CPU frame was
+  rendered, and no `makes no GPU frame` line appeared.
+- Paint includes the vsync-blocked Present, so the frame walk largely overlaps the wait
+  that glass-off paints spend idle. That is why the trace's `draw` share (12.55 against
+  3.67 ms, with 13 trace lines a frame written to stderr) is larger than the paint share.
+- **The 8 ms target is not met in this PR, and glass is not what misses it.** With glass on,
+  paint is within 0.2 ms of glass off. The remaining 3 ms to 8 ms is the base paint, the
+  separate base-paint PR's work. That PR also shortens the GPU frame's tree walk, because it
+  is the same walk.
+- `swift test --filter LiquidGlass` on Windows passed: 28 tests, 0 failures, both plain and
+  with `APPKITWIN_HOST_BACKEND=1`, from a CRLF checkout.
+
 ### Fidelity
 
 The constants were tuned against Apple's descriptions, not against pixels: the machine this
