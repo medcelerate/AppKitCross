@@ -202,7 +202,8 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             _ = render(w.contentView!)
             let sample = _GlassRegistry.sample(for: glass)
             XCTAssertFalse(sample.dirty)
-            XCTAssertNotNil(sample.image)
+            // A sample drawn from the frame on the GPU (Direct2D, ADR-0052 round 3) keeps no image.
+            XCTAssertTrue(sample.image != nil || sample.isGPUFrame)
             if !(_GlassGPU.program?.drawsInPlace ?? false) {
                 // A program that draws in place (Direct2D) keeps no shaded image.
                 XCTAssertNotNil(sample.shadedImage, "the shaded image is kept with the sample")
@@ -230,7 +231,7 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             let first = render(w.contentView!)
             XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "three lenses share one frame of the content beneath them")
             let samples = lenses.map { _GlassRegistry.sample(for: $0) }
-            XCTAssertTrue(samples.allSatisfy { !$0.dirty && $0.image != nil })
+            XCTAssertTrue(samples.allSatisfy { !$0.dirty && ($0.image != nil || $0.isGPUFrame) })
             // Content under the middle lens changes: that lens re-samples, the others keep theirs.
             halves.setNeedsDisplay(NSRect(x: 120, y: 30, width: 40, height: 20))
             XCTAssertFalse(samples[0].dirty); XCTAssertTrue(samples[1].dirty); XCTAssertFalse(samples[2].dirty)

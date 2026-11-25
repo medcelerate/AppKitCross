@@ -207,7 +207,8 @@ enum _GlassShaders {
         float luminance = k[9].z;
         if (luminance < 0) {
             float4 probe = ProbeTexture.SampleLevel(ProbeSampler, uv1.xy + (float2(0.5, 0.5) - posScene.xy) * uv1.zw, 0);
-            luminance = probe.a > 0.5 ? probe.r : -1;
+            // Two bytes: whole steps of 1/255 in red, the fraction of a step in green.
+            luminance = probe.a > 0.5 ? (round(probe.r * 255) + probe.g) / 255 : -1;
         }
         bool dark = k[9].x == 1 || (k[9].x == 2 && (luminance < 0 ? 1.0 : luminance) < k[9].y);
         float4 veil = dark ? k[7] : k[6];
@@ -245,7 +246,7 @@ enum _GlassShaders {
         return float4(saturate(rgb) * outA, outA);
     }
     """#
-    static let hlslHash: UInt64 = 0x596f6e62cb1f602d
+    static let hlslHash: UInt64 = 0xf0872de2f6e2a483
     /// Platform/Shaders/glass_backdrop.hlsl
     static let hlslBackdrop = #"""
     // Liquid Glass backdrop stage, HLSL (ADR-0052 stage 2, round 3): the box passes with the
@@ -292,8 +293,10 @@ enum _GlassShaders {
         return c / 255;
     }
     
-    // The alpha-weighted mean luminance of the crop, as one pixel at the scene origin: the mean
-    // in red (and green and blue), alpha 1; transparent when nothing in the crop is covered.
+    // The alpha-weighted mean luminance of the crop, as one pixel at the scene origin, alpha 1;
+    // transparent when nothing in the crop is covered. Direct2D's intermediates are 8-bit, and
+    // one byte (1/255) is enough to flip the variant of a backdrop near the threshold, so the mean
+    // is stored in two: red the whole steps of 1/255, green the fraction of a step (16 bits in all).
     float4 luminance(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
         float sum = 0, weight = 0;
         int w = (int)k[0].z, h = (int)k[0].w;
@@ -304,8 +307,9 @@ enum _GlassShaders {
             }
         }
         if (weight <= 0) return float4(0, 0, 0, 0);
-        float l = sum / weight;
-        return float4(l, l, l, 1);
+        float v = sum / weight * 255;
+        float whole = floor(v);
+        return float4(whole / 255, v - whole, 0, 1);
     }
     """#
     /// Platform/Shaders/glass_box.comp

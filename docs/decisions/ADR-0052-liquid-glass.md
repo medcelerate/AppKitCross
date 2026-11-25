@@ -518,8 +518,11 @@ Departures and fallbacks:
   the band. The CPU frame counts background pixels instead; there is no pixel to count
   without a read-back. The two agree for every window the port draws: a
   `fullSizeContentView` window's content reaches under the band and is sampled directly.
-- **The probe's mean reaches the lens as an 8-bit value**, so the variant pick near the 0.35
-  threshold can differ from the software pass's by 1/255 of luminance.
+- **The probe's mean reaches the lens in two 8-bit channels** (whole steps of 1/255 and the
+  fraction of a step), because Direct2D's intermediates are 8-bit. A single byte flipped a
+  test lens whose backdrop's mean was 0.351, a thousandth above the 0.35 threshold, to the
+  dark variant (Windows CI on 7bb54bc: a whole lens off by up to 116/255). Sixteen bits keep
+  the pick the software pass's.
 - **The CPU frame stays the fallback.** When `makeFrame` returns nil (a target that is no
   device context), the CPU frame is used from then on (`_GlassGPU.framesUnavailable`), with
   round 1's path: the CPU backdrop stage and the lens effect. The software pass is still

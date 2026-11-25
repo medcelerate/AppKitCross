@@ -41,7 +41,8 @@ float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 u
     float luminance = k[9].z;
     if (luminance < 0) {
         float4 probe = ProbeTexture.SampleLevel(ProbeSampler, uv1.xy + (float2(0.5, 0.5) - posScene.xy) * uv1.zw, 0);
-        luminance = probe.a > 0.5 ? probe.r : -1;
+        // Two bytes: whole steps of 1/255 in red, the fraction of a step in green.
+        luminance = probe.a > 0.5 ? (round(probe.r * 255) + probe.g) / 255 : -1;
     }
     bool dark = k[9].x == 1 || (k[9].x == 2 && (luminance < 0 ? 1.0 : luminance) < k[9].y);
     float4 veil = dark ? k[7] : k[6];

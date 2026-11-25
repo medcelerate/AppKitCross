@@ -42,8 +42,10 @@ float4 box(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv
     return c / 255;
 }
 
-// The alpha-weighted mean luminance of the crop, as one pixel at the scene origin: the mean
-// in red (and green and blue), alpha 1; transparent when nothing in the crop is covered.
+// The alpha-weighted mean luminance of the crop, as one pixel at the scene origin, alpha 1;
+// transparent when nothing in the crop is covered. Direct2D's intermediates are 8-bit, and
+// one byte (1/255) is enough to flip the variant of a backdrop near the threshold, so the mean
+// is stored in two: red the whole steps of 1/255, green the fraction of a step (16 bits in all).
 float4 luminance(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
     float sum = 0, weight = 0;
     int w = (int)k[0].z, h = (int)k[0].w;
@@ -54,6 +56,7 @@ float4 luminance(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, flo
         }
     }
     if (weight <= 0) return float4(0, 0, 0, 0);
-    float l = sum / weight;
-    return float4(l, l, l, 1);
+    float v = sum / weight * 255;
+    float whole = floor(v);
+    return float4(whole / 255, v - whole, 0, 1);
 }
