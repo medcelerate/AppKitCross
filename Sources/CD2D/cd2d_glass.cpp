@@ -272,6 +272,15 @@ static void drawInPixels(ID2D1DeviceContext *dc, ID2D1Image *image) {
     dc->SetUnitMode(mode);
 }
 
+/// The same for an effect: its output image (an ID2D1Effect is no ID2D1Image).
+static void drawInPixels(ID2D1DeviceContext *dc, ID2D1Effect *effect) {
+    ID2D1Image *image = nullptr;
+    effect->GetOutput(&image);
+    if (!image) return;
+    drawInPixels(dc, image);
+    image->Release();
+}
+
 static bool setBlob(ID2D1Effect *effect, const float *k) {
     return SUCCEEDED(effect->SetValue(0, D2D1_PROPERTY_TYPE_BLOB, reinterpret_cast<const BYTE *>(k), 48 * sizeof(float)));
 }
