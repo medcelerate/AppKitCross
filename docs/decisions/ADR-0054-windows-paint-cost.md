@@ -67,3 +67,24 @@ without the vsync wait; normal runs keep `Present(1, 0)`.
 ## Consequences
 
 Round 2 implements what the profile justifies and records it here.
+
+## Follow-up: smear below the screen edge while scrolling (reported in PR 99 round 3)
+
+`Examples/Glass --autoscroll 25` on a 150% monitor, window 2230x1457 pt straddling the
+monitor seam with its lower part below the screen edge: the visible bottom rows show the
+document smeared downward (the tops of the purple dots streak through the orange band).
+Glass lenses are correct, so it is the base paint path, not ADR-0052.
+
+Likely cause, from reading the code (unconfirmed): `paint()` takes `BeginPaint`'s
+`rcPaint` as the frame's dirty rect and clips drawing to it. Windows clips a window's
+update region to its visible part, so when the uncovered strip lies below the screen edge
+it is never drawn, and the canvas there keeps stale rows. `scrollBacking` then copies the
+whole clip view, stale rows included, upward by the scroll step, so each frame pulls
+the never-painted rows into the visible rows just above the edge: streaks.
+
+Candidate fix: `scrollBacking` refuses the copy (returns false, so the clip view repaints
+whole) when the copy's source is not wholly on a monitor (`MonitorFromPoint(...,
+MONITOR_DEFAULTTONULL)` on its corners, or the visible region from `GetRandomRgn`), or
+clamps the source to the visible part and invalidates the rest. The PC confirms first:
+with `APPKITWIN_TRACE_INVALIDATION=1`, the `win32 paint dirty` lines should show
+`rcPaint` stopping at the screen edge while the `win32 scroll copy` source reaches past it.
