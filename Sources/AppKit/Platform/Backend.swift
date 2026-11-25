@@ -152,6 +152,12 @@ public protocol PlatformWindow: AnyObject {
     /// (Windows: the monitor an HWND belongs to). Nil when only `displays` and the frame
     /// can tell, which is how the core then decides `NSWindow.screen`.
     var currentDisplay: PlatformDisplay? { get }
+    /// Sets `frame` (screen points) as a frame on `display`. Where every monitor's points
+    /// are its pixels at its own scale (Windows), point frames of monitors at different
+    /// scales overlap, so the point rect alone does not say which monitor it is on: a menu
+    /// opened from a window on a 150% monitor would be placed at 100%. The default sets
+    /// `frame`.
+    func setFrame(_ frame: NSRect, onDisplay display: PlatformDisplay?)
     var isVisible: Bool { get }
     var isKey: Bool { get }
     var minSize: NSSize { get set }
@@ -329,6 +335,7 @@ extension PlatformWindow {
     public func setResizeConstraints(_ constraints: PlatformResizeConstraints) { }
     public var hasClientSideTitleBar: Bool { false }
     public var currentDisplay: PlatformDisplay? { nil }
+    public func setFrame(_ frame: NSRect, onDisplay display: PlatformDisplay?) { self.frame = frame }
     public func miniaturize() { }
     public func deminiaturize() { }
     public func zoom() { }

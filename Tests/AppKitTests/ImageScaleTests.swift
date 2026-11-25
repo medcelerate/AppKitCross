@@ -11,7 +11,7 @@ import XCTest
 import CoreGraphics
 #endif
 #if canImport(QuartzCore)
-import QuartzCore
+@testable import QuartzCore
 #endif
 #if os(Linux)
 import CCairo
@@ -19,7 +19,7 @@ import CCairo
 
 #if canImport(CoreGraphics)
 /// One row's left edge: how many pixels sit between the background and the solid core
-/// (coverage strictly between 10% and 90%), and the row's ink in pixels (the coverage sum).
+/// (coverage strictly between 2% and 98%), and the row's ink in pixels (the coverage sum).
 struct _EdgeProfile: CustomStringConvertible {
     var ramp: Int
     var ink: CGFloat
@@ -32,9 +32,9 @@ struct _EdgeProfile: CustomStringConvertible {
         let c = (0..<width).map { min(1, max(0, coverage($0))) }
         values = c.map { UInt8((255 * (1 - $0)).rounded()) }
         ink = c.reduce(0, +)
-        guard let core = c.firstIndex(where: { $0 >= 0.9 }) else { ramp = .max; return }
+        guard let core = c.firstIndex(where: { $0 >= 0.98 }) else { ramp = .max; return }
         var n = 0, x = core - 1
-        while x >= 0, c[x] > 0.1 { n += 1; x -= 1 }
+        while x >= 0, c[x] > 0.02 { n += 1; x -= 1 }
         ramp = n
     }
 }
@@ -254,6 +254,119 @@ final class ImageScaleTests: XCTestCase, @unchecked Sendable {
             guard let surface = Platform.backend.image.makeOffscreen(size: NSSize(width: 10, height: 10), scale: 1.5) else { return XCTFail("no offscreen") }
             XCTAssertEqual(NSImage._deviceScale(surface.context, hints: nil), 1.5, accuracy: 0.001)
             XCTAssertEqual(NSImage._scale(of: surface.context.userSpaceToDeviceSpaceTransform), 1.5, accuracy: 0.001)
+        }
+    }
+
+    /// A row's darkness on white relative to its darkest pixel (a tinted symbol is grey).
+    @MainActor private func relativeProfile(_ image: CGImage, row: Int) -> _EdgeProfile {
+        let data = _pixels(image)
+        var darkest: CGFloat = 0
+        for x in 0..<image.width { darkest = max(darkest, 1 - CGFloat(data[row * image.bytesPerRow + x * 4 + 2]) / 255) }
+        return _edgeProfile(image, row: row, byAlpha: false, core: darkest)
+    }
+
+    /// A toolbar group's buttons sit in a container whose origin is fractional at 1.5x (the
+    /// right-hand group of Sibyl's toolbar at x + 0.5 px). Their symbols must land on whole
+    /// pixels, drawn in software and composited as layers alike: the PC read a half-pixel
+    /// shifted edge (E8 D9 99 79 B9) on those items while the left group was crisp.
+    func testButtonSymbolInAFractionalContainerAtOneAndAHalf() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            for layered in [false, true] {
+                let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 80, height: 40), styleMask: [.titled], backing: .buffered, defer: false)
+                w.backgroundColor = .white
+                let group = NSView(frame: NSRect(x: 30 + 1.0 / 3, y: 10, width: 40, height: 20))
+                let button = NSButton(frame: NSRect(x: 2, y: 2, width: 16, height: 16))
+                button.isBordered = false
+                button.image = stopSymbol()
+                button.imagePosition = .imageOnly
+                group.addSubview(button)
+                w.contentView!.addSubview(group)
+                let platform = host(w)
+                if layered {
+                    w.contentView!.wantsLayer = true
+                    platform.layerHostingEnabled = true
+                }
+                platform.setBackingScaleFactor(1.5)
+                w.makeKeyAndOrderFront(nil)
+                if layered { w._updateLayerHosting() }
+                var frames = 0
+                repeat { w.displayIfNeeded(); frames += 1 } while platform._needsPaint && frames < 6
+                w.display()
+                if layered { XCTAssertTrue(w._hostsLayersNatively) }
+                guard let image = platform.lastImage, let box = _darkBox(image, threshold: 200) else { return XCTFail("no symbol (layered \(layered))") }
+                let p = relativeProfile(image, row: (box.minY + box.maxY) / 2)
+                XCTAssertLessThanOrEqual(p.ramp, 1, "layered \(layered): \(p)")
+                w.close()
+            }
+        }
+    }
+
+    /// The placement arithmetic: absolute positions round to whole pixels, children are
+    /// placed relative to their parent's rounded position, and a node under a scale keeps
+    /// its exact translation.
+    func testScenePlacementsSnapToWholePixels() {
+        var scene = _CALayerScene()
+        func node(_ id: Int, parent: Int?, _ t: CGAffineTransform) -> _CALayerSceneNode {
+            _CALayerSceneNode(id: id, parent: parent, transform: t, size: CGSize(width: 10, height: 10), opacity: 1, clipsToBounds: false, cornerRadius: 0, maskedCorners: [], content: nil, name: nil)
+        }
+        scene.nodes = [
+            node(100, parent: nil, .identity),
+            node(101, parent: 0, CGAffineTransform(translationX: 30 + 1.0 / 3, y: 10)),     // 45.5 px
+            node(102, parent: 1, CGAffineTransform(translationX: 2, y: 2.25)),             // 48.5, 18.375
+            node(103, parent: 1, CGAffineTransform(a: 2, b: 0, c: 0, d: 2, tx: 0.5, ty: 0)),
+            node(104, parent: 3, CGAffineTransform(translationX: 0.25, y: 0)),
+        ]
+        let p = scene._pixelSnappedTranslations(scale: 1.5)
+        XCTAssertEqual(p[0], .zero)
+        XCTAssertEqual(p[1], CGPoint(x: 46, y: 15), "45.5 px rounds to 46")
+        // Child absolute 48.5 → 49 (relative 3 to the parent's 46); 18.375 → 18 (relative 3).
+        XCTAssertEqual(p[2], CGPoint(x: 3, y: 3))
+        XCTAssertNil(p[3], "a scaled node keeps its exact translation")
+        XCTAssertNil(p[4], "and so does everything under it")
+    }
+
+    /// A menu opened from a window on a 150% monitor to the right of a 100% primary. In the
+    /// port's screen points (each monitor's pixels at its own scale) the two monitors' point
+    /// frames overlap, so the first screen holding the anchor was the primary: the PC saw
+    /// the "Toolbar style" pop-up open on the primary at x / 1.5. The menu takes the screen
+    /// of the window it was opened from and its window is placed on that display.
+    func testMenuFromAWindowOnASecondaryMonitorOpensOnThatMonitor() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let backend = Platform.backend as! HostBackend
+            let saved = backend.displays
+            defer { backend.displays = saved }
+            let primary = PlatformDisplay(frame: NSRect(x: 0, y: 0, width: 2560, height: 1440), visibleFrame: NSRect(x: 0, y: 40, width: 2560, height: 1400),
+                                          backingScaleFactor: 1, localizedName: "Primary 100%", isMain: true)
+            // 2560 px to the right at 150%: points are its pixels / 1.5.
+            let secondary = PlatformDisplay(frame: NSRect(x: 2560 / 1.5, y: 0, width: 2560 / 1.5, height: 1440 / 1.5), visibleFrame: NSRect(x: 2560 / 1.5, y: 0, width: 2560 / 1.5, height: 1440 / 1.5),
+                                            backingScaleFactor: 1.5, localizedName: "Secondary 150%", isMain: false)
+            backend.displays = [primary, secondary]
+            let w = NSWindow(contentRect: NSRect(x: 2006, y: 400, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+            host(w)._currentDisplay = secondary
+            w.makeKeyAndOrderFront(nil)
+            XCTAssertEqual(w.screen?.localizedName, "Secondary 150%")
+            let anchor = NSRect(x: 2116, y: 560, width: 130, height: 24)
+            XCTAssertTrue(NSScreen.screens[0].frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)), "the point frames overlap at the anchor")
+            XCTAssertEqual(_NSMenuTracker.screen(forAnchor: anchor, source: w)?.localizedName, "Secondary 150%")
+            XCTAssertEqual(_NSMenuTracker.screen(forAnchor: anchor, source: nil)?.localizedName, "Primary 100%", "without a source window the first screen holding the anchor")
+
+            let menu = NSMenu(title: "Style")
+            menu.addItem(withTitle: "Icon and Text", action: nil, keyEquivalent: "")
+            menu.addItem(withTitle: "Icon Only", action: nil, keyEquivalent: "")
+            let tracker = _NSMenuTracker.begin(menu: menu, anchor: anchor, placement: .besideAnchor(edge: .minY), openedWithMouseDown: false)
+            defer { tracker.cancel() }
+            guard let menuWindow = tracker.levels.first?.window else { return XCTFail("no menu window") }
+            // NSWindow's storage, through the subclass's mirror.
+            var mirror: Mirror? = Mirror(reflecting: menuWindow)
+            var found: HostWindow? = nil
+            while let m = mirror, found == nil { found = m.descendant("_platform") as? HostWindow; mirror = m.superclassMirror }
+            guard let menuHost = found else { return XCTFail("no host window") }
+            XCTAssertEqual(menuHost.lastPlacementDisplay?.localizedName, "Secondary 150%", "the menu window is placed on the source window's monitor")
+            XCTAssertEqual(menuWindow.frame.minX, anchor.minX, accuracy: 0.5, "it opens at its button")
+            XCTAssertEqual(menuWindow.frame.maxY, anchor.minY, accuracy: 0.5)
+            w.close()
         }
     }
 

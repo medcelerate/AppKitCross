@@ -248,6 +248,17 @@ final class HostWindow: PlatformWindow {
         self._frame = frameRect(forContentRect: contentRect)
     }
 
+    /// Test hook: the display the window system says the window is on (a backend that
+    /// tracks monitors itself, as Windows does).
+    var _currentDisplay: PlatformDisplay? = nil
+    var currentDisplay: PlatformDisplay? { _currentDisplay }
+    /// The display the last `setFrame(_:onDisplay:)` named (tests).
+    private(set) var lastPlacementDisplay: PlatformDisplay? = nil
+    func setFrame(_ frame: NSRect, onDisplay display: PlatformDisplay?) {
+        lastPlacementDisplay = display
+        self.frame = frame
+    }
+
     var frame: NSRect {
         get { _frame }
         set {
@@ -405,6 +416,8 @@ final class HostWindow: PlatformWindow {
     private func composite(_ scene: PlatformLayerScene, into ctx: CGContext, height: CGFloat) {
         var children: [Int: [Int]] = [:]
         var roots: [Int] = []
+        // Whole-pixel placements, as the Win32 visual tree gets them.
+        let snapped = scene._pixelSnappedTranslations(scale: scene.scale)
         for (i, n) in scene.nodes.enumerated() {
             if let p = n.parent { children[p, default: []].append(i) } else { roots.append(i) }
         }
@@ -482,7 +495,9 @@ final class HostWindow: PlatformWindow {
                 return
             }
             ctx.saveGState()
-            ctx.concatenate(plane?.affine ?? n.transform)        // now in the node's local y-down space
+            var placement = plane?.affine ?? n.transform
+            if plane == nil, let p = snapped[i] { placement.tx = p.x / scene.scale; placement.ty = p.y / scene.scale }
+            ctx.concatenate(placement)        // now in the node's local y-down space
             drawLocal(i, alpha: a, into: ctx)
             ctx.restoreGState()
         }
