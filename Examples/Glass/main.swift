@@ -215,8 +215,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
             }
         }
         w.display()
-        guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
-        content.cacheDisplay(in: content.bounds, to: rep)
+        // The scene's own size, not the content view's bounds: a window the platform rounded
+        // to whole pixels at a fractional scale (Windows at 150 %: 721x451 px for 480x300 pt)
+        // would otherwise add a row and a column.
+        let area = NSRect(origin: .zero, size: GlassReferenceScene.size)
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: area) else { return }
+        content.cacheDisplay(in: area, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
         print("reference \(scene.rawValue) \(state.rawValue): \(path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")

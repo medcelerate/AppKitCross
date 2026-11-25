@@ -217,7 +217,10 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/AppKit/Platform/Shaders")
         guard FileManager.default.fileExists(atPath: dir.path) else { throw XCTSkip("sources not beside the tests") }
-        func text(_ name: String) throws -> String { try String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8) }
+        // A CR LF checkout (core.autocrlf on Windows) must not fail the comparison: the
+        // embed is made from LF sources (.gitattributes pins them to LF too).
+        func lf(_ data: Data) -> Data { Data(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\r\n", with: "\n").utf8) }
+        func text(_ name: String) throws -> String { String(decoding: lf(try Data(contentsOf: dir.appendingPathComponent(name))), as: UTF8.self) }
         func fnv(_ data: Data) -> UInt64 {
             var h: UInt64 = 0xcbf29ce484222325
             for b in data { h ^= UInt64(b); h = h &* 0x100000001b3 }
@@ -225,12 +228,12 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
         }
         XCTAssertEqual(_GlassShaders.metal, try text("glass.metal").trimmingCharacters(in: .newlines))
         XCTAssertEqual(_GlassShaders.hlsl, try text("glass_lens.hlsl").trimmingCharacters(in: .newlines))
-        let common = try Data(contentsOf: dir.appendingPathComponent("glass_common.glsl"))
+        let common = lf(try Data(contentsOf: dir.appendingPathComponent("glass_common.glsl")))
         for (name, hash, spirv) in [("glass_box", _GlassShaders.glassBoxHash, _GlassShaders.glassBoxSPIRV),
                                     ("glass_saturate", _GlassShaders.glassSaturateHash, _GlassShaders.glassSaturateSPIRV),
                                     ("glass_luminance", _GlassShaders.glassLuminanceHash, _GlassShaders.glassLuminanceSPIRV),
                                     ("glass_lens", _GlassShaders.glassLensHash, _GlassShaders.glassLensSPIRV)] {
-            let glsl = try Data(contentsOf: dir.appendingPathComponent(name + ".comp"))
+            let glsl = lf(try Data(contentsOf: dir.appendingPathComponent(name + ".comp")))
             XCTAssertEqual(fnv(common + glsl), hash, "\(name).comp changed since its SPIR-V was embedded")
             XCTAssertEqual(spirv.first, 0x0723_0203, "\(name) is SPIR-V")
         }

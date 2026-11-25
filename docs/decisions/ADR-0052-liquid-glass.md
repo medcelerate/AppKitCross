@@ -426,8 +426,49 @@ rendering the frame beneath the glass twice (the lens and material scales) and 1
 The host was never the budget; it shows the read-back's price. Windows draws in place, so
 each surface costs its draw call and the upload of a sample-scale bitmap, and the CPU work
 left per frame is the frame render, the crops and the blur. The budget: under 8 ms a scroll
-frame with glass in a release build at 1x on the PC (software: 18 to 21 ms). Measured in PC
-round 1 of the stage-2 PR; the numbers go here.
+frame with glass in a release build at 1x on the PC (software: 18 to 21 ms).
+
+**PC round 1** (PR 99 at d880a2c; RTX desktop, 2560x1440 at 100 %, release,
+`--autoscroll 10 --interval 0`):
+
+| | paint mean | p95 | fps free-running |
+|---|---|---|---|
+| glass on, Direct2D program | 16.3 ms | 18.4 ms | 44 |
+| glass on, software | 19.1 ms | | 39 |
+| glass off | 10.9 ms | 16.1 ms | 60 |
+
+The GPU draws are not the cost. The trace puts the eleven Direct2D lens and material draws
+at 0.63 ms a frame together (0.04 to 0.08 ms each). The CPU work is two renders of the window
+beneath the glass, 6.2 ms between them: 3.25 ms at a quarter scale (225x160 px) and 3.4 ms at
+an eighth (113x80 px). Their cost does not scale with their pixels, so it is the view tree's
+draw calls through the WIC software target, not rasterising.
+
+What the 8 ms budget does not account for is the glass-off baseline: 10.9 ms against 1.3 ms on
+the host. Two things in it:
+
+- The demo's "paint" wraps `displayIfNeeded`, which on Windows includes `EndDraw` and
+  `Present(1, 0)` on a two-buffer flip-sequential chain. That blocks until a buffer is free,
+  so part of it is the vertical blank. Glass off runs at 59.8 fps, the refresh rate. The
+  trace's own "draw" (`platformWindowDraw`, no present) is the number to read for the paint.
+- The rest is a port-wide Direct2D draw cost: the window paints seven rectangles a scroll
+  frame, and a tree walk costs about 3 ms whatever the pixel size. That is a follow-up of
+  its own, not glass: profile per-rectangle tree walks, per-draw path geometries and
+  DirectWrite layouts on the PC.
+
+Round 2 renders the window beneath the glass once per paint. The material's eighth-scale
+frame is the lens frame halved, each pixel the mean of a 2x2 block (`_GlassFrame.halved`).
+That removes one tree walk, about 3.4 ms on the PC. Host 2x, the same run: 6.5 ms with the
+GPU program (was 7.7), 8.8 ms in software. With glass on, the PC then costs the baseline plus
+one CPU frame render (about 3.3 ms) plus the crops, blur and draws (about 1 ms).
+
+Meeting 8 ms with glass at 1x needs two further pieces:
+
+- the frame beneath the glass rendered on the GPU, as a device-context bitmap target on the
+  window's device rather than a WIC bitmap, so the tree walk costs Direct2D's GPU path;
+- the base paint follow-up.
+
+Both are recorded as the next steps; the stage-2 shaders for the box and luminance stages are
+ready for the GPU frame.
 
 ### Fidelity
 
@@ -485,4 +526,15 @@ direction (the published WWDC25 and HIG material describes the look but gives no
 4. The adaptive threshold (0.35) and the dark veil, from the over-dark scene.
 
 Each change goes in with its before and after numbers from the comparison, here.
+
+PC round 1 compared the port's Windows captures with the host's. At 1x the mean difference
+was 0.07 to 0.20/255, and the maximum of 18 to 27 came at glyph antialiasing only. At 1.5x it
+was 0.9 to 1.1/255 against the resampled 2x captures. The 1.5x captures came out 721x451 px:
+the window the platform rounds to whole pixels at 150 %. `Glass --reference` now draws
+exactly the scene's 480x300 pt.
+
+The inactive window's glass is brighter than the key window's in light appearance
+(13 to 18 levels on the PC). That is by design: inactive glass is flatter and more opaque,
+with a 0.6 veil against 0.42, as macOS draws an inactive window's materials. It is one more
+thing for the macOS 26 captures to confirm.
 

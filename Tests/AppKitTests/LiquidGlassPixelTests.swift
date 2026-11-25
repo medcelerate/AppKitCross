@@ -588,6 +588,43 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A paint with a lens and the toolbar band's material renders the window beneath the
+    /// glass once: the material's eighth-scale frame is the lens's quarter-scale frame halved
+    /// (ADR-0052 stage 2), and the band still carries the document's colour.
+    func testMaterialFrameIsTheLensFrameHalved() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: 200), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.appearance = NSAppearance(named: .aqua)
+            w.makeKeyAndOrderFront(nil)
+            defer { w.close() }
+            let content = _SolidView(frame: NSRect(x: 0, y: 0, width: 400, height: 200), color: NSColor(red: 0.3, green: 0.85, blue: 0.4, alpha: 1))
+            content.autoresizingMask = [.width, .height]
+            w.contentView = content
+            content.addSubview(NSGlassEffectView(frame: NSRect(x: 40, y: 40, width: 120, height: 44)))
+            let d = _EmptyToolbarDelegate()
+            let tb = NSToolbar(identifier: "glass.halved")
+            tb.delegate = d
+            w.toolbar = tb
+            w.display()
+            content.needsDisplay = true
+            let before = _GlassRegistry.frameRenders
+            w.display()
+            XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "one render of the window for the lens and the band")
+            // The halving itself: a 2x2 block's mean, the odd edge repeated, the top edge kept.
+            let px: [UInt8] = [10, 20, 30, 255, 30, 40, 50, 255, 90, 90, 90, 255,
+                               50, 60, 70, 255, 70, 80, 90, 255, 90, 90, 90, 255]
+            let template = makeImage(width: 1, height: 1) { _, _ in (0, 0, 0) }
+            let frame = _GlassFrame(rect: NSRect(x: 0, y: 10, width: 12, height: 8), scale: 0.25, pixels: _MaterialPixels(bytes: px, width: 3, height: 2, stride: 12, template: template), invalidation: 0)
+            let half = frame.halved(invalidation: 0)
+            XCTAssertEqual(half.pixels.width, 2); XCTAssertEqual(half.pixels.height, 1)
+            XCTAssertEqual(Array(half.pixels.bytes[0..<4]), [40, 50, 60, 255])
+            XCTAssertEqual(Array(half.pixels.bytes[4..<8]), [90, 90, 90, 255])
+            XCTAssertEqual(half.rect.maxY, frame.rect.maxY, "the top edge stays")
+            XCTAssertEqual(half.scale, 0.125)
+        }
+    }
+
     /// The navigation split view's sidebar pane draws the sidebar material; the detail does not.
     func testSidebarPaneIsMarked() {
         MainActor.assumeIsolated {

@@ -599,6 +599,31 @@ internal final class _GlassFrame {
         self.rect = rect; self.scale = scale; self.pixels = pixels; self.invalidation = invalidation
     }
 
+    /// This frame at half the scale: every pixel the rounded mean of a 2x2 block (the last
+    /// row or column of an odd size repeats), the top edge kept.
+    func halved(invalidation: Int) -> _GlassFrame {
+        let sw = pixels.width, sh = pixels.height, ss = pixels.stride
+        let w = (sw + 1) / 2, h = (sh + 1) / 2, stride = w * 4
+        var out = [UInt8](repeating: 0, count: stride * h)
+        pixels.bytes.withUnsafeBufferPointer { src in
+            out.withUnsafeMutableBufferPointer { dst in
+                for y in 0..<h {
+                    let r0 = 2 * y * ss, r1 = min(sh - 1, 2 * y + 1) * ss
+                    for x in 0..<w {
+                        let c0 = 2 * x * 4, c1 = min(sw - 1, 2 * x + 1) * 4
+                        for c in 0..<4 {
+                            let sum = Int(src[r0 + c0 + c]) + Int(src[r0 + c1 + c]) + Int(src[r1 + c0 + c]) + Int(src[r1 + c1 + c])
+                            dst[y * stride + x * 4 + c] = UInt8((sum + 2) >> 2)
+                        }
+                    }
+                }
+            }
+        }
+        let half = scale / 2
+        let r = NSRect(x: rect.minX, y: rect.maxY - CGFloat(h) / half, width: CGFloat(w) / half, height: CGFloat(h) / half)
+        return _GlassFrame(rect: r, scale: half, pixels: _MaterialPixels(bytes: out, width: w, height: h, stride: stride, template: pixels.template), invalidation: invalidation)
+    }
+
     /// The pixel rows and columns covering `windowRect`, clamped to the frame.
     func cells(for windowRect: NSRect) -> (columns: Range<Int>, rows: Range<Int>)? {
         let c0 = max(0, Int(((windowRect.minX - rect.minX) * scale).rounded(.down)))
@@ -749,6 +774,19 @@ internal enum _GlassRegistry {
         let id = ObjectIdentifier(window)
         let invalidation = invalidations[id, default: 0]
         if let f = frames[id]?[scale], f.invalidation == invalidation { return f }
+        // One render of the window per paint (ADR-0052 stage 2): a material's frame (an eighth
+        // of the backing scale) is the lens frame (a quarter) halved, not a second paint of
+        // the view tree, which on Windows cost as much as the first (3.4 ms at 1x on the PC).
+        let lensScale = max(0.125, window.backingScaleFactor / _GlassRenderer.sampleScaleDivisor)
+        if scale < lensScale, abs(lensScale / scale - 2) < 1e-6, let full = frame(of: window, beneath: view, scale: lensScale) {
+            let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+            let f = full.halved(invalidation: invalidation)
+            frames[id, default: [:]][scale] = f
+            if NSView._traceFrames {
+                NSView._trace(String(format: "glass frame %dx%d px at %.2fx (halved): %.2f ms", f.pixels.width, f.pixels.height, scale, NSView._traceClock() - t0))
+            }
+            return f
+        }
         // The area the window paints: the content, the toolbar band above it, accessories.
         var area = window._contentView?.frame ?? .zero
         if let t = window._toolbarView, !t.isHidden { area = area.union(t.frame) }
