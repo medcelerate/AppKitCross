@@ -13,21 +13,40 @@ enum GlassReferenceScene: String, CaseIterable {
     case dark = "dark"
     /// Light appearance over dark content: the adaptive regular glass turns dark.
     case overDark = "over-dark"
+    /// Light appearance: a regular capsule beside SwiftUI's interactive glass
+    /// (`glassEffect(.regular.interactive())`), captured at rest, hovered and pressed.
+    case interactive = "interactive"
+
+    /// The pointer state an interactive scene is captured in.
+    enum State: String, CaseIterable { case rest, hover, press }
 
     static let size = NSSize(width: 480, height: 300)
 
+    /// The states each scene is captured in.
+    var states: [State] { self == .interactive ? State.allCases : [.rest] }
+
     /// The glass surfaces, by name, in content coordinates (y up), with their corner radius
     /// and style: what the comparison measures.
-    struct Surface { let name: String; let frame: NSRect; let radius: CGFloat; let clear: Bool; let tinted: Bool }
-    static let surfaces: [Surface] = [
-        Surface(name: "regular capsule", frame: NSRect(x: 24, y: 228, width: 180, height: 48), radius: 24, clear: false, tinted: false),
-        Surface(name: "clear capsule", frame: NSRect(x: 276, y: 228, width: 180, height: 48), radius: 24, clear: true, tinted: false),
-        Surface(name: "regular panel", frame: NSRect(x: 24, y: 60, width: 220, height: 120), radius: 20, clear: false, tinted: false),
-        Surface(name: "tinted capsule", frame: NSRect(x: 276, y: 132, width: 180, height: 48), radius: 24, clear: false, tinted: true),
-        Surface(name: "small circle", frame: NSRect(x: 340, y: 48, width: 56, height: 56), radius: 28, clear: false, tinted: false),
-    ]
+    struct Surface { let name: String; let frame: NSRect; let radius: CGFloat; let clear: Bool; let tinted: Bool; let interactive: Bool }
+    static let regularCapsule = Surface(name: "regular capsule", frame: NSRect(x: 24, y: 228, width: 180, height: 48), radius: 24, clear: false, tinted: false, interactive: false)
+    var surfaces: [Surface] {
+        if self == .interactive {
+            return [Self.regularCapsule,
+                    Surface(name: "interactive capsule", frame: NSRect(x: 24, y: 96, width: 220, height: 56), radius: 28, clear: false, tinted: false, interactive: true)]
+        }
+        return [
+            Self.regularCapsule,
+            Surface(name: "clear capsule", frame: NSRect(x: 276, y: 228, width: 180, height: 48), radius: 24, clear: true, tinted: false, interactive: false),
+            Surface(name: "regular panel", frame: NSRect(x: 24, y: 60, width: 220, height: 120), radius: 20, clear: false, tinted: false, interactive: false),
+            Surface(name: "tinted capsule", frame: NSRect(x: 276, y: 132, width: 180, height: 48), radius: 24, clear: false, tinted: true, interactive: false),
+            Surface(name: "small circle", frame: NSRect(x: 340, y: 48, width: 56, height: 56), radius: 28, clear: false, tinted: false, interactive: false),
+        ]
+    }
 
     var appearance: NSAppearance.Name { self == .dark ? .darkAqua : .aqua }
+
+    /// The capture's file name: `<prefix>-<scene>-<state>@<scale>x.png`.
+    func fileName(prefix: String, state: State, scale: Int) -> String { "\(prefix)-\(rawValue)-\(state.rawValue)@\(scale)x.png" }
 
     // `makeContent()` (the backdrop with the glass over it) is in ReferenceSceneGlass.swift,
     // which Apple's SDK compiles for macOS 26 only; the comparison needs this file alone.

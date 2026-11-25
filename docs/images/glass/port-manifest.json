@@ -1,0 +1,19 @@
+{
+  "generator": "tools/glass/capture-references.sh",
+  "commit": "891716b",
+  "renderer": "Examples/Glass --reference on the host backend, APPKITWIN_LIQUID_GLASS=1, the GPU program",
+  "captures": [
+    {"file": "port-light-rest@2x.png", "scene": "light", "state": "rest", "scale": 2},
+    {"file": "port-dark-rest@2x.png", "scene": "dark", "state": "rest", "scale": 2},
+    {"file": "port-over-dark-rest@2x.png", "scene": "over-dark", "state": "rest", "scale": 2},
+    {"file": "port-interactive-rest@2x.png", "scene": "interactive", "state": "rest", "scale": 2},
+    {"file": "port-interactive-hover@2x.png", "scene": "interactive", "state": "hover", "scale": 2},
+    {"file": "port-interactive-press@2x.png", "scene": "interactive", "state": "press", "scale": 2},
+    {"file": "port-light-rest@1x.png", "scene": "light", "state": "rest", "scale": 1},
+    {"file": "port-dark-rest@1x.png", "scene": "dark", "state": "rest", "scale": 1},
+    {"file": "port-over-dark-rest@1x.png", "scene": "over-dark", "state": "rest", "scale": 1},
+    {"file": "port-interactive-rest@1x.png", "scene": "interactive", "state": "rest", "scale": 1},
+    {"file": "port-interactive-hover@1x.png", "scene": "interactive", "state": "hover", "scale": 1},
+    {"file": "port-interactive-press@1x.png", "scene": "interactive", "state": "press", "scale": 1}
+  ]
+}

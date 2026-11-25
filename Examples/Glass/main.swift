@@ -94,12 +94,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     static func disc(_ color: NSColor) -> NSImage { glyph { r in color.setFill(); NSBezierPath(ovalIn: r).fill() } }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `Glass --reference <scene> <out.png>` draws one of the reference scenes (light,
-        // dark, over-dark; ReferenceScene.swift) through the port and exits: the port's half
-        // of the comparison with real macOS 26 glass (tools/glass/reference, ADR-0052).
-        if let i = CommandLine.arguments.firstIndex(of: "--reference"), i + 2 < CommandLine.arguments.count,
-           let scene = GlassReferenceScene(rawValue: CommandLine.arguments[i + 1]) {
-            writeReference(scene, to: CommandLine.arguments[i + 2])
+        // `Glass --reference <scene> <state> <out.png>` draws one of the reference scenes
+        // (light, dark, over-dark, interactive; states rest, hover, press;
+        // ReferenceScene.swift) through the port and exits: the port's half of the comparison
+        // with real macOS 26 glass (tools/glass/capture-references.sh, ADR-0052). The scale is
+        // the display's (`APPKITWIN_HOST_SCALE=1` on the host for 1x).
+        if let i = CommandLine.arguments.firstIndex(of: "--reference"), i + 3 < CommandLine.arguments.count,
+           let scene = GlassReferenceScene(rawValue: CommandLine.arguments[i + 1]),
+           let state = GlassReferenceScene.State(rawValue: CommandLine.arguments[i + 2]) {
+            writeReference(scene, state: state, to: CommandLine.arguments[i + 3])
             NSApp.terminate(nil)
             return
         }
@@ -190,18 +193,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         print("screenshot: \(path) (\(image.width)x\(image.height))")
     }
 
-    private func writeReference(_ scene: GlassReferenceScene, to path: String) {
+    private func writeReference(_ scene: GlassReferenceScene, state: GlassReferenceScene.State, to path: String) {
         let w = NSWindow(contentRect: NSRect(origin: NSPoint(x: 100, y: 100), size: GlassReferenceScene.size), styleMask: [.titled], backing: .buffered, defer: false)
         w.appearance = NSAppearance(named: scene.appearance)
         w.contentView = scene.makeContent()
         w.makeKeyAndOrderFront(nil)
-        w.display()
+        w.layoutIfNeeded()
         let content = w.contentView!
+        if state != .rest, let surface = scene.surfaces.first(where: { $0.interactive }) {
+            // The pointer over the interactive surface (and the button down for a press),
+            // delivered to the glass view as the event loop would.
+            let point = NSPoint(x: surface.frame.midX, y: surface.frame.midY)
+            var glass: [NSView] = []
+            func collect(_ v: NSView) { if v is NSGlassEffectView { glass.append(v) }; v.subviews.forEach(collect) }
+            collect(content)
+            for g in glass where g.convert(g.bounds, to: nil).contains(point) {
+                if let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: point, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                                      context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) { g.mouseEntered(with: enter) }
+                if state == .press, let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { g.mouseDown(with: down) }
+            }
+        }
+        w.display()
         guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
         content.cacheDisplay(in: content.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
-        print("reference \(scene.rawValue): \(path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")
+        print("reference \(scene.rawValue) \(state.rawValue): \(path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")
     }
 
     private func glassButton(_ title: String, frame: NSRect) -> NSGlassEffectView {

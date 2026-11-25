@@ -12,8 +12,14 @@ final class HostBackend: PlatformBackend {
     var displays: [PlatformDisplay] = [
         PlatformDisplay(frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
                         visibleFrame: NSRect(x: 0, y: 0, width: 1920, height: 1055),
-                        backingScaleFactor: 2, localizedName: "Host Display", isMain: true)
+                        backingScaleFactor: HostBackend.displayScale, localizedName: "Host Display", isMain: true)
     ]
+    /// The host display's scale: 2, or `APPKITWIN_HOST_SCALE` (1 for the 1x reference
+    /// captures of the Liquid Glass scenes, ADR-0052).
+    static var displayScale: CGFloat {
+        guard let v = ProcessInfo.processInfo.environment["APPKITWIN_HOST_SCALE"].flatMap(Double.init), v > 0 else { return 2 }
+        return CGFloat(v)
+    }
     /// Test hook: the physical top-left pixel of each display (index into `displays`);
     /// by default the display's point origin times its scale, flipped against the
     /// primary display's physical height, as Win32Backend derives `NSScreen` frames.

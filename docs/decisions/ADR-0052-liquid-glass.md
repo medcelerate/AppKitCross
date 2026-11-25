@@ -435,22 +435,42 @@ The constants were tuned against Apple's descriptions, not against pixels: the m
 was written on runs macOS 15.8, where `NSGlassEffectView` does not exist, so no reference
 could be taken here. Stage 2 adds the means to take them:
 
-- `Examples/Glass/ReferenceScene.swift` and `ReferenceSceneGlass.swift` describe three
-  scenes (light, dark, light appearance over dark content; regular, clear and tinted
-  capsules, a rounded panel and a small circle over colour bands, a checker strip and discs)
-  with public AppKit names alone, so the same files compile against the port and against
-  Apple's AppKit.
-- `Glass --reference <scene> <out.png>` draws a scene through the port
-  (`docs/images/glass/port-<scene>@2x.png`, committed).
-- `tools/glass/capture-references.sh`, on a macOS 26 Mac, builds `tools/glass/reference`
-  against Apple's SDK (outside the package, so the port's AppKit does not shadow it), captures
-  each scene with real `NSGlassEffectView`s through ScreenCaptureKit into
-  `docs/images/glass/macos26-<scene>@2x.png`, draws the port's, and prints per surface the
-  interior colour and luminance, the luminance spread (how blurred the glass is) and the top
-  and bottom rim against the interior, for both and their difference.
+- `Examples/Glass/ReferenceScene.swift` and `ReferenceSceneGlass.swift` describe four
+  scenes with public AppKit and SwiftUI names alone, so the same files compile against the
+  port and against Apple's SDK: `light`, `dark` and `over-dark` (light appearance over deep
+  colours), each with regular, clear and tinted capsules, a rounded panel and a small circle
+  over colour bands, a checker strip and discs; and `interactive`, a regular capsule beside
+  SwiftUI's `glassEffect(.regular.interactive())`, in the states `rest`, `hover` and `press`.
+- `Glass --reference <scene> <state> <out.png>` draws a scene through the port
+  (`APPKITWIN_HOST_SCALE=1` gives the host display a scale of 1 for the 1x captures).
+  The port's captures are committed as `docs/images/glass/port-<scene>-<state>@<n>x.png`
+  with `port-manifest.json`.
+- `tools/glass/capture-references.sh` runs on a macOS 26 Mac. It builds `tools/glass/reference`
+  against Apple's SDK, outside the package so the port's AppKit does not shadow it. It
+  captures every scene and state with real glass through ScreenCaptureKit, at the display's
+  scale and at 1x (resampled by the window server unless the display is 1x; the manifest
+  records which), into `docs/images/glass/macos26-<scene>-<state>@<n>x.png` and
+  `macos26-manifest.json`. Then it draws the port's captures and prints the comparison for
+  each pair: per surface, the interior colour and luminance, the luminance spread (how
+  blurred the glass is), and the top and bottom rim against the interior. Capture conditions
+  are fixed: a 480x300 pt content area at a fixed position, the window key with its shadow
+  off, the pointer parked away for `rest`, and a 1.2 s settle before each capture. Hover warps
+  the pointer onto the interactive surface. Press posts a mouse down, which needs
+  Accessibility permission for the terminal; without it the press captures are skipped and
+  listed in the manifest.
+
+**The macOS 26 references are pending.** The command to produce and commit them, on a macOS 26
+Mac with Xcode 26 and its command-line tools selected (`xcode-select -p`):
+
+```bash
+git clone https://github.com/medcelerate/AppKitCross.git && cd AppKitCross   # or: git fetch origin && git switch claude/glass-gpu-c4d3e9
+git switch claude/glass-gpu-c4d3e9
+bash tools/glass/capture-references.sh
+git add docs/images/glass && git commit -m "Liquid Glass: macOS 26 reference captures (ADR-0052)" && git push
+```
 
 No constant changed in stage 2: retuning without references would be guessing in another
-direction. What to check first when the captures exist, from Apple's material as presented
+direction (the published WWDC25 and HIG material describes the look but gives no numbers). What to check first when the captures exist, from Apple's material as presented
 (WWDC25, the HIG) against this pass:
 
 1. The far edge. The port darkens the bevel facing away from the light (`rim * 0.45`);
