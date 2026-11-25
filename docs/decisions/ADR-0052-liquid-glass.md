@@ -470,6 +470,102 @@ Meeting 8 ms with glass at 1x needs two further pieces:
 Both are recorded as the next steps; the stage-2 shaders for the box and luminance stages are
 ready for the GPU frame.
 
+### Round 3: the frame beneath the glass on the GPU
+
+Evan's call after PC round 1: keep going towards 8 ms in this PR by moving the frame beneath
+the glass onto the GPU on Windows. That frame is the one CPU cost the glass adds that grows
+with the window. The port-wide base paint is a separate session's PR; this one stays out of
+the general paint path.
+
+**The frame.** The program can make the frame (`PlatformGlassProgram.makeFrame`):
+
+- On Windows, `cd2d_glass_frame_create` makes a bitmap target on a second device context of
+  the window's own `ID2D1Device`, at 96 DPI so a DIP is a pixel.
+- `Win32GlassFrame` draws into it through a `CGContext` whose base transform takes points to
+  those pixels, made with the window context's factory (`CGContext._d2dFactory`) so its
+  geometry belongs to the same device.
+- Core paints the window beneath the glass into it exactly as into the CPU offscreen
+  (`_GlassRegistry.paintBeneath`, shared by both paths), once per paint and only at the
+  lens scale.
+- The material's frame is that bitmap halved on the device (`_GlassGPUFrame` with the halved
+  geometry), not a second paint.
+
+**The graph.** Each surface draws from a crop of the frame
+(`PlatformGlassFrameSource`, `cd2d_glass_draw_from_frame`) as one Direct2D effect graph on the
+window's device context:
+
+1. For a material, the built-in Scale effect at exactly 0.5 with linear filtering. Bilinear
+   at a 2x2 block's shared corner is the block's mean, which is the CPU halving's.
+2. The crop (built-in Crop). For a band over a document that does not run under it, a flip
+   about the edge (built-in 2D affine transform, nearest neighbour) composited above it, which
+   is the mirrored strip.
+3. Six box passes and the saturation. `glass_backdrop.hlsl`'s `box` is a custom effect that
+   reads whole texels and writes whole bytes, so the truncating sums are the software
+   running sum's.
+4. The luminance probe: `luminance`, a custom effect whose one-pixel output is the
+   alpha-weighted mean.
+5. The lens (`glass_lens.hlsl`), which reads the probe as its second input (`k[9].z < 0`) and
+   the backdrop at the crop's origin (`k[11].xy`).
+
+Nothing is read back, nothing uploaded. The trace line is
+`glass Direct2D from the GPU frame WxH px (lens): ms`, and the frame's is
+`glass frame WxH px at 0.25x (GPU)`.
+
+Departures and fallbacks:
+
+- **The mirror's condition is structural on the GPU frame.** The surface's rows lie outside
+  the content view, which is ADR-0018's case of nothing but the window background beneath
+  the band. The CPU frame counts background pixels instead; there is no pixel to count
+  without a read-back. The two agree for every window the port draws: a
+  `fullSizeContentView` window's content reaches under the band and is sampled directly.
+- **The probe's mean reaches the lens as an 8-bit value**, so the variant pick near the 0.35
+  threshold can differ from the software pass's by 1/255 of luminance.
+- **The CPU frame stays the fallback.** When `makeFrame` returns nil (a target that is no
+  device context), the CPU frame is used from then on (`_GlassGPU.framesUnavailable`), with
+  round 1's path: the CPU backdrop stage and the lens effect. The software pass is still
+  behind it, and `APPKITWIN_LIQUID_GLASS_GPU=0` still forces it.
+- A sample drawn from the GPU frame keeps no image: `_GlassSample.isGPUFrame` is set, and
+  the invalidation bookkeeping (the window rectangle, the mirrored strip) is kept as before.
+
+**Fixed in passing:** a glass surface with nothing to sample (no window content beneath, a
+zero-size crop) made the renderer drop the GPU program for the process, because a draw that
+returned false read as a failure. It now draws the software fallback fill and keeps the
+program.
+
+**Tests.** `LiquidGlassGPUTests.testGPUFramePlumbingMatchesSoftware` runs Core's round-3
+path on the host and in the Linux container with a program that renders its frame on the CPU
+and draws each surface from its crop, doing the halving, the crop and the mirror as the
+effect graph does. Across a window with two lenses and the toolbar band, that program
+through the GPU-frame path matches the same program through Core's CPU frame within the
+tolerance, with one frame render per paint. The effect graph itself runs on Windows only.
+The PC checks it against the stored captures and against the GPU=0 run.
+
+Two things the test turned up:
+
+- corelibs Foundation's `CGRect.intersects` counts rectangles that only share an edge. The
+  structural mirror test asks for an overlap of positive area.
+- On Linux the software pass's flat material (the band drawn as its blurred image scaled up
+  by cairo, then fills) differs from any program's per-pixel material by up to 79/255 at the
+  band's edges, where cairo's filter fades into transparency; Apple's CoreGraphics and the
+  programs agree. The programs' material is the reference-faithful one, so the software
+  pass's flat path on Linux is a follow-up, not a tolerance change.
+
+**What glass alone can reach.** With the GPU frame, a scroll frame's glass work on Windows is:
+
+- one paint of the window beneath the glass into a GPU bitmap, which is the same tree walk
+  as the base paint, at a quarter of the backing scale;
+- per surface, one effect graph (round 1 measured the lens draw at 0.04 to 0.08 ms; the graph
+  adds GPU passes, not CPU).
+
+What it cannot reach is the cost of that tree walk itself, measured at about 3.3 ms through
+the WIC software target. Through the GPU device context it should be cheaper, and by how much
+is round 3's PC number. The rest of the gap to 8 ms is the base paint (10.9 ms with glass off
+on the PC against 1.3 ms on the host). That belongs to the separate base-paint PR: one tree
+walk over the dirty union, cached DirectWrite layouts, simple-shape fills. Every one of those
+also cuts the glass frame's tree walk, since it is the same walk. The budget for glass's own
+share is the difference glass on minus glass off: 5.4 ms in PC round 1 (16.3 against
+10.9), and round 3 aims below 2 ms.
+
 ### Fidelity
 
 The constants were tuned against Apple's descriptions, not against pixels: the machine this

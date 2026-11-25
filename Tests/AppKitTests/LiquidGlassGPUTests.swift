@@ -184,6 +184,64 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// Round 3's plumbing: a program that renders the frame beneath the glass itself and draws
+    /// every surface from a crop of it (here on the CPU, standing in for the Direct2D frame and
+    /// effect graph) gives the window the same program gives over Core's CPU frame: the crops,
+    /// the material's frame at half the lens frame's scale, the strip below the toolbar band
+    /// mirrored in (structurally rather than by counting background pixels), one frame render
+    /// per paint.
+    func testGPUFramePlumbingMatchesSoftware() throws {
+        try requireHostBackend()
+        try MainActor.assumeIsolated {
+            @MainActor func paint(gpuFrames: Bool) throws -> (image: CGImage, renders: Int, gpuFrame: Bool) {
+                _GlassGPU._override = .some(_CPUFrameProgram())
+                _GlassGPU.framesUnavailable = !gpuFrames
+                let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 320, height: 200), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                w.appearance = NSAppearance(named: .aqua)
+                w.makeKeyAndOrderFront(nil)
+                defer { w.close() }
+                let content = _GPUTestBands(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+                content.autoresizingMask = [.width, .height]
+                w.contentView = content
+                let lens = NSGlassEffectView(frame: NSRect(x: 20, y: 30, width: 130, height: 44)); lens.cornerRadius = 22
+                let clear = NSGlassEffectView(frame: NSRect(x: 170, y: 120, width: 120, height: 44)); clear.cornerRadius = 12; clear.style = .clear
+                content.addSubview(lens); content.addSubview(clear)
+                let d = _GPUTestToolbarDelegate()
+                let tb = NSToolbar(identifier: "glass.gpu.frame.\(gpuFrames)")
+                tb.delegate = d
+                w.toolbar = tb
+                w.display()
+                content.needsDisplay = true
+                let before = _GlassRegistry.frameRenders
+                w.display()
+                let renders = _GlassRegistry.frameRenders - before
+                guard let image = (Mirror(reflecting: w).descendant("_platform") as? HostWindow)?.lastImage else { throw XCTSkip("no host image") }
+                return (image, renders, _GlassRegistry.sample(for: lens).isGPUFrame)
+            }
+            let emulated = try paint(gpuFrames: true)
+            let software = try paint(gpuFrames: false)
+            _GlassGPU.framesUnavailable = false
+            XCTAssertTrue(emulated.gpuFrame, "the lens drew from the program's frame")
+            XCTAssertFalse(software.gpuFrame, "the reference drew from Core's CPU frame")
+            XCTAssertEqual(emulated.renders, 1, "one frame render for the lenses and the band")
+            let d = difference(emulated.image, software.image)
+            if d.max > maxTolerance {
+                // Where the windows differ, for the failure message.
+                let a = bytes(emulated.image), b = bytes(software.image)
+                var where_ = [String]()
+                for y in stride(from: 0, to: emulated.image.height, by: 1) {
+                    for x in 0..<emulated.image.width {
+                        let o = y * emulated.image.bytesPerRow + x * 4
+                        if (0..<4).contains(where: { abs(Int(a[o + $0]) - Int(b[o + $0])) > maxTolerance }) { where_.append("(\(x),\(y))") }
+                    }
+                }
+                XCTFail("differing pixels (\(where_.count)): \(where_.prefix(12).joined(separator: " ")) ... \(where_.suffix(4).joined(separator: " ")) in \(emulated.image.width)x\(emulated.image.height)")
+            }
+            XCTAssertLessThanOrEqual(d.max, maxTolerance, "window through the frame program, largest channel difference")
+            XCTAssertLessThanOrEqual(d.mean, meanTolerance, "window through the frame program, mean channel difference")
+        }
+    }
+
     /// `APPKITWIN_LIQUID_GLASS_GPU=0` (or no/false/off) selects the software pass; anything
     /// else, or nothing, asks for the program.
     func testEnvironmentOptOutSelectsSoftware() {
@@ -228,6 +286,7 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
         }
         XCTAssertEqual(_GlassShaders.metal, try text("glass.metal").trimmingCharacters(in: .newlines))
         XCTAssertEqual(_GlassShaders.hlsl, try text("glass_lens.hlsl").trimmingCharacters(in: .newlines))
+        XCTAssertEqual(_GlassShaders.hlslBackdrop, try text("glass_backdrop.hlsl").trimmingCharacters(in: .newlines))
         let common = lf(try Data(contentsOf: dir.appendingPathComponent("glass_common.glsl")))
         for (name, hash, spirv) in [("glass_box", _GlassShaders.glassBoxHash, _GlassShaders.glassBoxSPIRV),
                                     ("glass_saturate", _GlassShaders.glassSaturateHash, _GlassShaders.glassSaturateSPIRV),
@@ -244,6 +303,7 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
 /// edges, colour and both luminances.
 @MainActor
 private final class _GPUTestBands: NSView {
+    override var isOpaque: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
         let colors: [NSColor] = [.systemRed, .systemYellow, .white, .systemBlue, .systemGreen, .black, .systemPurple]
         let h = bounds.height / CGFloat(colors.count)
@@ -253,5 +313,44 @@ private final class _GPUTestBands: NSView {
         }
         NSColor.systemPink.setFill()
         NSBezierPath(ovalIn: NSRect(x: bounds.midX - 30, y: bounds.midY - 30, width: 60, height: 60)).fill()
+    }
+}
+
+private final class _GPUTestToolbarDelegate: NSObject, NSToolbarDelegate {
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [] }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [] }
+}
+
+/// The round-3 program contract on the CPU: the frame is an offscreen surface, and a surface
+/// is drawn from its crop (halved, mirrored) through the software pass, as the Direct2D
+/// effect graph does on the window's device.
+@MainActor
+private final class _CPUFrameProgram: PlatformGlassProgram {
+    final class Frame: PlatformGlassFrame {
+        let surface: PlatformOffscreenSurface
+        let scale: CGFloat
+        var image: CGImage?
+        init(surface: PlatformOffscreenSurface, scale: CGFloat) { self.surface = surface; self.scale = scale }
+        var context: CGContext { surface.context }
+        func finish() -> Bool { image = surface.makeImage(); return image != nil }
+    }
+    let name = "CPU frame emulation"
+    var runsBackdropStage: Bool { true }
+    var drawsInPlace: Bool { true }
+    func render(_ backdrop: CGImage, request: PlatformGlassRequest) -> CGImage? { SoftwareMaterialBackend.shared.render(backdrop, request: request) }
+    func draw(_ backdrop: CGImage, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool {
+        drawRendered(backdrop, request: request, in: rect, of: context, flipped: flipped)
+    }
+    func makeFrame(pixelWidth: Int, pixelHeight: Int, scale: CGFloat, like context: CGContext) -> (any PlatformGlassFrame)? {
+        Platform.backend.image.makeOffscreen(size: CGSize(width: CGFloat(pixelWidth) / scale, height: CGFloat(pixelHeight) / scale), scale: scale)
+            .map { Frame(surface: $0, scale: scale) }
+    }
+    func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool {
+        guard let frame = source.frame as? Frame, let image = frame.image, let pixels = _MaterialPixels(image) else { return false }
+        var f = _GlassFrame(rect: .zero, scale: frame.scale, pixels: pixels, invalidation: 0)
+        if source.halved { f = f.halved(invalidation: 0) }
+        let crop = f.crop(columns: source.cropX..<(source.cropX + source.cropWidth), rows: source.cropY..<(source.cropY + source.cropHeight), mirrorBelow: source.mirrorBelow)
+        guard let raw = crop.makeImage() else { return false }
+        return drawRendered(raw, request: request, in: rect, of: context, flipped: flipped)
     }
 }

@@ -167,15 +167,18 @@ enum _GlassShaders {
     // Liquid Glass lens, HLSL (ADR-0052 stage 2): the pixel shader of the Direct2D custom effect
     // in Sources/CD2D/cd2d_glass.cpp, run on the window's own D2D device. The lens stage of
     // glass.metal with the same arithmetic; the backdrop arrives already blurred and saturated
-    // (the backdrop stage runs on the CPU on Windows while the frame beneath the glass is a CPU
-    // bitmap, ADR-0052) and its luminance is in the constants. The input is the backdrop at the
-    // sample scale, laid in the effect's space at (0, 0); the output covers (0, 0, W, H) in
-    // output pixels. D2D hands the input's texture coordinate of this pixel's scene position
+    // (by glass_backdrop.hlsl's effects over the frame rendered on the GPU, or on the CPU when the
+    // frame beneath the glass is a CPU bitmap, ADR-0052). Its luminance is in the constants, or
+    // (k[9].z < 0) the one pixel of input 1, glass_backdrop.hlsl's probe. The backdrop is at the
+    // sample scale, its crop starting at (k[11].x, k[11].y) in the effect's space; the output
+    // covers (0, 0, W, H) in output pixels. D2D hands the input's texture coordinate of this pixel's scene position
     // (uv0.xy) and the size of one scene pixel in it (uv0.zw), so any point of the backdrop is
     // uv0.xy + (q - posScene.xy) * uv0.zw.
     
     Texture2D InputTexture : register(t0);
+    Texture2D ProbeTexture : register(t1);
     SamplerState InputSampler : register(s0);
+    SamplerState ProbeSampler : register(s1);
     
     // Twelve float4 rows, see glass.metal's GlassConstants.
     cbuffer GlassConstants : register(b0) { float4 k[12]; };
@@ -196,12 +199,16 @@ enum _GlassShaders {
         return float3(d, n);
     }
     
-    float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
+    float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0, float4 uv1 : TEXCOORD1) : SV_Target {
         float2 p = posScene.xy;
         float3 f = glass_field(p);
         float d = f.x; float2 n = f.yz;
         if (d >= 0.5) return float4(0, 0, 0, 0);
         float luminance = k[9].z;
+        if (luminance < 0) {
+            float4 probe = ProbeTexture.SampleLevel(ProbeSampler, uv1.xy + (float2(0.5, 0.5) - posScene.xy) * uv1.zw, 0);
+            luminance = probe.a > 0.5 ? probe.r : -1;
+        }
         bool dark = k[9].x == 1 || (k[9].x == 2 && (luminance < 0 ? 1.0 : luminance) < k[9].y);
         float4 veil = dark ? k[7] : k[6];
         float rimA = dark ? k[8].z : k[8].x, spec = dark ? k[8].w : k[8].y;
@@ -216,7 +223,7 @@ enum _GlassShaders {
         // software look-up clamps its indices; the sampler is bilinear.
         float2 q = (bent - k[1].xy) * k[1].zw;
         q = clamp(q, float2(0.5, 0.5), k[0].zw - float2(0.5, 0.5));
-        float4 c = InputTexture.SampleLevel(InputSampler, uv0.xy + (q - posScene.xy) * uv0.zw, 0);
+        float4 c = InputTexture.SampleLevel(InputSampler, uv0.xy + (q + k[11].xy - posScene.xy) * uv0.zw, 0);
         float a = c.a;
         float3 rgb = c.rgb;
         if (a > 0.001) rgb *= 1 / a;
@@ -238,7 +245,69 @@ enum _GlassShaders {
         return float4(saturate(rgb) * outA, outA);
     }
     """#
-    static let hlslHash: UInt64 = 0x62330167821b4590
+    static let hlslHash: UInt64 = 0x596f6e62cb1f602d
+    /// Platform/Shaders/glass_backdrop.hlsl
+    static let hlslBackdrop = #"""
+    // Liquid Glass backdrop stage, HLSL (ADR-0052 stage 2, round 3): the box passes with the
+    // saturation, and the luminance probe, as Direct2D custom effects (Sources/CD2D/cd2d_glass.cpp)
+    // over the frame beneath the glass rendered on the window's own device. The same arithmetic
+    // as glass.metal's glass_box, glass_saturate and glass_luminance: every pass reads and
+    // writes whole bytes (point sampling; Direct2D's intermediates are 8-bit), so the box's
+    // truncating division is the software running sum's.
+    //
+    // The input lies in the frame's pixel space; the crop is (k[0].x, k[0].y) to
+    // (k[0].x + k[0].z, k[0].y + k[0].w). D2D hands the input's texture coordinate of this
+    // pixel's scene position (uv0.xy) and the size of one scene pixel in it (uv0.zw).
+    
+    Texture2D InputTexture : register(t0);
+    SamplerState InputSampler : register(s0);
+    
+    // k[0]: crop x, y, width, height (frame pixels); k[1]: box radius, horizontal (0/1),
+    // saturate after this pass (0/1), saturation.
+    cbuffer GlassBackdropConstants : register(b0) { float4 k[12]; };
+    
+    float4 glass_texel(float2 index, float2 posScene, float4 uv0) {
+        return round(InputTexture.SampleLevel(InputSampler, uv0.xy + (index + 0.5 - posScene) * uv0.zw, 0) * 255);
+    }
+    
+    // One box pass (and the saturation when it is the last): bytes in, bytes out.
+    float4 box(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
+        int r = (int)k[1].x;
+        bool across = k[1].y > 0.5;
+        float2 p = floor(posScene.xy);
+        float lo = across ? k[0].x : k[0].y;
+        float hi = lo + (across ? k[0].z : k[0].w) - 1;
+        float4 sum = float4(0, 0, 0, 0);
+        [loop] for (int i = -r; i <= r; i++) {
+            float2 q = p;
+            if (across) q.x = clamp(p.x + i, lo, hi); else q.y = clamp(p.y + i, lo, hi);
+            sum += glass_texel(q, posScene.xy, uv0);
+        }
+        float4 c = floor(sum / (2 * r + 1));
+        if (k[1].z > 0.5) {
+            // rgba here: the software's b, g, r weights on blue, green, red.
+            float l = 0.0722 * c.b + 0.7152 * c.g + 0.2126 * c.r;
+            c.rgb = clamp(floor(float3(l, l, l) + (c.rgb - float3(l, l, l)) * k[1].w + 0.5), float3(0, 0, 0), float3(c.a, c.a, c.a));
+        }
+        return c / 255;
+    }
+    
+    // The alpha-weighted mean luminance of the crop, as one pixel at the scene origin: the mean
+    // in red (and green and blue), alpha 1; transparent when nothing in the crop is covered.
+    float4 luminance(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
+        float sum = 0, weight = 0;
+        int w = (int)k[0].z, h = (int)k[0].w;
+        [loop] for (int y = 0; y < h; y++) {
+            [loop] for (int x = 0; x < w; x++) {
+                float4 c = glass_texel(float2(k[0].x + x, k[0].y + y), posScene.xy, uv0);
+                if (c.a > 0) { sum += 0.0722 * c.b + 0.7152 * c.g + 0.2126 * c.r; weight += c.a; }
+            }
+        }
+        if (weight <= 0) return float4(0, 0, 0, 0);
+        float l = sum / weight;
+        return float4(l, l, l, 1);
+    }
+    """#
     /// Platform/Shaders/glass_box.comp
     static let glassBoxHash: UInt64 = 0x9666b569a2ac2017
     static let glassBoxSPIRV: [UInt32] = [

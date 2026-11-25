@@ -128,6 +128,30 @@ public protocol PlatformGlassProgram: AnyObject {
     /// Draws the shaded surface into `rect` of `context` (the image's top row at the rect's
     /// visual top, `flipped` as the view); false when it could not.
     func draw(_ backdrop: CGImage, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool
+    /// Round 3: a surface for the frame beneath the glass that stays on the device `like`
+    /// draws with, `pixelWidth` by `pixelHeight`, drawn in points at `scale` (bottom-left
+    /// origin, as an offscreen surface); nil to render the frame on the CPU. The default is nil.
+    func makeFrame(pixelWidth: Int, pixelHeight: Int, scale: CGFloat, like context: CGContext) -> (any PlatformGlassFrame)?
+    /// The whole program over such a frame, drawn into `rect` of `context`; false when it could
+    /// not (the caller draws the software pass).
+    func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool
+}
+
+/// The frame beneath the glass on the GPU (round 3): drawn through `context`, then finished.
+@MainActor
+public protocol PlatformGlassFrame: AnyObject {
+    var context: CGContext { get }
+    /// Ends the drawing; false when the device failed it.
+    func finish() -> Bool
+}
+
+/// One surface's backdrop in a GPU frame: the crop (frame pixels, top row first, of the frame
+/// halved when `halved`), and the crop row above which the strip below is mirrored in.
+public struct PlatformGlassFrameSource {
+    public let frame: any PlatformGlassFrame
+    public let halved: Bool
+    public let cropX: Int, cropY: Int, cropWidth: Int, cropHeight: Int
+    public let mirrorBelow: Int?
 }
 
 /// Which glass program the window uses: the platform's when it starts and the switch does
@@ -137,6 +161,9 @@ public enum _GlassGPU {
     /// Pins the program (tests): `.some(nil)` forces the software pass.
     public static var _override: (any PlatformGlassProgram)??
     private static var resolved: (any PlatformGlassProgram)??
+    /// Set when the program made no GPU frame (round 3): the frame beneath the glass is
+    /// rendered on the CPU from then on.
+    public static var framesUnavailable = false
     /// Why the program is not in use, for traces.
     public private(set) static var unavailableReason: String?
 
@@ -152,7 +179,7 @@ public enum _GlassGPU {
     }
 
     /// Forgets the resolved program so the next use reads the environment again (tests).
-    public static func _resetForTesting() { resolved = nil; unavailableReason = nil }
+    public static func _resetForTesting() { resolved = nil; unavailableReason = nil; framesUnavailable = false }
 
     /// Whether `environment` asks for the GPU program: anything but 0/no/false/off.
     public static func isRequested(_ environment: [String: String]) -> Bool {
@@ -190,6 +217,9 @@ public enum _GlassGPU {
 public struct _GlassProgramError: Error, Sendable { public let message: String; public init(_ message: String) { self.message = message } }
 
 extension PlatformGlassProgram {
+    public func makeFrame(pixelWidth: Int, pixelHeight: Int, scale: CGFloat, like context: CGContext) -> (any PlatformGlassFrame)? { nil }
+    public func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool { false }
+
     /// Draws the rendered image the way the software pass's shaded image is drawn.
     public func drawRendered(_ backdrop: CGImage, request: PlatformGlassRequest, in rect: CGRect, of ctx: CGContext, flipped: Bool) -> Bool {
         guard let image = render(backdrop, request: request) else { return false }

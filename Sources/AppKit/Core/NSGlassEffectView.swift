@@ -286,11 +286,15 @@ internal enum _GlassRenderer {
         // The GPU stage (ADR-0052 stage 2) takes every rounded-rectangle lens and every flat
         // material; a lens with any other outline keeps the software pass's coverage mask.
         if let program = _GlassGPU.program, !(spec.lens && isPath(outline)) {
-            if drawWithProgram(program, spec: spec, outline: outline, in: rect, margin: margin, sample: sample, view: view, context: ctx) {
+            switch drawWithProgram(program, spec: spec, outline: outline, in: rect, margin: margin, sample: sample, view: view, context: ctx) {
+            case .drawn:
                 ctx.restoreGState()
                 return
+            case .nothingToSample:
+                break
+            case .failed:
+                _GlassGPU.disable("\(program.name) could not draw a \(Int(rect.width))x\(Int(rect.height)) pt surface")
             }
-            _GlassGPU.disable("\(program.name) could not draw a \(Int(rect.width))x\(Int(rect.height)) pt surface")
         }
         if let backdrop = sample.backdrop(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view) {
             let scale = view.window?.backingScaleFactor ?? 1
@@ -364,17 +368,33 @@ internal enum _GlassRenderer {
         return false
     }
 
+    enum ProgramOutcome { case drawn, nothingToSample, failed }
+
     /// The glass through the GPU program: the request built from the spec as the software
     /// pass builds its parameters, the raw sample when the program blurs it itself, the
     /// result drawn in place or cached with the sample as the software pass's shaded image.
+    /// A program that draws in place takes the frame beneath the glass on the GPU when it
+    /// can (round 3): the whole program then runs on the window's device.
     private static func drawWithProgram(_ program: any PlatformGlassProgram, spec: _GlassSpec, outline: _GlassOutline, in rect: NSRect, margin: CGFloat,
-                                        sample: _GlassSample, view: NSView, context ctx: CGContext) -> Bool {
+                                        sample: _GlassSample, view: NSView, context ctx: CGContext) -> ProgramOutcome {
+        let scale = view.window?.backingScaleFactor ?? 1
+        if program.drawsInPlace, !_GlassGPU.framesUnavailable,
+           let source = sample.gpuSource(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view, program: program, context: ctx) {
+            let request = glassRequest(spec, outline: outline, in: rect, margin: margin, scale: scale, view: view, imageRect: source.imageRect, luminance: nil,
+                                       blurPixels: sample.blurPixels, raw: true)
+            let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+            let ok = program.draw(from: source.source, request: request, in: rect, of: ctx, flipped: view.isFlipped)
+            if NSView._traceFrames {
+                NSView._trace(String(format: "glass %@ from the GPU frame %dx%d px (%@): %.2f ms", program.name, request.parameters.width, request.parameters.height, spec.lens ? "lens" : "material", NSView._traceClock() - t0))
+            }
+            return ok ? .drawn : .failed
+        }
         guard let backdrop = sample.backdrop(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view, raw: program.runsBackdropStage) else {
             // Nothing to sample: the software pass's fallback fill, not a program failure.
-            return false
+            return .nothingToSample
         }
-        let scale = view.window?.backingScaleFactor ?? 1
-        let request = glassRequest(spec, outline: outline, in: rect, margin: margin, scale: scale, view: view, backdrop: backdrop, blurPixels: sample.blurPixels, raw: program.runsBackdropStage)
+        let request = glassRequest(spec, outline: outline, in: rect, margin: margin, scale: scale, view: view, imageRect: backdrop.imageRect,
+                                   luminance: backdrop.luminance, blurPixels: sample.blurPixels, raw: program.runsBackdropStage)
         let t0 = NSView._traceFrames ? NSView._traceClock() : 0
         let ok: Bool
         if program.drawsInPlace {
@@ -391,13 +411,13 @@ internal enum _GlassRenderer {
         if NSView._traceFrames {
             NSView._trace(String(format: "glass %@ %dx%d px (%@): %.2f ms", program.name, request.parameters.width, request.parameters.height, spec.lens ? "lens" : "material", NSView._traceClock() - t0))
         }
-        return ok
+        return ok ? .drawn : .failed
     }
 
     /// The program's request: the parameters of both variants, the shape, where the
     /// backdrop lies in output pixels, the backdrop stage's blur and saturation.
     static func glassRequest(_ spec: _GlassSpec, outline: _GlassOutline, in rect: NSRect, margin: CGFloat, scale: CGFloat, view: NSView,
-                             backdrop: (image: CGImage, imageRect: NSRect?, luminance: CGFloat?), blurPixels: Int, raw: Bool) -> PlatformGlassRequest {
+                             imageRect: NSRect?, luminance: CGFloat?, blurPixels: Int, raw: Bool) -> PlatformGlassRequest {
         var p = PlatformGlassParameters(width: max(1, Int((rect.width * scale).rounded(.up))), height: max(1, Int((rect.height * scale).rounded(.up))))
         p.veil = .white
         p.veilAlpha = spec.lightVeilAlpha
@@ -415,7 +435,7 @@ internal enum _GlassRenderer {
         let variant: PlatformGlassRequest.Variant
         switch spec.variant { case .light: variant = .light; case .dark: variant = .dark; case .adaptive: variant = .adaptive }
         let backdropRect: CGRect
-        if let imageRect = backdrop.imageRect {
+        if let imageRect {
             let inWindow = view.convert(rect, to: nil)
             backdropRect = CGRect(x: (imageRect.minX - inWindow.minX) * scale, y: (inWindow.maxY - imageRect.maxY) * scale, width: imageRect.width * scale, height: imageRect.height * scale)
         } else {
@@ -427,7 +447,7 @@ internal enum _GlassRenderer {
                                     darkRimAlpha: spec.rimAlpha * 0.55, darkSpecular: spec.specular * 0.7, variant: variant,
                                     shapeRect: CGRect(x: 0, y: 0, width: CGFloat(p.width), height: CGFloat(p.height)), cornerRadius: radius,
                                     backdropRect: backdropRect, blurRadius: blurPixels, saturation: spec.saturation,
-                                    luminance: raw ? nil : (backdrop.luminance ?? 1))
+                                    luminance: raw ? nil : (luminance ?? 1))
     }
 
     /// The lens stage's shape for `outline`: the rounded rectangle in output pixels, or the
@@ -522,6 +542,8 @@ internal final class _GlassSample {
     private var appearanceIsDark = false
     /// Whether the image is the raw sample (the GPU program blurs it) or the blurred one.
     private(set) var isRaw = false
+    /// Whether the surface last drew from the frame on the GPU (round 3): no image is kept.
+    private(set) var isGPUFrame = false
     /// The blur radius in sample pixels the backdrop stage uses.
     private(set) var blurPixels = 0
     private var generation = 0
@@ -542,6 +564,7 @@ internal final class _GlassSample {
         let inWindow = view.convert(rect, to: nil)
         if dirty || image == nil || rect != self.rect || inWindow != windowRect || backing != scale || spec.blurRadius != blur || spec.saturation != saturation || spec.extendsFrom != extendsFrom || dark != appearanceIsDark || raw != isRaw {
             self.rect = rect; windowRect = inWindow; scale = backing; blur = spec.blurRadius; saturation = spec.saturation; extendsFrom = spec.extendsFrom; appearanceIsDark = dark; isRaw = raw
+            isGPUFrame = false
             dirty = false
             generation += 1
             let sampleScale = max(0.125, backing / (spec.lens ? _GlassRenderer.sampleScaleDivisor : _GlassRenderer.materialSampleScaleDivisor))
@@ -569,6 +592,25 @@ internal final class _GlassSample {
         }
         guard let image else { return nil }
         return (image, imageWindowRect.isNull ? nil : imageWindowRect, luminance)
+    }
+
+    /// The backdrop as a crop of the frame beneath the glass on the GPU (round 3), nil when the
+    /// program makes no such frame. Keeps the bookkeeping the invalidation reads (the window
+    /// rectangle, the mirrored strip) but no image: the program draws in place every time.
+    func gpuSource(rect: NSRect, spec: _GlassSpec, view: NSView, program: any PlatformGlassProgram, context: CGContext) -> (source: PlatformGlassFrameSource, imageRect: NSRect)? {
+        guard view.window != nil else { return nil }
+        let backing = view.window?.backingScaleFactor ?? 1
+        let sampleScale = max(0.125, backing / (spec.lens ? _GlassRenderer.sampleScaleDivisor : _GlassRenderer.materialSampleScaleDivisor))
+        guard let r = _GlassRegistry.gpuSource(beneath: view, rect: rect, scale: sampleScale, extendsFrom: spec.extendsFrom, margin: spec.blurRadius + spec.refraction,
+                                               program: program, context: context) else { return nil }
+        if dirty || !isGPUFrame { generation += 1 }
+        self.rect = rect; windowRect = view.convert(rect, to: nil); scale = backing; blur = spec.blurRadius; saturation = spec.saturation
+        extendsFrom = spec.extendsFrom; appearanceIsDark = view.effectiveAppearance.isDark; isRaw = true; isGPUFrame = true
+        dirty = false
+        image = nil; luminance = nil; shadedImage = nil
+        extended = r.extended; imageWindowRect = r.windowRect
+        blurPixels = Int((spec.blurRadius * sampleScale).rounded())
+        return (r.source, r.windowRect)
     }
 
     /// The shaded image for `key` over the current backdrop, made when either changed.
@@ -619,26 +661,13 @@ internal final class _GlassFrame {
                 }
             }
         }
-        let half = scale / 2
-        let r = NSRect(x: rect.minX, y: rect.maxY - CGFloat(h) / half, width: CGFloat(w) / half, height: CGFloat(h) / half)
-        return _GlassFrame(rect: r, scale: half, pixels: _MaterialPixels(bytes: out, width: w, height: h, stride: stride, template: pixels.template), invalidation: invalidation)
+        let g = geometry.halved()
+        return _GlassFrame(rect: g.rect, scale: g.scale, pixels: _MaterialPixels(bytes: out, width: w, height: h, stride: stride, template: pixels.template), invalidation: invalidation)
     }
 
-    /// The pixel rows and columns covering `windowRect`, clamped to the frame.
-    func cells(for windowRect: NSRect) -> (columns: Range<Int>, rows: Range<Int>)? {
-        let c0 = max(0, Int(((windowRect.minX - rect.minX) * scale).rounded(.down)))
-        let c1 = min(pixels.width, Int(((windowRect.maxX - rect.minX) * scale).rounded(.up)))
-        let r0 = max(0, Int(((rect.maxY - windowRect.maxY) * scale).rounded(.down)))
-        let r1 = min(pixels.height, Int(((rect.maxY - windowRect.minY) * scale).rounded(.up)))
-        guard c1 > c0, r1 > r0 else { return nil }
-        return (c0..<c1, r0..<r1)
-    }
-
-    /// The window rectangle the cells cover.
-    func windowRect(columns: Range<Int>, rows: Range<Int>) -> NSRect {
-        NSRect(x: rect.minX + CGFloat(columns.lowerBound) / scale, y: rect.maxY - CGFloat(rows.upperBound) / scale,
-               width: CGFloat(columns.count) / scale, height: CGFloat(rows.count) / scale)
-    }
+    var geometry: _GlassFrameGeometry { _GlassFrameGeometry(rect: rect, scale: scale, width: pixels.width, height: pixels.height) }
+    func cells(for windowRect: NSRect) -> (columns: Range<Int>, rows: Range<Int>)? { geometry.cells(for: windowRect) }
+    func windowRect(columns: Range<Int>, rows: Range<Int>) -> NSRect { geometry.windowRect(columns: columns, rows: rows) }
 
     /// The pixels of the cells; `mirrorBelow` (a row index within `rows`) takes the rows
     /// above it from the rows below it in reverse, a strip beyond an edge mirrored in.
@@ -663,6 +692,48 @@ internal final class _GlassFrame {
     }
 }
 
+/// Where a frame's pixels lie in the window: the top row is the rectangle's top edge.
+struct _GlassFrameGeometry {
+    let rect: NSRect
+    let scale: CGFloat
+    let width: Int, height: Int
+
+    /// The pixel rows and columns covering `windowRect`, clamped to the frame.
+    func cells(for windowRect: NSRect) -> (columns: Range<Int>, rows: Range<Int>)? {
+        let c0 = max(0, Int(((windowRect.minX - rect.minX) * scale).rounded(.down)))
+        let c1 = min(width, Int(((windowRect.maxX - rect.minX) * scale).rounded(.up)))
+        let r0 = max(0, Int(((rect.maxY - windowRect.maxY) * scale).rounded(.down)))
+        let r1 = min(height, Int(((rect.maxY - windowRect.minY) * scale).rounded(.up)))
+        guard c1 > c0, r1 > r0 else { return nil }
+        return (c0..<c1, r0..<r1)
+    }
+
+    /// The window rectangle the cells cover.
+    func windowRect(columns: Range<Int>, rows: Range<Int>) -> NSRect {
+        NSRect(x: rect.minX + CGFloat(columns.lowerBound) / scale, y: rect.maxY - CGFloat(rows.upperBound) / scale,
+               width: CGFloat(columns.count) / scale, height: CGFloat(rows.count) / scale)
+    }
+
+    /// This geometry at half the scale, as `_GlassFrame.halved` makes it.
+    func halved() -> _GlassFrameGeometry {
+        let w = (width + 1) / 2, h = (height + 1) / 2, half = scale / 2
+        return _GlassFrameGeometry(rect: NSRect(x: rect.minX, y: rect.maxY - CGFloat(h) / half, width: CGFloat(w) / half, height: CGFloat(h) / half),
+                                   scale: half, width: w, height: h)
+    }
+}
+
+/// The frame beneath the glass on the GPU (round 3), or that frame halved for a material.
+@MainActor
+internal final class _GlassGPUFrame {
+    let geometry: _GlassFrameGeometry
+    let frame: any PlatformGlassFrame
+    let halved: Bool
+    let invalidation: Int
+    init(geometry: _GlassFrameGeometry, frame: any PlatformGlassFrame, halved: Bool, invalidation: Int) {
+        self.geometry = geometry; self.frame = frame; self.halved = halved; self.invalidation = invalidation
+    }
+}
+
 /// Every live glass surface, so a view dirtying the content beneath one marks its sample
 /// stale (and the surface for redisplay), and a window's key change redraws them all.
 @MainActor
@@ -673,6 +744,8 @@ internal enum _GlassRegistry {
     /// The shared frame per window and the count of invalidations it has seen, which a
     /// frame records so a stale one is never cropped.
     private static var frames: [ObjectIdentifier: [CGFloat: _GlassFrame]] = [:]
+    /// The same on the GPU (round 3).
+    private static var gpuFrames: [ObjectIdentifier: [CGFloat: _GlassGPUFrame]] = [:]
     private static var invalidations: [ObjectIdentifier: Int] = [:]
     /// Frames rendered, for the tests of the per-paint sharing.
     internal static var frameRenders = 0
@@ -716,6 +789,7 @@ internal enum _GlassRegistry {
             let id = ObjectIdentifier(window)
             invalidations[id, default: 0] += 1
             frames[id] = nil
+            gpuFrames[id] = nil
         }
     }
 
@@ -762,6 +836,7 @@ internal enum _GlassRegistry {
             if bottom > top, top >= 0, bottom <= cells.rows.count {
                 let surface = frame.crop(columns: cells.columns, rows: (cells.rows.lowerBound + top)..<(cells.rows.lowerBound + bottom))
                 if surface.mostly(background) { mirrorBelow = bottom }
+                if NSView._traceFrames { NSView._trace("glass CPU source band: rows \(top)..<\(bottom) of \(cells.rows), mirror below \(mirrorBelow.map(String.init) ?? "none")") }
             }
         }
         let pixels = frame.crop(columns: cells.columns, rows: cells.rows, mirrorBelow: mirrorBelow)
@@ -787,15 +862,33 @@ internal enum _GlassRegistry {
             }
             return f
         }
-        // The area the window paints: the content, the toolbar band above it, accessories.
+        guard let area = paintArea(of: window, scale: scale) else { return nil }
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        guard let surface = Platform.backend.image.makeOffscreen(size: area.size, scale: scale) else { return nil }
+        paintBeneath(view, in: window, area: area, into: surface.context)
+        guard let image = surface.makeImage(), let pixels = _MaterialPixels(image) else { return nil }
+        let f = _GlassFrame(rect: area, scale: scale, pixels: pixels, invalidation: invalidation)
+        frames[id, default: [:]][scale] = f
+        frameRenders += 1
+        if NSView._traceFrames {
+            NSView._trace(String(format: "glass frame %dx%d px at %.2fx: %.2f ms", pixels.width, pixels.height, scale, NSView._traceClock() - t0))
+        }
+        return f
+    }
+
+    /// The area the window paints (the content, the toolbar band above it, accessories),
+    /// snapped to whole pixels at `scale`.
+    private static func paintArea(of window: NSWindow, scale: CGFloat) -> NSRect? {
         var area = window._contentView?.frame ?? .zero
         if let t = window._toolbarView, !t.isHidden { area = area.union(t.frame) }
         if let a = window._accessoryHost, !a.isHidden { area = area.union(a.frame) }
         guard area.width > 0, area.height > 0, area.width.isFinite, area.height.isFinite else { return nil }
-        area = NSRect(x: area.minX, y: area.minY, width: (area.width * scale).rounded(.up) / scale, height: (area.height * scale).rounded(.up) / scale)
-        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
-        guard let surface = Platform.backend.image.makeOffscreen(size: area.size, scale: scale) else { return nil }
-        let ctx = surface.context
+        return NSRect(x: area.minX, y: area.minY, width: (area.width * scale).rounded(.up) / scale, height: (area.height * scale).rounded(.up) / scale)
+    }
+
+    /// Paints what the window draws beneath its glass in `area` into `ctx` (an offscreen
+    /// surface of `area`'s size, bottom-left origin).
+    private static func paintBeneath(_ view: NSView, in window: NSWindow, area: NSRect, into ctx: CGContext) {
         // Every glass surface stops the paint: the frame holds what lies beneath the first
         // of them in the paint order (the content under a lens, never the lens itself).
         var stops = Set<ObjectIdentifier>(), stopLayers = Set<ObjectIdentifier>()
@@ -826,14 +919,73 @@ internal enum _GlassRegistry {
         NSAppearance.current = window.effectiveAppearance
         window._drawBeneathGlass(into: ctx, rect: area)
         ctx.restoreGState()
-        guard let image = surface.makeImage(), let pixels = _MaterialPixels(image) else { return nil }
-        let f = _GlassFrame(rect: area, scale: scale, pixels: pixels, invalidation: invalidation)
-        frames[id, default: [:]][scale] = f
+    }
+
+    /// The window's shared frame on the GPU (round 3), rendered now through the program
+    /// unless the one from this paint is current; the material's is the lens frame halved
+    /// on the device. Nil when the program makes no GPU frame (the CPU frame is used then,
+    /// and no GPU frame is tried again).
+    private static func gpuFrame(of window: NSWindow, beneath view: NSView, scale: CGFloat, program: any PlatformGlassProgram, like context: CGContext) -> _GlassGPUFrame? {
+        let id = ObjectIdentifier(window)
+        let invalidation = invalidations[id, default: 0]
+        if let f = gpuFrames[id]?[scale], f.invalidation == invalidation { return f }
+        let lensScale = max(0.125, window.backingScaleFactor / _GlassRenderer.sampleScaleDivisor)
+        if scale < lensScale, abs(lensScale / scale - 2) < 1e-6 {
+            guard let full = gpuFrame(of: window, beneath: view, scale: lensScale, program: program, like: context) else { return nil }
+            let f = _GlassGPUFrame(geometry: full.geometry.halved(), frame: full.frame, halved: true, invalidation: invalidation)
+            gpuFrames[id, default: [:]][scale] = f
+            return f
+        }
+        guard let area = paintArea(of: window, scale: scale) else { return nil }
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        let w = Int((area.width * scale).rounded()), h = Int((area.height * scale).rounded())
+        guard let frame = program.makeFrame(pixelWidth: w, pixelHeight: h, scale: scale, like: context) else {
+            _GlassGPU.framesUnavailable = true
+            if NSView._traceFrames { NSView._trace("glass frame: \(program.name) makes no GPU frame here; the frame is rendered on the CPU") }
+            return nil
+        }
+        paintBeneath(view, in: window, area: area, into: frame.context)
+        guard frame.finish() else { return nil }
+        let f = _GlassGPUFrame(geometry: _GlassFrameGeometry(rect: area, scale: scale, width: w, height: h), frame: frame, halved: false, invalidation: invalidation)
+        gpuFrames[id, default: [:]][scale] = f
         frameRenders += 1
         if NSView._traceFrames {
-            NSView._trace(String(format: "glass frame %dx%d px at %.2fx: %.2f ms", pixels.width, pixels.height, scale, NSView._traceClock() - t0))
+            NSView._trace(String(format: "glass frame %dx%d px at %.2fx (GPU): %.2f ms", w, h, scale, NSView._traceClock() - t0))
         }
         return f
+    }
+
+    /// `render(beneath:)` on the GPU frame: the crop of the frame (halved for a material) and,
+    /// for a band, the row above which the strip below it is mirrored in. Nothing is read back,
+    /// so the mirror's condition is structural rather than the CPU frame's background count:
+    /// the content view does not reach under the surface (ADR-0018: nothing but the window
+    /// background lies under the band unless the content runs under it).
+    static func gpuSource(beneath view: NSView, rect: NSRect, scale: CGFloat, extendsFrom: NSRectEdge?, margin: CGFloat,
+                          program: any PlatformGlassProgram, context: CGContext) -> (source: PlatformGlassFrameSource, extended: Bool, windowRect: NSRect)? {
+        guard rect.width > 0, rect.height > 0, rect.width.isFinite, rect.height.isFinite, let window = view.window,
+              let frame = gpuFrame(of: window, beneath: view, scale: scale, program: program, like: context) else { return nil }
+        let inWindow = view.convert(rect, to: nil)
+        guard let cells = frame.geometry.cells(for: inWindow) else { return nil }
+        let covered = frame.geometry.windowRect(columns: cells.columns, rows: cells.rows)
+        var mirrorBelow: Int?
+        if extendsFrom == .minY {
+            let surface = NSRect(x: inWindow.minX, y: inWindow.minY + margin, width: inWindow.width, height: max(0, inWindow.height - 2 * margin))
+            let content = window._contentView.map { $0.convert($0.bounds, to: nil) } ?? .zero
+            // An overlap of positive area: rectangles that only share an edge (the content's
+            // top is the band's bottom) do not count, which corelibs' `intersects` does.
+            let overlap = content.intersection(surface)
+            if overlap.isNull || overlap.width <= 0 || overlap.height <= 0 {
+                let top = Int(((covered.maxY - (inWindow.maxY - margin)) * scale).rounded())
+                let bottom = Int(((covered.maxY - (inWindow.minY + margin)) * scale).rounded())
+                if bottom > top, top >= 0, bottom <= cells.rows.count { mirrorBelow = bottom }
+            }
+            if NSView._traceFrames {
+                NSView._trace("glass GPU source band: surface \(surface), content \(content), rows \(cells.rows), mirror below \(mirrorBelow.map(String.init) ?? "none")")
+            }
+        }
+        let source = PlatformGlassFrameSource(frame: frame.frame, halved: frame.halved, cropX: cells.columns.lowerBound, cropY: cells.rows.lowerBound,
+                                              cropWidth: cells.columns.count, cropHeight: cells.rows.count, mirrorBelow: mirrorBelow)
+        return (source, mirrorBelow != nil, covered)
     }
 
     /// The view tree beneath `view` for `rect` (bounds coordinates) when it has no window:

@@ -2324,3 +2324,13 @@ void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count) {
 
 // The render target behind a CD2D target, for the Liquid Glass effect (cd2d_glass.cpp).
 extern "C" void *cd2d_target_native_render_target(CD2DTarget *t) { return t ? t->target : nullptr; }
+
+// A CD2D target over an existing render target (the Liquid Glass frame's device context,
+// cd2d_glass.cpp); it holds a reference, released with cd2d_target_release.
+extern "C" CD2DTarget *cd2d_target_wrap_native(void *renderTarget) {
+    if (!renderTarget) return nullptr;
+    CD2DTarget *t = new CD2DTarget();
+    t->target = static_cast<ID2D1RenderTarget *>(renderTarget);
+    t->target->AddRef();
+    return t;
+}

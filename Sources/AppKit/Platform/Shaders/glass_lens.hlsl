@@ -1,15 +1,18 @@
 // Liquid Glass lens, HLSL (ADR-0052 stage 2): the pixel shader of the Direct2D custom effect
 // in Sources/CD2D/cd2d_glass.cpp, run on the window's own D2D device. The lens stage of
 // glass.metal with the same arithmetic; the backdrop arrives already blurred and saturated
-// (the backdrop stage runs on the CPU on Windows while the frame beneath the glass is a CPU
-// bitmap, ADR-0052) and its luminance is in the constants. The input is the backdrop at the
-// sample scale, laid in the effect's space at (0, 0); the output covers (0, 0, W, H) in
-// output pixels. D2D hands the input's texture coordinate of this pixel's scene position
+// (by glass_backdrop.hlsl's effects over the frame rendered on the GPU, or on the CPU when the
+// frame beneath the glass is a CPU bitmap, ADR-0052). Its luminance is in the constants, or
+// (k[9].z < 0) the one pixel of input 1, glass_backdrop.hlsl's probe. The backdrop is at the
+// sample scale, its crop starting at (k[11].x, k[11].y) in the effect's space; the output
+// covers (0, 0, W, H) in output pixels. D2D hands the input's texture coordinate of this pixel's scene position
 // (uv0.xy) and the size of one scene pixel in it (uv0.zw), so any point of the backdrop is
 // uv0.xy + (q - posScene.xy) * uv0.zw.
 
 Texture2D InputTexture : register(t0);
+Texture2D ProbeTexture : register(t1);
 SamplerState InputSampler : register(s0);
+SamplerState ProbeSampler : register(s1);
 
 // Twelve float4 rows, see glass.metal's GlassConstants.
 cbuffer GlassConstants : register(b0) { float4 k[12]; };
@@ -30,12 +33,16 @@ float3 glass_field(float2 p) {
     return float3(d, n);
 }
 
-float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0) : SV_Target {
+float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 uv0 : TEXCOORD0, float4 uv1 : TEXCOORD1) : SV_Target {
     float2 p = posScene.xy;
     float3 f = glass_field(p);
     float d = f.x; float2 n = f.yz;
     if (d >= 0.5) return float4(0, 0, 0, 0);
     float luminance = k[9].z;
+    if (luminance < 0) {
+        float4 probe = ProbeTexture.SampleLevel(ProbeSampler, uv1.xy + (float2(0.5, 0.5) - posScene.xy) * uv1.zw, 0);
+        luminance = probe.a > 0.5 ? probe.r : -1;
+    }
     bool dark = k[9].x == 1 || (k[9].x == 2 && (luminance < 0 ? 1.0 : luminance) < k[9].y);
     float4 veil = dark ? k[7] : k[6];
     float rimA = dark ? k[8].z : k[8].x, spec = dark ? k[8].w : k[8].y;
@@ -50,7 +57,7 @@ float4 main(float4 pos : SV_POSITION, float4 posScene : SCENE_POSITION, float4 u
     // software look-up clamps its indices; the sampler is bilinear.
     float2 q = (bent - k[1].xy) * k[1].zw;
     q = clamp(q, float2(0.5, 0.5), k[0].zw - float2(0.5, 0.5));
-    float4 c = InputTexture.SampleLevel(InputSampler, uv0.xy + (q - posScene.xy) * uv0.zw, 0);
+    float4 c = InputTexture.SampleLevel(InputSampler, uv0.xy + (q + k[11].xy - posScene.xy) * uv0.zw, 0);
     float a = c.a;
     float3 rgb = c.rgb;
     if (a > 0.001) rgb *= 1 / a;

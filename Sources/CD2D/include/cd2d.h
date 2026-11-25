@@ -432,17 +432,37 @@ void cd2d_target_draw_text_layout(CD2DTarget *target, CD2DTextLayout *layout, fl
 /// return as a one-byte Bool and loses the id. `menu` and `hwnd` are HMENU / HWND as void*.
 int cd2d_track_popup_menu_command(void *menu, unsigned int flags, int x, int y, void *hwnd);
 
-/// The Liquid Glass lens (ADR-0052 stage 2) as a Direct2D custom effect whose pixel shader is
-/// the HLSL in Platform/Shaders/glass_lens.hlsl. `cd2d_glass_prepare` compiles it once per
-/// process with D3DCompile (d3dcompiler_47.dll, loaded at run time); false with the reason.
-bool cd2d_glass_prepare(const char *hlsl, char *error, uint32_t errorCapacity);
-/// Draws the lens over `backdrop` (premultiplied BGRA, the blurred sample, `stride` bytes a
-/// row) into `target`, whose current transform maps the output's pixels (x right, y down from
-/// the top row, `width` by `height`) to the target's user space. `constants` holds the
-/// program's 48 floats. False when the target is no device context or the effect could not
-/// be made; the caller then draws the software pass.
+/// Liquid Glass (ADR-0052 stage 2) as Direct2D custom effects whose pixel shaders are the HLSL
+/// in Platform/Shaders (glass_lens.hlsl, glass_backdrop.hlsl). `cd2d_glass_prepare` compiles
+/// them once per process with D3DCompile (d3dcompiler_47.dll, loaded at run time); false with
+/// the reason.
+bool cd2d_glass_prepare(const char *lensHLSL, const char *backdropHLSL, char *error, uint32_t errorCapacity);
+/// Draws the lens over `backdrop` (premultiplied BGRA, the CPU-blurred sample, `stride` bytes
+/// a row) into `target`, whose current transform maps the output's pixels (x right, y down
+/// from the top row, `width` by `height`) to the target's user space. `constants` holds the
+/// program's 48 floats, the luminance in them. False when the target is no device context or
+/// the effect could not be made; the caller then draws the software pass.
 bool cd2d_glass_draw(CD2DTarget *target, const uint8_t *backdrop, uint32_t backdropWidth, uint32_t backdropHeight, uint32_t stride,
                      const float *constants, uint32_t width, uint32_t height);
+
+/// The frame beneath the glass rendered on the window's own device (round 3): a bitmap target
+/// of `width` by `height` pixels at 96 DPI on a device context of `like`'s device, begun and
+/// cleared; draw through `cd2d_glass_frame_target`, then `cd2d_glass_frame_finish`. NULL when
+/// `like` is no device context (the caller renders the frame on the CPU).
+typedef struct CD2DGlassFrame CD2DGlassFrame;
+CD2DGlassFrame *cd2d_glass_frame_create(CD2DTarget *like, uint32_t width, uint32_t height);
+CD2DTarget *cd2d_glass_frame_target(CD2DGlassFrame *frame);
+bool cd2d_glass_frame_finish(CD2DGlassFrame *frame);
+void cd2d_glass_frame_release(CD2DGlassFrame *frame);
+/// The whole program over a finished frame, as one effect graph drawn into `target` (its
+/// transform as for cd2d_glass_draw): the frame (halved to a 2x2 mean for a material), the
+/// crop (`cropX`, `cropY`, `cropWidth`, `cropHeight` in the possibly halved frame's pixels;
+/// with `mirrorBelow` > 0 the rows above that crop row are the rows below it mirrored), the
+/// box passes of `boxRadius` with the saturation (`constants` row 9 w), the luminance probe,
+/// the lens.
+bool cd2d_glass_draw_from_frame(CD2DTarget *target, CD2DGlassFrame *frame, bool halved,
+                                uint32_t cropX, uint32_t cropY, uint32_t cropWidth, uint32_t cropHeight, int32_t mirrorBelow,
+                                uint32_t boxRadius, const float *constants, uint32_t width, uint32_t height);
 
 #ifdef __cplusplus
 }
