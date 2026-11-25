@@ -283,6 +283,15 @@ internal enum _GlassRenderer {
         ctx.saveGState()
         path.addClip()
         let sample = _GlassRegistry.sample(for: view, slot: slot)
+        // The GPU stage (ADR-0052 stage 2) takes every rounded-rectangle lens and every flat
+        // material; a lens with any other outline keeps the software pass's coverage mask.
+        if let program = _GlassGPU.program, !(spec.lens && isPath(outline)) {
+            if drawWithProgram(program, spec: spec, outline: outline, in: rect, margin: margin, sample: sample, view: view, context: ctx) {
+                ctx.restoreGState()
+                return
+            }
+            _GlassGPU.disable("\(program.name) could not draw a \(Int(rect.width))x\(Int(rect.height)) pt surface")
+        }
         if let backdrop = sample.backdrop(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view) {
             let scale = view.window?.backingScaleFactor ?? 1
             let dark = spec.resolvesDark(luminance: backdrop.luminance)
@@ -348,6 +357,77 @@ internal enum _GlassRenderer {
             ctx.fill(rect)
         }
         ctx.restoreGState()
+    }
+
+    private static func isPath(_ outline: _GlassOutline) -> Bool {
+        if case .path = outline { return true }
+        return false
+    }
+
+    /// The glass through the GPU program: the request built from the spec as the software
+    /// pass builds its parameters, the raw sample when the program blurs it itself, the
+    /// result drawn in place or cached with the sample as the software pass's shaded image.
+    private static func drawWithProgram(_ program: any PlatformGlassProgram, spec: _GlassSpec, outline: _GlassOutline, in rect: NSRect, margin: CGFloat,
+                                        sample: _GlassSample, view: NSView, context ctx: CGContext) -> Bool {
+        guard let backdrop = sample.backdrop(rect: rect.insetBy(dx: -margin, dy: -margin), spec: spec, view: view, raw: program.runsBackdropStage) else {
+            // Nothing to sample: the software pass's fallback fill, not a program failure.
+            return false
+        }
+        let scale = view.window?.backingScaleFactor ?? 1
+        let request = glassRequest(spec, outline: outline, in: rect, margin: margin, scale: scale, view: view, backdrop: backdrop, blurPixels: sample.blurPixels, raw: program.runsBackdropStage)
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        let ok: Bool
+        if program.drawsInPlace {
+            ok = program.draw(backdrop.image, request: request, in: rect, of: ctx, flipped: view.isFlipped)
+        } else {
+            var h = Hasher(); h.combine(request); h.combine(view.isFlipped)
+            if let image = sample.shaded(key: h.finalize(), make: { program.render(backdrop.image, request: request) }) {
+                drawImage(image, in: rect, context: ctx, flipped: view.isFlipped)
+                ok = true
+            } else {
+                ok = false
+            }
+        }
+        if NSView._traceFrames {
+            NSView._trace(String(format: "glass %@ %dx%d px (%@): %.2f ms", program.name, request.parameters.width, request.parameters.height, spec.lens ? "lens" : "material", NSView._traceClock() - t0))
+        }
+        return ok
+    }
+
+    /// The program's request: the parameters of both variants, the shape, where the
+    /// backdrop lies in output pixels, the backdrop stage's blur and saturation.
+    static func glassRequest(_ spec: _GlassSpec, outline: _GlassOutline, in rect: NSRect, margin: CGFloat, scale: CGFloat, view: NSView,
+                             backdrop: (image: CGImage, imageRect: NSRect?, luminance: CGFloat?), blurPixels: Int, raw: Bool) -> PlatformGlassRequest {
+        var p = PlatformGlassParameters(width: max(1, Int((rect.width * scale).rounded(.up))), height: max(1, Int((rect.height * scale).rounded(.up))))
+        p.veil = .white
+        p.veilAlpha = spec.lightVeilAlpha
+        p.rimAlpha = spec.rimAlpha
+        p.specular = spec.specular
+        if let tint = spec.tint, let c = tint.usingColorSpace(.sRGB) {
+            p.tint = .init(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent, alpha: c.alphaComponent)
+            p.tintAlpha = spec.tintAlpha
+        }
+        p.edgeWidth = spec.edgeWidth * scale
+        p.refraction = spec.refraction * scale
+        p.rimWidth = spec.lens ? max(1, 1 * scale) : 0
+        p.brighten = spec.brighten
+        let dv = spec.darkVeil.usingColorSpace(.sRGB) ?? spec.darkVeil
+        let variant: PlatformGlassRequest.Variant
+        switch spec.variant { case .light: variant = .light; case .dark: variant = .dark; case .adaptive: variant = .adaptive }
+        let backdropRect: CGRect
+        if let imageRect = backdrop.imageRect {
+            let inWindow = view.convert(rect, to: nil)
+            backdropRect = CGRect(x: (imageRect.minX - inWindow.minX) * scale, y: (inWindow.maxY - imageRect.maxY) * scale, width: imageRect.width * scale, height: imageRect.height * scale)
+        } else {
+            backdropRect = CGRect(x: -margin * scale, y: -margin * scale, width: (rect.width + 2 * margin) * scale, height: (rect.height + 2 * margin) * scale)
+        }
+        let radius: CGFloat
+        if spec.lens, case .roundedRect(let r) = outline { radius = r * scale } else { radius = 0 }
+        return PlatformGlassRequest(parameters: p, darkVeil: .init(red: dv.redComponent, green: dv.greenComponent, blue: dv.blueComponent), darkVeilAlpha: spec.darkVeilAlpha,
+                                    darkRimAlpha: spec.rimAlpha * 0.55, darkSpecular: spec.specular * 0.7, variant: variant,
+                                    shapeRect: CGRect(x: 0, y: 0, width: CGFloat(p.width), height: CGFloat(p.height)), cornerRadius: radius,
+                                    backdropRect: backdropRect, blurRadius: blurPixels, saturation: spec.saturation,
+                                    luminance: raw ? nil : (backdrop.luminance ?? 1))
     }
 
     /// The lens stage's shape for `outline`: the rounded rectangle in output pixels, or the
@@ -440,6 +520,10 @@ internal final class _GlassSample {
     private var saturation: CGFloat = 0
     private var extendsFrom: NSRectEdge?
     private var appearanceIsDark = false
+    /// Whether the image is the raw sample (the GPU program blurs it) or the blurred one.
+    private(set) var isRaw = false
+    /// The blur radius in sample pixels the backdrop stage uses.
+    private(set) var blurPixels = 0
     private var generation = 0
     private var shadeKey: Int?
     private var shadeGeneration = -1
@@ -450,12 +534,14 @@ internal final class _GlassSample {
     /// The blurred content beneath `rect` (bounds coordinates), sampled afresh when the
     /// cache is dirty or the surface moved, scaled or re-themed. `imageRect` is the
     /// rectangle the image covers, in window coordinates (nil without a window).
-    func backdrop(rect: NSRect, spec: _GlassSpec, view: NSView) -> (image: CGImage, imageRect: NSRect?, luminance: CGFloat?)? {
+    /// With `raw` the image is the sample as rendered, for a GPU program that runs the
+    /// backdrop stage itself (ADR-0052 stage 2), and no luminance is probed.
+    func backdrop(rect: NSRect, spec: _GlassSpec, view: NSView, raw: Bool = false) -> (image: CGImage, imageRect: NSRect?, luminance: CGFloat?)? {
         let backing = view.window?.backingScaleFactor ?? 1
         let dark = view.effectiveAppearance.isDark
         let inWindow = view.convert(rect, to: nil)
-        if dirty || image == nil || rect != self.rect || inWindow != windowRect || backing != scale || spec.blurRadius != blur || spec.saturation != saturation || spec.extendsFrom != extendsFrom || dark != appearanceIsDark {
-            self.rect = rect; windowRect = inWindow; scale = backing; blur = spec.blurRadius; saturation = spec.saturation; extendsFrom = spec.extendsFrom; appearanceIsDark = dark
+        if dirty || image == nil || rect != self.rect || inWindow != windowRect || backing != scale || spec.blurRadius != blur || spec.saturation != saturation || spec.extendsFrom != extendsFrom || dark != appearanceIsDark || raw != isRaw {
+            self.rect = rect; windowRect = inWindow; scale = backing; blur = spec.blurRadius; saturation = spec.saturation; extendsFrom = spec.extendsFrom; appearanceIsDark = dark; isRaw = raw
             dirty = false
             generation += 1
             let sampleScale = max(0.125, backing / (spec.lens ? _GlassRenderer.sampleScaleDivisor : _GlassRenderer.materialSampleScaleDivisor))
@@ -465,11 +551,16 @@ internal final class _GlassSample {
                 extended = raw.extended
                 imageWindowRect = raw.windowRect ?? .null
                 let radius = Int((spec.blurRadius * sampleScale).rounded())
+                blurPixels = radius
                 let t1 = NSView._traceFrames ? NSView._traceClock() : 0
-                let blurred = Platform.backend.material.blur(raw.image, radius: radius, saturation: spec.saturation) ?? raw.image
+                if isRaw {
+                    image = raw.image
+                } else {
+                    let blurred = Platform.backend.material.blur(raw.image, radius: radius, saturation: spec.saturation) ?? raw.image
+                    image = blurred
+                }
                 let t2 = NSView._traceFrames ? NSView._traceClock() : 0
-                image = blurred
-                luminance = Platform.backend.material.averageLuminance(blurred)
+                if !isRaw, let image { luminance = Platform.backend.material.averageLuminance(image) }
                 if NSView._traceFrames { NSView._trace(String(format: "glass sample stages: crop %.2f blur %.2f luminance %.2f ms", t1 - t0, t2 - t1, NSView._traceClock() - t2)) }
             }
             if NSView._traceFrames, let image {

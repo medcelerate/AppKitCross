@@ -94,6 +94,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     static func disc(_ color: NSColor) -> NSImage { glyph { r in color.setFill(); NSBezierPath(ovalIn: r).fill() } }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `Glass --reference <scene> <out.png>` draws one of the reference scenes (light,
+        // dark, over-dark; ReferenceScene.swift) through the port and exits: the port's half
+        // of the comparison with real macOS 26 glass (tools/glass/reference, ADR-0052).
+        if let i = CommandLine.arguments.firstIndex(of: "--reference"), i + 2 < CommandLine.arguments.count,
+           let scene = GlassReferenceScene(rawValue: CommandLine.arguments[i + 1]) {
+            writeReference(scene, to: CommandLine.arguments[i + 2])
+            NSApp.terminate(nil)
+            return
+        }
         if ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] != "1" {
             print("Glass: APPKITWIN_LIQUID_GLASS is not set; every surface draws the pre-26 look. Run with APPKITWIN_LIQUID_GLASS=1 for the material.")
         }
@@ -179,6 +188,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         guard let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
         print("screenshot: \(path) (\(image.width)x\(image.height))")
+    }
+
+    private func writeReference(_ scene: GlassReferenceScene, to path: String) {
+        let w = NSWindow(contentRect: NSRect(origin: NSPoint(x: 100, y: 100), size: GlassReferenceScene.size), styleMask: [.titled], backing: .buffered, defer: false)
+        w.appearance = NSAppearance(named: scene.appearance)
+        w.contentView = scene.makeContent()
+        w.makeKeyAndOrderFront(nil)
+        w.display()
+        let content = w.contentView!
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+        content.cacheDisplay(in: content.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("reference \(scene.rawValue): \(path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")
     }
 
     private func glassButton(_ title: String, frame: NSRect) -> NSGlassEffectView {

@@ -432,6 +432,18 @@ void cd2d_target_draw_text_layout(CD2DTarget *target, CD2DTextLayout *layout, fl
 /// return as a one-byte Bool and loses the id. `menu` and `hwnd` are HMENU / HWND as void*.
 int cd2d_track_popup_menu_command(void *menu, unsigned int flags, int x, int y, void *hwnd);
 
+/// The Liquid Glass lens (ADR-0052 stage 2) as a Direct2D custom effect whose pixel shader is
+/// the HLSL in Platform/Shaders/glass_lens.hlsl. `cd2d_glass_prepare` compiles it once per
+/// process with D3DCompile (d3dcompiler_47.dll, loaded at run time); false with the reason.
+bool cd2d_glass_prepare(const char *hlsl, char *error, uint32_t errorCapacity);
+/// Draws the lens over `backdrop` (premultiplied BGRA, the blurred sample, `stride` bytes a
+/// row) into `target`, whose current transform maps the output's pixels (x right, y down from
+/// the top row, `width` by `height`) to the target's user space. `constants` holds the
+/// program's 48 floats. False when the target is no device context or the effect could not
+/// be made; the caller then draws the software pass.
+bool cd2d_glass_draw(CD2DTarget *target, const uint8_t *backdrop, uint32_t backdropWidth, uint32_t backdropHeight, uint32_t stride,
+                     const float *constants, uint32_t width, uint32_t height);
+
 #ifdef __cplusplus
 }
 #endif

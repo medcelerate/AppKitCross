@@ -279,6 +279,7 @@ Runtime switches (the full table is in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md
 | `APPKITWIN_SOFTWARE_LAYERS=1` | Windows: software compositing instead of DirectComposition (blank or flickering layers) |
 | `APPKITWIN_METAL_REFERENCE=1` | the CPU Metal device instead of Direct3D 12 or Vulkan |
 | `APPKITWIN_LIQUID_GLASS=1` | macOS 26's Liquid Glass for toolbars, sidebars, `glassEffect` and the glass button styles (ADR-0052): the blurred backdrop through a lens (refraction, rim, sheen, light/dark by the content beneath); or the `AppKitCrossLiquidGlass` Info.plist key. Off, the pre-26 look. `Examples/Glass` shows it |
+| `APPKITWIN_LIQUID_GLASS_GPU=0` | Liquid Glass through the software pass instead of the GPU program (ADR-0052 stage 2); the GPU program is the default where it starts and falls back to software on its own |
 | `APPKITWIN_UNIFIED_CAPTION=1` | Windows: SwiftUI scene windows draw their unified title bar as the window's caption (ADR-0053): title, toolbar items and accessories in the band, the Windows caption buttons at its right, the application menu as a row directly under it (Alt+letter, F10, arrows as with the native bar). Or the `AppKitCrossUnifiedCaption` Info.plist key. AppKit windows opt in with the macOS recipe (`fullSizeContentView` + `titlebarAppearsTransparent`) and need no switch. `=0` forces the classic caption on every window. Off (the default), the classic Windows caption, HMENU menu bar and toolbar band below |
 
 ## 5. Porting recipe

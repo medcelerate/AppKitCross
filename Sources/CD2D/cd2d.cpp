@@ -2321,3 +2321,6 @@ void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) { delete[] entries[i].type; delete[] entries[i].bytes; }
     delete[] entries;
 }
+
+// The render target behind a CD2D target, for the Liquid Glass effect (cd2d_glass.cpp).
+extern "C" void *cd2d_target_native_render_target(CD2DTarget *t) { return t ? t->target : nullptr; }

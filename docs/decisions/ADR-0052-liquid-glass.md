@@ -214,9 +214,9 @@ backends (Direct2D bitmaps, cairo image surfaces, the host's bitmap context), so
 implementation serves them all. A GPU implementation (a Direct2D effect graph or a D3D12
 compute pass on Windows, Vulkan on Linux, Metal on the host) overrides `material` on its
 `PlatformBackend` with the three stages as shaders over the same inputs; the stages are
-split so a backend can take the blur first and leave the lens to software. None is written
-yet: the machine this ADR was written on cannot build the Windows or Linux GPU paths, and
-the software pass meets the frame budget at the sizes glass is used at.
+split so a backend can take the blur first and leave the lens to software. The GPU
+programs came with stage 2 (below); the software pass stays every backend's fallback and
+the reference they are tested against.
 
 Windows' DWM backdrop is unchanged and still what a behind-window `NSVisualEffectView`
 asks for (Mica/Acrylic over the whole rectangle, per PR 77's rule that a rounded or
@@ -310,7 +310,159 @@ column are the glass material over the window.
   resamples; a hover re-shades from the cached backdrop. `APPKITWIN_TRACE_FRAMES=1` prints
   each stage's time next to the paint's.
 - Not done: the morph animation between a container's separate and merged shapes and
-  `glassEffectID` transitions; the GPU stages on Windows, Linux and the host (the seam is
-  there, software serves all three); the sidebar lit by the desktop through Mica (needs
-  the non-opaque window); the scroll-edge extension for edges other than the strip below
-  a band; reference captures from a macOS 26 machine to tune the constants against.
+  `glassEffectID` transitions; the sidebar lit by the desktop through Mica (needs the
+  non-opaque window); the scroll-edge extension for edges other than the strip below a
+  band. The GPU stage and the reference tooling are stage 2 (below); the macOS 26
+  captures themselves are still to be taken.
+
+## Stage 2: the GPU programs (2026-11-24)
+
+### Decision
+
+One glass program per graphics API, each running the stages of the software pass with the
+software pass's arithmetic over the same inputs, so the two agree to a few 1/255 steps and
+the software pass stays both the fallback and the reference the tests compare with
+(`Platform/GlassProgram.swift`, `PlatformGlassProgram`, `PlatformGlassRequest`):
+
+1. **Backdrop**: three box passes per axis of radius `max(1, (r + 1) / 2)` over the raw
+   sample, as integer sums of the border-clamped bytes divided with truncation. That is the
+   software running sum exactly, bit for bit, rather than a true Gaussian: a different kernel
+   would have made "agrees with the reference" a matter of taste. Then the saturation pull
+   from luminance, rounded as the software rounds.
+2. **Luminance probe**: the alpha-weighted mean luminance of the blurred sample, a one-group
+   reduction, which picks the variant of an adaptive surface inside the program. The request
+   carries both variants (the light veil, rim and sheen and the dark ones), so nothing is
+   read back to decide.
+3. **Lens**: per output pixel the rounded rectangle's signed distance and normal, the
+   refraction through the bevel, the bilinear look-up (border-clamped, the software
+   convention), veil, tint, rim, sheen, lift, coverage: the per-pixel program above, line for
+   line. A flat material is the same program with no bevel, rim or sheen and a radius of 0,
+   so the band and the sidebar go through it too.
+
+The constants are one block of twelve float4 rows (`GlassConstants` in the sources,
+`PlatformGlassRequest.constants` packs them), identical in all three languages. The sources
+are `Sources/AppKit/Platform/Shaders`: `glass.metal`, `glass_{box,saturate,luminance,lens}.comp`
+with `glass_common.glsl`, and `glass_lens.hlsl`. `tools/glass/embed-shaders.py` embeds them
+into `GlassShaders.swift` (MSL and HLSL as text, compiled at run time; the GLSL as SPIR-V,
+compiled by `tools/glass/build-spirv.sh` in the Linux container with glslang, next to the
+FNV-1a hash of its source, which a test recomputes so an edit without a re-embed fails the
+suite). The directory is excluded from the AppKit target.
+
+Per platform:
+
+| | program | stages on the GPU | result |
+|---|---|---|---|
+| macOS host | `glass.metal` on Apple's Metal (`HostGlassMetalProgram` over the Objective-C `CGlassMetal` shim, fast math off) | all three | read back into a `CGImage`, cached with the sample as the software pass's shaded image |
+| Linux | the GLSL compute shaders as SPIR-V on the Metal module's Vulkan shim (`LinuxGlassVulkanProgram`, `CMetalVulkan` directly, ADR-0012's binding model: storage buffers in set 1) | all three | read back into the cairo image the window draws |
+| Windows | `glass_lens.hlsl` as the pixel shader of a Direct2D custom effect (`Win32GlassProgram`, `Sources/CD2D/cd2d_glass.cpp`) on the window's own device context | the lens | drawn in place: `DrawImage` of the effect into the window, nothing read back |
+
+Departures from the scope written above, deliberately:
+
+- **Direct2D, not D3D12, on Windows.** The window composites through Direct2D on a D3D11
+  device (the swap chain, PR 17 and Milestone 3), and the D3D12 device belongs to the Metal
+  module. A D3D12 compute pass would upload the backdrop to one device and read the shaded
+  surface back for the other on every draw; a Direct2D effect runs on the device that
+  already holds the window's canvas, which is the point of the stage. The HLSL is compiled
+  at run time (`D3DCompile` from `d3dcompiler_47.dll`, loaded dynamically, IEEE strictness,
+  `ps_4_0`, so a feature level 9 device falls back to software) rather than at build time:
+  no shader compiler is needed in the Windows build and the embedded text is the source of
+  truth on every platform.
+- **The backdrop stage stays on the CPU on Windows** for now. The frame beneath the glass is
+  still a CPU bitmap there (a WIC render target, `_GlassFrame`), so the raw sample is in
+  system memory whichever stage runs first, the blur at the sample scale costs a few
+  hundredths of a millisecond (the host trace: 0.03 to 0.06 ms a surface), and the
+  per-pixel lens at the backing scale is what dominated. The effect takes the blurred
+  sample (uploaded at the sample scale, a few kilobytes) and the CPU's exact luminance.
+  Moving the frame itself to a GPU bitmap (a device-context target on the window's device)
+  is the next step if the PC's trace shows the frame render dominating; the box and
+  luminance stages then go into the effect graph, and the shaders for them exist already.
+- **Any outline other than a rounded rectangle keeps the software lens** (SwiftUI's
+  `glassEffect(in:)` with its own shape): the chamfer distance transform of the coverage
+  mask is a CPU pass, and shipping a distance field to three APIs for a rare case is not
+  worth it yet. Those surfaces draw exactly as before.
+- **On the host and Linux the result is read back**, one synchronous round trip per stale
+  surface, because those windows composite on the CPU (the host's bitmap context, cairo).
+  It is cheaper than the software lens but not free (below).
+
+Selection (`_GlassGPU.program`): the platform's program when it starts, unless
+`APPKITWIN_LIQUID_GLASS_GPU` is `0`, `no`, `false` or `off`, which forces the software pass.
+Both stay behind `APPKITWIN_LIQUID_GLASS`: with glass off nothing here runs. A program that
+cannot start (no Metal device, no Vulkan 1.3 loader or `APPKITWIN_METAL_REFERENCE=1`, no
+`d3dcompiler_47.dll`) leaves the software pass in place, and one that fails to draw is
+dropped for the rest of the process with one line on stderr, the surface drawn by software
+that same paint. `APPKITWIN_TRACE_FRAMES=1` names the program once and times every GPU draw
+(`glass Direct2D 288x88 px (lens): 0.05 ms`).
+
+The Vulkan shim binds every buffer slot as a uniform and a storage buffer at once; the
+uniform view is now clamped to the device's `maxUniformBufferRange`, so the program's pixel
+buffers (larger than 64 KB) stay valid descriptors.
+
+### Tolerance
+
+A program agrees with the software pass when no channel of the shaded surface differs by
+more than 3/255 and the mean difference is at most 0.25/255. The arithmetic is the same;
+what differs is float rounding (op order, `round` at exact halves) and, on Windows, the
+sampler's bilinear filter instead of the software's. Measured on the host (Metal, Apple M4
+Pro): the whole `Examples/Glass` window through the program against the same window through
+software differs by at most 3/255 in any channel, 0.008/255 on average. The Vulkan program
+on lavapipe passes the same tests in the container. Windows is checked on the PC (the
+effect cannot run where this was written); its tests run the effect into a bitmap context
+and compare as the others do.
+
+### Performance
+
+`Examples/Glass --autoscroll 5 --interval 0`, release, macOS host at 2x (900 by 600 points,
+the band and nine lenses re-sampled every frame):
+
+| | paint mean | p95 | fps free-running |
+|---|---|---|---|
+| glass on, GPU (Metal) | 7.7 ms | 9.4 ms | 106 |
+| glass on, software (`APPKITWIN_LIQUID_GLASS_GPU=0`) | 9.4 ms | 10.1 ms | 89 |
+| glass off | 1.3 ms | 1.6 ms | 338 |
+
+The trace splits the GPU frame into 3.3 ms of lens programs (eleven surfaces, about 0.3 ms
+each, almost all of it the synchronous command-buffer round trip the read-back needs), 1.9 ms
+rendering the frame beneath the glass twice (the lens and material scales) and 1 ms of crops.
+The host was never the budget; it shows the read-back's price. Windows draws in place, so
+each surface costs its draw call and the upload of a sample-scale bitmap, and the CPU work
+left per frame is the frame render, the crops and the blur. The budget: under 8 ms a scroll
+frame with glass in a release build at 1x on the PC (software: 18 to 21 ms). Measured in PC
+round 1 of the stage-2 PR; the numbers go here.
+
+### Fidelity
+
+The constants were tuned against Apple's descriptions, not against pixels: the machine this
+was written on runs macOS 15.8, where `NSGlassEffectView` does not exist, so no reference
+could be taken here. Stage 2 adds the means to take them:
+
+- `Examples/Glass/ReferenceScene.swift` and `ReferenceSceneGlass.swift` describe three
+  scenes (light, dark, light appearance over dark content; regular, clear and tinted
+  capsules, a rounded panel and a small circle over colour bands, a checker strip and discs)
+  with public AppKit names alone, so the same files compile against the port and against
+  Apple's AppKit.
+- `Glass --reference <scene> <out.png>` draws a scene through the port
+  (`docs/images/glass/port-<scene>@2x.png`, committed).
+- `tools/glass/capture-references.sh`, on a macOS 26 Mac, builds `tools/glass/reference`
+  against Apple's SDK (outside the package, so the port's AppKit does not shadow it), captures
+  each scene with real `NSGlassEffectView`s through ScreenCaptureKit into
+  `docs/images/glass/macos26-<scene>@2x.png`, draws the port's, and prints per surface the
+  interior colour and luminance, the luminance spread (how blurred the glass is) and the top
+  and bottom rim against the interior, for both and their difference.
+
+No constant changed in stage 2: retuning without references would be guessing in another
+direction. What to check first when the captures exist, from Apple's material as presented
+(WWDC25, the HIG) against this pass:
+
+1. The far edge. The port darkens the bevel facing away from the light (`rim * 0.45`);
+   Apple's glass shows a second, weaker highlight there (light reflected inside the lens),
+   so its bottom rim is likely brighter than its interior, not darker.
+2. Blur against lensing. Apple's regular glass looks less blurred and more lens-like than a
+   16 pt blur under a 0.42 white veil: content stays legible through it and bends strongly
+   near the edge. The blur radius, the veil and the refraction depth are the three numbers
+   the comparison's spread and interior colour decide.
+3. Clear glass. Apple's clear variant has almost no frosting; the port's keeps a 10 pt blur
+   and a 0.16 veil.
+4. The adaptive threshold (0.35) and the dark veil, from the over-dark scene.
+
+Each change goes in with its before and after numbers from the comparison, here.
+

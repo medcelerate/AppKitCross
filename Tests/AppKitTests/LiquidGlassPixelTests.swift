@@ -203,7 +203,10 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             let sample = _GlassRegistry.sample(for: glass)
             XCTAssertFalse(sample.dirty)
             XCTAssertNotNil(sample.image)
-            XCTAssertNotNil(sample.shadedImage, "the shaded image is kept with the sample")
+            if !(_GlassGPU.program?.drawsInPlace ?? false) {
+                // A program that draws in place (Direct2D) keeps no shaded image.
+                XCTAssertNotNil(sample.shadedImage, "the shaded image is kept with the sample")
+            }
             glass.needsDisplay = true
             XCTAssertFalse(sample.dirty, "the glass redrawing keeps its sample")
             aside.needsDisplay = true
@@ -384,18 +387,24 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
     /// variant, over light content it stays light.
     func testAdaptiveVariantFollowsBackdropLuminance() {
         MainActor.assumeIsolated {
-            @MainActor func glassOver(_ color: NSColor) -> (pixel: (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat), luminance: CGFloat?) {
+            @MainActor func glassOver(_ color: NSColor) -> (pixel: (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat), luminance: CGFloat?, raw: Bool) {
                 let w = window()
                 w.contentView!.addSubview(_SolidView(frame: w.contentView!.bounds, color: color))
                 let glass = NSGlassEffectView(frame: NSRect(x: 40, y: 20, width: 120, height: 60))
                 w.contentView!.addSubview(glass)
                 let rep = render(w.contentView!)
-                return (pixel(rep, 100, 50), _GlassRegistry.sample(for: glass).luminance)
+                let sample = _GlassRegistry.sample(for: glass)
+                return (pixel(rep, 100, 50), sample.luminance, sample.isRaw)
             }
             let overBlack = glassOver(NSColor(white: 0.05, alpha: 1))
             let overWhite = glassOver(NSColor(white: 0.95, alpha: 1))
-            XCTAssertLessThan(overBlack.luminance ?? 1, 0.35, "the sample's luminance is read")
-            XCTAssertGreaterThan(overWhite.luminance ?? 0, 0.35)
+            // The software pass reads the luminance on the CPU; a GPU program that runs the
+            // backdrop stage probes it itself (ADR-0052 stage 2), and the pixels below check
+            // the variant it picked.
+            if !overBlack.raw {
+                XCTAssertLessThan(overBlack.luminance ?? 1, 0.35, "the sample's luminance is read")
+                XCTAssertGreaterThan(overWhite.luminance ?? 0, 0.35)
+            }
             XCTAssertLessThan(luma(overBlack.pixel), 0.3, "dark glass over dark content: \(overBlack.pixel)")
             XCTAssertGreaterThan(luma(overWhite.pixel), 0.8, "light glass over light content: \(overWhite.pixel)")
             let spec = _GlassSpec.lens(clear: false, in: NSView())
