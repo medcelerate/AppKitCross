@@ -192,7 +192,7 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
             XCTAssertTrue(_GlassGPU.isRequested(["APPKITWIN_LIQUID_GLASS_GPU": "1"]))
             for off in ["0", "no", "false", "OFF"] { XCTAssertFalse(_GlassGPU.isRequested(["APPKITWIN_LIQUID_GLASS_GPU": off]), off) }
             let previous = ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS_GPU"]
-            setenv("APPKITWIN_LIQUID_GLASS_GPU", "0", 1)
+            _setTestEnvironment("APPKITWIN_LIQUID_GLASS_GPU", "0")
             _GlassGPU._resetForTesting()
             XCTAssertNil(_GlassGPU.program, "the switch off selects the software pass")
             XCTAssertEqual(_GlassGPU.unavailableReason, "APPKITWIN_LIQUID_GLASS_GPU=0")
@@ -205,7 +205,7 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
             w.contentView!.cacheDisplay(in: w.contentView!.bounds, to: rep)
             XCTAssertFalse(_GlassRegistry.sample(for: glass).isRaw, "the software pass blurs the sample itself")
             w.close()
-            if let previous { setenv("APPKITWIN_LIQUID_GLASS_GPU", previous, 1) } else { unsetenv("APPKITWIN_LIQUID_GLASS_GPU") }
+            _setTestEnvironment("APPKITWIN_LIQUID_GLASS_GPU", previous)
             _GlassGPU._resetForTesting()
         }
     }
