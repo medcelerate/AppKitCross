@@ -242,6 +242,54 @@ final class LiquidGlassGPUTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// A GPU frame stays on the device it was made on (PC round 3): a context that takes none
+    /// (an offscreen capture's WIC bitmap on Windows, on its own software device) samples the
+    /// CPU frame without turning GPU frames off for the window, and a context on another device
+    /// renders a frame of its own instead of drawing the window's, which on Direct2D failed the
+    /// capture's EndDraw and left it empty.
+    func testGPUFrameFollowsTheContextsDevice() throws {
+        try requireHostBackend()
+        try MainActor.assumeIsolated {
+            let program = _CPUFrameProgram()
+            _GlassGPU._override = .some(program)
+            _GlassGPU.framesUnavailable = false
+            let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 320, height: 200), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.appearance = NSAppearance(named: .aqua)
+            w.makeKeyAndOrderFront(nil)
+            defer { w.close() }
+            let content = _GPUTestBands(frame: NSRect(x: 0, y: 0, width: 320, height: 200))
+            w.contentView = content
+            let lens = NSGlassEffectView(frame: NSRect(x: 20, y: 30, width: 130, height: 44)); lens.cornerRadius = 22
+            content.addSubview(lens)
+            w.display()
+            XCTAssertTrue(_GlassRegistry.sample(for: lens).isGPUFrame, "the window's context takes the GPU frame")
+
+            // Redrawing the glass alone keeps the frame (no invalidation beneath it); on another
+            // device the frame is rendered again.
+            var before = _GlassRegistry.frameRenders
+            lens.needsDisplay = true
+            w.display()
+            XCTAssertEqual(_GlassRegistry.frameRenders - before, 0, "the frame is reused on its device")
+            program.device = 2
+            before = _GlassRegistry.frameRenders
+            lens.needsDisplay = true
+            w.display()
+            XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "a context on another device gets a frame of its own")
+            XCTAssertTrue(_GlassRegistry.sample(for: lens).isGPUFrame)
+
+            // A context that takes no GPU frame samples the CPU frame; GPU frames stay on.
+            program.device = nil
+            lens.needsDisplay = true
+            w.display()
+            XCTAssertFalse(_GlassRegistry.sample(for: lens).isGPUFrame, "the capture sampled the CPU frame")
+            XCTAssertFalse(_GlassGPU.framesUnavailable, "GPU frames stay on for the window")
+            program.device = 1
+            lens.needsDisplay = true
+            w.display()
+            XCTAssertTrue(_GlassRegistry.sample(for: lens).isGPUFrame, "the window's next paint takes the GPU frame again")
+        }
+    }
+
     /// `APPKITWIN_LIQUID_GLASS_GPU=0` (or no/false/off) selects the software pass; anything
     /// else, or nothing, asks for the program.
     func testEnvironmentOptOutSelectsSoftware() {
@@ -335,6 +383,9 @@ private final class _CPUFrameProgram: PlatformGlassProgram {
         func finish() -> Bool { image = surface.makeImage(); return image != nil }
     }
     let name = "CPU frame emulation"
+    /// The device the window's context draws on; nil for a context that takes no GPU frame.
+    var device: Int? = 1
+    func frameDevice(for context: CGContext) -> Int? { device }
     var runsBackdropStage: Bool { true }
     var drawsInPlace: Bool { true }
     func render(_ backdrop: CGImage, request: PlatformGlassRequest) -> CGImage? { SoftwareMaterialBackend.shared.render(backdrop, request: request) }

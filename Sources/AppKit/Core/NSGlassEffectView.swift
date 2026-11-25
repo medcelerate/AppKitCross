@@ -729,8 +729,10 @@ internal final class _GlassGPUFrame {
     let frame: any PlatformGlassFrame
     let halved: Bool
     let invalidation: Int
-    init(geometry: _GlassFrameGeometry, frame: any PlatformGlassFrame, halved: Bool, invalidation: Int) {
-        self.geometry = geometry; self.frame = frame; self.halved = halved; self.invalidation = invalidation
+    /// The device the frame lives on (`PlatformGlassProgram.frameDevice(for:)`).
+    let device: Int
+    init(geometry: _GlassFrameGeometry, frame: any PlatformGlassFrame, halved: Bool, invalidation: Int, device: Int) {
+        self.geometry = geometry; self.frame = frame; self.halved = halved; self.invalidation = invalidation; self.device = device
     }
 }
 
@@ -831,10 +833,13 @@ internal enum _GlassRegistry {
             // edge (as many as lie above it) are mirrored about that edge; the margin
             // below the edge keeps the real content, so the mirror joins it without a seam.
             let background = PlatformGlassParameters.Color(red: bg.redComponent, green: bg.greenComponent, blue: bg.blueComponent)
-            let top = Int(((covered.maxY - (inWindow.maxY - margin)) * scale).rounded())
-            let bottom = Int(((covered.maxY - (inWindow.minY + margin)) * scale).rounded())
-            if bottom > top, top >= 0, bottom <= cells.rows.count {
-                let surface = frame.crop(columns: cells.columns, rows: (cells.rows.lowerBound + top)..<(cells.rows.lowerBound + bottom))
+            // Only the rows wholly inside the surface are tested: at 1.5x the edge (112.5 px)
+            // falls inside a row that is half content.
+            let topEdge = (covered.maxY - (inWindow.maxY - margin)) * scale, bottomEdge = (covered.maxY - (inWindow.minY + margin)) * scale
+            let top = Int(topEdge.rounded()), bottom = Int(bottomEdge.rounded())
+            let inner = max(0, Int((topEdge - 1e-6).rounded(.up)))..<min(cells.rows.count, Int((bottomEdge + 1e-6).rounded(.down)))
+            if bottom > top, top >= 0, bottom <= cells.rows.count, !inner.isEmpty {
+                let surface = frame.crop(columns: cells.columns, rows: (cells.rows.lowerBound + inner.lowerBound)..<(cells.rows.lowerBound + inner.upperBound))
                 if surface.mostly(background) { mirrorBelow = bottom }
                 if NSView._traceFrames { NSView._trace("glass CPU source band: rows \(top)..<\(bottom) of \(cells.rows), mirror below \(mirrorBelow.map(String.init) ?? "none")") }
             }
@@ -877,13 +882,18 @@ internal enum _GlassRegistry {
     }
 
     /// The area the window paints (the content, the toolbar band above it, accessories),
-    /// snapped to whole pixels at `scale`.
+    /// snapped to whole pixels at half `scale`: the material's frame is this one halved from
+    /// its top row, so an even pixel count keeps the halved rows on the same grid from the
+    /// bottom as a frame rendered at the material's scale. With an odd one (638 pt at 2x) the
+    /// band's bottom edge fell inside a halved row, the band's rows were no longer all window
+    /// background, and the CPU frame stopped mirroring the strip below it (PC round 3).
     private static func paintArea(of window: NSWindow, scale: CGFloat) -> NSRect? {
         var area = window._contentView?.frame ?? .zero
         if let t = window._toolbarView, !t.isHidden { area = area.union(t.frame) }
         if let a = window._accessoryHost, !a.isHidden { area = area.union(a.frame) }
         guard area.width > 0, area.height > 0, area.width.isFinite, area.height.isFinite else { return nil }
-        return NSRect(x: area.minX, y: area.minY, width: (area.width * scale).rounded(.up) / scale, height: (area.height * scale).rounded(.up) / scale)
+        let half = scale / 2
+        return NSRect(x: area.minX, y: area.minY, width: (area.width * half).rounded(.up) / half, height: (area.height * half).rounded(.up) / half)
     }
 
     /// Paints what the window draws beneath its glass in `area` into `ctx` (an offscreen
@@ -924,15 +934,21 @@ internal enum _GlassRegistry {
     /// The window's shared frame on the GPU (round 3), rendered now through the program
     /// unless the one from this paint is current; the material's is the lens frame halved
     /// on the device. Nil when the program makes no GPU frame (the CPU frame is used then,
-    /// and no GPU frame is tried again).
+    /// and no GPU frame is tried again), or none for `context` (an offscreen capture on
+    /// another device than the window's: that paint samples the CPU frame). A frame is
+    /// reused only on the device it was made on.
     private static func gpuFrame(of window: NSWindow, beneath view: NSView, scale: CGFloat, program: any PlatformGlassProgram, like context: CGContext) -> _GlassGPUFrame? {
+        guard let device = program.frameDevice(for: context) else {
+            if NSView._traceFrames { NSView._trace("glass frame: \(program.name) takes no GPU frame for this context; it samples the CPU frame") }
+            return nil
+        }
         let id = ObjectIdentifier(window)
         let invalidation = invalidations[id, default: 0]
-        if let f = gpuFrames[id]?[scale], f.invalidation == invalidation { return f }
+        if let f = gpuFrames[id]?[scale], f.invalidation == invalidation, f.device == device { return f }
         let lensScale = max(0.125, window.backingScaleFactor / _GlassRenderer.sampleScaleDivisor)
         if scale < lensScale, abs(lensScale / scale - 2) < 1e-6 {
             guard let full = gpuFrame(of: window, beneath: view, scale: lensScale, program: program, like: context) else { return nil }
-            let f = _GlassGPUFrame(geometry: full.geometry.halved(), frame: full.frame, halved: true, invalidation: invalidation)
+            let f = _GlassGPUFrame(geometry: full.geometry.halved(), frame: full.frame, halved: true, invalidation: invalidation, device: device)
             gpuFrames[id, default: [:]][scale] = f
             return f
         }
@@ -946,7 +962,7 @@ internal enum _GlassRegistry {
         }
         paintBeneath(view, in: window, area: area, into: frame.context)
         guard frame.finish() else { return nil }
-        let f = _GlassGPUFrame(geometry: _GlassFrameGeometry(rect: area, scale: scale, width: w, height: h), frame: frame, halved: false, invalidation: invalidation)
+        let f = _GlassGPUFrame(geometry: _GlassFrameGeometry(rect: area, scale: scale, width: w, height: h), frame: frame, halved: false, invalidation: invalidation, device: device)
         gpuFrames[id, default: [:]][scale] = f
         frameRenders += 1
         if NSView._traceFrames {

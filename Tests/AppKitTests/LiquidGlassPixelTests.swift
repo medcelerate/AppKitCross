@@ -589,6 +589,37 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    /// The CPU frame mirrors the strip below the toolbar band whatever the window's height and
+    /// scale: the material's frame is the lens frame halved from its top row, and with an odd
+    /// lens row count (or at 1.5x, where no material row ends at the band's edge) a row half
+    /// content was counted with the band's and the mirror was lost (PC round 3).
+    func testBandMirrorsAtEveryHeight() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            for height in stride(from: CGFloat(200), through: 207, by: 1) {
+                let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: height), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                w.appearance = NSAppearance(named: .aqua)
+                defer { w.close() }
+                let content = _SolidView(frame: NSRect(x: 0, y: 0, width: 400, height: height), color: NSColor(red: 0.3, green: 0.85, blue: 0.4, alpha: 1))
+                w.contentView = content
+                let d = _EmptyToolbarDelegate()
+                let tb = NSToolbar(identifier: "glass.band.mirror.\(height)")
+                tb.delegate = d
+                w.toolbar = tb
+                w.layoutIfNeeded()
+                guard let band = w._toolbarView else { XCTFail("no band"); return }
+                let margin: CGFloat = 24
+                let lensScale = max(0.125, w.backingScaleFactor / _GlassRenderer.sampleScaleDivisor)
+                // The material's scale, the lens frame halved: and the lens frame itself.
+                for scale in [lensScale / 2, lensScale] {
+                    _GlassRegistry.noteInvalidation(in: w, from: nil, rect: nil)
+                    let r = _GlassRegistry.render(beneath: band, rect: band.bounds.insetBy(dx: -margin, dy: -margin), scale: scale, extendsFrom: .minY, margin: margin)
+                    XCTAssertEqual(r?.extended, true, "the strip below the band is mirrored at \(height) pt, \(scale)x")
+                }
+            }
+        }
+    }
+
     /// A paint with a lens and the toolbar band's material renders the window beneath the
     /// glass once: the material's eighth-scale frame is the lens's quarter-scale frame halved
     /// (ADR-0052 stage 2), and the band still carries the document's colour.

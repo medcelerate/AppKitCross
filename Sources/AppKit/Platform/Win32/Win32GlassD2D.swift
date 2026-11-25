@@ -53,6 +53,11 @@ final class Win32GlassProgram: PlatformGlassProgram {
         Win32GlassFrame(pixelWidth: pixelWidth, pixelHeight: pixelHeight, scale: scale, like: context)
     }
 
+    func frameDevice(for context: CGContext) -> Int? {
+        let device = cd2d_glass_frame_device(context._d2dTarget)
+        return device == 0 ? nil : Int(bitPattern: UInt(device))
+    }
+
     func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of ctx: CGContext, flipped: Bool) -> Bool {
         let w = request.parameters.width, h = request.parameters.height
         guard let frame = source.frame as? Win32GlassFrame, w > 0, h > 0, rect.width > 0, rect.height > 0 else { return false }

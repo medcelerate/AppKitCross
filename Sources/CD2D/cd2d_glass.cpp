@@ -34,6 +34,7 @@
 
 extern "C" void *cd2d_target_native_render_target(CD2DTarget *t);
 extern "C" CD2DTarget *cd2d_target_wrap_native(void *renderTarget);
+extern "C" bool cd2d_target_is_wic(CD2DTarget *t);
 
 enum GlassKind { kLens = 0, kBox = 1, kLuminance = 2 };
 
@@ -289,6 +290,7 @@ static bool setBlob(ID2D1Effect *effect, const float *k) {
 /// pixel; the caller's transform scales), drawn through its own device context.
 struct CD2DGlassFrame {
     ID2D1DeviceContext *dc = nullptr;
+    ID2D1Device *device = nullptr;   // the window's: the frame draws into targets on it only
     ID2D1Bitmap1 *bitmap = nullptr;
     CD2DTarget *target = nullptr;
     bool drawing = false;
@@ -360,17 +362,33 @@ bool cd2d_glass_draw(CD2DTarget *target, const uint8_t *backdrop, uint32_t backd
     return ok;
 }
 
+/// The device `target` draws on, AddRef'd; NULL for a WIC bitmap target, which renders on
+/// its own software device: an image from the window's device drawn into it fails its
+/// EndDraw (D2DERR_WRONG_RESOURCE_DOMAIN) and leaves the whole capture empty (PC round 3).
+static ID2D1Device *frameDevice(CD2DTarget *target) {
+    if (!target || cd2d_target_is_wic(target)) return nullptr;
+    ID2D1DeviceContext *dc = deviceContext(target);
+    if (!dc) return nullptr;
+    ID2D1Device *device = nullptr;
+    dc->GetDevice(&device);
+    dc->Release();
+    return device;
+}
+
+uintptr_t cd2d_glass_frame_device(CD2DTarget *target) {
+    ID2D1Device *device = frameDevice(target);
+    if (!device) return 0;
+    device->Release();   // the identity only; the window's target keeps the device alive
+    return reinterpret_cast<uintptr_t>(device);
+}
+
 CD2DGlassFrame *cd2d_glass_frame_create(CD2DTarget *like, uint32_t width, uint32_t height) {
     if (gBytecode[kLens].empty() || !like || width == 0 || height == 0) return nullptr;
-    ID2D1DeviceContext *windowDC = deviceContext(like);
-    if (!windowDC) return nullptr;
-    ID2D1Device *device = nullptr;
-    windowDC->GetDevice(&device);
-    windowDC->Release();
+    ID2D1Device *device = frameDevice(like);
     if (!device) return nullptr;
     CD2DGlassFrame *f = new CD2DGlassFrame();
+    f->device = device;   // the reference frameDevice took
     HRESULT hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &f->dc);
-    device->Release();
     if (SUCCEEDED(hr)) {
         D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
@@ -401,6 +419,7 @@ void cd2d_glass_frame_release(CD2DGlassFrame *frame) {
     if (frame->target) cd2d_target_release(frame->target);   // releases its reference to dc
     if (frame->bitmap) frame->bitmap->Release();
     if (frame->dc) frame->dc->Release();
+    if (frame->device) frame->device->Release();
     delete frame;
 }
 
@@ -408,6 +427,10 @@ bool cd2d_glass_draw_from_frame(CD2DTarget *target, CD2DGlassFrame *frame, bool 
                                 uint32_t cropX, uint32_t cropY, uint32_t cropWidth, uint32_t cropHeight, int32_t mirrorBelow,
                                 uint32_t boxRadius, const float *constants, uint32_t width, uint32_t height) {
     if (gBytecode[kLens].empty() || !target || !frame || !frame->bitmap || frame->drawing || !constants || cropWidth == 0 || cropHeight == 0 || width == 0 || height == 0) return false;
+    ID2D1Device *device = frameDevice(target);
+    if (!device) return false;
+    device->Release();
+    if (device != frame->device) return false;   // another device's frame would fail the EndDraw
     ID2D1DeviceContext *dc = deviceContext(target);
     if (!dc) return false;
     bool ok = false;

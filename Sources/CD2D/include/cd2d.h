@@ -448,8 +448,11 @@ bool cd2d_glass_draw(CD2DTarget *target, const uint8_t *backdrop, uint32_t backd
 /// The frame beneath the glass rendered on the window's own device (round 3): a bitmap target
 /// of `width` by `height` pixels at 96 DPI on a device context of `like`'s device, begun and
 /// cleared; draw through `cd2d_glass_frame_target`, then `cd2d_glass_frame_finish`. NULL when
-/// `like` is no device context (the caller renders the frame on the CPU).
+/// `like` is no device context or a WIC bitmap target (the caller renders the frame on the CPU).
 typedef struct CD2DGlassFrame CD2DGlassFrame;
+/// The identity of the device a frame for `target` lives on, which a frame draws into targets
+/// on only; 0 when `target` takes no frame (a WIC bitmap target renders on its own device).
+uintptr_t cd2d_glass_frame_device(CD2DTarget *target);
 CD2DGlassFrame *cd2d_glass_frame_create(CD2DTarget *like, uint32_t width, uint32_t height);
 CD2DTarget *cd2d_glass_frame_target(CD2DGlassFrame *frame);
 bool cd2d_glass_frame_finish(CD2DGlassFrame *frame);

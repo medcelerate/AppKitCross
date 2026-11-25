@@ -339,7 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                     self.timer?.invalidate(); self.timer = nil
                     let glass = ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] == "1" ? "on" : "off"
                     let elapsed = now.timeIntervalSince(start)
-                    print(String(format: "autoscroll summary (glass %@, %.0fx, interval %.1f ms): %d frames in %.1f s (%.1f fps), paint mean %.2f ms, p95 %.2f ms, max %.2f ms; frame gap mean %.2f ms, p95 %.2f ms, min %.2f ms", glass, self.window.backingScaleFactor, interval * 1000, paints.count, elapsed, Double(paints.count) / elapsed, Self.mean(paints), Self.p95(paints), paints.max() ?? 0, Self.mean(gaps), Self.p95(gaps), gaps.min() ?? 0))
+                    print(String(format: "autoscroll summary (glass %@, %@x, interval %.1f ms): %d frames in %.1f s (%.1f fps), paint mean %.2f ms, p95 %.2f ms, max %.2f ms; frame gap mean %.2f ms, p95 %.2f ms, min %.2f ms", glass, "\(self.window.backingScaleFactor)", interval * 1000, paints.count, elapsed, Double(paints.count) / elapsed, Self.mean(paints), Self.p95(paints), paints.max() ?? 0, Self.mean(gaps), Self.p95(gaps), gaps.min() ?? 0))
                     NSApp.terminate(nil)
                 }
             }

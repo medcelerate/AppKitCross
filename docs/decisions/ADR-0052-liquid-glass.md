@@ -529,6 +529,23 @@ Departures and fallbacks:
   behind it, and `APPKITWIN_LIQUID_GLASS_GPU=0` still forces it.
 - A sample drawn from the GPU frame keeps no image: `_GlassSample.isGPUFrame` is set, and
   the invalidation bookkeeping (the window rectangle, the mirrored strip) is kept as before.
+- **A GPU frame stays on its device** (`PlatformGlassProgram.frameDevice(for:)`). An
+  offscreen capture (`--reference`, `--screenshot`) draws the window into a WIC bitmap
+  target, which renders on its own software device. PC round 3 found every capture empty
+  on the GPU path: the window device's frame drawn into it failed the capture's `EndDraw`,
+  and Direct2D then copies nothing into the bitmap. A WIC target now takes no GPU frame
+  (`cd2d_glass_frame_device` returns 0) and samples the CPU frame for that paint, without
+  turning GPU frames off for the window. A frame is reused only on the device it was made
+  on, and `cd2d_glass_draw_from_frame` refuses another device's frame.
+- **The material's halved frame lines up with the band's edge.** Halving starts at the lens
+  frame's top row, so the paint area is rounded to whole pixels at half the lens scale. With
+  an odd lens row count (a 638 pt area at 2x), the band's bottom edge fell inside a material
+  row that was half document. The CPU frame's "only window background" test then failed, and
+  the software band stopped mirroring the strip below it. PC round 3 saw this at 150 % as a
+  pale GPU=0 band against the GPU's mirrored one. At 1.5x no material row ends at the edge
+  (600 pt is 112.5 px), so the test now reads only the rows wholly inside the surface.
+  `testBandMirrorsAtEveryHeight` covers heights 200 to 207 pt at both scales. The GPU path's
+  structural mirror was right all along.
 
 **Fixed in passing:** a glass surface with nothing to sample (no window content beneath, a
 zero-size crop) made the renderer drop the GPU program for the process, because a draw that

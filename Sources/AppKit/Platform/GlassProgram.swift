@@ -132,6 +132,11 @@ public protocol PlatformGlassProgram: AnyObject {
     /// draws with, `pixelWidth` by `pixelHeight`, drawn in points at `scale` (bottom-left
     /// origin, as an offscreen surface); nil to render the frame on the CPU. The default is nil.
     func makeFrame(pixelWidth: Int, pixelHeight: Int, scale: CGFloat, like context: CGContext) -> (any PlatformGlassFrame)?
+    /// The device a frame for `context` lives on, which a frame is reused on only: a frame made
+    /// on the window's device cannot be drawn into a context on another (an offscreen bitmap
+    /// for a capture). Nil when `context` takes no GPU frame; that context then samples the
+    /// CPU frame, and GPU frames stay on for the others. The default is nil.
+    func frameDevice(for context: CGContext) -> Int?
     /// The whole program over such a frame, drawn into `rect` of `context`; false when it could
     /// not (the caller draws the software pass).
     func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool
@@ -218,6 +223,7 @@ public struct _GlassProgramError: Error, Sendable { public let message: String; 
 
 extension PlatformGlassProgram {
     public func makeFrame(pixelWidth: Int, pixelHeight: Int, scale: CGFloat, like context: CGContext) -> (any PlatformGlassFrame)? { nil }
+    public func frameDevice(for context: CGContext) -> Int? { nil }
     public func draw(from source: PlatformGlassFrameSource, request: PlatformGlassRequest, in rect: CGRect, of context: CGContext, flipped: Bool) -> Bool { false }
 
     /// Draws the rendered image the way the software pass's shaded image is drawn.
