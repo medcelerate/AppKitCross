@@ -502,6 +502,7 @@ import CoreText
     internal func _displayHierarchy(in ctx: CGContext, dirtyRect: NSRect) {
         guard !_isHidden, _alphaValue > 0 else { return }
         guard _frame.intersects(dirtyRect) else { return }
+        NSView._paintViewsVisited &+= 1
         // A glass pass samples what lies beneath its surface: the paint stops there (ADR-0052).
         if NSView._glassStop != nil { if CALayer._composeStopped { return }; if _stopsGlassSample { CALayer._composeStopped = true; return } }
         if let l = _layer, _isLayerRoot {
@@ -539,6 +540,7 @@ import CoreText
         let previousDrawing = NSView._drawingView
         NSView._drawingView = self
         NSView._drawObserver?(self)
+        NSView._paintViewsDrawn &+= 1
         draw(localDirty)
         NSView._drawingView = previousDrawing
         _dirtyRect = nil
@@ -596,6 +598,11 @@ import CoreText
     /// Milliseconds on a monotonic clock, for `_traceFrames` lines.
     public static func _traceClock() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000 }
 
+    /// Views the display entered (their frame meets the dirty area) and views whose
+    /// `draw(_:)` it ran, since launch: the frame trace and tests read them per tree walk
+    /// (ADR-0054).
+    nonisolated(unsafe) internal static var _paintViewsVisited = 0
+    nonisolated(unsafe) internal static var _paintViewsDrawn = 0
     /// Every invalidation since launch (tests measure what an update costs).
     nonisolated(unsafe) public static var _invalidationCount = 0
     /// Sees every invalidation (tests count them per view type and collect the dirty area).
@@ -2574,6 +2581,7 @@ extension NSView: CALayerDelegate, CALayerHost {
         if wantsDefaultClipping { ctx.clip(to: b) }
         _dirtyRect = b
         NSView._drawObserver?(self)
+        NSView._paintViewsDrawn &+= 1
         if wantsUpdateLayer { updateLayer() } else { draw(b) }
         _dirtyRect = nil
         NSAppearance.current = previousAppearance

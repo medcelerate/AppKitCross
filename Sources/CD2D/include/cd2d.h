@@ -432,6 +432,49 @@ void cd2d_target_draw_text_layout(CD2DTarget *target, CD2DTextLayout *layout, fl
 /// return as a one-byte Bool and loses the id. `menu` and `hwnd` are HMENU / HWND as void*.
 int cd2d_track_popup_menu_command(void *menu, unsigned int flags, int x, int y, void *hwnd);
 
+
+// ---------------------------------------------------------------- Frame statistics (ADR-0054)
+//
+// Per-category call counts and CPU time of the shim's Direct2D/DirectWrite work, for the
+// `APPKITWIN_TRACE_FRAMES=1` trace. Off by default: every timed call then costs one load
+// and branch. Times are what the calling thread spends inside the call (Direct2D batches
+// drawing, so fills and strokes are cheap here and their GPU work lands in END_DRAW).
+enum {
+    CD2D_STAT_GEOMETRY = 0,     // path geometry creation and population (count: geometries)
+    CD2D_STAT_STROKE_STYLE,     // stroke style creation
+    CD2D_STAT_BRUSH,            // solid colour brush creation
+    CD2D_STAT_TEXT_LAYOUT,      // DirectWrite text layout creation (string drawing and measuring)
+    CD2D_STAT_TEXT_SHAPE,       // DirectWrite shaping (CoreText lines)
+    CD2D_STAT_TEXT_DRAW,        // DrawTextLayout and DrawGlyphRun
+    CD2D_STAT_FILL_RECT,
+    CD2D_STAT_FILL_PATH,
+    CD2D_STAT_STROKE_RECT,
+    CD2D_STAT_STROKE_PATH,
+    CD2D_STAT_CLIP_RECT,        // axis-aligned clip push and pop (count: pushes)
+    CD2D_STAT_CLIP_LAYER,       // geometry clip (layer) push and pop (count: pushes)
+    CD2D_STAT_BITMAP_CREATE,    // bitmap upload from pixels
+    CD2D_STAT_BITMAP_DRAW,
+    CD2D_STAT_OFFSCREEN,        // WIC bitmap targets: create, end_draw, read back
+    CD2D_STAT_TRANSFORM,        // SetTransform
+    CD2D_STAT_CLEAR,
+    CD2D_STAT_END_DRAW,         // a window target's EndDraw (flushes the batched drawing)
+    CD2D_STAT_COPY,             // canvas to back buffer
+    CD2D_STAT_PRESENT,          // Present / Present1 (blocks for a free buffer under vsync)
+    CD2D_STAT_COUNT
+};
+void cd2d_stats_enable(bool on);
+bool cd2d_stats_enabled(void);
+/// Copies the counts and milliseconds of every category (`n` entries, at most
+/// CD2D_STAT_COUNT) and resets them.
+void cd2d_stats_take(uint32_t *counts, double *milliseconds, uint32_t n);
+/// For timed calls outside this target (CDirectWrite): a start stamp (0 while off) and
+/// the matching end, which adds `count` calls and the time since `start` to `category`.
+int64_t cd2d_stats_begin(void);
+void cd2d_stats_end(int32_t category, int64_t start, uint32_t count);
+/// The sync interval window targets present with: 1 (vsync, the default) or 0
+/// (`APPKITWIN_PRESENT_INTERVAL=0`, for measuring the paint without the wait).
+void cd2d_set_present_interval(uint32_t interval);
+
 #ifdef __cplusplus
 }
 #endif

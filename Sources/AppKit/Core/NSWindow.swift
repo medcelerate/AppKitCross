@@ -1289,6 +1289,9 @@ import CoreText
     internal private(set) var _lastPaintArea: CGFloat = 0
     /// The areas the last paint drew (tests read what a scroll or an animation frame cost).
     internal private(set) var _lastPaintRects: [NSRect] = []
+    /// One entry per walk of the view trees the last paint made: the views it entered and
+    /// the views whose `draw(_:)` ran (the frame trace and tests, ADR-0054).
+    internal private(set) var _lastPaintWalks: [(visited: Int, drawn: Int)] = []
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
@@ -1312,7 +1315,10 @@ import CoreText
         if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
         if !_hostsLayersNatively, let m = _menuBarRow, !m.isHidden { m.layoutSubtreeIfNeeded() }
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
+        var walks: [(visited: Int, drawn: Int)] = []
         for rect in paintRects {
+            let visited0 = NSView._paintViewsVisited, drawn0 = NSView._paintViewsDrawn
+            defer { walks.append((NSView._paintViewsVisited - visited0, NSView._paintViewsDrawn - drawn0)) }
             context.saveGState()
             if paintRects.count > 1 || rect != dirtyRect { context.clip(to: rect) }
             if _isOpaque {
@@ -1334,9 +1340,11 @@ import CoreText
             }
             context.restoreGState()
         }
+        _lastPaintWalks = walks
         if NSView._traceFrames {
             let area = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
-            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f, %d rects, %.0f pt²", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area))
+            let perWalk = walks.map { "\($0.drawn)/\($0.visited)" }.joined(separator: " ")
+            NSView._trace(String(format: "frames paint '%@' layout %.2f ms draw %.2f ms dirty %.0fx%.0f, %d rects, %.0f pt², %d walks, views drawn/visited per walk: %@", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area, walks.count, perWalk))
         }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
