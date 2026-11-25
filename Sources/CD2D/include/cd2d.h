@@ -124,6 +124,8 @@ bool cd2d_target_is_composition(CD2DTarget *target);
 void cd2d_target_release(CD2DTarget *target);
 void cd2d_target_resize(CD2DTarget *target, uint32_t pixelWidth, uint32_t pixelHeight);
 void cd2d_target_set_dpi(CD2DTarget *target, float dpi);
+/// The render target's DPI (96 = one DIP per pixel); 96 for a null target.
+float cd2d_target_get_dpi(CD2DTarget *target);
 void cd2d_target_begin_draw(CD2DTarget *target);
 /// Returns false when the target was lost and must be recreated (D2DERR_RECREATE_TARGET,
 /// or DXGI_ERROR_DEVICE_REMOVED / DXGI_ERROR_DEVICE_RESET from the swap chain).

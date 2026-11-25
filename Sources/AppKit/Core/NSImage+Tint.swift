@@ -11,9 +11,12 @@ import CoreGraphics
 
 extension NSImage {
     /// A bitmap image of this image's alpha filled with `color`, sized for `size` points at
-    /// the current backing scale; cached per colour and size. Nil when it cannot be rendered.
+    /// the current context's device scale (its user-to-device transform, which carries the
+    /// window's backing scale); cached per colour and pixel size, so a backing-scale change
+    /// renders afresh. Nil when it cannot be rendered.
     @MainActor internal func _tintedForTemplate(_ color: NSColor, size: NSSize) -> NSImage? {
-        let backing = NSView.focusView?.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        let backing = NSGraphicsContext.current.map { NSImage._deviceScale($0.cgContext, hints: nil) }
+            ?? NSView.focusView?.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
         let base = self.size
         guard base.width > 0, base.height > 0, size.width > 0, size.height > 0 else { return nil }
         let scale = backing * max(size.width / base.width, size.height / base.height)
@@ -22,7 +25,7 @@ extension NSImage {
         rgb.getRed(&r, green: &g, blue: &b, alpha: &a)
         let key = "\(Int((r * 255).rounded())),\(Int((g * 255).rounded())),\(Int((b * 255).rounded())),\(Int((a * 255).rounded()))@\(Int((base.width * scale).rounded()))x\(Int((base.height * scale).rounded()))"
         if let cached = _tintCache[key] { return cached }
-        guard let cg = _cgImage(scale: scale, fitting: size) else { return nil }
+        guard let cg = _cgImage(scale: backing, fitting: size) else { return nil }
         let px = NSBitmapImageRep._rgbaPixels(of: cg)
         var bgra = [UInt8](repeating: 0, count: px.width * px.height * 4)
         let cr = Int((r * 255).rounded()), cgn = Int((g * 255).rounded()), cb = Int((b * 255).rounded())

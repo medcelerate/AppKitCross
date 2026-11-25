@@ -145,7 +145,7 @@ public enum _CAProjective {
             return
         }
         guard extent.width > 0, extent.height > 0, let whole = h.corners(of: extent) else { return }
-        let ctm = ctx.ctm
+        let ctm = ctx.userSpaceToDeviceSpaceTransform
         let device = whole.map { $0.applying(ctm) }
         // The deviation of the fourth corner from the parallelogram the other three span,
         // in device pixels: the error of drawing the whole extent with one affine map.

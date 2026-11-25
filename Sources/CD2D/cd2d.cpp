@@ -522,6 +522,13 @@ void cd2d_target_set_dpi(CD2DTarget *target, float dpi) {
     if (target->target) target->target->SetDpi(dpi, dpi);
 }
 
+float cd2d_target_get_dpi(CD2DTarget *target) {
+    if (!target || !target->target) return 96.0f;
+    float x = 96.0f, y = 96.0f;
+    target->target->GetDpi(&x, &y);
+    return x > 0 ? x : 96.0f;
+}
+
 void cd2d_target_begin_draw(CD2DTarget *target) {
     if (!target || !target->target) return;
     target->target->BeginDraw();

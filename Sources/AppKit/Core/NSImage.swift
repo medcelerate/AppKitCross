@@ -46,10 +46,16 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
 
     open override var description: String { "<NSImage \(_name.map { "'\($0)' " } ?? "")size=\(_size) reps=\(_representations.count)>" }
 
-    /// The pixels to draw, rendering drawing handlers and template images as needed.
+    /// The pixels to draw for a destination of `destination` points (the image's size when
+    /// nil) at `scale` device pixels per point. A drawing handler (the port's symbols) or a
+    /// drawn rep renders at the destination's pixels per image point, so a symbol drawn at
+    /// 1.5x, or enlarged by its font, is rasterised for those pixels rather than scaled up.
     @MainActor internal func _cgImage(scale: CGFloat = 1, fitting destination: NSSize? = nil) -> CGImage? {
+        let target = destination ?? _size
+        let repScale = _size.width > 0 && _size.height > 0 && target.width > 0 && target.height > 0
+            ? scale * max(target.width / _size.width, target.height / _size.height) : scale
         if let handler = _drawingHandler {
-            guard let surface = Platform.backend.image.makeOffscreen(size: _size, scale: scale) else { return nil }
+            guard let surface = Platform.backend.image.makeOffscreen(size: _size, scale: repScale) else { return nil }
             let gc = NSGraphicsContext(cgContext: surface.context, flipped: _drawingHandlerFlipped)
             let saved = NSGraphicsContext.current
             NSGraphicsContext.current = gc
@@ -61,9 +67,8 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
             NSGraphicsContext.current = saved
             return surface.makeImage()
         }
-        let target = destination ?? _size
         if let best = _bestRepresentation(pixels: NSSize(width: target.width * scale, height: target.height * scale), destination: target),
-           let image = best._cgImage() ?? best._renderedBitmap()?.cgImage { return image }
+           let image = best._cgImage() ?? best._renderedBitmap(scale: repScale)?.cgImage { return image }
         for rep in _representations {
             if let image = rep._cgImage() { return image }
         }
@@ -369,27 +374,55 @@ open class NSImage: NSObject, NSCopying, NSSecureCoding, NSCoding, NSPasteboardR
         MainActor.assumeIsolated {
             guard let gc = NSGraphicsContext.current else { return }
             let scale = NSImage._deviceScale(gc.cgContext, hints: hints)
-            guard let image = _cgImage(scale: scale, fitting: dstSpacePortionRect.size) else {
+            // Rendered for the whole image's size at this draw's magnification (a portion's
+            // destination covers only that portion); a nine-slice draw keeps its corners at
+            // their size, so it renders at the image's size.
+            let src = srcSpacePortionRect
+            let whole = src.isEmpty || src == NSRect(origin: .zero, size: _size)
+            let sliced = whole && (_hasCapInsets || _resizingMode == .tile)
+            let fitting = sliced ? _size : src.isEmpty || src.width <= 0 || src.height <= 0 ? dstSpacePortionRect.size
+                : NSSize(width: dstSpacePortionRect.width * _size.width / src.width, height: dstSpacePortionRect.height * _size.height / src.height)
+            guard let image = _cgImage(scale: scale, fitting: fitting) else {
                 if let standIn = delegate?.imageDidNotDraw(self, in: dstSpacePortionRect), standIn !== self {
                     standIn.draw(in: dstSpacePortionRect, from: srcSpacePortionRect, operation: op, fraction: requestedAlpha, respectFlipped: respectContextIsFlipped, hints: hints)
                 }
                 return
             }
-            let whole = srcSpacePortionRect.isEmpty || srcSpacePortionRect == NSRect(origin: .zero, size: _size)
-            if whole, _hasCapInsets || _resizingMode == .tile {
+            if sliced {
                 _drawNineSlice(image, in: dstSpacePortionRect, operation: op, fraction: requestedAlpha, respectFlipped: respectContextIsFlipped)
                 return
             }
-            NSImageRep._drawImage(image, imageSize: _size, in: dstSpacePortionRect, from: srcSpacePortionRect, operation: op, fraction: requestedAlpha, respectFlipped: respectContextIsFlipped, hints: hints)
+            let dst = whole ? NSImage._pixelAligned(dstSpacePortionRect, pixels: (image.width, image.height), in: gc.cgContext) : dstSpacePortionRect
+            NSImageRep._drawImage(image, imageSize: _size, in: dst, from: srcSpacePortionRect, operation: op, fraction: requestedAlpha, respectFlipped: respectContextIsFlipped, hints: hints)
         }
     }
 
+    /// `rect` moved (by under a device pixel) onto the device pixel grid when the image's
+    /// pixels map one to one onto it in an unrotated context, so a symbol rendered for 1.5x
+    /// at a fractional point position is not resampled across two pixels at every edge.
+    @MainActor internal static func _pixelAligned(_ rect: NSRect, pixels: (Int, Int), in ctx: CGContext) -> NSRect {
+        let t = ctx.userSpaceToDeviceSpaceTransform
+        guard t.b == 0, t.c == 0, t.a != 0, t.d != 0 else { return rect }
+        let sx = abs(t.a), sy = abs(t.d)
+        guard abs(rect.width * sx - CGFloat(pixels.0)) < 0.75, abs(rect.height * sy - CGFloat(pixels.1)) < 0.75 else { return rect }
+        let p = rect.origin.applying(t)
+        let dx = (p.x.rounded() - p.x) / t.a, dy = (p.y.rounded() - p.y) / t.d
+        return NSRect(x: rect.minX + dx, y: rect.minY + dy, width: CGFloat(pixels.0) / sx, height: CGFloat(pixels.1) / sy)
+    }
+
     private var _hasCapInsets: Bool { _capInsets.top != 0 || _capInsets.left != 0 || _capInsets.bottom != 0 || _capInsets.right != 0 }
-    /// Device pixels per point of `ctx` (the CTM's scale, or the hint's transform).
+    /// Device pixels per point of `ctx`: the user-to-device transform's scale (the CTM and
+    /// the target's backing scale; on Windows and Linux a window's scale lives in the target,
+    /// not the CTM), or the hint's transform. Images rasterise drawing handlers (symbols)
+    /// and pick representations at this scale, so they stay as sharp as text at 1.5x or 2x.
     @MainActor internal static func _deviceScale(_ ctx: CGContext, hints: [NSImageRep.HintKey: Any]?) -> CGFloat {
         if let t = hints?[.ctm] as? NSAffineTransform { let m = t.transformStruct; return max(abs(m.m11), abs(m.m22), 0.01) }
-        let m = ctx.ctm
-        return max(0.01, (abs(m.a) + abs(m.d)) / 2 > 0 ? max(hypot(m.a, m.b), hypot(m.c, m.d)) : 1)
+        return _scale(of: ctx.userSpaceToDeviceSpaceTransform)
+    }
+    /// The larger axis scale of `m` (at least 0.01).
+    internal static func _scale(of m: CGAffineTransform) -> CGFloat {
+        let s = max(hypot(m.a, m.b), hypot(m.c, m.d))
+        return s.isFinite && s > 0 ? max(0.01, s) : 1
     }
 
     /// Nine slices of `image` into `dst` (see `draw(in:from:operation:fraction:respectFlipped:hints:)`).

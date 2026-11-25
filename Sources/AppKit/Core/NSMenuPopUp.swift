@@ -426,6 +426,20 @@ final class _NSMenuTracker {
     private let skipsFirstItem: Bool
     private let minimumWidth: CGFloat
     private var openPoint: NSPoint?
+    /// The screen the menu hierarchy opens on, chosen once from the root anchor.
+    private var placementScreen: NSScreen?
+
+    /// The screen a menu anchored at `anchor` (screen points) opens on: the screen of the
+    /// window it was opened from (the key window, else the main window) when that screen
+    /// holds the anchor, else the first screen that does. On Windows each monitor's points
+    /// are its pixels at its own scale, so a 150% monitor's point frame overlaps the 100%
+    /// primary's and the first containing screen can be the wrong one.
+    static func screen(forAnchor anchor: NSRect, source: NSWindow?, screens: [NSScreen] = NSScreen.screens) -> NSScreen? {
+        let mid = NSPoint(x: anchor.midX, y: anchor.midY)
+        let holding = screens.filter { $0.frame.contains(mid) }
+        if let s = source?.screen, holding.contains(where: { $0 == s && $0.backingScaleFactor == s.backingScaleFactor }) { return s }
+        return holding.first ?? NSScreen.main
+    }
     private var movedSinceOpen = false
     private var sawFirstMouseUp = false
     private(set) var finished = false
@@ -495,8 +509,12 @@ final class _NSMenuTracker {
             let rowTop = itemIndex.flatMap { layout.row(forItemIndex: $0) }?.frame.minY ?? 0
             origin = NSPoint(x: anchor.minX, y: anchor.maxY + rowTop - size.height)
         }
-        // Keep the menu on the screen that holds the anchor.
-        let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: anchor.midX, y: anchor.midY)) } ?? NSScreen.main
+        // Keep the menu on the screen that holds the anchor (a submenu stays on its root's).
+        if placementScreen == nil {
+            let source = NSApplication.shared.keyWindow.flatMap { isMenuWindow($0) ? nil : $0 } ?? NSApplication.shared.mainWindow
+            placementScreen = _NSMenuTracker.screen(forAnchor: anchor, source: source)
+        }
+        let screen = placementScreen
         var frameSize = size
         var scrollOffset: CGFloat = 0
         if let visible = screen?.visibleFrame {
@@ -524,6 +542,7 @@ final class _NSMenuTracker {
             }
             if origin.y + frameSize.height > visible.maxY { origin.y = max(visible.minY, visible.maxY - frameSize.height) }
         }
+        window._placementScreen = screen
         window.setFrame(NSRect(origin: origin, size: frameSize), display: false)
         window.scrollOffset = scrollOffset
         var level = Level(menu: menu, window: window, parentRow: parentRow)

@@ -56,6 +56,38 @@ public struct _CALayerScene {
     public init() {}
 }
 
+extension _CALayerScene {
+    /// Each node's translation in its parent, in pixels at `scale`, with every node whose
+    /// placement chain is pure translation moved (by under half a pixel) so that its absolute
+    /// position is a whole pixel. A compositor that places a surface at a fractional pixel
+    /// offset resamples it bilinearly: a crisp 1.5x symbol in a toolbar item at x + 0.5 px
+    /// comes out with every vertical edge spread over two pixels. Nodes under a scale,
+    /// rotation, flip or 3D transform keep their exact translation (`nil` where the node is
+    /// not snapped); the result is indexed like `nodes`.
+    public func _pixelSnappedTranslations(scale: CGFloat) -> [CGPoint?] {
+        var exact = [CGPoint?](repeating: nil, count: nodes.count)
+        var rounded = [CGPoint?](repeating: nil, count: nodes.count)
+        var result = [CGPoint?](repeating: nil, count: nodes.count)
+        for (i, node) in nodes.enumerated() {
+            let t = node.transform
+            guard node.transform3D == nil, t.a == 1, t.b == 0, t.c == 0, t.d == 1 else { continue }
+            let parentExact: CGPoint, parentRounded: CGPoint
+            if let p = node.parent {
+                // `parent` is an index into `nodes` (a parent precedes its children).
+                guard p < i, let e = exact[p], let r = rounded[p] else { continue }
+                parentExact = e; parentRounded = r
+            } else {
+                parentExact = .zero; parentRounded = .zero
+            }
+            let e = CGPoint(x: parentExact.x + t.tx * scale, y: parentExact.y + t.ty * scale)
+            let r = CGPoint(x: e.x.rounded(), y: e.y.rounded())
+            exact[i] = e; rounded[i] = r
+            result[i] = CGPoint(x: r.x - parentRounded.x, y: r.y - parentRounded.y)
+        }
+        return result
+    }
+}
+
 extension CALayer {
     /// Returns the sublayers plus any layers a host attaches below this one outside the
     /// layer tree (AppKit views that host a foreign layer). Installed by the host.
