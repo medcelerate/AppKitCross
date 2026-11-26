@@ -1,6 +1,6 @@
 # ADR-0054: The Windows base paint cost
 
-Date: 2026-11-25. Status: proposed; round 1 measures, the fixes follow the PC's profile.
+Date: 2026-11-25. Status: proposed; round 1 measured on the PC, round 2 fixes what it found.
 
 ## Context
 
@@ -64,9 +64,83 @@ GPU work lands in `end-draw`.
 `APPKITWIN_PRESENT_INTERVAL=0` presents with sync interval 0, for measuring the paint
 without the vsync wait; normal runs keep `Present(1, 0)`.
 
+## The PC profile (round 1, 89cde80, glass off, 1x)
+
+`Glass --autoscroll 10 --interval 0`, steady state, means of 60 paints:
+
+| | vsync (default) | `APPKITWIN_PRESENT_INTERVAL=0` |
+|---|---|---|
+| example's paint mean | 11.0 ms | 4.0 ms (101.6 fps) |
+| draw (to the end of the walk) | 3.9-4.2 ms | 3.9 ms |
+| finish (EndDraw, copy, Present) | 6.4-6.9 ms | 0.4 ms |
+| `present` | 6.1-6.6 ms | 0.07 ms |
+| shim total without end-draw/present | ~0.75 ms | ~0.7 ms |
+
+Per paint: 6 rects, 6 walks, 39 views drawn; `text-shape` 12.7 calls / 0.51 ms (the
+largest shim cost), `text-draw` 14.7 / 0.04 ms, `geometry` 48 / 0.07 ms, `fill-path` 46,
+`fill-rect` 26, `clip-rect` 59, `transform` 186, all at a few hundredths of a millisecond;
+`end-draw` 0.30 ms. No bitmap uploads, offscreen targets or text layouts in a scroll frame.
+
+What that says:
+
+- **The 10.9 ms was mostly the vsync wait.** Back-to-back frames on a two-buffer flip
+  chain block in `Present` until a buffer frees: 6-7 ms of the paint. Without the wait the
+  whole paint is 4.0 ms, already under the 5 ms goal. Nothing is wrong with presenting; the
+  example's number just measured it. The trace keeps `draw` and `finish` apart.
+- **Direct2D is not the cost.** Geometry, fills, clips and transforms total well under a
+  millisecond however many there are; the candidate fixes for them (FillEllipse, cached
+  geometries and brushes) would save hundredths of a millisecond and are not done.
+- **About 3.1 ms of the 3.9 ms draw is outside the shim**: Swift code in the walk and in the
+  views. The one shim category that is real, `text-shape`, points at the part of it that
+  repeats: every string drawn is laid out again (an attributed string, a typesetter, a
+  line, the port's Core Text on DirectWrite) and the Glass bands ask
+  `NSFont.systemFont(ofSize:weight:)` for their font in every `draw(_:)`, each answer a new
+  platform font (a Core Text font with a descriptor copy, a DirectWrite face lookup) that
+  the shim does not time.
+- **A frame gap of 9.8 ms against a 4.0 ms paint** without vsync: 5.8 ms a frame goes
+  outside `displayIfNeeded`. The pump's wait cannot be it at `--interval 0` (the timer is
+  always due, so the wait is zero), which leaves the scroll step before the paint and the
+  run loop's servicing. Round 2 splits it.
+- The fifth walk's "10/5" (drawn above entered) was the counter: a layer-backed view draws
+  through its layer delegate without entering `_displayHierarchy`, so it counted as drawn
+  only. It now counts as entered too.
+
+## Decision (round 2: the repeated text work)
+
+- **Fonts are cached by request.** `NSFont`'s factory (`systemFont`, `init(name:size:)`,
+  descriptors, `withSize`, the font manager's conversions all go through it) keeps the font
+  it made for each (family, size, weight, italic, monospaced) and answers a repeat with the
+  same object, as AppKit's shared font instances do. Fonts are immutable, so sharing is
+  safe; a family that is not installed is remembered as a miss. Bounded at 1024 entries.
+- **Drawn strings keep their lines.** The Core Text string backend (every platform's
+  `NSString.draw`; Windows and Linux run the port's Core Text, the host Apple's) keeps the
+  `CTLine`s it laid out for each (string, font, colour, wrap width) and draws them again
+  without laying out. Measuring was already cached (`_NSTextMeasureCache`). Bounded at 2048
+  entries; the font is held with its lines so its identity cannot be reused.
+- **The trace grows what the shim cannot see.** `frames paint` now gives each walk's time
+  next to its views drawn/entered, and the paint's strings drawn (with their time and how
+  many had to be laid out) and platform fonts made (with their time). The Glass example's
+  summary gains a `gap split` line: scroll step, paint, and the time outside the timer
+  callback.
+
+Not done, because the profile does not justify it: path geometry and brush caching,
+`FillEllipse`/`FillRoundedRectangle`, the per-context bitmap cache (no uploads in a scroll
+frame). One walk over all rectangles is held for round 2's per-walk times: Direct2D has no
+cheap multi-rectangle clip (`clip(to: [CGRect])` is the union's box on Windows), so a single
+walk would either draw everything inside the union's box or need a geometry clip layer per
+view, and the shim's numbers show the per-view Direct2D overhead of a walk is small.
+
 ## Consequences
 
-Round 2 implements what the profile justifies and records it here.
+`PaintTextCostTests` (host) checks that repainting views that ask for their font and draw
+their labels in `draw(_:)` makes no platform font and lays out no line, that two requests
+for a font answer with the same object, and that no walk reports more views drawn than
+entered. The pixel tests are unchanged.
+
+PC round 2 measures the same runs: the `strings drawn ... fonts made` fields should show
+nothing laid out and no fonts made in a steady scroll frame, and `draw` should fall by
+what the text and fonts cost. If the walk itself is still most of the draw, the per-walk
+times say whether merging walks is worth its clip cost.
 
 ## Follow-up: smear below the screen edge while scrolling (reported in PR 99 round 3)
 
@@ -86,5 +160,5 @@ Candidate fix: `scrollBacking` refuses the copy (returns false, so the clip view
 whole) when the copy's source is not wholly on a monitor (`MonitorFromPoint(...,
 MONITOR_DEFAULTTONULL)` on its corners, or the visible region from `GetRandomRgn`), or
 clamps the source to the visible part and invalidates the rest. The PC confirms first:
-with `APPKITWIN_TRACE_INVALIDATION=1`, the `win32 paint dirty` lines should show
+with `APPKITWIN_TRACE=1`, the `win32 paint dirty` lines should show
 `rcPaint` stopping at the screen edge while the `win32 scroll copy` source reaches past it.

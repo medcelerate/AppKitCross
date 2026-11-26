@@ -2581,6 +2581,9 @@ extension NSView: CALayerDelegate, CALayerHost {
         if wantsDefaultClipping { ctx.clip(to: b) }
         _dirtyRect = b
         NSView._drawObserver?(self)
+        // A layer-backed view is entered through its layer, not `_displayHierarchy`: count it
+        // entered too, so a walk never reports more views drawn than entered.
+        NSView._paintViewsVisited &+= 1
         NSView._paintViewsDrawn &+= 1
         if wantsUpdateLayer { updateLayer() } else { draw(b) }
         _dirtyRect = nil
