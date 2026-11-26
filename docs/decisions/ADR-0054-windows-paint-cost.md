@@ -1,6 +1,6 @@
 # ADR-0054: The Windows base paint cost
 
-Date: 2026-11-25. Status: proposed; round 1 measured on the PC, round 2 fixes what it found.
+Date: 2026-11-25. Status: accepted; PC round 2 (6697797) passed.
 
 ## Context
 
@@ -141,6 +141,54 @@ PC round 2 measures the same runs: the `strings drawn ... fonts made` fields sho
 nothing laid out and no fonts made in a steady scroll frame, and `draw` should fall by
 what the text and fonts cost. If the walk itself is still most of the draw, the per-walk
 times say whether merging walks is worth its clip cost.
+
+## The PC result (round 2, 6697797, glass off, 1x, both monitors at 100%)
+
+`Glass --autoscroll 10 --interval 0`:
+
+| | round 1 | round 2 |
+|---|---|---|
+| draw (trace, steady frame / 60-paint mean) | 3.7-4.2 ms | 1.66-2.07 ms |
+| paint without the vsync wait (example) | 4.03 ms | 2.22 ms (124.5 fps) |
+| `text-shape` per paint | 12.7 / 0.51 ms | 0 |
+| shim total without end-draw/present | ~0.75 ms | ~0.2 ms |
+| paint under vsync (example) | 11.0 ms | 11.1 ms (the wait) |
+
+Steady frame: 6 walks of 0.22, 0.37, 0.28, 0.27, 0.41 and 0.08 ms (about 1.6 ms, now
+most of the draw); 14 strings drawn in 0.11 ms, none laid out; no fonts made. Over 1,178
+paints, 1,154 laid out nothing, 23 laid out one line (a "Band N" label scrolling into view
+for the first time) and the first paint 13; one font was made, on the first paint. The
+scroll step before the paint is 0.17 ms. `Glass --screenshot` is byte-identical to round
+1. Sweep: Sibyl idle 30 s used 78 ms of CPU; TextEdit typing, underline and undo,
+MDVault scrolling an 82K-character note (no layouts or fonts while scrolling) and the
+Toolbar example's display modes and resizes drew correctly.
+
+**Which monitor.** `APPKITWIN_PRESENT_INTERVAL=0` has no effect on the PC's primary
+monitor (59 Hz): `Present(0, 0)` still blocks to vsync there (11.1 ms paint), likely DWM
+declining sync-interval-0 presents of a windowed flip chain on that display. It works on
+the second monitor, where round 1's 4.03 ms and round 2's 2.22 ms were measured. Numbers
+without the vsync wait must say which monitor they came from.
+
+## Further follow-ups
+
+- **Merging walks.** Six walks now cost about 1.6 ms of a 2 ms draw. A merged walk needs a
+  clip for several rectangles that Direct2D does not make cheaply (see above); measure a
+  geometry-group clip layer per walk against the six walks before doing it.
+- **Time outside the timer callback.** With frames back to back, about 5.5 ms a frame
+  passes between one autoscroll callback ending and the next starting, whatever the paint
+  costs and with or without vsync. The scroll step is 0.17 ms, so it is the run loop and
+  the Win32 pump (`PlatformMainQueue.service`, the `MsgWaitForMultipleObjectsEx` loop in
+  `Win32Backend`), not drawing. `APPKITWIN_TRACE=1`'s once-a-second `pump` line (wakes,
+  service time) is the place to start.
+- **MDVault editor blank for a large note** (pre-existing, seen at PR 98/99 builds too;
+  the text system's owner, ADR-0030/TextKit 1 incremental layout): the Editor tab of an
+  82K-character note draws nothing (0 views drawn, frame ticks of 390-620 ms), with LF or
+  CRLF line ends; afterwards toggling the mode does not repaint until the window reopens.
+  Separately, with CRLF line ends the status bar counts 17 lines for 1,073 (only bare LFs
+  count). Small notes render fine.
+- **Toolbar "Label only" search item** (pre-existing; the toolbar's owner, ADR-0021
+  controls / the toolbar item views): the search item reads "SearchSearch", its label
+  drawn inside the field over the clipped placeholder.
 
 ## Follow-up: smear below the screen edge while scrolling (reported in PR 99 round 3)
 
