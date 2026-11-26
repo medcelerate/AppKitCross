@@ -1,0 +1,16 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Saturation in place on binding 1 (see glass.metal).
+#include "glass_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+void main() {
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= pass.width || gid.y >= pass.height) return;
+    uint o = gid.y * pass.stride + gid.x;
+    vec4 c = vec4(glass_unpack(dst[o]));   // b, g, r, a
+    float s = k[9].w;
+    float l = 0.0722 * c.x + 0.7152 * c.y + 0.2126 * c.z;
+    // round() is half-away-from-zero like the software pass's for the non-negative values kept.
+    vec3 v = clamp(floor(vec3(l) + (c.xyz - vec3(l)) * s + 0.5), vec3(0.0), vec3(c.w));
+    dst[o] = glass_pack(uvec4(uvec3(v), uint(c.w)));
+}

@@ -76,6 +76,9 @@ struct CD2DTarget {
     // Composition surface targets (Milestone 9): BeginDraw hands out a region of a larger
     // atlas, so every transform the caller sets is shifted by this origin (DIPs).
     float originX = 0, originY = 0;
+    // A WIC bitmap target (cd2d_offscreen_create): drawn on its own software device, so it
+    // cannot draw the Liquid Glass frame made on a window's device (cd2d_glass.cpp).
+    bool wic = false;
 };
 struct CD2DBrush { ID2D1SolidColorBrush *brush = nullptr; };
 struct CD2DStrokeStyle { ID2D1StrokeStyle *style = nullptr; };
@@ -949,6 +952,7 @@ CD2DOffscreen *cd2d_offscreen_create(CD2DFactory *factory, uint32_t w, uint32_t 
     o->wic = wic; o->rt = rt; o->width = w; o->height = h;
     o->target = new CD2DTarget();
     o->target->target = rt;
+    o->target->wic = true;
     return o;
 }
 
@@ -2327,4 +2331,18 @@ void cd2d_drag_data_free_entries(CD2DDragEntry *entries, uint32_t count) {
     if (!entries) return;
     for (uint32_t i = 0; i < count; i++) { delete[] entries[i].type; delete[] entries[i].bytes; }
     delete[] entries;
+}
+
+// The render target behind a CD2D target, for the Liquid Glass effect (cd2d_glass.cpp).
+extern "C" void *cd2d_target_native_render_target(CD2DTarget *t) { return t ? t->target : nullptr; }
+extern "C" bool cd2d_target_is_wic(CD2DTarget *t) { return t && t->wic; }
+
+// A CD2D target over an existing render target (the Liquid Glass frame's device context,
+// cd2d_glass.cpp); it holds a reference, released with cd2d_target_release.
+extern "C" CD2DTarget *cd2d_target_wrap_native(void *renderTarget) {
+    if (!renderTarget) return nullptr;
+    CD2DTarget *t = new CD2DTarget();
+    t->target = static_cast<ID2D1RenderTarget *>(renderTarget);
+    t->target->AddRef();
+    return t;
 }

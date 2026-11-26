@@ -1,0 +1,76 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// The lens over the blurred backdrop (binding 0) into binding 1, one invocation per output
+// pixel (see glass.metal).
+#include "glass_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+
+vec3 glass_field(vec2 p) {
+    float radius = k[3].x;
+    vec2 c = (k[2].xy + k[2].zw) * 0.5;
+    vec2 h = (k[2].zw - k[2].xy) * 0.5 - vec2(radius);
+    vec2 dd = p - c;
+    vec2 q = abs(dd) - h;
+    vec2 o = max(q, vec2(0.0));
+    float outside = sqrt(o.x * o.x + o.y * o.y);
+    float d = outside + min(max(q.x, q.y), 0.0) - radius;
+    vec2 n;
+    if (outside > 1e-5) n = vec2(o.x / outside * (dd.x < 0.0 ? -1.0 : 1.0), o.y / outside * (dd.y < 0.0 ? -1.0 : 1.0));
+    else if (q.x > q.y) n = vec2(dd.x < 0.0 ? -1.0 : 1.0, 0.0);
+    else n = vec2(0.0, dd.y < 0.0 ? -1.0 : 1.0);
+    return vec3(d, n);
+}
+
+vec4 glass_bilinear(uint w, uint h, uint stride, float x, float y) {
+    float cx = min(float(w - 1u), max(0.0, x)), cy = min(float(h - 1u), max(0.0, y));
+    uint x0 = uint(cx), y0 = uint(cy);
+    uint x1 = min(w - 1u, x0 + 1u), y1 = min(h - 1u, y0 + 1u);
+    float fx = cx - float(x0), fy = cy - float(y0);
+    vec4 c00 = vec4(glass_unpack(src[y0 * stride + x0])), c10 = vec4(glass_unpack(src[y0 * stride + x1]));
+    vec4 c01 = vec4(glass_unpack(src[y1 * stride + x0])), c11 = vec4(glass_unpack(src[y1 * stride + x1]));
+    return (c00 * ((1.0 - fx) * (1.0 - fy)) + c10 * (fx * (1.0 - fy)) + c01 * ((1.0 - fx) * fy) + c11 * (fx * fy)) * (1.0 / 255.0);
+}
+
+uint glass_byte(float v) { return uint(min(255.0, max(0.0, floor(v * 255.0 + 0.5)))); }
+
+void main() {
+    uint W = uint(k[0].x), H = uint(k[0].y);
+    uvec2 gid = gl_GlobalInvocationID.xy;
+    if (gid.x >= W || gid.y >= H) return;
+    vec2 p = vec2(gid) + 0.5;
+    vec3 f = glass_field(p);
+    float d = f.x; vec2 n = f.yz;
+    if (d >= 0.5) { dst[gid.y * W + gid.x] = 0u; return; }
+    float lum = k[9].z >= 0.0 ? k[9].z : luminance[0];
+    bool dark = k[9].x == 1.0 || (k[9].x == 2.0 && (lum < 0.0 ? 1.0 : lum) < k[9].y);
+    vec4 veil = dark ? k[7] : k[6];
+    float rimA = dark ? k[8].z : k[8].x, spec = dark ? k[8].w : k[8].y;
+    float edge = k[3].y, refraction = k[3].z, rimW = k[3].w;
+    bool bevelled = k[4].w > 0.0;
+    float cover = min(1.0, 0.5 - d);
+    float t = bevelled ? min(1.0, max(0.0, 1.0 + d / edge)) : 0.0;
+    float bend = refraction * t * t;
+    p += n * bend;
+    float facing = n.x * k[4].x + n.y * k[4].y;
+    vec4 c = glass_bilinear(pass.width, pass.height, pass.stride, (p.x - k[1].x) * k[1].z - 0.5, (p.y - k[1].y) * k[1].w - 0.5);
+    float a = c.w;
+    vec3 bgr = c.xyz;
+    if (a > 0.001) bgr *= 1.0 / a;
+    vec3 rgb = bgr.zyx;
+    rgb += (veil.rgb - rgb) * veil.a; a += (1.0 - a) * veil.a;
+    if (k[5].w > 0.0) { rgb += (k[5].rgb - rgb) * k[5].w; a += (1.0 - a) * k[5].w; }
+    if (rimA > 0.0) {
+        float rim = min(1.0, max(0.0, 1.0 + d / rimW)) * rimA;
+        if (facing > 0.0) rgb += (1.0 - rgb) * (rim * facing);
+        else rgb *= 1.0 - rim * -facing * 0.45;
+        a += (1.0 - a) * rim;
+    }
+    if (spec > 0.0 && facing > 0.0 && bevelled) {
+        float reach = min(1.0, max(0.0, 1.0 + d / (2.0 * edge)));
+        rgb += (1.0 - rgb) * (facing * facing * reach * reach * spec);
+    }
+    float lift = k[4].z;
+    if (lift > 0.0) rgb += (1.0 - rgb) * lift;
+    float outA = min(1.0, a) * cover;
+    dst[gid.y * W + gid.x] = glass_pack(uvec4(glass_byte(rgb.b * outA), glass_byte(rgb.g * outA), glass_byte(rgb.r * outA), glass_byte(outA)));
+}

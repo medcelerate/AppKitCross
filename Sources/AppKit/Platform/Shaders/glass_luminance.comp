@@ -1,0 +1,24 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// The alpha-weighted mean luminance of the blurred sample (binding 1) into binding 4, one
+// workgroup of 256 (see glass.metal).
+#include "glass_common.glsl"
+layout(local_size_x = 256) in;
+shared float sums[256];
+shared float weights[256];
+void main() {
+    uint tid = gl_LocalInvocationIndex;
+    float sum = 0.0, weight = 0.0;
+    uint n = pass.width * pass.height;
+    for (uint i = tid; i < n; i += 256u) {
+        uvec4 c = glass_unpack(dst[(i / pass.width) * pass.stride + (i % pass.width)]);
+        if (c.w > 0u) { sum += 0.0722 * float(c.x) + 0.7152 * float(c.y) + 0.2126 * float(c.z); weight += float(c.w); }
+    }
+    sums[tid] = sum; weights[tid] = weight;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) { sums[tid] += sums[tid + s]; weights[tid] += weights[tid + s]; }
+        barrier();
+    }
+    if (tid == 0u) luminance[0] = weights[0] > 0.0 ? sums[0] / weights[0] : -1.0;
+}

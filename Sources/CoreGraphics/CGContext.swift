@@ -187,6 +187,9 @@ public final class CGContext {
     /// The CD2DTarget* this context draws into, with the CTM already applied to it, for
     /// DirectWrite's DrawGlyphRun in the CoreText engine.
     public var _d2dTarget: OpaquePointer { target }
+    /// The CD2DFactory* the context makes its geometry with, for a context drawing into a
+    /// resource of the same device (the Liquid Glass frame, ADR-0052).
+    public var _d2dFactory: OpaquePointer { factory }
     /// Text drawing state (CoreText's CTLineDraw/CTRunDraw read and advance these).
     public var textPosition: CGPoint = .zero
     public var textMatrix: CGAffineTransform = .identity

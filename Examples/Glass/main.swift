@@ -94,6 +94,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     static func disc(_ color: NSColor) -> NSImage { glyph { r in color.setFill(); NSBezierPath(ovalIn: r).fill() } }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `Glass --reference <scene> <state> <out.png>` draws one of the reference scenes
+        // (light, dark, over-dark, interactive; states rest, hover, press;
+        // ReferenceScene.swift) through the port and exits: the port's half of the comparison
+        // with real macOS 26 glass (tools/glass/capture-references.sh, ADR-0052). The scale is
+        // the display's (`APPKITWIN_HOST_SCALE=1` on the host for 1x).
+        if let i = CommandLine.arguments.firstIndex(of: "--reference"), i + 3 < CommandLine.arguments.count,
+           let scene = GlassReferenceScene(rawValue: CommandLine.arguments[i + 1]),
+           let state = GlassReferenceScene.State(rawValue: CommandLine.arguments[i + 2]) {
+            writeReference(scene, state: state, to: CommandLine.arguments[i + 3])
+            NSApp.terminate(nil)
+            return
+        }
         if ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] != "1" {
             print("Glass: APPKITWIN_LIQUID_GLASS is not set; every surface draws the pre-26 look. Run with APPKITWIN_LIQUID_GLASS=1 for the material.")
         }
@@ -179,6 +191,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
         guard let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
         print("screenshot: \(path) (\(image.width)x\(image.height))")
+    }
+
+    private func writeReference(_ scene: GlassReferenceScene, state: GlassReferenceScene.State, to path: String) {
+        let w = NSWindow(contentRect: NSRect(origin: NSPoint(x: 100, y: 100), size: GlassReferenceScene.size), styleMask: [.titled], backing: .buffered, defer: false)
+        w.appearance = NSAppearance(named: scene.appearance)
+        w.contentView = scene.makeContent()
+        w.makeKeyAndOrderFront(nil)
+        w.layoutIfNeeded()
+        let content = w.contentView!
+        if state != .rest, let surface = scene.surfaces.first(where: { $0.interactive }) {
+            // The pointer over the interactive surface (and the button down for a press),
+            // delivered to the glass view as the event loop would.
+            let point = NSPoint(x: surface.frame.midX, y: surface.frame.midY)
+            var glass: [NSView] = []
+            func collect(_ v: NSView) { if v is NSGlassEffectView { glass.append(v) }; v.subviews.forEach(collect) }
+            collect(content)
+            for g in glass where g.convert(g.bounds, to: nil).contains(point) {
+                if let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: point, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                                      context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) { g.mouseEntered(with: enter) }
+                if state == .press, let down = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: w.windowNumber,
+                                                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1) { g.mouseDown(with: down) }
+            }
+        }
+        w.display()
+        // The scene's own size, not the content view's bounds: a window the platform rounded
+        // to whole pixels at a fractional scale (Windows at 150 %: 721x451 px for 480x300 pt)
+        // would otherwise add a row and a column.
+        let area = NSRect(origin: .zero, size: GlassReferenceScene.size)
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: area) else { return }
+        content.cacheDisplay(in: area, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: URL(fileURLWithPath: path))
+        print("reference \(scene.rawValue) \(state.rawValue): \(path) (\(rep.pixelsWide)x\(rep.pixelsHigh))")
     }
 
     private func glassButton(_ title: String, frame: NSRect) -> NSGlassEffectView {
@@ -294,7 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                     self.timer?.invalidate(); self.timer = nil
                     let glass = ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] == "1" ? "on" : "off"
                     let elapsed = now.timeIntervalSince(start)
-                    print(String(format: "autoscroll summary (glass %@, %.0fx, interval %.1f ms): %d frames in %.1f s (%.1f fps), paint mean %.2f ms, p95 %.2f ms, max %.2f ms; frame gap mean %.2f ms, p95 %.2f ms, min %.2f ms", glass, self.window.backingScaleFactor, interval * 1000, paints.count, elapsed, Double(paints.count) / elapsed, Self.mean(paints), Self.p95(paints), paints.max() ?? 0, Self.mean(gaps), Self.p95(gaps), gaps.min() ?? 0))
+                    print(String(format: "autoscroll summary (glass %@, %@x, interval %.1f ms): %d frames in %.1f s (%.1f fps), paint mean %.2f ms, p95 %.2f ms, max %.2f ms; frame gap mean %.2f ms, p95 %.2f ms, min %.2f ms", glass, "\(self.window.backingScaleFactor)", interval * 1000, paints.count, elapsed, Double(paints.count) / elapsed, Self.mean(paints), Self.p95(paints), paints.max() ?? 0, Self.mean(gaps), Self.p95(gaps), gaps.min() ?? 0))
                     NSApp.terminate(nil)
                 }
             }

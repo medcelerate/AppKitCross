@@ -1118,7 +1118,11 @@ static void bindDescriptors(CMVCommandList *l, VkPipelineBindPoint bindPoint) {
             const BufferBinding &bb = l->shaderBuffers[half][i];
             CMVBuffer *buffer = bb.buffer ? bb.buffer : d->dummyBuffer;
             uint64_t offset = bb.buffer ? std::min(bb.offset, buffer->length - 1) : 0;
-            bufferInfos.push_back({buffer->buffer, offset, VK_WHOLE_SIZE});
+            // A slot is bound as a uniform and a storage buffer at once (ADR-0012); the uniform
+            // view never exceeds the device's maxUniformBufferRange, so a large storage
+            // buffer (the glass program's pixels, ADR-0052) stays a valid uniform descriptor.
+            VkDeviceSize uniformRange = std::min<VkDeviceSize>(buffer->length - offset, d->properties.limits.maxUniformBufferRange);
+            bufferInfos.push_back({buffer->buffer, offset, uniformRange});
             write(sets[0], half * kHalf + kBindUniform + i, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &bufferInfos.back(), nullptr);
             bufferInfos.push_back({buffer->buffer, offset, VK_WHOLE_SIZE});
             write(sets[1], half * kSlots + i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &bufferInfos.back(), nullptr);

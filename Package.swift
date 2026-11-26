@@ -9,7 +9,9 @@ import Foundation
 // so our CoreGraphics module supplies CGContext, CGPath, CGColor, ... over Direct2D.
 var targets: [Target] = []
 var appKitDependencies: [Target.Dependency] = []
-var appKitExclude: [String] = []
+// The Liquid Glass shader sources (ADR-0052 stage 2) are embedded into GlassShaders.swift by
+// tools/glass/embed-shaders.py, not built.
+var appKitExclude: [String] = ["Platform/Shaders"]
 
 #if os(Windows)
 // DirectWrite and DirectComposition headers are C++-only; they arrive with C++ interop in
@@ -161,6 +163,8 @@ appKitDependencies += ["CoreGraphics", "CCairo", "CX11", "CWayland", "CoreText",
 targets += [.target(name: "CSpellCheck", path: "Sources/CSpellCheck", linkerSettings: [.linkedLibrary("dl")])]
 appKitDependencies += ["CSpellCheck", "Combine"]
 appKitExclude += ["Platform/Win32"]
+// The Liquid Glass GPU program (ADR-0052 stage 2) drives the Vulkan shim directly.
+appKitDependencies += ["CMetalVulkan"]
 let quartzCoreDependencies: [Target.Dependency] = ["CoreGraphics"]
 let swiftUIDependencies: [Target.Dependency] = ["AppKit", "Combine", "UniformTypeIdentifiers"]
 let leafModuleProducts: [Product] = [.library(name: "UniformTypeIdentifiers", targets: ["UniformTypeIdentifiers"]), .library(name: "ImageIO", targets: ["ImageIO"])]
@@ -168,6 +172,11 @@ let leafModuleTestDependencies: [Target.Dependency] = ["UniformTypeIdentifiers",
 let platformTestDependencies: [Target.Dependency] = ["CDBus"]
 #else
 // macOS: Apple's UniformTypeIdentifiers and ImageIO are the reference the tests run against.
+// The Liquid Glass GPU program (ADR-0052 stage 2) runs on Apple's Metal through an
+// Objective-C shim, so AppKit never imports Apple's Metal module (the port's own `Metal`
+// target would shadow it).
+targets += [.target(name: "CGlassMetal", path: "Sources/CGlassMetal", linkerSettings: [.linkedFramework("Metal"), .linkedFramework("Foundation")])]
+appKitDependencies += ["CGlassMetal"]
 let audioShimDependencies: [Target.Dependency] = []
 appKitExclude += ["Platform/Win32", "Platform/Linux"]
 let quartzCoreDependencies: [Target.Dependency] = []
