@@ -471,7 +471,8 @@ Linux, which needs `patchelf`), the SwiftPM resource bundles, and `Info.plist`, 
 and icons from the app's directory (`--info-plist`, `--resources`, `--icon` override them).
 `--appimage` needs `appimagetool`. A `WARNING: not found` line (exit status 2) means the folder
 will not start elsewhere. Build Linux folders on the oldest distribution you support (glibc
-comes from the system). `--include <path>` adds a file or directory the app opens at run
+comes from the system). On Windows the release bundle is a GUI application (no console
+window beside it; `--console` keeps one). `--include <path>` adds a file or directory the app opens at run
 time (`LoadLibrary`/`dlopen` libraries) or a tester README; `--zip` also writes `<zip>.sha256`,
 and `tools/windows/verify-bundle.ps1 -Zip <zip>` runs the zip the way a tester will
 (ADR-0055). Crash reports go to `%LOCALAPPDATA%\<bundle id>\Crashes` or

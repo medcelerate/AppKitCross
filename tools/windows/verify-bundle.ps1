@@ -8,8 +8,14 @@ unzip into a fresh folder under %TEMP% (outside any build tree), launch the exec
 with PATH cut to the Windows directories and LOCALAPPDATA pointed at a scratch folder,
 and require it to be alive after -Seconds. Exit 1 with the reason otherwise: an exit code
 of 0xC0000135 (-1073741515) is a DLL the folder lacks; a Crashes folder under the scratch
-LOCALAPPDATA means the crash reporter fired. Prints what the app wrote under its scratch
-LOCALAPPDATA, which is where app support and crash reports land on a tester's machine.
+LOCALAPPDATA, or a new crash report under the real one, means the crash reporter fired.
+The port's crash reporter reads the LOCALAPPDATA variable, so its reports land in the
+scratch folder; an app that resolves Application Support through the known-folder API
+(corelibs FileManager does) writes to the real profile regardless, so pass the app's own
+override in -Env to keep a verify run out of it (Sibyl: SIBYL_APP_SUPPORT).
+
+.PARAMETER Env
+Extra environment variables for the run, e.g. @{ SIBYL_APP_SUPPORT = "C:\scratch" }.
 
 .EXAMPLE
 pwsh tools\windows\verify-bundle.ps1 -Zip .build\bundle\MyApp-1.0-windows-x86_64.zip
@@ -19,6 +25,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Zip,
     [string]$Exe,
     [int]$Seconds = 10,
+    [hashtable]$Env = @{},
     [switch]$KeepExtracted
 )
 $ErrorActionPreference = "Stop"
@@ -64,6 +71,10 @@ Write-Host "Unzipped to $folder ($(@(Get-ChildItem $folder -File).Count) files a
 $scratchLocal = Join-Path $work "localappdata"
 New-Item -ItemType Directory -Force $scratchLocal | Out-Null
 $savedPath = $env:PATH; $savedLocal = $env:LOCALAPPDATA
+$realLocal = $env:LOCALAPPDATA
+$started = Get-Date
+$saved = @{}
+foreach ($k in $Env.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, [string]$Env[$k]) }
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
 $env:LOCALAPPDATA = $scratchLocal
 try {
@@ -82,14 +93,22 @@ try {
     Write-Host "$Exe ran for $Seconds s without the toolchain on PATH"
 } finally {
     $env:PATH = $savedPath; $env:LOCALAPPDATA = $savedLocal
+    foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
 }
 Write-Host "--- first stderr lines ---"
 if (Test-Path $stderr) { Get-Content $stderr -TotalCount 25 }
-Write-Host "--- written under a fresh LOCALAPPDATA ---"
-Get-ChildItem -Recurse $scratchLocal -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\Microsoft\\' } | ForEach-Object { Write-Host ("  " + $_.FullName.Substring($scratchLocal.Length + 1)) }
+Write-Host "--- written under the scratch LOCALAPPDATA (crash reports land here; app support only if the app reads the variable) ---"
+$written = @(Get-ChildItem -Recurse $scratchLocal -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\Microsoft\\' })
+if ($written.Count) { $written | ForEach-Object { Write-Host ("  " + $_.FullName.Substring($scratchLocal.Length + 1)) } } else { Write-Host "  (nothing)" }
 $crashes = @(Get-ChildItem -Recurse -Directory -Filter Crashes $scratchLocal -ErrorAction SilentlyContinue)
+# An app that puts the reports elsewhere (APPKITWIN_CRASH_DIR, or a reporter of its own under
+# the real profile): any crash report newer than the launch counts too.
+if ($realLocal -and (Test-Path $realLocal)) {
+    $crashes += @(Get-ChildItem -Directory $realLocal -ErrorAction SilentlyContinue | ForEach-Object { Get-ChildItem -Directory -Filter Crashes $_.FullName -ErrorAction SilentlyContinue } |
+        Where-Object { @(Get-ChildItem $_.FullName -File -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started }).Count -gt 0 })
+}
 if ($crashes.Count) {
-    foreach ($c in $crashes) { Get-ChildItem $c.FullName -Filter *.txt | ForEach-Object { Write-Host "--- $($_.Name) ---"; Get-Content $_.FullName -TotalCount 40 } }
+    foreach ($c in $crashes) { Get-ChildItem $c.FullName -Filter *.txt | Where-Object { $_.LastWriteTime -ge $started } | ForEach-Object { Write-Host "--- $($_.FullName) ---"; Get-Content $_.FullName -TotalCount 40 } }
     Write-Error "the crash reporter wrote a report during the run"; exit 1
 }
 if (-not $KeepExtracted) { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue } else { Write-Host "Kept $work" }

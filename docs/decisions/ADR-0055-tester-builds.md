@@ -35,14 +35,29 @@ SHA-256 (`Sources/AppBundler/SHA256.swift`, FIPS 180-4 vectors in the tests), si
 CryptoKit is Apple-only and a dependency on swift-crypto would be paid by every consumer's
 build for one hash of one file.
 
+### A Windows release bundle is a GUI application
+
+swift-build links every executable as a console application, so a double-click on the
+bundled `Sibyl.exe` opened a terminal window beside the app (the first PC run). The plugin
+links a Windows release build with `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`: a GUI
+application whose entry point is still Swift's `main`, so arguments and a redirected
+stderr (`Start-Process ... -RedirectStandardError`, `2>` in cmd) keep working; nothing is
+printed to a console that is not there. The developer's own `swift build` is unchanged and
+`--console` keeps the console in the bundle too (a tester who needs the log is told to
+redirect it, which also works for a console build).
+
 ### `tools/windows/verify-bundle.ps1`
 
 What the tester will do, scripted: check the sidecar, unzip under `%TEMP%`, refuse links and
 a folder without `swiftCore.dll`/`Foundation.dll`, run the executable for ten seconds with
 PATH cut to the Windows directories and `LOCALAPPDATA` pointed at a scratch folder, require
 it alive (an exit of `0xC0000135` is named as a missing DLL), print what it wrote under that
-`LOCALAPPDATA` (where app support and crash reports land) and fail if a `Crashes` folder
-appeared. The release CI job does the same inline for the port's examples; the script is for
+`LOCALAPPDATA` and fail if a `Crashes` folder appeared there or a report newer than the
+launch appeared under the real profile. The port's crash reporter reads the `LOCALAPPDATA`
+variable, so its reports land in the scratch folder; an app that resolves Application
+Support through the known-folder API (corelibs `FileManager` does) writes to the real
+profile regardless, which the second PC run showed as empty Sibyl session files in the
+operator's folder. `-Env` passes the app's own override (`SIBYL_APP_SUPPORT`) for the run. The release CI job does the same inline for the port's examples; the script is for
 apps built outside this repository, on a PC or in their own CI.
 
 ### The app's repository owns the tester material
@@ -52,7 +67,8 @@ bundle through the plugin, then `BUILD-INFO.txt` with the Sibyl and AppKitCross 
 the toolchain, the tester README as `README.md`, whisper.cpp's licence under `Licenses/`,
 `-Include` extras, `TurboActivate.dll` when `Vendor/TurboActivate` has one; zipped with
 Windows' own `tar` as `Sibyl-<version>+g<sha>-windows-<arch>.zip` with a `.sha256`;
-`-Verify` runs the script above from the AppKitCross checkout), the README
+`-Verify` runs the script above from the AppKitCross checkout with `SIBYL_APP_SUPPORT` in a
+scratch folder), the README
 (`docs/port/README-WINDOWS-TESTERS.md`: a test build, how to run, the ADR-0050 gaps, where
 crash reports are and what to send, the `APPKITWIN_*` switches), `Resources/Sibyl.png`
 (256 px from the `.icns`, so the port has a window icon: it reads `.png`/`.ico`, not

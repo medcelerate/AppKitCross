@@ -218,6 +218,9 @@ swift package --allow-writing-to-package-directory bundle --product MyApp -c rel
     --include README.md --include path/to/Windows.Devices.Midi2.dll --include path/to/Windows.Devices.Midi2.pri
 ```
 
+On Windows the release bundle is linked as a GUI application (`/SUBSYSTEM:WINDOWS`, Swift's
+`main` as the entry point), so no terminal opens beside it; `--console` keeps the console
+subsystem, and a redirected stderr reaches its file either way.
 `--include` (repeatable) copies a file or directory beside the executable: libraries the app
 opens with `LoadLibrary`/`dlopen`, which the import tables do not list, and a README or
 build-info file a tester should find at the top. `--zip` also writes `<zip>.sha256`
