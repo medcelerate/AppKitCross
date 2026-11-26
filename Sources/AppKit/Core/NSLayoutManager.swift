@@ -492,7 +492,7 @@ open class NSLayoutManager: NSObject, NSSecureCoding, NSCoding, NSGlyphStorage {
         let cachedLength = cached.last.map { $0.range.location + $0.range.length } ?? 0
         let geometry = _textContainers.map(_ContainerGeometry.init)
         let inconsistency = _cacheInconsistency(cached)
-        if let inconsistency { FileHandle.standardError.write(Data("NSLayoutManager: cached layout is inconsistent (\(inconsistency)); laying everything out again\n".utf8)) }
+        if let inconsistency { fputs("NSLayoutManager: cached layout is inconsistent (\(inconsistency)); laying everything out again\n", stderr) }
         if NSView._traceInvalidation, !cached.isEmpty, geometry != _unitsGeometry {
             _textTrace("layout manager geometry \(_unitsGeometry.map { $0.size.width }) -> \(geometry.map { $0.size.width }): every paragraph again")
         }

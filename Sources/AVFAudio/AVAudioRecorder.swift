@@ -123,7 +123,7 @@ open class AVAudioRecorder: NSObject, @unchecked Sendable {
             return true
         } catch {
             if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
-                FileHandle.standardError.write("AppKitCross audio: AVAudioRecorder.prepareToRecord: \(error)\n".data(using: .utf8)!)
+                fputs("AppKitCross audio: AVAudioRecorder.prepareToRecord: \(error)\n", stderr)
             }
             _teardown()
             return false

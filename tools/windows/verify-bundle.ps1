@@ -90,7 +90,19 @@ try {
         exit 1
     }
     Stop-Process -Id $p.Id -Force
-    Write-Host "$Exe ran for $Seconds s without the toolchain on PATH"
+    Write-Host "$Exe ran for $Seconds s without the toolchain on PATH (stderr redirected)"
+    # Then as Explorer starts it: no redirects, so a GUI-subsystem process has no stdio
+    # handles at all. The first Sibyl tester build ran with stderr redirected and trapped
+    # on its first log line when double-clicked (ADR-0055).
+    $plain = Start-Process -FilePath $exePath -WorkingDirectory $folder -PassThru
+    Start-Sleep -Seconds $Seconds
+    if ($plain.HasExited) {
+        $code = $plain.ExitCode
+        Write-Error ("{0} started without redirected stdio (a double-click) exited within {1} s with 0x{2:X8} ({2}){3}" -f $Exe, $Seconds, $code, $(if ($code -eq -1073741795) { ": a Swift trap, often a write to a stdio handle the process does not have" } else { "" }))
+        exit 1
+    }
+    Stop-Process -Id $plain.Id -Force
+    Write-Host "$Exe ran for $Seconds s started the way a double-click starts it (no stdio)"
 } finally {
     $env:PATH = $savedPath; $env:LOCALAPPDATA = $savedLocal
     foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
@@ -98,7 +110,7 @@ try {
 Write-Host "--- first stderr lines ---"
 if (Test-Path $stderr) { Get-Content $stderr -TotalCount 25 }
 Write-Host "--- written under the scratch LOCALAPPDATA (crash reports land here; app support only if the app reads the variable) ---"
-$written = @(Get-ChildItem -Recurse $scratchLocal -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch '\\Microsoft\\' })
+$written = @(Get-ChildItem -Recurse $scratchLocal -ErrorAction SilentlyContinue | Where-Object { $_.FullName.Substring($scratchLocal.Length + 1) -notmatch '^Microsoft(\\|$)' })
 if ($written.Count) { $written | ForEach-Object { Write-Host ("  " + $_.FullName.Substring($scratchLocal.Length + 1)) } } else { Write-Host "  (nothing)" }
 $crashes = @(Get-ChildItem -Recurse -Directory -Filter Crashes $scratchLocal -ErrorAction SilentlyContinue)
 # An app that puts the reports elsewhere (APPKITWIN_CRASH_DIR, or a reporter of its own under

@@ -472,7 +472,9 @@ and icons from the app's directory (`--info-plist`, `--resources`, `--icon` over
 `--appimage` needs `appimagetool`. A `WARNING: not found` line (exit status 2) means the folder
 will not start elsewhere. Build Linux folders on the oldest distribution you support (glibc
 comes from the system). On Windows the release bundle is a GUI application (no console
-window beside it; `--console` keeps one). `--include <path>` adds a file or directory the app opens at run
+window beside it; `--console` keeps one): started from Explorer it has no stdio handles, so
+write diagnostics with `fputs(_, stderr)`, never `FileHandle.standardError.write`, whose
+corelibs implementation traps on a missing handle (ADR-0055). `--include <path>` adds a file or directory the app opens at run
 time (`LoadLibrary`/`dlopen` libraries) or a tester README; `--zip` also writes `<zip>.sha256`,
 and `tools/windows/verify-bundle.ps1 -Zip <zip>` runs the zip the way a tester will
 (ADR-0055). Crash reports go to `%LOCALAPPDATA%\<bundle id>\Crashes` or

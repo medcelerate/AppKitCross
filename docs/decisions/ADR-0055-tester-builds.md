@@ -46,12 +46,24 @@ printed to a console that is not there. The developer's own `swift build` is unc
 `--console` keeps the console in the bundle too (a tester who needs the log is told to
 redirect it, which also works for a console build).
 
+That linked, verified and still failed the tester: a double-click (ShellExecute, no stdio
+redirect) trapped in swiftCore within a second, before the first log line, while the same
+exe ran when verify redirected stderr. A GUI-subsystem process started from Explorer has no
+standard handles; corelibs' `FileHandle.write(_:)` is a force-try, so the port's first log
+line (`FileHandle.standardError.write` in OSLog's sink) was the trap. Every diagnostic write
+in the port (OSLog, CoreMIDI, AVFAudio, AppKit, SwiftUI, UserNotifications, MetalKit) now
+goes through C `fputs(_, stderr)`, which fails silently on a missing handle and still
+reaches a redirected one; Sibyl's own three writers were changed the same way. The rule for
+the port: never `FileHandle.standardError.write` for a diagnostic.
+
 ### `tools/windows/verify-bundle.ps1`
 
 What the tester will do, scripted: check the sidecar, unzip under `%TEMP%`, refuse links and
 a folder without `swiftCore.dll`/`Foundation.dll`, run the executable for ten seconds with
 PATH cut to the Windows directories and `LOCALAPPDATA` pointed at a scratch folder, require
-it alive (an exit of `0xC0000135` is named as a missing DLL), print what it wrote under that
+it alive (an exit of `0xC0000135` is named as a missing DLL), then run it again with no
+stdio redirected at all, as a double-click does (`0xC000001D` named as a Swift trap, the
+stdio-handle case above), print what it wrote under that
 `LOCALAPPDATA` and fail if a `Crashes` folder appeared there or a report newer than the
 launch appeared under the real profile. The port's crash reporter reads the `LOCALAPPDATA`
 variable, so its reports land in the scratch folder; an app that resolves Application

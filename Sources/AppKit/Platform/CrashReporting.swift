@@ -106,7 +106,7 @@ public enum PlatformCrashReporting {
         if env["APPKITWIN_CRASH_REPORTER"] == "0" { return }
         if env["XCTestConfigurationFilePath"] != nil || ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix(".xctest") || $0.contains("PackageTests") }) { return }
         if !install() {
-            FileHandle.standardError.write(Data("AppKitCross: cannot use the crash report directory \(reportsDirectory(bundleIdentifier: applicationIdentifier).path); crash reports are off\n".utf8))
+            fputs("AppKitCross: cannot use the crash report directory \(reportsDirectory(bundleIdentifier: applicationIdentifier).path); crash reports are off\n", stderr)
         }
         #endif
     }
@@ -125,7 +125,7 @@ public enum PlatformCrashReporting {
     /// a second later, once the first window has had time to appear.
     @MainActor static func scheduleCrashTestIfRequested() {
         guard let kind = requestedCrashTest() else { return }
-        FileHandle.standardError.write(Data("AppKitCross: APPKITWIN_CRASH_TEST is set; crashing in one second\n".utf8))
+        fputs("AppKitCross: APPKITWIN_CRASH_TEST is set; crashing in one second\n", stderr)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             ccrash_crash_now(kind)
         }

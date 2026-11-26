@@ -172,7 +172,7 @@ final class FreedesktopNotifier: PlatformNotifier, @unchecked Sendable {
         dbus_error_init(&err)
         let reply = dbus_connection_send_with_reply_and_block(connection, message, 5000, &err)
         if reply == nil, let text = err.message {
-            FileHandle.standardError.write(Data("UserNotifications: \(method) failed: \(String(cString: text))\n".utf8))
+            fputs("UserNotifications: \(method) failed: \(String(cString: text))\n", stderr)
         }
         dbus_error_free(&err)
         // Signals read while waiting for the reply are queued: dispatch them too.

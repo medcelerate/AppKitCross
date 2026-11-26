@@ -258,7 +258,7 @@ import CoreText
         get { _maxAcceleratorLevel }
         set {
             guard (1...5).contains(newValue) else {
-                FileHandle.standardError.write(Data("Warning: NSButton's maxAcceleratorLevel may range from 1 to 5.  \(newValue) is not a valid value.\n".utf8))
+                fputs("Warning: NSButton's maxAcceleratorLevel may range from 1 to 5.  \(newValue) is not a valid value.\n", stderr)
                 return
             }
             _maxAcceleratorLevel = newValue

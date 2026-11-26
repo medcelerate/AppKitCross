@@ -261,7 +261,10 @@ enum _OSLogOutput {
             sink(line)
             return
         }
-        FileHandle.standardError.write(Data((line + "\n").utf8))
+        // C stdio, never FileHandle.standardError: corelibs' `write(_:)` is a force-try, and
+        // a GUI-subsystem process started from Explorer has no stderr handle, so the first
+        // log line trapped in the first Sibyl tester build (ADR-0055). fputs just fails.
+        fputs(line + "\n", stderr)
         #if os(Windows)
         (line + "\n").withCString(encodedAs: UTF16.self) { OutputDebugStringW($0) }
         #endif

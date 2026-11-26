@@ -167,7 +167,7 @@ final class MIDIServer: @unchecked Sendable {
         if !announced {
             announced = true
             if let line = backend.startupLine(destinationCount: online.count) {
-                FileHandle.standardError.write(Data("CoreMIDI: \(line)\n".utf8))
+                fputs("CoreMIDI: \(line)\n", stderr)
             }
         }
         let ref = allocateRef()
