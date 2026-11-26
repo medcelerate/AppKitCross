@@ -95,10 +95,29 @@ No code signing (SmartScreen warns; the README says so), no installer, no Start-
 shortcut (Sibyl posts no user notifications, which were the one reason ADR-0043 needed
 one), and no Linux tester build yet (the same script shape would do, with `--appimage`).
 
+## Verification
+
+Four rounds on Evan's Windows PC (Swift 6.4.1, Windows 11 build 26200, Ryzen 5 3600X),
+driven through its Remote Control session; each round's findings are the fixes above
+(strict-mode listing and BUILD-INFO contents; console subsystem and the known-folder app
+support; the stdio-handle trap). The fourth round is the tester artifact:
+
+| | |
+|---|---|
+| Zip | `Sibyl-0.1.0+g732954a-windows-x86_64.zip`, 56,900,583 bytes, in the Sibyl checkout's `.build\bundle` on the PC |
+| SHA-256 | `ea689968fb9b71d0b1472af9b0283cb4edf6a2c7a273d8ac199f684d13abca76` |
+| Built from | Sibyl 732954a, AppKitCross 3e334e6 (this branch), linked 2026-11-26 02:10 UTC |
+| Checked | sidecar matches; unzipped under `%TEMP%` with PATH cut to the Windows directories; alive after 10 s both with stderr redirected and with no stdio (a double-click); PE subsystem 2, no console process; the window draws with the Sibyl icon; `Start-Process .\Sibyl.exe -RedirectStandardError sibyl.log` captures the three launch lines; nothing written to the operator's real profile; clean exit on close, no Event 1000; Settings opened and the app quit through its menu in an earlier round of the same layout |
+| Not checked | a machine that never had a Swift toolchain (the PC has no clean account or VM); Windows 10; an Arm PC; MIDI 2.0 (no `Windows.Devices.Midi2` preview DLLs on the PC, so the zip carries none and the app uses WinMM) |
+
+The host build's AppBundlerTests cover `--include`, the sidecar and the SHA-256 vectors;
+Sibyl's `windows.yml` builds the same zip on `windows-2022` with Swift 6.2 as a run artifact.
+
 ## Consequences
 
 - Any dependent can ship run-time libraries and tester files in one `bundle` command, and
   gets a checksum for free.
-- A tester build is checked the way a tester runs it before it leaves the machine.
+- A tester build is checked the way a tester runs it before it leaves the machine, both
+  with redirected stdio and without any: the two launches found different bugs.
 - The app's repository, not the port's, says what its testers should know; the port's docs
   (`docs/DEVELOPMENT.md`, "Tester builds") give the recipe to follow.
