@@ -6,7 +6,10 @@
 // Options: --product <name> (required unless the package has exactly one executable),
 // -c/--configuration debug|release (default release), --output <dir> (default
 // .build/bundle), --version <v> (default: CFBundleShortVersionString, else 0.0.0),
-// --info-plist <path>, --resources <dir>, --icon <path> (repeatable), --zip, --appimage,
+// --info-plist <path>, --resources <dir>, --icon <path> (repeatable), --include <path>
+// (repeatable: a file or directory copied beside the executable, for libraries the app
+// loads at run time and anything else a user should find in the folder), --zip (also
+// writes <zip>.sha256), --appimage,
 // --no-build (bundle what the last build produced), --no-debug-info (Windows release: skip
 // the PDB that `-g -debug-info-format=codeview` / `-Xlinker -debug` add for crash reports).
 
@@ -52,6 +55,7 @@ struct AppBundlePlugin: CommandPlugin {
         if let v = take("--info-plist") { forwarded += ["--info-plist", v] }
         if let v = take("--resources") { forwarded += ["--resources", v] }
         for v in takeAll("--icon") { forwarded += ["--icon", v] }
+        for v in takeAll("--include") { forwarded += ["--include", v] }
         if has("--zip") { forwarded.append("--zip") }
         if has("--appimage") { forwarded.append("--appimage") }
         if !args.isEmpty { throw BundlePluginError("unknown arguments: \(args.joined(separator: " "))") }

@@ -4,7 +4,7 @@
 //
 //   AppKitCrossBundle --executable .build/release/MyApp --name MyApp --package-dir . \
 //       --output .build/bundle [--target MyApp]... [--app-root dir]... [--version 1.2] \
-//       [--info-plist path] [--resources dir] [--icon path]... [--zip] [--appimage]
+//       [--info-plist path] [--resources dir] [--icon path]... [--include path]... [--zip] [--appimage]
 
 import AppBundler
 import Foundation
@@ -44,6 +44,7 @@ let version = value("--version")
 let infoPlist = value("--info-plist").map { URL(fileURLWithPath: $0) }
 let resources = value("--resources").map { URL(fileURLWithPath: $0, isDirectory: true) }
 let icons = values("--icon").map { URL(fileURLWithPath: $0) }
+let includes = values("--include").map { URL(fileURLWithPath: $0) }
 let zip = flag("--zip")
 let appImage = flag("--appimage")
 if !args.isEmpty { fail("unknown arguments: \(args.joined(separator: " "))") }
@@ -51,7 +52,7 @@ if !args.isEmpty { fail("unknown arguments: \(args.joined(separator: " "))") }
 let options = BundleOptions(executable: exeURL, name: name, packageDirectory: packageDir,
                             appRootCandidates: appRoots.isEmpty ? [packageDir] : appRoots,
                             targets: targets.isEmpty ? [name] : targets, outputDirectory: output, version: version,
-                            infoPlist: infoPlist, resources: resources, icons: icons, zip: zip, appImage: appImage)
+                            infoPlist: infoPlist, resources: resources, icons: icons, include: includes, zip: zip, appImage: appImage)
 let bundler = Bundler(options: options)
 do {
     let report = try bundler.run()

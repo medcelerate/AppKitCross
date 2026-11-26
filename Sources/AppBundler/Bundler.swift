@@ -11,6 +11,8 @@
 //     Info.plist                the app's Info.plist, when it has one
 //     Resources/                the app's Resources directory, when it has one
 //     *.ico, *.png              icons found beside the Info.plist
+//     (--include ...)           files or directories the app opens at run time that the
+//                               import walk cannot see (a LoadLibrary'd DLL, a tester README)
 //
 // Everything sits beside the executable: Windows looks for DLLs in the executable's
 // directory first, SwiftPM links Linux executables with RUNPATH $ORIGIN, the Swift
@@ -49,6 +51,11 @@ public struct BundleOptions: Sendable {
     public var infoPlist: URL?
     public var resources: URL?
     public var icons: [URL]
+    /// Extra files or directories copied beside the executable under their own names:
+    /// what the executable loads at run time rather than at load time (`LoadLibrary` /
+    /// `dlopen` libraries such as `Windows.Devices.Midi2.dll` or a licensing library) and
+    /// what a tester should find at the top of the folder (a README).
+    public var include: [URL]
     public var zip: Bool
     public var appImage: Bool
     public var platform: BundlePlatform
@@ -56,7 +63,8 @@ public struct BundleOptions: Sendable {
 
     public init(executable: URL, name: String, packageDirectory: URL, appRootCandidates: [URL] = [], targets: [String] = [],
                 outputDirectory: URL, version: String? = nil, infoPlist: URL? = nil, resources: URL? = nil, icons: [URL] = [],
-                zip: Bool = false, appImage: Bool = false, platform: BundlePlatform = .current, architecture: String = Bundler.hostArchitecture) {
+                include: [URL] = [], zip: Bool = false, appImage: Bool = false, platform: BundlePlatform = .current,
+                architecture: String = Bundler.hostArchitecture) {
         self.executable = executable
         self.name = name
         self.packageDirectory = packageDirectory
@@ -67,6 +75,7 @@ public struct BundleOptions: Sendable {
         self.infoPlist = infoPlist
         self.resources = resources
         self.icons = icons
+        self.include = include
         self.zip = zip
         self.appImage = appImage
         self.platform = platform
@@ -83,6 +92,9 @@ public struct BundleReport: Sendable {
     public var copiedFiles: [String] = []
     public var notes: [String] = []
     public var archive: URL?
+    /// Lower-case hex SHA-256 of `archive`, also written beside it as `<archive>.sha256`
+    /// in `sha256sum` format so a tester can check the download.
+    public var archiveSHA256: String?
     public var appImage: URL?
 }
 
@@ -133,9 +145,16 @@ public final class Bundler {
         }
         try copyResourceBundles()
         let plist = try copyAppFiles()
+        try copyIncludedFiles()
 
         let version = options.version ?? (plist?["CFBundleShortVersionString"] as? String) ?? "0.0.0"
-        if options.zip { report.archive = try makeZip(version: version) }
+        if options.zip {
+            let archive = try makeZip(version: version)
+            report.archive = archive
+            let digest = try SHA256.hexDigest(ofFileAt: archive)
+            report.archiveSHA256 = digest
+            try Data("\(digest)  \(archive.lastPathComponent)\n".utf8).write(to: URL(fileURLWithPath: archive.path + ".sha256"))
+        }
         if options.appImage {
             if options.platform == .linux { report.appImage = try makeAppImage(version: version, plist: plist) }
             else { report.notes.append("--appimage applies to Linux only; skipped") }
@@ -487,6 +506,16 @@ public final class Bundler {
         return plist
     }
 
+    /// `--include`: copied last, so an included file wins over a same-named file the
+    /// walk above produced (an app-local DLL replacing one found on PATH, say).
+    private func copyIncludedFiles() throws {
+        for item in options.include {
+            guard fm.fileExists(atPath: item.path) else { throw BundleError.message("--include: no file or directory at \(item.path)") }
+            try copy(item, to: folder.appendingPathComponent(item.lastPathComponent))
+            report.copiedFiles.append("\(item.lastPathComponent) (--include)")
+        }
+    }
+
     // MARK: Archives
 
     public static func archiveName(name: String, version: String, platform: BundlePlatform, architecture: String, ext: String) -> String {
@@ -585,6 +614,7 @@ public final class Bundler {
         if !report.missingLibraries.isEmpty { lines.append("  WARNING: not found, the app will not start without them: \(report.missingLibraries.joined(separator: ", "))") }
         for note in report.notes { lines.append("  note: \(note)") }
         if let a = report.archive { lines.append("Archive: \(a.path)") }
+        if let d = report.archiveSHA256, let a = report.archive { lines.append("SHA-256: \(d)  \(a.lastPathComponent) (also in \(a.lastPathComponent).sha256)") }
         if let a = report.appImage { lines.append("AppImage: \(a.path)") }
         return lines.joined(separator: "\n")
     }
