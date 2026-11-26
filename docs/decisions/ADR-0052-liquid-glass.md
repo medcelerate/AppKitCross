@@ -546,6 +546,14 @@ Departures and fallbacks:
   (600 pt is 112.5 px), so the test now reads only the rows wholly inside the surface.
   `testBandMirrorsAtEveryHeight` covers heights 200 to 207 pt at both scales. The GPU path's
   structural mirror was right all along.
+- **PC round 4** (a8b483b, 100 %) confirmed both fixes:
+  - The six `--reference` captures are no longer empty. They are pixel-identical to round
+    1's, and within a mean of 0.03 to 0.08/255 of `port-*@1x`; the largest differences, 18
+    to 27/255, are glyph antialiasing.
+  - The capture paints log `takes no GPU frame for this context`.
+  - The GPU and GPU=0 screenshots differ by at most 1/255, with both bands mirrored.
+  - A traced live run drew 140 of 142 paints from the GPU frame, with no CPU frame.
+  - 150 % is pending a display change.
 
 **Fixed in passing:** a glass surface with nothing to sample (no window content beneath, a
 zero-size crop) made the renderer drop the GPU program for the process, because a draw that
