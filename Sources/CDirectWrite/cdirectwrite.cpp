@@ -320,10 +320,18 @@ bool cdw_font_table(CDWFont *font, uint32_t tag, const void **data, uint32_t *si
 
 void cdw_font_table_release(CDWFont *font, void *context) { if (font && context) font->face->ReleaseFontTable(context); }
 
+/// Times the enclosing call into a CD2D frame statistics category (ADR-0054).
+struct CDWStat {
+    int32_t cat; uint32_t n; int64_t t0;
+    explicit CDWStat(int32_t c, uint32_t count = 1) : cat(c), n(count), t0(cd2d_stats_begin()) {}
+    ~CDWStat() { cd2d_stats_end(cat, t0, n); }
+};
+
 bool cdw_draw_glyphs(CD2DTarget *target, CDWFont *font, const uint16_t *glyphs, const float *positionsXY, uint32_t count, float r, float g, float b, float a) {
     ID2D1RenderTarget *rt = static_cast<ID2D1RenderTarget *>(cd2d_target_render_target(target));
     if (!rt || !font || !font->face || !glyphs || !positionsXY) return false;
     if (count == 0) return true;
+    CDWStat stat(CD2D_STAT_TEXT_DRAW);
     ComPtr<ID2D1SolidColorBrush> brush;
     if (FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(r, g, b, a), brush.put())) || !brush) return false;
     // The context's user space is y up; DirectWrite draws y down. Flip the y axis in front of
@@ -628,6 +636,7 @@ std::vector<FallbackRun> fallbackRuns(const WCHAR *text, UINT32 count, CDWFont *
 extern "C" {
 
 CDWShaped *cdw_shape(const uint16_t *text, uint32_t count, CDWFont *font, const char *localeUTF8) {
+    CDWStat stat(CD2D_STAT_TEXT_SHAPE);
     if (!font || !count || !factory()) return nullptr;
     std::wstring locale = localeUTF8 ? widen(localeUTF8) : L"en-us";
     if (locale.empty()) locale = L"en-us";

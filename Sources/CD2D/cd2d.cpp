@@ -90,6 +90,42 @@ struct CD2DPath {
 
 template <typename T> static void safeRelease(T *&p) { if (p) { p->Release(); p = nullptr; } }
 
+// ---------------------------------------------------------------- Frame statistics (ADR-0054)
+
+static bool g_statsOn = false;
+static uint32_t g_statCounts[CD2D_STAT_COUNT];
+static int64_t g_statTicks[CD2D_STAT_COUNT];
+static uint32_t g_presentInterval = 1;
+
+static inline int64_t statNow() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
+
+/// Times the enclosing call into `category` while statistics are on.
+struct StatScope {
+    int cat; uint32_t n; int64_t t0;
+    explicit StatScope(int c, uint32_t count = 1) : cat(c), n(count), t0(g_statsOn ? statNow() : 0) {}
+    ~StatScope() { if (t0) { g_statCounts[cat] += n; g_statTicks[cat] += statNow() - t0; } }
+};
+
+extern "C" {
+void cd2d_stats_enable(bool on) { g_statsOn = on; }
+bool cd2d_stats_enabled(void) { return g_statsOn; }
+void cd2d_stats_take(uint32_t *counts, double *ms, uint32_t n) {
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+    for (uint32_t i = 0; i < n && i < CD2D_STAT_COUNT; i++) {
+        if (counts) counts[i] = g_statCounts[i];
+        if (ms) ms[i] = (double)g_statTicks[i] * 1000.0 / (double)f.QuadPart;
+        g_statCounts[i] = 0; g_statTicks[i] = 0;
+    }
+}
+int64_t cd2d_stats_begin(void) { return g_statsOn ? statNow() : 0; }
+void cd2d_stats_end(int32_t category, int64_t start, uint32_t count) {
+    if (!start || category < 0 || category >= CD2D_STAT_COUNT) return;
+    g_statCounts[category] += count;
+    g_statTicks[category] += statNow() - start;
+}
+void cd2d_set_present_interval(uint32_t interval) { g_presentInterval = interval ? 1 : 0; }
+}
+
 extern "C" {
 
 CD2DFactory *cd2d_factory_create(void) {
@@ -582,7 +618,12 @@ void cd2d_target_set_dirty(CD2DTarget *target, int32_t left, int32_t top, int32_
 
 bool cd2d_target_end_draw(CD2DTarget *target) {
     if (!target || !target->target) return false;
-    HRESULT hr = target->target->EndDraw();
+    HRESULT hr;
+    {
+        // A target without a window (a WIC bitmap) rasterises on the CPU here.
+        StatScope stat(target->swapChain || target->hwnd ? CD2D_STAT_END_DRAW : CD2D_STAT_OFFSCREEN, target->swapChain || target->hwnd ? 1 : 0);
+        hr = target->target->EndDraw();
+    }
     if (!target->swapChain) return hr != D2DERR_RECREATE_TARGET;
     if (target->lost || isDeviceLost(hr)) return false;
     if (!target->backBuffer || !target->canvas) { target->lost = true; return false; }
@@ -592,6 +633,8 @@ bool cd2d_target_end_draw(CD2DTarget *target) {
     D2D1_SIZE_U size = target->backBuffer->GetPixelSize();
     D2D1_RECT_U whole = D2D1::RectU(0, 0, size.width, size.height);
     HRESULT copied;
+    {
+    StatScope copyStat(CD2D_STAT_COPY);
     if (target->hdr && target->whiteScale) {
         // FP16 back buffer: the 8-bit sRGB canvas goes through the linearising and
         // white-level effects (the formats differ, so a copy is not possible anyway).
@@ -605,6 +648,7 @@ bool cd2d_target_end_draw(CD2DTarget *target) {
         D2D1_POINT_2U dest = D2D1::Point2U(0, 0);
         copied = target->backBuffer->CopyFromBitmap(&dest, target->canvas, &whole);
     }
+    }
     if (FAILED(copied)) { target->lost = true; return false; }
     bool partial = target->hasDirty && !target->canvasFresh;
     D2D1_RECT_U changed = partial ? target->dirty : whole;
@@ -614,14 +658,17 @@ bool cd2d_target_end_draw(CD2DTarget *target) {
     target->hasDirty = false;
     target->canvasFresh = false;
     HRESULT present;
-    if (partial) {
-        RECT rect = { (LONG)changed.left, (LONG)changed.top, (LONG)changed.right, (LONG)changed.bottom };
-        DXGI_PRESENT_PARAMETERS params = {};
-        params.DirtyRectsCount = 1;
-        params.pDirtyRects = &rect;
-        present = target->swapChain->Present1(1, 0, &params);
-    } else {
-        present = target->swapChain->Present(1, 0);
+    {
+        StatScope stat(CD2D_STAT_PRESENT);
+        if (partial) {
+            RECT rect = { (LONG)changed.left, (LONG)changed.top, (LONG)changed.right, (LONG)changed.bottom };
+            DXGI_PRESENT_PARAMETERS params = {};
+            params.DirtyRectsCount = 1;
+            params.pDirtyRects = &rect;
+            present = target->swapChain->Present1(g_presentInterval, 0, &params);
+        } else {
+            present = target->swapChain->Present(g_presentInterval, 0);
+        }
     }
     if (isDeviceLost(present)) { target->lost = true; return false; }
     // A composition swap chain reaches the screen only when the visual tree commits.
@@ -656,10 +703,12 @@ int32_t cd2d_debug_report_live_objects(void) {
 }
 
 void cd2d_target_clear(CD2DTarget *target, float r, float g, float b, float a) {
+    StatScope stat(CD2D_STAT_CLEAR);
     if (target && target->target) target->target->Clear(D2D1::ColorF(r, g, b, a));
 }
 
 void cd2d_target_set_transform(CD2DTarget *target, const CD2DMatrix *m) {
+    StatScope stat(CD2D_STAT_TRANSFORM);
     if (!target || !target->target || !m) return;
     target->target->SetTransform(D2D1::Matrix3x2F(m->m11, m->m12, m->m21, m->m22, m->dx + target->originX, m->dy + target->originY));
 }
@@ -672,6 +721,7 @@ void cd2d_target_set_antialias(CD2DTarget *target, bool aa) {
 }
 
 CD2DBrush *cd2d_brush_create(CD2DTarget *target, float r, float g, float b, float a) {
+    StatScope stat(CD2D_STAT_BRUSH);
     if (!target || !target->target) return nullptr;
     ID2D1SolidColorBrush *br = nullptr;
     if (FAILED(target->target->CreateSolidColorBrush(D2D1::ColorF(r, g, b, a), &br))) return nullptr;
@@ -692,6 +742,7 @@ void cd2d_brush_release(CD2DBrush *brush) {
 
 CD2DStrokeStyle *cd2d_stroke_style_create(CD2DFactory *factory, int cap, int join, float miterLimit,
                                           const float *dashes, uint32_t dashCount, float dashOffset) {
+    StatScope stat(CD2D_STAT_STROKE_STYLE);
     if (!factory || !factory->factory) return nullptr;
     D2D1_CAP_STYLE c = cap == CD2D_CAP_ROUND ? D2D1_CAP_STYLE_ROUND : cap == CD2D_CAP_SQUARE ? D2D1_CAP_STYLE_SQUARE : D2D1_CAP_STYLE_FLAT;
     D2D1_LINE_JOIN j = join == CD2D_JOIN_ROUND ? D2D1_LINE_JOIN_ROUND : join == CD2D_JOIN_BEVEL ? D2D1_LINE_JOIN_BEVEL : D2D1_LINE_JOIN_MITER_OR_BEVEL;
@@ -711,6 +762,7 @@ void cd2d_stroke_style_release(CD2DStrokeStyle *style) {
 }
 
 CD2DPath *cd2d_path_create(CD2DFactory *factory, bool evenOdd) {
+    StatScope stat(CD2D_STAT_GEOMETRY);
     if (!factory || !factory->factory) return nullptr;
     ID2D1PathGeometry *g = nullptr;
     if (FAILED(factory->factory->CreatePathGeometry(&g))) return nullptr;
@@ -724,6 +776,7 @@ CD2DPath *cd2d_path_create(CD2DFactory *factory, bool evenOdd) {
 }
 
 void cd2d_path_begin_figure(CD2DPath *p, float x, float y) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (!p || !p->sink) return;
     if (p->figureOpen) p->sink->EndFigure(D2D1_FIGURE_END_OPEN);
     p->sink->BeginFigure(D2D1::Point2F(x, y), D2D1_FIGURE_BEGIN_FILLED);
@@ -731,26 +784,31 @@ void cd2d_path_begin_figure(CD2DPath *p, float x, float y) {
 }
 
 void cd2d_path_add_line(CD2DPath *p, float x, float y) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (p && p->sink && p->figureOpen) p->sink->AddLine(D2D1::Point2F(x, y));
 }
 
 void cd2d_path_add_quad(CD2DPath *p, float cx, float cy, float x, float y) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (p && p->sink && p->figureOpen)
         p->sink->AddQuadraticBezier(D2D1::QuadraticBezierSegment(D2D1::Point2F(cx, cy), D2D1::Point2F(x, y)));
 }
 
 void cd2d_path_add_bezier(CD2DPath *p, float c1x, float c1y, float c2x, float c2y, float x, float y) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (p && p->sink && p->figureOpen)
         p->sink->AddBezier(D2D1::BezierSegment(D2D1::Point2F(c1x, c1y), D2D1::Point2F(c2x, c2y), D2D1::Point2F(x, y)));
 }
 
 void cd2d_path_end_figure(CD2DPath *p, bool closed) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (!p || !p->sink || !p->figureOpen) return;
     p->sink->EndFigure(closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
     p->figureOpen = false;
 }
 
 void cd2d_path_close(CD2DPath *p) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (!p || !p->sink) return;
     if (p->figureOpen) { p->sink->EndFigure(D2D1_FIGURE_END_OPEN); p->figureOpen = false; }
     p->sink->Close();
@@ -758,6 +816,7 @@ void cd2d_path_close(CD2DPath *p) {
 }
 
 void cd2d_path_release(CD2DPath *p) {
+    StatScope stat(CD2D_STAT_GEOMETRY, 0);
     if (!p) return;
     if (p->sink) { if (p->figureOpen) p->sink->EndFigure(D2D1_FIGURE_END_OPEN); p->sink->Close(); safeRelease(p->sink); }
     safeRelease(p->geometry);
@@ -765,32 +824,39 @@ void cd2d_path_release(CD2DPath *p) {
 }
 
 void cd2d_target_fill_path(CD2DTarget *t, CD2DPath *p, CD2DBrush *b) {
+    StatScope stat(CD2D_STAT_FILL_PATH);
     if (t && t->target && p && p->geometry && b && b->brush) t->target->FillGeometry(p->geometry, b->brush);
 }
 
 void cd2d_target_stroke_path(CD2DTarget *t, CD2DPath *p, CD2DBrush *b, float width, CD2DStrokeStyle *s) {
+    StatScope stat(CD2D_STAT_STROKE_PATH);
     if (t && t->target && p && p->geometry && b && b->brush)
         t->target->DrawGeometry(p->geometry, b->brush, width, s ? s->style : nullptr);
 }
 
 void cd2d_target_fill_rect(CD2DTarget *t, float l, float tp, float r, float bt, CD2DBrush *b) {
+    StatScope stat(CD2D_STAT_FILL_RECT);
     if (t && t->target && b && b->brush) t->target->FillRectangle(D2D1::RectF(l, tp, r, bt), b->brush);
 }
 
 void cd2d_target_stroke_rect(CD2DTarget *t, float l, float tp, float r, float bt, CD2DBrush *b, float width, CD2DStrokeStyle *s) {
+    StatScope stat(CD2D_STAT_STROKE_RECT);
     if (t && t->target && b && b->brush) t->target->DrawRectangle(D2D1::RectF(l, tp, r, bt), b->brush, width, s ? s->style : nullptr);
 }
 
 void cd2d_target_push_clip_rect(CD2DTarget *t, float l, float tp, float r, float bt, bool aa) {
+    StatScope stat(CD2D_STAT_CLIP_RECT);
     if (t && t->target)
         t->target->PushAxisAlignedClip(D2D1::RectF(l, tp, r, bt), aa ? D2D1_ANTIALIAS_MODE_PER_PRIMITIVE : D2D1_ANTIALIAS_MODE_ALIASED);
 }
 
 void cd2d_target_pop_clip_rect(CD2DTarget *t) {
+    StatScope stat(CD2D_STAT_CLIP_RECT, 0);
     if (t && t->target) t->target->PopAxisAlignedClip();
 }
 
 void cd2d_target_push_clip_path(CD2DTarget *t, CD2DPath *p) {
+    StatScope stat(CD2D_STAT_CLIP_LAYER);
     if (!t || !t->target || !p || !p->geometry) return;
     ID2D1Layer *layer = nullptr;
     if (FAILED(t->target->CreateLayer(nullptr, &layer))) return;
@@ -799,6 +865,7 @@ void cd2d_target_push_clip_path(CD2DTarget *t, CD2DPath *p) {
 }
 
 void cd2d_target_pop_clip_path(CD2DTarget *t) {
+    StatScope stat(CD2D_STAT_CLIP_LAYER, 0);
     if (t && t->target) t->target->PopLayer();
 }
 
@@ -916,6 +983,7 @@ bool cd2d_image_encode(const uint8_t *pixels, uint32_t width, uint32_t height, u
 }
 
 CD2DBitmap *cd2d_bitmap_create(CD2DTarget *t, uint32_t width, uint32_t height, uint32_t stride, const uint8_t *pixels) {
+    StatScope stat(CD2D_STAT_BITMAP_CREATE);
     if (!t || !t->target || !pixels) return nullptr;
     D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
     ID2D1Bitmap *bm = nullptr;
@@ -933,6 +1001,7 @@ void cd2d_bitmap_release(CD2DBitmap *b) {
 
 void cd2d_target_draw_bitmap(CD2DTarget *t, CD2DBitmap *b, float dl, float dt, float dr, float db, float opacity, bool linear,
                              float sl, float st, float sr, float sb) {
+    StatScope stat(CD2D_STAT_BITMAP_DRAW);
     if (!t || !t->target || !b || !b->bitmap) return;
     D2D1_RECT_F dst = D2D1::RectF(dl, dt, dr, db);
     D2D1_RECT_F src = D2D1::RectF(sl, st, sr, sb);
@@ -940,6 +1009,7 @@ void cd2d_target_draw_bitmap(CD2DTarget *t, CD2DBitmap *b, float dl, float dt, f
 }
 
 CD2DOffscreen *cd2d_offscreen_create(CD2DFactory *factory, uint32_t w, uint32_t h, float dpi) {
+    StatScope stat(CD2D_STAT_OFFSCREEN);
     IWICImagingFactory *wf = wicFactory();
     if (!factory || !factory->factory || !wf) return nullptr;
     IWICBitmap *wic = nullptr;
@@ -959,6 +1029,7 @@ CD2DOffscreen *cd2d_offscreen_create(CD2DFactory *factory, uint32_t w, uint32_t 
 CD2DTarget *cd2d_offscreen_target(CD2DOffscreen *o) { return o ? o->target : nullptr; }
 
 uint32_t cd2d_offscreen_read(CD2DOffscreen *o, uint8_t *buffer, uint32_t size) {
+    StatScope stat(CD2D_STAT_OFFSCREEN, 0);
     if (!o || !o->wic || !buffer) return 0;
     uint32_t stride = o->width * 4;
     if (size < stride * o->height) return 0;
@@ -1497,6 +1568,7 @@ bool cd2d_text_format_metrics(CD2DTextFormat *format, float *ascent, float *desc
 }
 
 CD2DTextLayout *cd2d_text_layout_create(CD2DTextFormat *format, const uint16_t *text, uint32_t length, float maxWidth, float maxHeight, bool wrap) {
+    StatScope stat(CD2D_STAT_TEXT_LAYOUT);
     IDWriteFactory *f = dwriteFactory();
     if (!f || !format || !format->format) return nullptr;
     IDWriteTextLayout *layout = nullptr;
@@ -1525,6 +1597,7 @@ void cd2d_text_layout_release(CD2DTextLayout *layout) {
 }
 
 void cd2d_target_draw_text_layout(CD2DTarget *t, CD2DTextLayout *layout, float x, float y, CD2DBrush *b) {
+    StatScope stat(CD2D_STAT_TEXT_DRAW);
     if (t && t->target && layout && layout->layout && b && b->brush)
         t->target->DrawTextLayout(D2D1::Point2F(x, y), layout->layout, b->brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
 }

@@ -74,9 +74,48 @@ final class HostTextBackend: PlatformTextBackend {
         return CGSize(width: width.rounded(.up), height: (lineHeight * CGFloat(ls.count)).rounded(.up))
     }
 
+    /// Laid-out lines for drawing, by string, font, colour and wrap width. Building them
+    /// (an attributed string, a typesetter, shaping) is most of what drawing a label costs on
+    /// the port's Core Text, and a view drawing the same label every frame (a scroll frame
+    /// paints a control under several dirty rectangles) laid it out every time (ADR-0054).
+    /// `CTLine` is immutable, so a line is drawn as often as asked.
+    private struct LinesKey: Hashable {
+        let text: String
+        let font: ObjectIdentifier
+        let color: [CGFloat]
+        let colorSpace: String
+        let maxWidth: CGFloat?
+    }
+    /// The font is held with its lines so its identity cannot be reused by another font.
+    private var drawnLines: [LinesKey: (font: HostFont, lines: [CTLine])] = [:]
+    /// Entries kept before the cache starts over (a bound on memory, not a working set).
+    static let drawnLinesLimit = 2048
+    /// Lines laid out (cache misses) and strings drawn, for `APPKITWIN_TRACE_FRAMES` and tests.
+    static var linesLaidOut = 0, stringsDrawn = 0
+    static var drawMilliseconds = 0.0
+
+    private func cachedLines(_ text: String, font f: HostFont, color: CGColor, maxWidth: CGFloat?) -> [CTLine] {
+        // Optional on Apple's CGColor (a pattern colour has none), plain on the port's.
+        let maybeComponents: [CGFloat]? = color.components
+        guard let components = maybeComponents else { return lines(text, font: f, color: color, maxWidth: maxWidth) }
+        let space = color.colorSpace.map { String(describing: $0.name) } ?? ""   // CFString? on Apple, String here
+        let key = LinesKey(text: text, font: ObjectIdentifier(f), color: components, colorSpace: space, maxWidth: maxWidth)
+        if let hit = drawnLines[key], hit.font === f { return hit.lines }
+        let ls = lines(text, font: f, color: color, maxWidth: maxWidth)
+        HostTextBackend.linesLaidOut &+= 1
+        if drawnLines.count >= HostTextBackend.drawnLinesLimit { drawnLines.removeAll(keepingCapacity: true) }
+        drawnLines[key] = (f, ls)
+        return ls
+    }
+
     func draw(_ text: String, font: PlatformFontHandle, color: CGColor, topLeft: CGPoint, maxWidth: CGFloat?, flipped: Bool, in context: CGContext) {
         guard let f = font as? HostFont else { return }
-        let ls = lines(text, font: f, color: color, maxWidth: maxWidth)
+        let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+        defer {
+            HostTextBackend.stringsDrawn &+= 1
+            if NSView._traceFrames { HostTextBackend.drawMilliseconds += NSView._traceClock() - t0 }
+        }
+        let ls = cachedLines(text, font: f, color: color, maxWidth: maxWidth)
         let lineHeight = f.ascent + f.descent + f.leading
         context.saveGState()
         context.textMatrix = .identity

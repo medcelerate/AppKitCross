@@ -47,11 +47,34 @@ open class NSFont: NSObject, NSCopying, NSSecureCoding, NSCoding {
         super.init()
     }
 
+    /// Fonts already made, by request: `systemFont(ofSize:weight:)` in a `draw(_:)` would
+    /// otherwise build a platform font every frame (on Windows a DirectWrite face lookup and a
+    /// descriptor copy, a large part of a scroll frame; ADR-0054). Fonts are immutable, so a
+    /// request answers with the same object, as AppKit's shared font instances do. A miss is
+    /// remembered too, so an absent family is not looked up again.
+    private struct _Request: Hashable { let family: String?, size: CGFloat, weight: CGFloat, italic: Bool, monospaced: Bool }
+    @MainActor private static var _made: [_Request: NSFont?] = [:]
+    /// Entries kept before the cache starts over (a bound on memory, not a working set).
+    internal static let _madeLimit = 1024
+    /// Platform fonts built (cache misses), and the time it took, for `APPKITWIN_TRACE_FRAMES`.
+    @MainActor internal static var _platformFontsMade = 0
+    @MainActor internal static var _platformFontMilliseconds = 0.0
+    @MainActor internal static func _removeCachedFonts() { _made.removeAll() }
+
     private static func make(family: String?, size: CGFloat, weight: CGFloat = 0, italic: Bool = false, monospaced: Bool = false) -> NSFont? {
         let s = size <= 0 ? NSFont.systemFontSize : size
         return MainActor.assumeIsolated {
-            guard let h = Platform.backend.text.makeFont(family: family, size: s, weight: weight, italic: italic, monospaced: monospaced) else { return nil }
-            return NSFont(handle: h, fontName: family ?? h.postScriptName, weight: weight, isSystem: family == nil, italic: italic, monospaced: monospaced)
+            let request = _Request(family: family, size: s, weight: weight, italic: italic, monospaced: monospaced)
+            if let known = _made[request] { return known }
+            let t0 = NSView._traceFrames ? NSView._traceClock() : 0
+            let font: NSFont? = Platform.backend.text.makeFont(family: family, size: s, weight: weight, italic: italic, monospaced: monospaced).map { h in
+                NSFont(handle: h, fontName: family ?? h.postScriptName, weight: weight, isSystem: family == nil, italic: italic, monospaced: monospaced)
+            }
+            _platformFontsMade &+= 1
+            if NSView._traceFrames { _platformFontMilliseconds += NSView._traceClock() - t0 }
+            if _made.count >= _madeLimit { _made.removeAll(keepingCapacity: true) }
+            _made[request] = font
+            return font
         }
     }
 

@@ -780,6 +780,8 @@ final class Win32Window: PlatformWindow {
 
     private func paint() {
         guard let hwnd else { return }
+        let traceStart = Win32PaintStats.begin()
+        defer { Win32PaintStats.end(traceStart, window: owner) }
         var ps = PAINTSTRUCT()
         _ = BeginPaint(hwnd, &ps)
         defer { EndPaint(hwnd, &ps) }
@@ -836,6 +838,7 @@ final class Win32Window: PlatformWindow {
             ctx.clip(to: rect)
             owner?.platformWindowDraw(into: ctx, dirtyRect: rect)
         }
+        Win32PaintStats.drawn()
         if !cd2d_target_end_draw(rt) {
             discardRenderTarget()
         } else if hostedScene != nil, !cd2d_target_is_composition(rt) {
@@ -1842,6 +1845,79 @@ final class Win32Window: PlatformWindow {
         let window = Unmanaged<Win32Window>.fromOpaque(raw).takeUnretainedValue()
         let handled: LRESULT? = MainActor.assumeIsolated { window.handle(msg, wParam, lParam) }
         return handled ?? DefWindowProcW(hwnd, msg, wParam, lParam)
+    }
+}
+/// The Direct2D side of `APPKITWIN_TRACE_FRAMES=1` (ADR-0054): per paint, one line with
+/// the shim's call counts and CPU time by category, the paint split into drawing (the
+/// view walk issuing calls) and EndDraw + copy + Present; every 60 paints, the means.
+/// `APPKITWIN_PRESENT_INTERVAL=0` presents without vsync (measurement only: a paint then
+/// shows its own cost instead of the wait for a free buffer).
+@MainActor
+enum Win32PaintStats {
+    static let names = ["geometry", "stroke-style", "brush", "text-layout", "text-shape", "text-draw", "fill-rect", "fill-path",
+                        "stroke-rect", "stroke-path", "clip-rect", "clip-layer", "bitmap-create", "bitmap-draw", "offscreen",
+                        "transform", "clear", "end-draw", "copy", "present"]
+    private static var configured = false
+    private static var drawnAt = 0.0
+    private static var paints = 0
+    private static var totalCounts = [UInt64](repeating: 0, count: Int(CD2D_STAT_COUNT))
+    private static var totalMs = [Double](repeating: 0, count: Int(CD2D_STAT_COUNT))
+    private static var totalPaintMs = 0.0, totalDrawMs = 0.0, totalFinishMs = 0.0
+    private static var totalRects = 0, totalWalks = 0, totalViewsDrawn = 0
+    static let window = 60
+
+    /// Starts a paint's statistics: the clock, or 0 when the trace is off.
+    static func begin() -> Double {
+        if !configured {
+            configured = true
+            if ProcessInfo.processInfo.environment["APPKITWIN_PRESENT_INTERVAL"] == "0" { cd2d_set_present_interval(0) }
+            if NSView._traceFrames { cd2d_stats_enable(true) }
+        }
+        guard NSView._traceFrames else { return 0 }
+        cd2d_stats_take(nil, nil, UInt32(CD2D_STAT_COUNT))      // what ran between paints is not this paint's
+        drawnAt = 0
+        return NSView._traceClock()
+    }
+
+    /// The view walk has issued its calls; EndDraw, the copy and Present follow.
+    static func drawn() { if NSView._traceFrames { drawnAt = NSView._traceClock() } }
+
+    static func end(_ start: Double, window owner: PlatformWindowOwner?) {
+        guard start > 0 else { return }
+        let now = NSView._traceClock()
+        var counts = [UInt32](repeating: 0, count: Int(CD2D_STAT_COUNT))
+        var ms = [Double](repeating: 0, count: Int(CD2D_STAT_COUNT))
+        cd2d_stats_take(&counts, &ms, UInt32(CD2D_STAT_COUNT))
+        let drawMs = drawnAt > 0 ? drawnAt - start : now - start
+        let finishMs = drawnAt > 0 ? now - drawnAt : 0
+        let w = owner as? NSWindow
+        let walks = w?._lastPaintWalks ?? []
+        let rects = w?._lastPaintRects.count ?? 0
+        let viewsDrawn = walks.reduce(0) { $0 + $1.drawn }
+        NSView._trace(String(format: "frames d2d paint %.2f ms = draw %.2f + finish %.2f (rects %d, walks %d, views drawn %d): ", now - start, drawMs, finishMs, rects, walks.count, viewsDrawn)
+                      + line(counts.map { UInt64($0) }, ms, per: 1))
+        paints += 1
+        for i in 0..<counts.count { totalCounts[i] += UInt64(counts[i]); totalMs[i] += ms[i] }
+        totalPaintMs += now - start; totalDrawMs += drawMs; totalFinishMs += finishMs
+        totalRects += rects; totalWalks += walks.count; totalViewsDrawn += viewsDrawn
+        if paints == window {
+            let n = Double(window)
+            NSView._trace(String(format: "frames d2d mean of %d paints: paint %.2f ms = draw %.2f + finish %.2f (rects %.1f, walks %.1f, views drawn %.1f): ", window, totalPaintMs / n, totalDrawMs / n, totalFinishMs / n, Double(totalRects) / n, Double(totalWalks) / n, Double(totalViewsDrawn) / n)
+                          + line(totalCounts, totalMs, per: n))
+            paints = 0
+            for i in 0..<totalCounts.count { totalCounts[i] = 0; totalMs[i] = 0 }
+            totalPaintMs = 0; totalDrawMs = 0; totalFinishMs = 0; totalRects = 0; totalWalks = 0; totalViewsDrawn = 0
+        }
+    }
+
+    /// `name count/ms` for each category that ran, divided by `per` (1 for one paint).
+    private static func line(_ counts: [UInt64], _ ms: [Double], per: Double) -> String {
+        var parts: [String] = []
+        for i in 0..<counts.count where counts[i] > 0 || ms[i] > 0.005 * per {
+            parts.append(String(format: "%@ %.1f/%.2fms", names[i], Double(counts[i]) / per, ms[i] / per))
+        }
+        let total = ms.reduce(0, +) / per
+        return parts.joined(separator: ", ") + String(format: "; shim total %.2f ms", total)
     }
 }
 #endif

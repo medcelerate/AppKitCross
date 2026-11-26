@@ -304,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
     /// run loop and the platform's pump allow); the stats go to stdout once a second and
     /// in a summary, and the app exits when the time is up.
     private func startAutoScroll(measuringFor seconds: Double?, interval: Double) {
-        var paints: [Double] = [], gaps: [Double] = []
+        var paints: [Double] = [], gaps: [Double] = [], steps: [Double] = []
         var secondPaints: [Double] = [], secondGaps: [Double] = []
         let start = Date()
         var lastReport = start
@@ -322,6 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                 self.scrollView.reflectScrolledClipView(clip)
                 guard let seconds else { return }
                 let t0 = DispatchTime.now().uptimeNanoseconds
+                steps.append(Double(t0 - frameStart) / 1_000_000)
                 self.window.displayIfNeeded()
                 let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
                 paints.append(ms); secondPaints.append(ms)
@@ -340,6 +341,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSToolbarDelegate, NSS
                     let glass = ProcessInfo.processInfo.environment["APPKITWIN_LIQUID_GLASS"] == "1" ? "on" : "off"
                     let elapsed = now.timeIntervalSince(start)
                     print(String(format: "autoscroll summary (glass %@, %@x, interval %.1f ms): %d frames in %.1f s (%.1f fps), paint mean %.2f ms, p95 %.2f ms, max %.2f ms; frame gap mean %.2f ms, p95 %.2f ms, min %.2f ms", glass, "\(self.window.backingScaleFactor)", interval * 1000, paints.count, elapsed, Double(paints.count) / elapsed, Self.mean(paints), Self.p95(paints), paints.max() ?? 0, Self.mean(gaps), Self.p95(gaps), gaps.min() ?? 0))
+                    // Where a frame gap goes besides the paint: the scroll step before it (the
+                    // clip view's scroll and the scroller update) and the rest, the time between
+                    // one timer callback ending and the next starting (the run loop, the pump).
+                    print(String(format: "autoscroll gap split: scroll step mean %.2f ms, paint %.2f ms, outside the callback %.2f ms", Self.mean(steps), Self.mean(paints), Self.mean(gaps) - Self.mean(steps) - Self.mean(paints)))
                     NSApp.terminate(nil)
                 }
             }

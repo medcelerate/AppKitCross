@@ -1289,6 +1289,9 @@ import CoreText
     internal private(set) var _lastPaintArea: CGFloat = 0
     /// The areas the last paint drew (tests read what a scroll or an animation frame cost).
     internal private(set) var _lastPaintRects: [NSRect] = []
+    /// One entry per walk of the view trees the last paint made: the views it entered and
+    /// the views whose `draw(_:)` ran (the frame trace and tests, ADR-0054).
+    internal private(set) var _lastPaintWalks: [(visited: Int, drawn: Int)] = []
 
     public func platformWindowDraw(into context: CGContext, dirtyRect: NSRect) {
         if NSView._traceInvalidation { NSView._trace("paint \'\(_title)\' \(dirtyRect)") }
@@ -1312,7 +1315,16 @@ import CoreText
         if !_hostsLayersNatively, let a = _accessoryHost, !a.isHidden { a.layoutSubtreeIfNeeded() }
         if !_hostsLayersNatively, let m = _menuBarRow, !m.isHidden { m.layoutSubtreeIfNeeded() }
         let t1 = NSView._traceFrames ? NSView._traceClock() : 0
+        var walks: [(visited: Int, drawn: Int)] = []
+        var walkMilliseconds: [Double] = []
+        let text0 = _NSPaintTextCounters.read()
         for rect in paintRects {
+            let visited0 = NSView._paintViewsVisited, drawn0 = NSView._paintViewsDrawn
+            let w0 = NSView._traceFrames ? NSView._traceClock() : 0
+            defer {
+                walks.append((NSView._paintViewsVisited - visited0, NSView._paintViewsDrawn - drawn0))
+                if NSView._traceFrames { walkMilliseconds.append(NSView._traceClock() - w0) }
+            }
             context.saveGState()
             if paintRects.count > 1 || rect != dirtyRect { context.clip(to: rect) }
             if _isOpaque {
@@ -1334,9 +1346,12 @@ import CoreText
             }
             context.restoreGState()
         }
+        _lastPaintWalks = walks
         if NSView._traceFrames {
             let area = paintRects.reduce(CGFloat(0)) { $0 + $1.width * $1.height }
-            NSView._trace(String(format: "frames paint '%@' layout %.1f ms draw %.1f ms dirty %.0fx%.0f, %d rects, %.0f pt²", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area))
+            let perWalk = zip(walks, walkMilliseconds).map { String(format: "%d/%d %.2fms", $0.0.drawn, $0.0.visited, $0.1) }.joined(separator: ", ")
+            let text = _NSPaintTextCounters.read().since(text0)
+            NSView._trace(String(format: "frames paint '%@' layout %.2f ms draw %.2f ms dirty %.0fx%.0f, %d rects, %.0f pt², %d walks, views drawn/entered and time per walk: %@; strings drawn %d (%.2f ms, %d laid out), fonts made %d (%.2f ms)", _title, t1 - t0, NSView._traceClock() - t1, dirtyRect.width, dirtyRect.height, paintRects.count, area, walks.count, perWalk, text.stringsDrawn, text.drawMilliseconds, text.linesLaidOut, text.fontsMade, text.fontMilliseconds))
         }
         NSAppearance.current = previousAppearance
         NSGraphicsContext.current = nil
@@ -3565,4 +3580,31 @@ extension NSWindow: PlatformAccessibilityProvider {
 /// A flag an animation's timer sets for the nested loop waiting on it.
 @MainActor internal final class _NSAnimationDone {
     var value = false
+}
+
+/// The text work a paint did, for the `frames paint` trace line and tests (ADR-0054):
+/// strings drawn through the platform text backend, how many of them had to be laid out
+/// (line cache misses), and platform fonts built (font cache misses).
+@MainActor
+internal struct _NSPaintTextCounters {
+    var stringsDrawn = 0, linesLaidOut = 0, fontsMade = 0
+    var drawMilliseconds = 0.0, fontMilliseconds = 0.0
+
+    static func read() -> _NSPaintTextCounters {
+        var c = _NSPaintTextCounters()
+        #if canImport(CoreText) && canImport(CoreGraphics)
+        c.stringsDrawn = HostTextBackend.stringsDrawn
+        c.linesLaidOut = HostTextBackend.linesLaidOut
+        c.drawMilliseconds = HostTextBackend.drawMilliseconds
+        #endif
+        c.fontsMade = NSFont._platformFontsMade
+        c.fontMilliseconds = NSFont._platformFontMilliseconds
+        return c
+    }
+
+    func since(_ earlier: _NSPaintTextCounters) -> _NSPaintTextCounters {
+        _NSPaintTextCounters(stringsDrawn: stringsDrawn - earlier.stringsDrawn, linesLaidOut: linesLaidOut - earlier.linesLaidOut,
+                             fontsMade: fontsMade - earlier.fontsMade, drawMilliseconds: drawMilliseconds - earlier.drawMilliseconds,
+                             fontMilliseconds: fontMilliseconds - earlier.fontMilliseconds)
+    }
 }
