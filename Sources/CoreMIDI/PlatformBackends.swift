@@ -11,7 +11,7 @@ func _MIDICString<T>(_ tuple: T) -> String {
 }
 
 func _MIDIReportUnavailable(_ message: String) {
-    FileHandle.standardError.write(Data("AppKitCross CoreMIDI: \(message)\n".utf8))
+    fputs("AppKitCross CoreMIDI: \(message)\n", stderr)
 }
 
 #if os(Windows)

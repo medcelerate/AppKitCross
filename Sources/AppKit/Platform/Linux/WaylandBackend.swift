@@ -359,7 +359,7 @@ final class WaylandBackend: PlatformBackend {
         if fds[2].revents != 0 { PlatformMainQueue.service() }
         wl_display_dispatch_pending(display)
         if wl_display_get_error(display) != 0 {
-            FileHandle.standardError.write(Data("AppKitCross: Wayland display error \(wl_display_get_error(display)); stopping\n".utf8))
+            fputs("AppKitCross: Wayland display error \(wl_display_get_error(display)); stopping\n", stderr)
             running = false
             return
         }
@@ -411,7 +411,7 @@ final class WaylandBackend: PlatformBackend {
         for f in due { f.callback() }
     }
 
-    func beep() { FileHandle.standardError.write(Data([0x07])) }   // no bell in the Wayland protocol
+    func beep() { fputs("\u{07}", stderr) }   // no bell in the Wayland protocol
 
     /// The key of the current keymap that types this keysym (at any level), translated by a
     /// scratch xkb state holding Shift, Lock, Control and Option as Mod5 (ISO Level 3, the

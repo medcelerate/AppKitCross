@@ -12,7 +12,7 @@ final class ALSAAudioBackend: PlatformAudioBackend {
         var error = [CChar](repeating: 0, count: 256)
         guard calsa_available(&error, error.count) else {
             if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
-                FileHandle.standardError.write("AppKitCross audio: ALSA unavailable: \(String(cString: error))\n".data(using: .utf8)!)
+                fputs("AppKitCross audio: ALSA unavailable: \(String(cString: error))\n", stderr)
             }
             return nil
         }
@@ -20,7 +20,7 @@ final class ALSAAudioBackend: PlatformAudioBackend {
         let probe: cwrap_probe = { _, _, _ in }
         guard let s = calsa_open(nil, 48000, 2, probe, nil, &error, error.count) else {
             if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
-                FileHandle.standardError.write("AppKitCross audio: ALSA default device: \(String(cString: error))\n".data(using: .utf8)!)
+                fputs("AppKitCross audio: ALSA default device: \(String(cString: error))\n", stderr)
             }
             return nil
         }

@@ -437,7 +437,7 @@ extension _AppRegistration {
                 }
                 exit(0)
             } catch {
-                FileHandle.standardError.write(Data("AppKitCross: registration failed: \(error)\n".utf8))
+                fputs("AppKitCross: registration failed: \(error)\n", stderr)
                 exit(1)
             }
         }

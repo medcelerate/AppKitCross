@@ -334,7 +334,7 @@ public final class _AppBundle: @unchecked Sendable {
         guard !installTried else { return }
         installTried = true
         if !_BundleHooks.install(), ProcessInfo.processInfo.environment["APPKITWIN_CORELIBS_BUNDLE"] != "1" {
-            FileHandle.standardError.write(Data("AppKitCross: Bundle stays corelibs' (\(_BundleHooks.installFailure ?? "unknown")); NSLocalizedString answers in the development language\n".utf8))
+            fputs("AppKitCross: Bundle stays corelibs' (\(_BundleHooks.installFailure ?? "unknown")); NSLocalizedString answers in the development language\n", stderr)
         }
         #endif
     }

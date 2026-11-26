@@ -209,6 +209,34 @@ The Linux folder runs on distributions at least as new as the build machine's (g
 libstdc++ come from the system): build on the oldest one you support. On macOS the folder
 is only a layout check; ship a Mac app with Xcode.
 
+### Tester builds
+
+ADR-0055. A folder for people outside the project adds what the walk above cannot know:
+
+```bash
+swift package --allow-writing-to-package-directory bundle --product MyApp -c release --zip \
+    --include README.md --include path/to/Windows.Devices.Midi2.dll --include path/to/Windows.Devices.Midi2.pri
+```
+
+On Windows the release bundle is linked as a GUI application (`/SUBSYSTEM:WINDOWS`, Swift's
+`main` as the entry point), so no terminal opens beside it; `--console` keeps the console
+subsystem, and a redirected stderr reaches its file either way.
+`--include` (repeatable) copies a file or directory beside the executable: libraries the app
+opens with `LoadLibrary`/`dlopen`, which the import tables do not list, and a README or
+build-info file a tester should find at the top. `--zip` also writes `<zip>.sha256`
+(`sha256sum` format) and prints the digest. Then, on Windows, prove the zip the way a tester
+will run it, outside the build tree and with the toolchain off PATH:
+
+```powershell
+pwsh tools\windows\verify-bundle.ps1 -Zip .build\bundle\MyApp-1.0-windows-x86_64.zip
+```
+
+It checks the sidecar, unzips under `%TEMP%`, runs the app for ten seconds with PATH cut to
+the Windows directories and a scratch `LOCALAPPDATA`, and fails on an early exit (naming
+`0xC0000135` as a missing DLL) or a crash report. Sibyl's `Scripts/package_windows.ps1` (in
+its own repository) is the worked example: bundle, `BUILD-INFO.txt` with both commits and
+the toolchain, the tester README, licences, zip, sidecar, verify.
+
 ### Crash reports
 
 `NSApplication` installs a crash handler at launch on Windows and Linux. A crash leaves:

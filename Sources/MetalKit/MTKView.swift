@@ -41,7 +41,7 @@ public protocol MTKViewDelegate: AnyObject {
     /// `APPKITWIN_METAL_TRACE=1` logs the swap chain's creation, re-creation and drops to stderr.
     private static let _traces = ProcessInfo.processInfo.environment["APPKITWIN_METAL_TRACE"] == "1"
     private func _trace(_ message: @autoclosure () -> String) {
-        if MTKView._traces { FileHandle.standardError.write(Data("MTKView: \(message())\n".utf8)) }
+        if MTKView._traces { fputs("MTKView: \(message())\n", stderr) }
     }
     #endif
     private var _presented: (any MTLTexture)?

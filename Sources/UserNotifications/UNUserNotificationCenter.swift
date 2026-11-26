@@ -365,7 +365,7 @@ open class UNUserNotificationCenter: NSObject, @unchecked Sendable {
                 delivered.removeAll { $0.request.identifier == notification.request.identifier }
                 delivered.append(notification)
             } catch {
-                FileHandle.standardError.write(Data("UserNotifications: could not show \(notification.request.identifier): \(error)\n".utf8))
+                fputs("UserNotifications: could not show \(notification.request.identifier): \(error)\n", stderr)
             }
         }
         if options.contains(.badge), let badge = content.badge {

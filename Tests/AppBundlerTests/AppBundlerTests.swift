@@ -159,6 +159,21 @@ final class BundlerTests: XCTestCase {
         try? FileManager.default.removeItem(at: temp)
     }
 
+    /// FIPS 180-4 vectors; the implementation is the port's own (no CryptoKit off macOS).
+    func testSHA256Vectors() throws {
+        XCTAssertEqual(SHA256.hexDigest(of: Data()), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        XCTAssertEqual(SHA256.hexDigest(of: Data("abc".utf8)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        XCTAssertEqual(SHA256.hexDigest(of: Data("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".utf8)),
+                       "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+        XCTAssertEqual(SHA256.hexDigest(of: Data(repeating: UInt8(ascii: "a"), count: 1_000_000)),
+                       "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0")
+        // The streaming path over a file agrees, across several 1 MB chunks.
+        let file = temp.appendingPathComponent("big.bin")
+        let data = Data((0..<(3 << 20) + 123).map { UInt8(truncatingIfNeeded: $0 &* 2654435761) })
+        try data.write(to: file)
+        XCTAssertEqual(try SHA256.hexDigest(ofFileAt: file), SHA256.hexDigest(of: data))
+    }
+
     func testArchiveName() {
         XCTAssertEqual(Bundler.archiveName(name: "MDVault", version: "1.2", platform: .windows, architecture: "x86_64", ext: "zip"), "MDVault-1.2-windows-x86_64.zip")
         XCTAssertEqual(Bundler.archiveName(name: "App", version: "1.0 beta/2", platform: .linux, architecture: "arm64", ext: "AppImage"), "App-1.0_beta_2-linux-arm64.AppImage")
@@ -338,21 +353,40 @@ final class BundlerTests: XCTestCase {
         try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: root.appendingPathComponent("Resources/Info.plist"))
         try Data("doc".utf8).write(to: root.appendingPathComponent("Resources/Welcome.md"))
         try Bundler.placeholderPNG.write(to: root.appendingPathComponent("AppIcon.png"))
+        // --include: a run-time library the import walk cannot see, and a tester README.
+        let extras = temp.appendingPathComponent("extras", isDirectory: true)
+        try fm.createDirectory(at: extras.appendingPathComponent("Plugins"), withIntermediateDirectories: true)
+        try Data("dll".utf8).write(to: extras.appendingPathComponent("Loaded.dll"))
+        try Data("read me".utf8).write(to: extras.appendingPathComponent("README-TESTERS.md"))
+        try Data("p".utf8).write(to: extras.appendingPathComponent("Plugins/one.txt"))
 
         let out = temp.appendingPathComponent("out", isDirectory: true)
         let options = BundleOptions(executable: exe, name: "App", packageDirectory: temp, appRootCandidates: [root], targets: ["App"],
-                                    outputDirectory: out, zip: true, platform: .macos, architecture: "arm64")
+                                    outputDirectory: out,
+                                    include: [extras.appendingPathComponent("Loaded.dll"), extras.appendingPathComponent("README-TESTERS.md"), extras.appendingPathComponent("Plugins")],
+                                    zip: true, platform: .macos, architecture: "arm64")
         let bundler = Bundler(options: options, log: { _ in })
         let report = try bundler.run()
         let folder = out.appendingPathComponent("App")
-        for item in ["App", "Info.plist", "Resources/Welcome.md", "AppIcon.png", "Pkg_App.resources/data.txt"] {
+        for item in ["App", "Info.plist", "Resources/Welcome.md", "AppIcon.png", "Pkg_App.resources/data.txt", "Loaded.dll", "README-TESTERS.md", "Plugins/one.txt"] {
             XCTAssertTrue(fm.fileExists(atPath: folder.appendingPathComponent(item).path), item)
         }
+        XCTAssertTrue(report.copiedFiles.contains("Loaded.dll (--include)"))
         XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("Pkg_Other.resources").path))
         XCTAssertEqual(report.resourceBundles, ["Pkg_App.resources"])
         let archive = try XCTUnwrap(report.archive)
         XCTAssertEqual(archive.lastPathComponent, "App-2.5-macos-arm64.zip")
         XCTAssertTrue(fm.fileExists(atPath: archive.path))
+        // The checksum sidecar in sha256sum format, matching the archive's bytes.
+        let digest = try XCTUnwrap(report.archiveSHA256)
+        XCTAssertEqual(digest, SHA256.hexDigest(of: try Data(contentsOf: archive)))
+        let sidecar = try String(contentsOf: URL(fileURLWithPath: archive.path + ".sha256"), encoding: .utf8)
+        XCTAssertEqual(sidecar, "\(digest)  App-2.5-macos-arm64.zip\n")
+        XCTAssertTrue(bundler.summary().contains("SHA-256: \(digest)"))
+        // A missing --include path is an error, not a silently thinner folder.
+        var broken = options
+        broken.include = [extras.appendingPathComponent("absent.dll")]
+        XCTAssertThrowsError(try Bundler(options: broken, log: { _ in }).run())
         // Running again replaces the folder rather than nesting into it.
         _ = try Bundler(options: options, log: { _ in }).run()
         XCTAssertFalse(fm.fileExists(atPath: folder.appendingPathComponent("App/App").path))

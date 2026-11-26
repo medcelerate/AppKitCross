@@ -195,7 +195,7 @@ public enum _GlassGPU {
     /// Stops using the program for the rest of the process after a failure.
     public static func disable(_ reason: String) {
         guard _override == nil else { return }
-        if case .some(.some) = resolved { FileHandle.standardError.write(Data("AppKitCross: Liquid Glass GPU program off, software pass from now on: \(reason)\n".utf8)) }
+        if case .some(.some) = resolved { fputs("AppKitCross: Liquid Glass GPU program off, software pass from now on: \(reason)\n", stderr) }
         unavailableReason = reason
         resolved = .some(nil)
     }

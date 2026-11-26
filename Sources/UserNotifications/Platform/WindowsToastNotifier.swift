@@ -46,7 +46,7 @@ final class WindowsToastNotifier: PlatformNotifier, @unchecked Sendable {
         }
         let result = cwas_toast_init(identity.identifier, identity.displayName, nil, activated, dismissed, context)
         if result < 0 {
-            FileHandle.standardError.write(Data("UserNotifications: toast notifier for \(identity.identifier) unavailable (HRESULT 0x\(String(UInt32(bitPattern: result), radix: 16)))\n".utf8))
+            fputs("UserNotifications: toast notifier for \(identity.identifier) unavailable (HRESULT 0x\(String(UInt32(bitPattern: result), radix: 16)))\n", stderr)
         }
         locked { initResult = result }
         return result

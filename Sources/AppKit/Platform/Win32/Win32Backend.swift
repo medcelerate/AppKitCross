@@ -642,7 +642,7 @@ final class Win32FileDialog: PlatformFileDialog {
         let labels = Array(groups.map { $0.label.replacingOccurrences(of: "|", with: "/") }.joined(separator: "|").utf16) + [0]
         let defaultExt = Array((options.defaultExtension ?? "").utf16) + [0]
         if ProcessInfo.processInfo.environment["APPKITWIN_FILE_DIALOG_TRACE"] != nil {
-            FileHandle.standardError.write(Data("[file-dialog] swift: name=\"\(options.defaultName ?? "")\" defaultExtension=\"\(options.defaultExtension ?? "")\" groups=\(groups)\n".utf8))
+            fputs("[file-dialog] swift: name=\"\(options.defaultName ?? "")\" defaultExtension=\"\(options.defaultExtension ?? "")\" groups=\(groups)\n", stderr)
         }
         var out: UnsafeMutablePointer<UInt16>? = nil
         var outLen: UInt32 = 0

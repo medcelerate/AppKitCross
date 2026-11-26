@@ -104,7 +104,7 @@ extension _AppRunner {
     /// `openWindow(id:)`: opens the scene's window, or brings an open `Window` forward.
     public func _openScene(id: String) {
         guard let scene = _windowScenes[id] else {
-            FileHandle.standardError.write(Data("SwiftUI: openWindow(id: \"\(id)\") names no Window or WindowGroup scene\n".utf8))
+            fputs("SwiftUI: openWindow(id: \"\(id)\") names no Window or WindowGroup scene\n", stderr)
             return
         }
         _present(scene)

@@ -15,9 +15,10 @@ enum _PasteboardTrace {
 
     static func log(_ message: @autoclosure () -> String) {
         guard let destination else { return }
-        let line = Data("[pasteboard] \(message())\n".utf8)
+        let text = "[pasteboard] \(message())\n"
+        let line = Data(text.utf8)
         if destination == "1" {
-            FileHandle.standardError.write(line)
+            fputs(text, stderr)
         } else if let h = FileHandle(forWritingAtPath: destination) ?? {
             FileManager.default.createFile(atPath: destination, contents: nil)
             return FileHandle(forWritingAtPath: destination)

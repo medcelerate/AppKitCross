@@ -6,9 +6,15 @@
 // Options: --product <name> (required unless the package has exactly one executable),
 // -c/--configuration debug|release (default release), --output <dir> (default
 // .build/bundle), --version <v> (default: CFBundleShortVersionString, else 0.0.0),
-// --info-plist <path>, --resources <dir>, --icon <path> (repeatable), --zip, --appimage,
+// --info-plist <path>, --resources <dir>, --icon <path> (repeatable), --include <path>
+// (repeatable: a file or directory copied beside the executable, for libraries the app
+// loads at run time and anything else a user should find in the folder), --zip (also
+// writes <zip>.sha256), --appimage,
 // --no-build (bundle what the last build produced), --no-debug-info (Windows release: skip
-// the PDB that `-g -debug-info-format=codeview` / `-Xlinker -debug` add for crash reports).
+// the PDB that `-g -debug-info-format=codeview` / `-Xlinker -debug` add for crash reports),
+// --console (Windows release: keep the console subsystem; by default the bundled executable
+// is linked as a GUI application so no terminal window opens beside it; a redirected stderr
+// still reaches its file).
 
 import Foundation
 import PackagePlugin
@@ -44,6 +50,7 @@ struct AppBundlePlugin: CommandPlugin {
         guard configuration == "release" || configuration == "debug" else { throw BundlePluginError("-c must be debug or release") }
         let noBuild = has("--no-build")
         let noDebugInfo = has("--no-debug-info")
+        let console = has("--console")
         var forwarded: [String] = []
         if let v = take("--output") { forwarded += ["--output", v] } else {
             forwarded += ["--output", context.package.directoryURL.appendingPathComponent(".build/bundle").path]
@@ -52,6 +59,7 @@ struct AppBundlePlugin: CommandPlugin {
         if let v = take("--info-plist") { forwarded += ["--info-plist", v] }
         if let v = take("--resources") { forwarded += ["--resources", v] }
         for v in takeAll("--icon") { forwarded += ["--icon", v] }
+        for v in takeAll("--include") { forwarded += ["--include", v] }
         if has("--zip") { forwarded.append("--zip") }
         if has("--appimage") { forwarded.append("--appimage") }
         if !args.isEmpty { throw BundlePluginError("unknown arguments: \(args.joined(separator: " "))") }
@@ -97,8 +105,16 @@ struct AppBundlePlugin: CommandPlugin {
                 parameters.otherSwiftcFlags += ["-g", "-debug-info-format=codeview"]
                 parameters.otherLinkerFlags += ["-debug"]
             }
+            // swift-build links a console application: a double-click opens a terminal
+            // window beside the app (ADR-0055, the first Sibyl tester run). A release
+            // bundle is a GUI application; Swift's `main` keeps the C entry point. The
+            // developer's own `swift build` is unchanged, and --console keeps it here too.
+            if configuration == "release" && !console {
+                parameters.otherLinkerFlags += ["/SUBSYSTEM:WINDOWS", "/ENTRY:mainCRTStartup"]
+            }
             #else
             _ = noDebugInfo
+            _ = console
             #endif
             let result = try packageManager.build(.product(productName), parameters: parameters)
             guard result.succeeded else { throw BundlePluginError("the build failed:\n\(result.logText)") }

@@ -350,7 +350,7 @@ open class AVAudioEngine: NSObject {
             if wasRunning {
                 _isRunning = false
                 do { try _startLocked() } catch {
-                    FileHandle.standardError.write("AppKitCross audio: cannot move the engine to \(newValue ?? "the default output"): \(error)\n".data(using: .utf8)!)
+                    fputs("AppKitCross audio: cannot move the engine to \(newValue ?? "the default output"): \(error)\n", stderr)
                 }
             }
         }
@@ -636,7 +636,7 @@ final class _DeviceWatch: @unchecked Sendable {
             engines = engines.filter { $0.value.engine != nil }
             lock.unlock()
             if ProcessInfo.processInfo.environment["APPKITWIN_AUDIO_LOG"] != nil {
-                FileHandle.standardError.write("AppKitCross audio: device change \(change)\n".data(using: .utf8)!)
+                fputs("AppKitCross audio: device change \(change)\n", stderr)
             }
             for e in live { e._deviceChanged(change) }
         }

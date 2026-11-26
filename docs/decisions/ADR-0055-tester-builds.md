@@ -1,0 +1,123 @@
+# ADR-0055: Tester builds of a ported app (Sibyl for Windows)
+
+Status: accepted (2026-11-25). Extends ADR-0046.
+
+## Context
+
+ADR-0046 gave a dependent `swift package bundle`: a folder that runs on a machine without
+Swift, checked in CI with the port's own examples. Sibyl (ADR-0050, its own repository at
+ClockworksTech/Sibyl) is the first app whose Windows build is handed to people outside the
+project, and the first run at that showed what the folder alone does not carry:
+
+- Libraries the app opens at run time are invisible to the import walk. Sibyl loads
+  `Windows.Devices.Midi2.dll` + `.pri` (MIDI 2.0 on Windows 11 25H2, from the preview NuGet
+  package, signed by the project's maintainer rather than Microsoft) and `TurboActivate.dll`
+  (licensing) with `LoadLibrary`; without them the app still runs, but on WinMM and with
+  licensing unenforced. The bundler had no way to add them; a hand copy after bundling was
+  lost by `--zip`.
+- A tester needs to know what they got: how to run it, what is known not to work, where a
+  crash report lands and what to send back, and exactly which commits built the binary.
+  None of that is the bundler's business, so it has to come from the app's repository.
+- A download needs a checksum, and the zip needs to be proven outside the build tree, with
+  the toolchain off PATH, before it is sent: the only Windows machines are Evan's PC and
+  GitHub's runners, and a zip that only ran beside the toolchain has proven little.
+
+## Decision
+
+### `--include` and a `.sha256` sidecar in the bundler
+
+`swift package bundle` takes `--include <path>` (repeatable; a file or directory copied
+beside the executable under its own name, last, so it wins over a same-named file the walk
+found), for the run-time libraries above and for anything a user should find at the top of
+the folder. A missing path is an error, not a thinner folder. `--zip` also writes
+`<zip>.sha256` in `sha256sum` format and prints the digest; the hash is the port's own
+SHA-256 (`Sources/AppBundler/SHA256.swift`, FIPS 180-4 vectors in the tests), since
+CryptoKit is Apple-only and a dependency on swift-crypto would be paid by every consumer's
+build for one hash of one file.
+
+### A Windows release bundle is a GUI application
+
+swift-build links every executable as a console application, so a double-click on the
+bundled `Sibyl.exe` opened a terminal window beside the app (the first PC run). The plugin
+links a Windows release build with `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`: a GUI
+application whose entry point is still Swift's `main`, so arguments and a redirected
+stderr (`Start-Process ... -RedirectStandardError`, `2>` in cmd) keep working; nothing is
+printed to a console that is not there. The developer's own `swift build` is unchanged and
+`--console` keeps the console in the bundle too (a tester who needs the log is told to
+redirect it, which also works for a console build).
+
+That linked, verified and still failed the tester: a double-click (ShellExecute, no stdio
+redirect) trapped in swiftCore within a second, before the first log line, while the same
+exe ran when verify redirected stderr. A GUI-subsystem process started from Explorer has no
+standard handles; corelibs' `FileHandle.write(_:)` is a force-try, so the port's first log
+line (`FileHandle.standardError.write` in OSLog's sink) was the trap. Every diagnostic write
+in the port (OSLog, CoreMIDI, AVFAudio, AppKit, SwiftUI, UserNotifications, MetalKit) now
+goes through C `fputs(_, stderr)`, which fails silently on a missing handle and still
+reaches a redirected one; Sibyl's own three writers were changed the same way. The rule for
+the port: never `FileHandle.standardError.write` for a diagnostic.
+
+### `tools/windows/verify-bundle.ps1`
+
+What the tester will do, scripted: check the sidecar, unzip under `%TEMP%`, refuse links and
+a folder without `swiftCore.dll`/`Foundation.dll`, run the executable for ten seconds with
+PATH cut to the Windows directories and `LOCALAPPDATA` pointed at a scratch folder, require
+it alive (an exit of `0xC0000135` is named as a missing DLL), then run it again with no
+stdio redirected at all, as a double-click does (`0xC000001D` named as a Swift trap, the
+stdio-handle case above), print what it wrote under that
+`LOCALAPPDATA` and fail if a `Crashes` folder appeared there or a report newer than the
+launch appeared under the real profile. The port's crash reporter reads the `LOCALAPPDATA`
+variable, so its reports land in the scratch folder; an app that resolves Application
+Support through the known-folder API (corelibs `FileManager` does) writes to the real
+profile regardless, which the second PC run showed as empty Sibyl session files in the
+operator's folder. `-Env` passes the app's own override (`SIBYL_APP_SUPPORT`) for the run. The release CI job does the same inline for the port's examples; the script is for
+apps built outside this repository, on a PC or in their own CI.
+
+### The app's repository owns the tester material
+
+Sibyl's branch `claude/windows-tester-build` adds `Scripts/package_windows.ps1` (release
+bundle through the plugin, then `BUILD-INFO.txt` with the Sibyl and AppKitCross commits and
+the toolchain, the tester README as `README.md`, whisper.cpp's licence under `Licenses/`,
+`-Include` extras, `TurboActivate.dll` when `Vendor/TurboActivate` has one; zipped with
+Windows' own `tar` as `Sibyl-<version>+g<sha>-windows-<arch>.zip` with a `.sha256`;
+`-Verify` runs the script above from the AppKitCross checkout with `SIBYL_APP_SUPPORT` in a
+scratch folder), the README
+(`docs/port/README-WINDOWS-TESTERS.md`: a test build, how to run, the ADR-0050 gaps, where
+crash reports are and what to send, the `APPKITWIN_*` switches), `Resources/Sibyl.png`
+(256 px from the `.icns`, so the port has a window icon: it reads `.png`/`.ico`, not
+`.icns`) and a `windows.yml` workflow (windows-2022, Swift 6.2, `-j 1`) that uploads the zip
+and sidecar as a run artifact on demand and on pushes to main. The script copies its extras
+itself rather than through `--include`, so it works against any AppKitCross main; once the
+app's pin passes this ADR it can collapse to one `bundle --zip --include ...` command.
+
+### What is not done
+
+No code signing (SmartScreen warns; the README says so), no installer, no Start-menu
+shortcut (Sibyl posts no user notifications, which were the one reason ADR-0043 needed
+one), and no Linux tester build yet (the same script shape would do, with `--appimage`).
+
+## Verification
+
+Four rounds on Evan's Windows PC (Swift 6.4.1, Windows 11 build 26200, Ryzen 5 3600X),
+driven through its Remote Control session; each round's findings are the fixes above
+(strict-mode listing and BUILD-INFO contents; console subsystem and the known-folder app
+support; the stdio-handle trap). The fourth round is the tester artifact:
+
+| | |
+|---|---|
+| Zip | `Sibyl-0.1.0+g732954a-windows-x86_64.zip`, 56,900,583 bytes, in the Sibyl checkout's `.build\bundle` on the PC |
+| SHA-256 | `ea689968fb9b71d0b1472af9b0283cb4edf6a2c7a273d8ac199f684d13abca76` |
+| Built from | Sibyl 732954a, AppKitCross 3e334e6 (this branch), linked 2026-11-26 02:10 UTC |
+| Checked | sidecar matches; unzipped under `%TEMP%` with PATH cut to the Windows directories; alive after 10 s both with stderr redirected and with no stdio (a double-click); PE subsystem 2, no console process; the window draws with the Sibyl icon; `Start-Process .\Sibyl.exe -RedirectStandardError sibyl.log` captures the three launch lines; nothing written to the operator's real profile; clean exit on close, no Event 1000; Settings opened and the app quit through its menu in an earlier round of the same layout |
+| Not checked | a machine that never had a Swift toolchain (the PC has no clean account or VM); Windows 10; an Arm PC; MIDI 2.0 (no `Windows.Devices.Midi2` preview DLLs on the PC, so the zip carries none and the app uses WinMM) |
+
+The host build's AppBundlerTests cover `--include`, the sidecar and the SHA-256 vectors;
+Sibyl's `windows.yml` builds the same zip on `windows-2022` with Swift 6.2 as a run artifact.
+
+## Consequences
+
+- Any dependent can ship run-time libraries and tester files in one `bundle` command, and
+  gets a checksum for free.
+- A tester build is checked the way a tester runs it before it leaves the machine, both
+  with redirected stdio and without any: the two launches found different bugs.
+- The app's repository, not the port's, says what its testers should know; the port's docs
+  (`docs/DEVELOPMENT.md`, "Tester builds") give the recipe to follow.

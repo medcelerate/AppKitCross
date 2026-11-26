@@ -53,7 +53,7 @@ public enum Platform {
     /// from running the tests makes an example look as if it never created its window).
     private static func headlessHostBackend() -> any PlatformBackend {
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil, !ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix(".xctest") || $0.contains("PackageTests") }) {
-            FileHandle.standardError.write(Data("AppKitCross: APPKITWIN_HOST_BACKEND=1 selects the headless host backend: no native window will appear (unset it to use the platform backend)\n".utf8))
+            fputs("AppKitCross: APPKITWIN_HOST_BACKEND=1 selects the headless host backend: no native window will appear (unset it to use the platform backend)\n", stderr)
         }
         return HostBackend()
     }
