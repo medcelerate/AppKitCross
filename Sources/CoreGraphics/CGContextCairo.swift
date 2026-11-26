@@ -97,6 +97,14 @@ public final class CGContext {
     }
 
     public var ctm: CGAffineTransform { state.ctm }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/userspacetodevicespacetransform
+    /// User space to the surface's pixels: the CTM and the base transform, which carries a
+    /// window's backing scale (the CTM alone is in points for a window context).
+    public var userSpaceToDeviceSpaceTransform: CGAffineTransform { state.ctm.concatenating(baseTransform) }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/converttodevicespace(_:)-1lb4e
+    public func convertToDeviceSpace(_ point: CGPoint) -> CGPoint { point.applying(userSpaceToDeviceSpaceTransform) }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/converttouserspace(_:)-6ihnw
+    public func convertToUserSpace(_ point: CGPoint) -> CGPoint { point.applying(userSpaceToDeviceSpaceTransform.inverted()) }
     public func translateBy(x: CGFloat, y: CGFloat) { state.ctm = CGAffineTransform(translationX: x, y: y).concatenating(state.ctm); applyTransform() }
     public func scaleBy(x: CGFloat, y: CGFloat) { state.ctm = CGAffineTransform(scaleX: x, y: y).concatenating(state.ctm); applyTransform() }
     public func rotate(by angle: CGFloat) { state.ctm = CGAffineTransform(rotationAngle: angle).concatenating(state.ctm); applyTransform() }

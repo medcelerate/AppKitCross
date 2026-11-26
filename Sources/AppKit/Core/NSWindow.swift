@@ -2942,9 +2942,13 @@ import CoreText
         if let d = delegate, rect.size != frame.size {
             rect.size = d.windowWillResize(self, to: rect.size)
         }
-        _platform?.frame = rect
+        if let screen = _placementScreen { _platform?.setFrame(rect, onDisplay: screen._platformDisplay) } else { _platform?.frame = rect }
         if flag { display() }
     }
+    /// The screen a frame set on this window is meant for, when the point frame alone is
+    /// ambiguous (menus opened from a window on a monitor of another scale; see
+    /// `PlatformWindow.setFrame(_:onDisplay:)`).
+    internal var _placementScreen: NSScreen? = nil
     /// - SeeAlso: https://developer.apple.com/documentation/appkit/nswindow/setframe(_:display:animate:)
     /// Animated, the frame moves there over `animationResizeTime(_:)` and the call returns
     /// when it has arrived, as AppKit's does (events are processed meanwhile).

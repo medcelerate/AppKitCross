@@ -22,6 +22,8 @@ open class NSScreen: NSObject {
         _display = display
         super.init()
     }
+    /// The backend's display this screen stands for.
+    internal var _platformDisplay: PlatformDisplay { _display }
 
     open override var description: String { "<NSScreen \(_display.localizedName) \(_display.frame)>" }
     open override func isEqual(_ object: Any?) -> Bool { (object as? NSScreen).map { $0._display.frame == _display.frame } ?? false }

@@ -26,7 +26,12 @@ What it demonstrates:
   default; 0 drives frames back to back, so the gap shows what the paint and the
   platform's pump allow rather than the timer's cadence). Measure with a
   release build (`swift run -c release Glass --autoscroll 5`): the per-pixel stages are
-  many times slower unoptimised.
+  many times slower unoptimised. The glass runs on the platform's GPU program (ADR-0052
+  stage 2); `APPKITWIN_LIQUID_GLASS_GPU=0` draws it with the software pass to compare.
+- `Glass --reference <light|dark|over-dark|interactive> <rest|hover|press> <out.png>`
+  draws one of the reference scenes (`ReferenceScene.swift` and `ReferenceSceneGlass.swift`,
+  shared with `tools/glass/reference`, which captures the same scenes with real macOS 26
+  glass; `tools/glass/capture-references.sh` runs both) and exits.
 
 Run it:
 

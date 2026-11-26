@@ -414,8 +414,23 @@ final class Win32Window: PlatformWindow {
             GetWindowRect(hwnd, &r)
             return Win32Backend.appKitRect(r, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
         }
-        set {
+        set { setFrame(newValue, targetScale: scale) }
+    }
+
+    /// A frame meant for `display` (a menu opened from a window on a 150% monitor): its
+    /// points are converted at that monitor's scale, not at this window's current one.
+    func setFrame(_ frame: NSRect, onDisplay display: PlatformDisplay?) {
+        setFrame(frame, targetScale: display?.backingScaleFactor ?? scale)
+    }
+
+    /// Sets the frame from points at `targetScale` (the scale of the monitor the frame is
+    /// on). Moving onto a monitor of another DPI, the window is first placed there at its
+    /// current pixel size (WM_DPICHANGED then gives it the new DPI and sizes it from its
+    /// points), then set to the exact rect at the new scale.
+    private func setFrame(_ newValue: NSRect, targetScale: CGFloat) {
+        do {
             guard let hwnd else { return }
+            let moving = targetScale != scale
             var f = newValue
             // A size that is not finite (a layout proposal that leaked into a frame) is
             // not a frame: Windows would clamp it to its maximum track size, taller than
@@ -428,18 +443,42 @@ final class Win32Window: PlatformWindow {
             f.size.height = min(max(f.size.height, minSize.height), maxSize.height)
             // A programmatic frame stays within the work area of the monitor it is on, as
             // the window manager keeps a user's window (AppKit constrains to the screen).
-            if let work = workArea(near: f), work.width > 0, work.height > 0 {
+            if let work = workArea(near: f, scale: targetScale), work.width > 0, work.height > 0 {
                 f.size.width = min(f.size.width, work.width)
                 f.size.height = min(f.size.height, work.height)
             }
-            let r = Win32Backend.win32Rect(f, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
-            if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) (was \(frame); asked \(newValue.size))") }
+            let r = Win32Backend.win32Rect(f, scale: targetScale, primaryHeight: Win32Backend.primaryHeightPixels)
+            if NSView._traceInvalidation { NSView._trace("win32 set frame \(f) at scale \(targetScale) (was \(frame) at \(scale); asked \(newValue.size))") }
+            if moving {
+                let w = Int32((f.width * scale).rounded()), h = Int32((f.height * scale).rounded())
+                SetWindowPos(hwnd, nil, r.left, r.top, w, h, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
+                // A window that is not shown yet (a menu about to open) may take the new
+                // monitor's DPI without a WM_DPICHANGED: adopt it here.
+                let actual = GetDpiForWindow(hwnd)
+                if actual != 0, actual != dpi {
+                    adoptDpi(actual)
+                    owner?.platformWindowDidChangeBackingScaleFactor(scale)
+                }
+            }
             SetWindowPos(hwnd, nil, r.left, r.top, r.right - r.left, r.bottom - r.top, UINT(SWP_NOZORDER | SWP_NOACTIVATE))
         }
     }
 
+    /// Takes `newDpi` as the window's DPI: the band extension, the render target and the
+    /// hosted scene follow (the caller tells the owner).
+    private func adoptDpi(_ newDpi: UINT) {
+        dpi = newDpi
+        extendFrame()           // the band's extension is in pixels
+        if let rt = renderTarget {
+            cd2d_target_set_dpi(rt, Float(dpi))
+            // The content size in points is unchanged, so no scene commit follows: the
+            // hosted tree is re-placed and re-rasterised at the new scale here.
+            if let scene = hostedScene, compositionTree != nil { _ = applyLayerScene(scene, to: rt) }
+        }
+    }
+
     /// The work area (points) of the monitor nearest `frame`.
-    private func workArea(near frame: NSRect) -> NSRect? {
+    private func workArea(near frame: NSRect, scale: CGFloat) -> NSRect? {
         var r = Win32Backend.win32Rect(frame, scale: scale, primaryHeight: Win32Backend.primaryHeightPixels)
         guard let monitor = MonitorFromRect(&r, DWORD(MONITOR_DEFAULTTONEAREST)) else { return nil }
         return Win32Backend.display(for: monitor, primaryHeight: Win32Backend.primaryHeightPixels)?.visibleFrame
@@ -926,7 +965,10 @@ final class Win32Window: PlatformWindow {
         let dpi = Float(96 * s)
         cd2d_comp_tree_begin_update(tree)
         var live = Set<Int>()
-        for node in scene.nodes {
+        // Whole-pixel placements: a surface at a fractional pixel offset is resampled by
+        // DirectComposition (half-pixel-soft symbols in a toolbar group at 1.5x).
+        let snapped = scene._pixelSnappedTranslations(scale: s)
+        for (index, node) in scene.nodes.enumerated() {
             let id = Int64(node.id)
             live.insert(node.id)
             let parent = node.parent.map { Int64(scene.nodes[$0].id) } ?? 0
@@ -952,7 +994,8 @@ final class Win32Window: PlatformWindow {
                 ]
                 cd2d_comp_tree_set_transform3d(tree, id, &rows)
             } else {
-                cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(t.tx * s), Float(t.ty * s))
+                let offset = snapped[index] ?? CGPoint(x: t.tx * s, y: t.ty * s)
+                cd2d_comp_tree_set_transform(tree, id, Float(t.a), Float(t.b), Float(t.c), Float(t.d), Float(offset.x), Float(offset.y))
                 cd2d_comp_tree_set_transform3d(tree, id, nil)
             }
             cd2d_comp_tree_set_opacity(tree, id, node.opacity)
@@ -1394,14 +1437,7 @@ final class Win32Window: PlatformWindow {
             // Keep the content size in points exact: size the frame from the point size at
             // the new DPI rather than taking the suggested rect's size (which rounds).
             let pointSize = contentSize
-            dpi = UINT(wParam & 0xFFFF)
-            extendFrame()           // the band's extension is in pixels
-            if let rt = renderTarget {
-                cd2d_target_set_dpi(rt, Float(dpi))
-                // The content size in points is unchanged, so no scene commit follows: the
-                // hosted tree is re-placed and re-rasterised at the new scale here.
-                if let scene = hostedScene, compositionTree != nil { _ = applyLayerScene(scene, to: rt) }
-            }
+            adoptDpi(UINT(wParam & 0xFFFF))
             if let suggested = UnsafePointer<RECT>(bitPattern: Int(lParam)), let hwnd {
                 let r = suggested.pointee
                 let i = nonClientInsets(dpi: dpi)

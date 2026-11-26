@@ -156,6 +156,18 @@ public final class CGContext {
     }
 
     public var ctm: CGAffineTransform { state.ctm }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/userspacetodevicespacetransform
+    /// User space to the target's pixels: the CTM, the base flip (in DIPs) and the target's
+    /// DPI. The CTM alone is in points here, since the window sets the DPI on the target, so
+    /// anything rasterising for this context (images, symbols) reads its pixel scale here.
+    public var userSpaceToDeviceSpaceTransform: CGAffineTransform {
+        let s = CGFloat(cd2d_target_get_dpi(target)) / 96
+        return state.ctm.concatenating(baseTransform).concatenating(CGAffineTransform(scaleX: s, y: s))
+    }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/converttodevicespace(_:)-1lb4e
+    public func convertToDeviceSpace(_ point: CGPoint) -> CGPoint { point.applying(userSpaceToDeviceSpaceTransform) }
+    /// - SeeAlso: https://developer.apple.com/documentation/coregraphics/cgcontext/converttouserspace(_:)-6ihnw
+    public func convertToUserSpace(_ point: CGPoint) -> CGPoint { point.applying(userSpaceToDeviceSpaceTransform.inverted()) }
     public func translateBy(x: CGFloat, y: CGFloat) { concatenate(CGAffineTransform(translationX: x, y: y)) }
     public func scaleBy(x: CGFloat, y: CGFloat) { concatenate(CGAffineTransform(scaleX: x, y: y)) }
     public func rotate(by angle: CGFloat) { concatenate(CGAffineTransform(rotationAngle: angle)) }
@@ -175,6 +187,9 @@ public final class CGContext {
     /// The CD2DTarget* this context draws into, with the CTM already applied to it, for
     /// DirectWrite's DrawGlyphRun in the CoreText engine.
     public var _d2dTarget: OpaquePointer { target }
+    /// The CD2DFactory* the context makes its geometry with, for a context drawing into a
+    /// resource of the same device (the Liquid Glass frame, ADR-0052).
+    public var _d2dFactory: OpaquePointer { factory }
     /// Text drawing state (CoreText's CTLineDraw/CTRunDraw read and advance these).
     public var textPosition: CGPoint = .zero
     public var textMatrix: CGAffineTransform = .identity

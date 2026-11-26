@@ -202,8 +202,12 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             _ = render(w.contentView!)
             let sample = _GlassRegistry.sample(for: glass)
             XCTAssertFalse(sample.dirty)
-            XCTAssertNotNil(sample.image)
-            XCTAssertNotNil(sample.shadedImage, "the shaded image is kept with the sample")
+            // A sample drawn from the frame on the GPU (Direct2D, ADR-0052 round 3) keeps no image.
+            XCTAssertTrue(sample.image != nil || sample.isGPUFrame)
+            if !(_GlassGPU.program?.drawsInPlace ?? false) {
+                // A program that draws in place (Direct2D) keeps no shaded image.
+                XCTAssertNotNil(sample.shadedImage, "the shaded image is kept with the sample")
+            }
             glass.needsDisplay = true
             XCTAssertFalse(sample.dirty, "the glass redrawing keeps its sample")
             aside.needsDisplay = true
@@ -227,7 +231,7 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             let first = render(w.contentView!)
             XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "three lenses share one frame of the content beneath them")
             let samples = lenses.map { _GlassRegistry.sample(for: $0) }
-            XCTAssertTrue(samples.allSatisfy { !$0.dirty && $0.image != nil })
+            XCTAssertTrue(samples.allSatisfy { !$0.dirty && ($0.image != nil || $0.isGPUFrame) })
             // Content under the middle lens changes: that lens re-samples, the others keep theirs.
             halves.setNeedsDisplay(NSRect(x: 120, y: 30, width: 40, height: 20))
             XCTAssertFalse(samples[0].dirty); XCTAssertTrue(samples[1].dirty); XCTAssertFalse(samples[2].dirty)
@@ -384,18 +388,24 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
     /// variant, over light content it stays light.
     func testAdaptiveVariantFollowsBackdropLuminance() {
         MainActor.assumeIsolated {
-            @MainActor func glassOver(_ color: NSColor) -> (pixel: (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat), luminance: CGFloat?) {
+            @MainActor func glassOver(_ color: NSColor) -> (pixel: (r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat), luminance: CGFloat?, raw: Bool) {
                 let w = window()
                 w.contentView!.addSubview(_SolidView(frame: w.contentView!.bounds, color: color))
                 let glass = NSGlassEffectView(frame: NSRect(x: 40, y: 20, width: 120, height: 60))
                 w.contentView!.addSubview(glass)
                 let rep = render(w.contentView!)
-                return (pixel(rep, 100, 50), _GlassRegistry.sample(for: glass).luminance)
+                let sample = _GlassRegistry.sample(for: glass)
+                return (pixel(rep, 100, 50), sample.luminance, sample.isRaw)
             }
             let overBlack = glassOver(NSColor(white: 0.05, alpha: 1))
             let overWhite = glassOver(NSColor(white: 0.95, alpha: 1))
-            XCTAssertLessThan(overBlack.luminance ?? 1, 0.35, "the sample's luminance is read")
-            XCTAssertGreaterThan(overWhite.luminance ?? 0, 0.35)
+            // The software pass reads the luminance on the CPU; a GPU program that runs the
+            // backdrop stage probes it itself (ADR-0052 stage 2), and the pixels below check
+            // the variant it picked.
+            if !overBlack.raw {
+                XCTAssertLessThan(overBlack.luminance ?? 1, 0.35, "the sample's luminance is read")
+                XCTAssertGreaterThan(overWhite.luminance ?? 0, 0.35)
+            }
             XCTAssertLessThan(luma(overBlack.pixel), 0.3, "dark glass over dark content: \(overBlack.pixel)")
             XCTAssertGreaterThan(luma(overWhite.pixel), 0.8, "light glass over light content: \(overWhite.pixel)")
             let spec = _GlassSpec.lens(clear: false, in: NSView())
@@ -576,6 +586,74 @@ final class LiquidGlassPixelTests: XCTestCase, @unchecked Sendable {
             XCTAssertGreaterThan(glass.g, 0.7, "under the light veil: \(glass)")
             let plain = bandPixel(on: false)
             XCTAssertLessThan(abs(plain.g - plain.r), 0.03, "off, the band is grey: \(plain)")
+        }
+    }
+
+    /// The CPU frame mirrors the strip below the toolbar band whatever the window's height and
+    /// scale: the material's frame is the lens frame halved from its top row, and with an odd
+    /// lens row count (or at 1.5x, where no material row ends at the band's edge) a row half
+    /// content was counted with the band's and the mirror was lost (PC round 3).
+    func testBandMirrorsAtEveryHeight() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            for height in stride(from: CGFloat(200), through: 207, by: 1) {
+                let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: height), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+                w.appearance = NSAppearance(named: .aqua)
+                defer { w.close() }
+                let content = _SolidView(frame: NSRect(x: 0, y: 0, width: 400, height: height), color: NSColor(red: 0.3, green: 0.85, blue: 0.4, alpha: 1))
+                w.contentView = content
+                let d = _EmptyToolbarDelegate()
+                let tb = NSToolbar(identifier: "glass.band.mirror.\(height)")
+                tb.delegate = d
+                w.toolbar = tb
+                w.layoutIfNeeded()
+                guard let band = w._toolbarView else { XCTFail("no band"); return }
+                let margin: CGFloat = 24
+                let lensScale = max(0.125, w.backingScaleFactor / _GlassRenderer.sampleScaleDivisor)
+                // The material's scale, the lens frame halved: and the lens frame itself.
+                for scale in [lensScale / 2, lensScale] {
+                    _GlassRegistry.noteInvalidation(in: w, from: nil, rect: nil)
+                    let r = _GlassRegistry.render(beneath: band, rect: band.bounds.insetBy(dx: -margin, dy: -margin), scale: scale, extendsFrom: .minY, margin: margin)
+                    XCTAssertEqual(r?.extended, true, "the strip below the band is mirrored at \(height) pt, \(scale)x")
+                }
+            }
+        }
+    }
+
+    /// A paint with a lens and the toolbar band's material renders the window beneath the
+    /// glass once: the material's eighth-scale frame is the lens's quarter-scale frame halved
+    /// (ADR-0052 stage 2), and the band still carries the document's colour.
+    func testMaterialFrameIsTheLensFrameHalved() throws {
+        try requireHostBackend()
+        MainActor.assumeIsolated {
+            let w = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: 200), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.appearance = NSAppearance(named: .aqua)
+            w.makeKeyAndOrderFront(nil)
+            defer { w.close() }
+            let content = _SolidView(frame: NSRect(x: 0, y: 0, width: 400, height: 200), color: NSColor(red: 0.3, green: 0.85, blue: 0.4, alpha: 1))
+            content.autoresizingMask = [.width, .height]
+            w.contentView = content
+            content.addSubview(NSGlassEffectView(frame: NSRect(x: 40, y: 40, width: 120, height: 44)))
+            let d = _EmptyToolbarDelegate()
+            let tb = NSToolbar(identifier: "glass.halved")
+            tb.delegate = d
+            w.toolbar = tb
+            w.display()
+            content.needsDisplay = true
+            let before = _GlassRegistry.frameRenders
+            w.display()
+            XCTAssertEqual(_GlassRegistry.frameRenders - before, 1, "one render of the window for the lens and the band")
+            // The halving itself: a 2x2 block's mean, the odd edge repeated, the top edge kept.
+            let px: [UInt8] = [10, 20, 30, 255, 30, 40, 50, 255, 90, 90, 90, 255,
+                               50, 60, 70, 255, 70, 80, 90, 255, 90, 90, 90, 255]
+            let template = makeImage(width: 1, height: 1) { _, _ in (0, 0, 0) }
+            let frame = _GlassFrame(rect: NSRect(x: 0, y: 10, width: 12, height: 8), scale: 0.25, pixels: _MaterialPixels(bytes: px, width: 3, height: 2, stride: 12, template: template), invalidation: 0)
+            let half = frame.halved(invalidation: 0)
+            XCTAssertEqual(half.pixels.width, 2); XCTAssertEqual(half.pixels.height, 1)
+            XCTAssertEqual(Array(half.pixels.bytes[0..<4]), [40, 50, 60, 255])
+            XCTAssertEqual(Array(half.pixels.bytes[4..<8]), [90, 90, 90, 255])
+            XCTAssertEqual(half.rect.maxY, frame.rect.maxY, "the top edge stays")
+            XCTAssertEqual(half.scale, 0.125)
         }
     }
 

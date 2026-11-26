@@ -180,6 +180,12 @@ without the vsync wait must say which monitor they came from.
   the Win32 pump (`PlatformMainQueue.service`, the `MsgWaitForMultipleObjectsEx` loop in
   `Win32Backend`), not drawing. `APPKITWIN_TRACE=1`'s once-a-second `pump` line (wakes,
   service time) is the place to start.
+- **Glass in the trace.** The Liquid Glass GPU pass (ADR-0052 stage 2, `cd2d_glass.cpp`)
+  is not in the trace's categories: its effect draws land in the caller's `draw` time and
+  its frame's `EndDraw` counts under `offscreen` with no calls. Add a `glass` category
+  before profiling glass-on frames.
+- **Summary line shape.** Since PR 99 the example prints the backing scale as the real
+  number (`glass off, 1.0x` where round 1 and 2 printed `1x`); the fields are unchanged.
 - **MDVault editor blank for a large note** (pre-existing, seen at PR 98/99 builds too;
   the text system's owner, ADR-0030/TextKit 1 incremental layout): the Editor tab of an
   82K-character note draws nothing (0 views drawn, frame ticks of 390-620 ms), with LF or
